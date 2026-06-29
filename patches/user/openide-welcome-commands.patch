@@ -1,8 +1,23 @@
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
-index 993abe60..af6d4600 100644
+index 993abe60..6905b279 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
-@@ -34,9 +34,149 @@ import { AccessibleViewRegistry } from '../../../../platform/accessibility/brows
+@@ -17,7 +17,7 @@ import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/edit
+ import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
+ import { IWalkthroughsService } from './gettingStartedService.js';
+ import { GettingStartedEditorOptions, GettingStartedInput } from './gettingStartedInput.js';
+-import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
++import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
+ import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
+ import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+ import { workbenchConfigurationNodeBase } from '../../../common/configuration.js';
+@@ -29,14 +29,159 @@ import { IExtensionManagementServerService } from '../../../services/extensionMa
+ import { IExtensionService } from '../../../services/extensions/common/extensions.js';
+ import { StartupPageEditorResolverContribution, StartupPageRunnerContribution } from './startupPage.js';
+ import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
+-import { DisposableStore } from '../../../../base/common/lifecycle.js';
++import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+ import { AccessibleViewRegistry } from '../../../../platform/accessibility/browser/accessibleViewRegistry.js';
  import { GettingStartedAccessibleView } from './gettingStartedAccessibleView.js';
  import { AgentSessionsWelcomePage } from '../../welcomeAgentSessions/browser/agentSessionsWelcome.js';
  import { IChatEntitlementService } from '../../../services/chat/common/chatEntitlementService.js';
@@ -18,6 +33,11 @@ index 993abe60..af6d4600 100644
 +import { IWorkbenchExtensionManagementService } from '../../../services/extensionManagement/common/extensionManagement.js';
 +import { dirname, joinPath } from '../../../../base/common/resources.js';
 +import { CancellationToken } from '../../../../base/common/cancellation.js';
++// OpenIDE: imports para el overlay de bienvenida a pantalla completa
++import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
++import { ILifecycleService, LifecyclePhase } from '../../../services/lifecycle/common/lifecycle.js';
++import { mainWindow } from '../../../../base/browser/window.js';
++import { $, append, addDisposableListener } from '../../../../base/browser/dom.js';
  
  export * as icons from './gettingStartedIcons.js';
  
@@ -152,3 +172,128 @@ index 993abe60..af6d4600 100644
  registerAction2(class extends Action2 {
  	constructor() {
  		super({
+@@ -365,3 +510,124 @@ registerWorkbenchContribution2(StartupPageRunnerContribution.ID, StartupPageRunn
+ 
+ AccessibleViewRegistry.register(new GettingStartedAccessibleView());
+ 
++// OpenIDE: pantalla de bienvenida a pantalla completa (overlay) que tapa el IDE
++// en el primer arranque, hasta que el usuario la completa o toca "Saltar".
++class OpenIDEWelcomeOverlayContribution extends Disposable implements IWorkbenchContribution {
++
++	static readonly ID = 'workbench.contrib.openideWelcomeOverlay';
++
++	private static readonly STORAGE_KEY = 'openide.welcomeShown';
++
++	private readonly renderDisposables = this._register(new DisposableStore());
++
++	constructor(
++		@IStorageService private readonly storageService: IStorageService,
++		@ICommandService private readonly commandService: ICommandService,
++		@ILifecycleService private readonly lifecycleService: ILifecycleService,
++		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
++	) {
++		super();
++		this.maybeShow();
++	}
++
++	private async maybeShow(): Promise<void> {
++		if (this.environmentService.skipWelcome) {
++			return;
++		}
++		if (this.storageService.getBoolean(OpenIDEWelcomeOverlayContribution.STORAGE_KEY, StorageScope.APPLICATION, false)) {
++			return;
++		}
++		// Solo en una instalacion nueva (primer arranque real).
++		if (!this.storageService.isNew(StorageScope.APPLICATION)) {
++			this.storageService.store(OpenIDEWelcomeOverlayContribution.STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
++			return;
++		}
++		await this.lifecycleService.when(LifecyclePhase.Restored);
++		this.storageService.store(OpenIDEWelcomeOverlayContribution.STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
++		this.render();
++	}
++
++	private dismiss(overlay: HTMLElement): void {
++		this.renderDisposables.clear();
++		overlay.remove();
++	}
++
++	private render(): void {
++		const overlay = append(mainWindow.document.body, $('.openide-welcome-overlay'));
++		overlay.style.cssText = [
++			'position:fixed', 'inset:0', 'z-index:2147483646',
++			'display:flex', 'flex-direction:column', 'align-items:center', 'justify-content:center',
++			'background:var(--vscode-editor-background, #1e1e1e)',
++			'color:var(--vscode-foreground, #cccccc)',
++			'font-family:var(--vscode-font-family, sans-serif)',
++			'padding:48px', 'overflow:auto'
++		].join(';');
++
++		const card = append(overlay, $('div'));
++		card.style.cssText = 'max-width:760px;width:100%;display:flex;flex-direction:column;gap:8px;';
++
++		const logo = append(card, $('div'));
++		logo.style.cssText = 'font-size:56px;text-align:center;line-height:1;';
++		logo.textContent = '🚀';
++
++		const title = append(card, $('h1'));
++		title.style.cssText = 'text-align:center;margin:8px 0 0;font-size:30px;font-weight:600;';
++		title.textContent = localize('openide.overlay.title', "Bienvenido a OpenIDE");
++
++		const subtitle = append(card, $('p'));
++		subtitle.style.cssText = 'text-align:center;margin:0 0 24px;opacity:0.8;';
++		subtitle.textContent = localize('openide.overlay.subtitle', "Configurá tu editor en tres pasos. Podés saltarlos cuando quieras.");
++
++		const steps = [
++			{ n: '1', title: localize('openide.overlay.step1.title', "Esto es OpenIDE"), desc: localize('openide.overlay.step1.desc', "Tu editor, sin telemetría y a tu manera. Elegí un tema para empezar."), button: localize('openide.overlay.step1.btn', "Elegir tema"), command: 'workbench.action.selectTheme' },
++			{ n: '2', title: localize('openide.overlay.step2.title', "Conectá con GitHub"), desc: localize('openide.overlay.step2.desc', "Iniciá sesión para clonar, sincronizar y publicar tus repositorios."), button: localize('openide.overlay.step2.btn', "Conectar con GitHub"), command: 'openide.signInWithGitHub' },
++			{ n: '3', title: localize('openide.overlay.step3.title', "Importá desde VS Code"), desc: localize('openide.overlay.step3.desc', "Traé tus configuraciones, atajos y extensiones de VS Code."), button: localize('openide.overlay.step3.btn', "Importar de VS Code"), command: 'openide.importFromVSCode' },
++		];
++
++		for (const step of steps) {
++			const row = append(card, $('div'));
++			row.style.cssText = 'display:flex;gap:16px;align-items:center;padding:16px;border:1px solid var(--vscode-widget-border, #303031);border-radius:8px;';
++
++			const badge = append(row, $('div'));
++			badge.style.cssText = 'flex:0 0 32px;height:32px;width:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--vscode-button-background, #0e639c);color:var(--vscode-button-foreground, #ffffff);font-weight:600;';
++			badge.textContent = step.n;
++
++			const text = append(row, $('div'));
++			text.style.cssText = 'flex:1;display:flex;flex-direction:column;gap:2px;min-width:0;';
++			const stTitle = append(text, $('div'));
++			stTitle.style.cssText = 'font-weight:600;';
++			stTitle.textContent = step.title;
++			const stDesc = append(text, $('div'));
++			stDesc.style.cssText = 'opacity:0.8;font-size:13px;';
++			stDesc.textContent = step.desc;
++
++			const btn = append(row, $('button'));
++			btn.style.cssText = 'flex:0 0 auto;cursor:pointer;border:none;border-radius:4px;padding:6px 14px;background:var(--vscode-button-secondaryBackground, #3a3d41);color:var(--vscode-button-secondaryForeground, #ffffff);';
++			btn.textContent = step.button;
++			this.renderDisposables.add(addDisposableListener(btn, 'click', () => this.commandService.executeCommand(step.command)));
++		}
++
++		const footer = append(card, $('div'));
++		footer.style.cssText = 'display:flex;gap:20px;align-items:center;justify-content:center;margin-top:24px;';
++
++		const start = append(footer, $('button'));
++		start.style.cssText = 'cursor:pointer;border:none;border-radius:4px;padding:8px 28px;font-size:14px;background:var(--vscode-button-background, #0e639c);color:var(--vscode-button-foreground, #ffffff);';
++		start.textContent = localize('openide.overlay.start', "Empezar");
++		this.renderDisposables.add(addDisposableListener(start, 'click', () => this.dismiss(overlay)));
++
++		const skip = append(footer, $('a'));
++		skip.style.cssText = 'cursor:pointer;color:var(--vscode-textLink-foreground, #3794ff);';
++		skip.textContent = localize('openide.overlay.skip', "Saltar");
++		this.renderDisposables.add(addDisposableListener(skip, 'click', () => this.dismiss(overlay)));
++
++		this.renderDisposables.add(addDisposableListener(overlay, 'keydown', (e: KeyboardEvent) => {
++			if (e.key === 'Escape') {
++				this.dismiss(overlay);
++			}
++		}));
++		overlay.tabIndex = -1;
++		overlay.focus();
++	}
++}
++registerWorkbenchContribution2(OpenIDEWelcomeOverlayContribution.ID, OpenIDEWelcomeOverlayContribution, WorkbenchPhase.AfterRestored);
++

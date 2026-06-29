@@ -28,12 +28,15 @@ let
     libdrm
     libxkbcommon
     mesa
+    libgbm
     alsa-lib
     fontconfig
     freetype
     krb5
     zlib
     stdenv.cc.cc.lib
+    systemdLibs
+    libnotify
 
     # Xorg
     xorgproto
