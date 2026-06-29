@@ -1,0 +1,154 @@
+diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
+index 067580a4..700e31d2 100644
+--- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
++++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
+@@ -34,9 +34,149 @@ import { AccessibleViewRegistry } from '../../../../platform/accessibility/brows
+ import { GettingStartedAccessibleView } from './gettingStartedAccessibleView.js';
+ import { AgentSessionsWelcomePage } from '../../welcomeAgentSessions/browser/agentSessionsWelcome.js';
+ import { IChatEntitlementService } from '../../../services/chat/common/chatEntitlementService.js';
++// OpenIDE: imports para los comandos de bienvenida (GitHub + importar de VS Code)
++import { IAuthenticationService } from '../../../services/authentication/common/authentication.js';
++import { INotificationService } from '../../../../platform/notification/common/notification.js';
++import { IFileService, FileOperationResult, toFileOperationResult } from '../../../../platform/files/common/files.js';
++import { IProgressService, ProgressLocation } from '../../../../platform/progress/common/progress.js';
++import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
++import { IPathService } from '../../../services/path/common/pathService.js';
++import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
++import { IExtensionGalleryService, IExtensionInfo } from '../../../../platform/extensionManagement/common/extensionManagement.js';
++import { IWorkbenchExtensionManagementService } from '../../../services/extensionManagement/common/extensionManagement.js';
++import { dirname, joinPath } from '../../../../base/common/resources.js';
++import { CancellationToken } from '../../../../base/common/cancellation.js';
+ 
+ export * as icons from './gettingStartedIcons.js';
+ 
++// OpenIDE: comando del step "Conectá con GitHub" del walkthrough de bienvenida.
++registerAction2(class extends Action2 {
++	constructor() {
++		super({
++			id: 'openide.signInWithGitHub',
++			title: localize2('openide.signInWithGitHub.title', 'OpenIDE: Conectar con GitHub'),
++			category: Categories.Help,
++			f1: true,
++		});
++	}
++
++	async run(accessor: ServicesAccessor) {
++		const authenticationService = accessor.get(IAuthenticationService);
++		const notificationService = accessor.get(INotificationService);
++		try {
++			const session = await authenticationService.createSession('github', ['read:user', 'user:email', 'repo']);
++			notificationService.info(localize('openide.signInWithGitHub.success', "Conectado a GitHub como {0}.", session.account.label));
++		} catch (e) {
++			notificationService.error(localize('openide.signInWithGitHub.error', "No se pudo conectar con GitHub: {0}", e instanceof Error ? e.message : String(e)));
++		}
++	}
++});
++
++// OpenIDE: comando del step "Importá desde VS Code" del walkthrough de bienvenida.
++// Copia settings/keybindings de la instalacion de VS Code original y reinstala
++// sus extensiones desde la galeria (con tolerancia: las que no esten en Open VSX se omiten).
++registerAction2(class extends Action2 {
++	constructor() {
++		super({
++			id: 'openide.importFromVSCode',
++			title: localize2('openide.importFromVSCode.title', 'OpenIDE: Importar configuración y extensiones de VS Code'),
++			category: Categories.Preferences,
++			f1: true,
++		});
++	}
++
++	async run(accessor: ServicesAccessor) {
++		const fileService = accessor.get(IFileService);
++		const notificationService = accessor.get(INotificationService);
++		const progressService = accessor.get(IProgressService);
++		const environmentService = accessor.get(IWorkbenchEnvironmentService);
++		const pathService = accessor.get(IPathService);
++		const profileService = accessor.get(IUserDataProfileService);
++		const galleryService = accessor.get(IExtensionGalleryService);
++		const extensionManagementService = accessor.get(IWorkbenchExtensionManagementService);
++
++		// La carpeta del VS Code original comparte el directorio de configuración
++		// con OpenIDE; solo cambia el nombre del producto ('Code'). Derivamos su ruta
++		// desde la nuestra para que funcione en Linux/macOS/Windows.
++		const ourUserDir = environmentService.userRoamingDataHome; // .../<Producto>/User
++		const configDir = dirname(dirname(ourUserDir));
++		const stockUserDir = joinPath(configDir, 'Code', 'User');
++		const userHome = pathService.userHome({ preferLocal: true });
++		const stockExtensionsManifest = joinPath(userHome, '.vscode', 'extensions', 'extensions.json');
++
++		await progressService.withProgress(
++			{ location: ProgressLocation.Notification, title: localize('openide.import.progress', "Importando desde VS Code…") },
++			async (progress) => {
++				const imported: string[] = [];
++				const failed: string[] = [];
++
++				// 1) settings.json y keybindings.json
++				const files = [
++					['settings.json', profileService.currentProfile.settingsResource],
++					['keybindings.json', profileService.currentProfile.keybindingsResource],
++				] as const;
++				for (const [name, target] of files) {
++					try {
++						const content = await fileService.readFile(joinPath(stockUserDir, name));
++						await fileService.writeFile(target, content.value);
++						imported.push(name);
++					} catch (e) {
++						if (toFileOperationResult(e as Error) !== FileOperationResult.FILE_NOT_FOUND) {
++							failed.push(name);
++						}
++					}
++				}
++
++				// 2) Extensiones desde ~/.vscode/extensions/extensions.json
++				try {
++					const manifest = await fileService.readFile(stockExtensionsManifest);
++					const entries = JSON.parse(manifest.value.toString()) as Array<{ identifier?: { id?: string; uuid?: string } }>;
++					const infos: IExtensionInfo[] = [];
++					for (const entry of entries) {
++						const id = entry.identifier?.id;
++						if (id) {
++							infos.push({ id, uuid: entry.identifier?.uuid });
++						}
++					}
++					if (infos.length) {
++						progress.report({ message: localize('openide.import.extensions', "Instalando {0} extensiones…", infos.length) });
++						const gallery = await galleryService.getExtensions(infos, CancellationToken.None);
++						const found = new Set(gallery.map(g => g.identifier.id.toLowerCase()));
++						for (const info of infos) {
++							if (!found.has(info.id.toLowerCase())) {
++								failed.push(info.id);
++							}
++						}
++						for (const g of gallery) {
++							try {
++								await extensionManagementService.installFromGallery(g);
++								imported.push(g.identifier.id);
++							} catch (e) {
++								failed.push(g.identifier.id);
++							}
++						}
++					}
++				} catch (e) {
++					if (toFileOperationResult(e as Error) !== FileOperationResult.FILE_NOT_FOUND) {
++						notificationService.warn(localize('openide.import.noExtensions', "No se pudieron leer las extensiones de VS Code."));
++					}
++				}
++
++				if (imported.length) {
++					const tail = failed.length
++						? ' ' + localize('openide.import.someFailed', "{0} no se pudieron importar (puede que no estén en Open VSX).", failed.length)
++						: '';
++					notificationService.info(localize('openide.import.done', "Se importaron {0} elementos desde VS Code.", imported.length) + tail);
++				} else if (failed.length) {
++					notificationService.warn(localize('openide.import.failed', "No se pudo importar desde VS Code."));
++				} else {
++					notificationService.info(localize('openide.import.nothing', "No se encontró una instalación de VS Code para importar."));
++				}
++			}
++		);
++	}
++});
++
+ registerAction2(class extends Action2 {
+ 	constructor() {
+ 		super({

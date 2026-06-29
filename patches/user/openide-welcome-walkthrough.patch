@@ -1,0 +1,54 @@
+diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts b/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts
+index 168a3d01..f8ce7742 100644
+--- a/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts
++++ b/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts
+@@ -71,6 +71,7 @@ gettingStartedContentRegistry.registerProvider('vs/workbench/contrib/welcomeGett
+ 
+ const setupIcon = registerIcon('getting-started-setup', Codicon.zap, localize('getting-started-setup-icon', "Icon used for the setup category of welcome page"));
+ const beginnerIcon = registerIcon('getting-started-beginner', Codicon.lightbulb, localize('getting-started-beginner-icon', "Icon used for the beginner category of welcome page"));
++const openideWelcomeIcon = registerIcon('openide-welcome', Codicon.rocket, localize('openide-welcome-icon', "Icon used for the OpenIDE welcome walkthrough"));
+ 
+ export type BuiltinGettingStartedStep = {
+ 	id: string;
+@@ -250,6 +251,41 @@ function createCopilotSetupStep(id: string, button: string, when: string, includ
+ }
+ 
+ export const walkthroughs: GettingStartedWalkthroughContent = [
++	{
++		id: 'openide.welcome',
++		title: localize('openide.welcome.title', "Bienvenido a OpenIDE"),
++		description: localize('openide.welcome.description', "Configurá tu editor en tres pasos: conocé OpenIDE, conectá tu cuenta de GitHub e importá lo que ya tenías en VS Code."),
++		isFeatured: true,
++		icon: openideWelcomeIcon,
++		when: '!isWeb',
++		walkthroughPageTitle: localize('openide.welcome.pageTitle', "OpenIDE"),
++		content: {
++			type: 'steps',
++			steps: [
++				{
++					id: 'openide.welcome.intro',
++					title: localize('openide.welcome.intro.title', "Esto es OpenIDE"),
++					description: localize('openide.welcome.intro.description', "Tu editor, sin telemetría y a tu manera. OpenIDE es un fork limpio de VS Code.\nElegí un tema para empezar.\n{0}", Button(localize('openide.welcome.intro.button', "Elegir tema"), 'command:workbench.action.selectTheme')),
++					completionEvents: ['onCommand:workbench.action.selectTheme'],
++					media: { type: 'svg', altText: 'OpenIDE', path: 'learn.svg' },
++				},
++				{
++					id: 'openide.welcome.github',
++					title: localize('openide.welcome.github.title', "Conectá con GitHub"),
++					description: localize('openide.welcome.github.description', "Iniciá sesión con GitHub para clonar, sincronizar y publicar tus repositorios sin salir del editor.\n{0}", Button(localize('openide.welcome.github.button', "Conectar con GitHub"), 'command:openide.signInWithGitHub')),
++					completionEvents: ['onCommand:openide.signInWithGitHub'],
++					media: { type: 'svg', altText: 'GitHub', path: 'git.svg' },
++				},
++				{
++					id: 'openide.welcome.import',
++					title: localize('openide.welcome.import.title', "Importá desde VS Code"),
++					description: localize('openide.welcome.import.description', "Traé tus configuraciones, atajos de teclado y extensiones desde tu instalación de VS Code.\n{0}", Button(localize('openide.welcome.import.button', "Importar de VS Code"), 'command:openide.importFromVSCode')),
++					completionEvents: ['onCommand:openide.importFromVSCode'],
++					media: { type: 'svg', altText: 'Extensiones', path: 'extensions.svg' },
++				},
++			]
++		}
++	},
+ 	{
+ 		id: 'Setup',
+ 		title: localize('gettingStarted.setup.title', "Get started with VS Code"),

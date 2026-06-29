@@ -1,0 +1,50 @@
+diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts
+index 6f785eaa..ff177d57 100644
+--- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts
++++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts
+@@ -129,6 +129,11 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
+ 			this.storageService.store(telemetryOptOutStorageKey, true, StorageScope.PROFILE, StorageTarget.USER);
+ 		}
+ 
++		// OpenIDE: en el primer arranque, abrir nuestro walkthrough de bienvenida.
++		if (this.tryOpenOpenIDEWelcome()) {
++			return;
++		}
++
+ 		if (this.tryOpenWalkthroughForFolder()) {
+ 			return;
+ 		}
+@@ -172,6 +177,33 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
+ 		return false;
+ 	}
+ 
++	// OpenIDE: abre el walkthrough 'openide.welcome' una unica vez, en el primer
++	// arranque de una instalacion nueva. Marca un flag para no repetirlo.
++	private tryOpenOpenIDEWelcome(): boolean {
++		if (this.environmentService.skipWelcome) {
++			return false;
++		}
++		const OPENIDE_WELCOME_SHOWN_KEY = 'openide.welcomeShown';
++		if (this.storageService.getBoolean(OPENIDE_WELCOME_SHOWN_KEY, StorageScope.APPLICATION, false)) {
++			return false;
++		}
++		if (!this.storageService.isNew(StorageScope.APPLICATION)) {
++			// No es una instalacion nueva: marcar como visto y no abrir nada.
++			this.storageService.store(OPENIDE_WELCOME_SHOWN_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
++			return false;
++		}
++		if (this.lifecycleService.startupKind === StartupKind.ReloadedWindow) {
++			return false;
++		}
++		this.storageService.store(OPENIDE_WELCOME_SHOWN_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
++		const options: GettingStartedEditorOptions = { selectedCategory: 'openide.welcome', pinned: false, preserveFocus: this.shouldPreserveFocus() };
++		this.editorService.openEditor({
++			resource: GettingStartedInput.RESOURCE,
++			options
++		});
++		return true;
++	}
++
+ 	private async openReadme() {
+ 		const readmes = arrays.coalesce(
+ 			await Promise.all(this.contextService.getWorkspace().folders.map(
