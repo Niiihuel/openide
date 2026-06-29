@@ -1,5 +1,5 @@
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
-index 993abe60..fc9cbe0e 100644
+index 993abe60..a951d295 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 @@ -17,7 +17,7 @@ import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/edit
@@ -16,7 +16,7 @@ index 993abe60..fc9cbe0e 100644
  import { StartupPageEditorResolverContribution, StartupPageRunnerContribution } from './startupPage.js';
  import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
 -import { DisposableStore } from '../../../../base/common/lifecycle.js';
-+import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
++import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
  import { AccessibleViewRegistry } from '../../../../platform/accessibility/browser/accessibleViewRegistry.js';
  import { GettingStartedAccessibleView } from './gettingStartedAccessibleView.js';
  import { AgentSessionsWelcomePage } from '../../welcomeAgentSessions/browser/agentSessionsWelcome.js';
@@ -193,7 +193,7 @@ index 993abe60..fc9cbe0e 100644
  registerAction2(class extends Action2 {
  	constructor() {
  		super({
-@@ -365,3 +531,317 @@ registerWorkbenchContribution2(StartupPageRunnerContribution.ID, StartupPageRunn
+@@ -365,3 +531,377 @@ registerWorkbenchContribution2(StartupPageRunnerContribution.ID, StartupPageRunn
  
  AccessibleViewRegistry.register(new GettingStartedAccessibleView());
  
@@ -511,3 +511,63 @@ index 993abe60..fc9cbe0e 100644
 +	}
 +});
 +
++
++// OpenIDE: ajustes de layout estilo "islas flotantes" (tipo Kiro).
++// - Activity bar / title bar / status bar transparentes, sin lineas (se funden con el fondo).
++// - Sidebar / panel / auxiliarybar como islas flotantes con gap y bordes redondeados.
++const OPENIDE_LAYOUT_CSS = `
++.monaco-workbench .part.activitybar,
++.monaco-workbench .part.titlebar,
++.monaco-workbench .part.statusbar {
++	background-color: transparent !important;
++	border: none !important;
++	box-shadow: none !important;
++}
++.monaco-workbench {
++	background-color: var(--vscode-editor-background) !important;
++}
++.monaco-workbench .part.sidebar,
++.monaco-workbench .part.panel,
++.monaco-workbench .part.auxiliarybar {
++	border: 6px solid transparent !important;
++	border-radius: 10px !important;
++	background-clip: padding-box !important;
++	overflow: hidden !important;
++	box-shadow: none !important;
++}
++.monaco-workbench .part.sidebar,
++.monaco-workbench .part.auxiliarybar {
++	border-left-width: 8px !important;
++	border-right-width: 8px !important;
++}
++/* quitar lineas internas de headers/secciones de los docks */
++.monaco-workbench .part.sidebar .composite.title,
++.monaco-workbench .part.auxiliarybar .composite.title,
++.monaco-workbench .part.panel .composite.title,
++.monaco-workbench .pane-header,
++.monaco-workbench .pane .pane-header,
++.monaco-workbench .split-view-view > .pane > .pane-header {
++	border: none !important;
++	box-shadow: none !important;
++}
++/* tabs del editor sin borde inferior (header integrado) */
++.monaco-workbench .part.editor > .content .editor-group-container > .title {
++	border-bottom: none !important;
++	box-shadow: none !important;
++}
++`;
++
++class OpenIDELayoutContribution extends Disposable implements IWorkbenchContribution {
++
++	static readonly ID = 'workbench.contrib.openideLayout';
++
++	constructor() {
++		super();
++		const style = mainWindow.document.createElement('style');
++		style.id = 'openide-layout';
++		style.textContent = OPENIDE_LAYOUT_CSS;
++		mainWindow.document.head.appendChild(style);
++		this._register(toDisposable(() => style.remove()));
++	}
++}
++registerWorkbenchContribution2(OpenIDELayoutContribution.ID, OpenIDELayoutContribution, WorkbenchPhase.BlockRestore);
