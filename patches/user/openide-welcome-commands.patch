@@ -1,5 +1,5 @@
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
-index 993abe60..6905b279 100644
+index 993abe60..d2b2bee6 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 @@ -17,7 +17,7 @@ import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/edit
@@ -172,19 +172,103 @@ index 993abe60..6905b279 100644
  registerAction2(class extends Action2 {
  	constructor() {
  		super({
-@@ -365,3 +510,124 @@ registerWorkbenchContribution2(StartupPageRunnerContribution.ID, StartupPageRunn
+@@ -365,3 +510,142 @@ registerWorkbenchContribution2(StartupPageRunnerContribution.ID, StartupPageRunn
  
  AccessibleViewRegistry.register(new GettingStartedAccessibleView());
  
-+// OpenIDE: pantalla de bienvenida a pantalla completa (overlay) que tapa el IDE
-+// en el primer arranque, hasta que el usuario la completa o toca "Saltar".
++// OpenIDE: dibuja la pantalla de bienvenida a pantalla completa (overlay) que
++// tapa el IDE, con los 3 pasos. Reutilizable desde el primer arranque y el comando.
++function showOpenIDEWelcomeOverlay(commandService: ICommandService): void {
++	// Evitar duplicados si ya hay un overlay abierto.
++	if (mainWindow.document.querySelector('.openide-welcome-overlay')) {
++		return;
++	}
++
++	const store = new DisposableStore();
++	const overlay = append(mainWindow.document.body, $('.openide-welcome-overlay'));
++	const dismiss = () => { store.dispose(); overlay.remove(); };
++
++	overlay.style.cssText = [
++		'position:fixed', 'inset:0', 'z-index:2147483646',
++		'display:flex', 'flex-direction:column', 'align-items:center', 'justify-content:center',
++		'background:var(--vscode-editor-background, #1e1e1e)',
++		'color:var(--vscode-foreground, #cccccc)',
++		'font-family:var(--vscode-font-family, sans-serif)',
++		'padding:48px', 'overflow:auto'
++	].join(';');
++
++	const card = append(overlay, $('div'));
++	card.style.cssText = 'max-width:760px;width:100%;display:flex;flex-direction:column;gap:8px;';
++
++	const logo = append(card, $('div'));
++	logo.style.cssText = 'font-size:56px;text-align:center;line-height:1;';
++	logo.textContent = '🚀';
++
++	const title = append(card, $('h1'));
++	title.style.cssText = 'text-align:center;margin:8px 0 0;font-size:30px;font-weight:600;';
++	title.textContent = localize('openide.overlay.title', "Bienvenido a OpenIDE");
++
++	const subtitle = append(card, $('p'));
++	subtitle.style.cssText = 'text-align:center;margin:0 0 24px;opacity:0.8;';
++	subtitle.textContent = localize('openide.overlay.subtitle', "Configurá tu editor en tres pasos. Podés saltarlos cuando quieras.");
++
++	const steps = [
++		{ n: '1', title: localize('openide.overlay.step1.title', "Esto es OpenIDE"), desc: localize('openide.overlay.step1.desc', "Tu editor, sin telemetría y a tu manera. Elegí un tema para empezar."), button: localize('openide.overlay.step1.btn', "Elegir tema"), command: 'workbench.action.selectTheme' },
++		{ n: '2', title: localize('openide.overlay.step2.title', "Conectá con GitHub"), desc: localize('openide.overlay.step2.desc', "Iniciá sesión para clonar, sincronizar y publicar tus repositorios."), button: localize('openide.overlay.step2.btn', "Conectar con GitHub"), command: 'openide.signInWithGitHub' },
++		{ n: '3', title: localize('openide.overlay.step3.title', "Importá desde VS Code"), desc: localize('openide.overlay.step3.desc', "Traé tus configuraciones, atajos y extensiones de VS Code."), button: localize('openide.overlay.step3.btn', "Importar de VS Code"), command: 'openide.importFromVSCode' },
++	];
++
++	for (const step of steps) {
++		const row = append(card, $('div'));
++		row.style.cssText = 'display:flex;gap:16px;align-items:center;padding:16px;border:1px solid var(--vscode-widget-border, #303031);border-radius:8px;';
++
++		const badge = append(row, $('div'));
++		badge.style.cssText = 'flex:0 0 32px;height:32px;width:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--vscode-button-background, #0e639c);color:var(--vscode-button-foreground, #ffffff);font-weight:600;';
++		badge.textContent = step.n;
++
++		const text = append(row, $('div'));
++		text.style.cssText = 'flex:1;display:flex;flex-direction:column;gap:2px;min-width:0;';
++		const stTitle = append(text, $('div'));
++		stTitle.style.cssText = 'font-weight:600;';
++		stTitle.textContent = step.title;
++		const stDesc = append(text, $('div'));
++		stDesc.style.cssText = 'opacity:0.8;font-size:13px;';
++		stDesc.textContent = step.desc;
++
++		const btn = append(row, $('button'));
++		btn.style.cssText = 'flex:0 0 auto;cursor:pointer;border:none;border-radius:4px;padding:6px 14px;background:var(--vscode-button-secondaryBackground, #3a3d41);color:var(--vscode-button-secondaryForeground, #ffffff);';
++		btn.textContent = step.button;
++		store.add(addDisposableListener(btn, 'click', () => commandService.executeCommand(step.command)));
++	}
++
++	const footer = append(card, $('div'));
++	footer.style.cssText = 'display:flex;gap:20px;align-items:center;justify-content:center;margin-top:24px;';
++
++	const start = append(footer, $('button'));
++	start.style.cssText = 'cursor:pointer;border:none;border-radius:4px;padding:8px 28px;font-size:14px;background:var(--vscode-button-background, #0e639c);color:var(--vscode-button-foreground, #ffffff);';
++	start.textContent = localize('openide.overlay.start', "Empezar");
++	store.add(addDisposableListener(start, 'click', () => dismiss()));
++
++	const skip = append(footer, $('a'));
++	skip.style.cssText = 'cursor:pointer;color:var(--vscode-textLink-foreground, #3794ff);';
++	skip.textContent = localize('openide.overlay.skip', "Saltar");
++	store.add(addDisposableListener(skip, 'click', () => dismiss()));
++
++	store.add(addDisposableListener(overlay, 'keydown', (e: KeyboardEvent) => {
++		if (e.key === 'Escape') {
++			dismiss();
++		}
++	}));
++	overlay.tabIndex = -1;
++	overlay.focus();
++}
++
++// OpenIDE: muestra el overlay de bienvenida en el primer arranque (instalacion nueva).
 +class OpenIDEWelcomeOverlayContribution extends Disposable implements IWorkbenchContribution {
 +
 +	static readonly ID = 'workbench.contrib.openideWelcomeOverlay';
 +
 +	private static readonly STORAGE_KEY = 'openide.welcomeShown';
-+
-+	private readonly renderDisposables = this._register(new DisposableStore());
 +
 +	constructor(
 +		@IStorageService private readonly storageService: IStorageService,
@@ -210,90 +294,24 @@ index 993abe60..6905b279 100644
 +		}
 +		await this.lifecycleService.when(LifecyclePhase.Restored);
 +		this.storageService.store(OpenIDEWelcomeOverlayContribution.STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
-+		this.render();
-+	}
-+
-+	private dismiss(overlay: HTMLElement): void {
-+		this.renderDisposables.clear();
-+		overlay.remove();
-+	}
-+
-+	private render(): void {
-+		const overlay = append(mainWindow.document.body, $('.openide-welcome-overlay'));
-+		overlay.style.cssText = [
-+			'position:fixed', 'inset:0', 'z-index:2147483646',
-+			'display:flex', 'flex-direction:column', 'align-items:center', 'justify-content:center',
-+			'background:var(--vscode-editor-background, #1e1e1e)',
-+			'color:var(--vscode-foreground, #cccccc)',
-+			'font-family:var(--vscode-font-family, sans-serif)',
-+			'padding:48px', 'overflow:auto'
-+		].join(';');
-+
-+		const card = append(overlay, $('div'));
-+		card.style.cssText = 'max-width:760px;width:100%;display:flex;flex-direction:column;gap:8px;';
-+
-+		const logo = append(card, $('div'));
-+		logo.style.cssText = 'font-size:56px;text-align:center;line-height:1;';
-+		logo.textContent = '🚀';
-+
-+		const title = append(card, $('h1'));
-+		title.style.cssText = 'text-align:center;margin:8px 0 0;font-size:30px;font-weight:600;';
-+		title.textContent = localize('openide.overlay.title', "Bienvenido a OpenIDE");
-+
-+		const subtitle = append(card, $('p'));
-+		subtitle.style.cssText = 'text-align:center;margin:0 0 24px;opacity:0.8;';
-+		subtitle.textContent = localize('openide.overlay.subtitle', "Configurá tu editor en tres pasos. Podés saltarlos cuando quieras.");
-+
-+		const steps = [
-+			{ n: '1', title: localize('openide.overlay.step1.title', "Esto es OpenIDE"), desc: localize('openide.overlay.step1.desc', "Tu editor, sin telemetría y a tu manera. Elegí un tema para empezar."), button: localize('openide.overlay.step1.btn', "Elegir tema"), command: 'workbench.action.selectTheme' },
-+			{ n: '2', title: localize('openide.overlay.step2.title', "Conectá con GitHub"), desc: localize('openide.overlay.step2.desc', "Iniciá sesión para clonar, sincronizar y publicar tus repositorios."), button: localize('openide.overlay.step2.btn', "Conectar con GitHub"), command: 'openide.signInWithGitHub' },
-+			{ n: '3', title: localize('openide.overlay.step3.title', "Importá desde VS Code"), desc: localize('openide.overlay.step3.desc', "Traé tus configuraciones, atajos y extensiones de VS Code."), button: localize('openide.overlay.step3.btn', "Importar de VS Code"), command: 'openide.importFromVSCode' },
-+		];
-+
-+		for (const step of steps) {
-+			const row = append(card, $('div'));
-+			row.style.cssText = 'display:flex;gap:16px;align-items:center;padding:16px;border:1px solid var(--vscode-widget-border, #303031);border-radius:8px;';
-+
-+			const badge = append(row, $('div'));
-+			badge.style.cssText = 'flex:0 0 32px;height:32px;width:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--vscode-button-background, #0e639c);color:var(--vscode-button-foreground, #ffffff);font-weight:600;';
-+			badge.textContent = step.n;
-+
-+			const text = append(row, $('div'));
-+			text.style.cssText = 'flex:1;display:flex;flex-direction:column;gap:2px;min-width:0;';
-+			const stTitle = append(text, $('div'));
-+			stTitle.style.cssText = 'font-weight:600;';
-+			stTitle.textContent = step.title;
-+			const stDesc = append(text, $('div'));
-+			stDesc.style.cssText = 'opacity:0.8;font-size:13px;';
-+			stDesc.textContent = step.desc;
-+
-+			const btn = append(row, $('button'));
-+			btn.style.cssText = 'flex:0 0 auto;cursor:pointer;border:none;border-radius:4px;padding:6px 14px;background:var(--vscode-button-secondaryBackground, #3a3d41);color:var(--vscode-button-secondaryForeground, #ffffff);';
-+			btn.textContent = step.button;
-+			this.renderDisposables.add(addDisposableListener(btn, 'click', () => this.commandService.executeCommand(step.command)));
-+		}
-+
-+		const footer = append(card, $('div'));
-+		footer.style.cssText = 'display:flex;gap:20px;align-items:center;justify-content:center;margin-top:24px;';
-+
-+		const start = append(footer, $('button'));
-+		start.style.cssText = 'cursor:pointer;border:none;border-radius:4px;padding:8px 28px;font-size:14px;background:var(--vscode-button-background, #0e639c);color:var(--vscode-button-foreground, #ffffff);';
-+		start.textContent = localize('openide.overlay.start', "Empezar");
-+		this.renderDisposables.add(addDisposableListener(start, 'click', () => this.dismiss(overlay)));
-+
-+		const skip = append(footer, $('a'));
-+		skip.style.cssText = 'cursor:pointer;color:var(--vscode-textLink-foreground, #3794ff);';
-+		skip.textContent = localize('openide.overlay.skip', "Saltar");
-+		this.renderDisposables.add(addDisposableListener(skip, 'click', () => this.dismiss(overlay)));
-+
-+		this.renderDisposables.add(addDisposableListener(overlay, 'keydown', (e: KeyboardEvent) => {
-+			if (e.key === 'Escape') {
-+				this.dismiss(overlay);
-+			}
-+		}));
-+		overlay.tabIndex = -1;
-+		overlay.focus();
++		showOpenIDEWelcomeOverlay(this.commandService);
 +	}
 +}
 +registerWorkbenchContribution2(OpenIDEWelcomeOverlayContribution.ID, OpenIDEWelcomeOverlayContribution, WorkbenchPhase.AfterRestored);
++
++// OpenIDE: comando para abrir la bienvenida a pantalla completa cuando quieras.
++registerAction2(class extends Action2 {
++	constructor() {
++		super({
++			id: 'openide.showWelcome',
++			title: localize2('openide.showWelcome.title', 'OpenIDE: Mostrar bienvenida'),
++			category: Categories.Help,
++			f1: true,
++		});
++	}
++
++	run(accessor: ServicesAccessor) {
++		showOpenIDEWelcomeOverlay(accessor.get(ICommandService));
++	}
++});
 +
