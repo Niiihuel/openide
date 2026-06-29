@@ -1,5 +1,5 @@
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
-index 993abe60..a90e4e83 100644
+index 993abe60..f1a3c961 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 @@ -17,7 +17,7 @@ import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/edit
@@ -194,7 +194,7 @@ index 993abe60..a90e4e83 100644
  registerAction2(class extends Action2 {
  	constructor() {
  		super({
-@@ -365,3 +532,382 @@ registerWorkbenchContribution2(StartupPageRunnerContribution.ID, StartupPageRunn
+@@ -365,3 +532,384 @@ registerWorkbenchContribution2(StartupPageRunnerContribution.ID, StartupPageRunn
  
  AccessibleViewRegistry.register(new GettingStartedAccessibleView());
  
@@ -518,11 +518,18 @@ index 993abe60..a90e4e83 100644
 +// - Sidebar / panel / auxiliarybar como islas flotantes con gap y bordes redondeados.
 +const OPENIDE_LAYOUT_CSS = `
 +.monaco-workbench .part.activitybar,
-+.monaco-workbench .part.titlebar,
-+.monaco-workbench .part.statusbar {
++.monaco-workbench .part.titlebar {
 +	background-color: transparent !important;
 +	border: none !important;
 +	box-shadow: none !important;
++}
++/* la status bar (footer) se funde con el fondo pero conserva su linea superior */
++.monaco-workbench .part.statusbar {
++	background-color: transparent !important;
++}
++/* matar la linea vertical del activity bar (borde ::before) */
++.monaco-workbench .activitybar.bordered::before {
++	border: none !important;
 +}
 +.monaco-workbench {
 +	background-color: var(--vscode-editor-background) !important;
@@ -535,11 +542,6 @@ index 993abe60..a90e4e83 100644
 +	background-clip: padding-box !important;
 +	overflow: hidden !important;
 +	box-shadow: none !important;
-+}
-+/* mas aire en la zona inferior (sobre la status bar) */
-+.monaco-workbench .part.sidebar,
-+.monaco-workbench .part.auxiliarybar {
-+	border-bottom-width: 12px !important;
 +}
 +/* quitar lineas internas de headers/secciones de los docks */
 +.monaco-workbench .part.sidebar .composite.title,

@@ -23,7 +23,7 @@ index f4d04e5c..53637650 100644
          "label": "%light2026ThemeLabel%",
 diff --git a/extensions/theme-defaults/themes/openide-dark.json b/extensions/theme-defaults/themes/openide-dark.json
 new file mode 100644
-index 00000000..66475879
+index 00000000..a5910804
 --- /dev/null
 +++ b/extensions/theme-defaults/themes/openide-dark.json
 @@ -0,0 +1,279 @@
@@ -165,7 +165,7 @@ index 00000000..66475879
 +
 +		"statusBar.background": "#141414",
 +		"statusBar.foreground": "#b4b4b4",
-+		"statusBar.border": "#00000000",
++		"statusBar.border": "#2b2b2b",
 +		"statusBar.noFolderBackground": "#141414",
 +		"statusBar.noFolderForeground": "#b4b4b4",
 +		"statusBar.debuggingBackground": "#3a3a3a",
@@ -308,7 +308,7 @@ index 00000000..66475879
 +}
 diff --git a/extensions/theme-defaults/themes/openide-light.json b/extensions/theme-defaults/themes/openide-light.json
 new file mode 100644
-index 00000000..9e535e8e
+index 00000000..d1373947
 --- /dev/null
 +++ b/extensions/theme-defaults/themes/openide-light.json
 @@ -0,0 +1,277 @@
@@ -448,7 +448,7 @@ index 00000000..9e535e8e
 +
 +		"statusBar.background": "#f3f3f3",
 +		"statusBar.foreground": "#3a3a3a",
-+		"statusBar.border": "#00000000",
++		"statusBar.border": "#d4d4d4",
 +		"statusBar.noFolderBackground": "#f3f3f3",
 +		"statusBar.noFolderForeground": "#3a3a3a",
 +		"statusBar.debuggingBackground": "#d6d6d6",

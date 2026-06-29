@@ -1,0 +1,19 @@
+diff --git a/src/vs/workbench/browser/parts/compositePart.ts b/src/vs/workbench/browser/parts/compositePart.ts
+index 8b631280..587fdabc 100644
+--- a/src/vs/workbench/browser/parts/compositePart.ts
++++ b/src/vs/workbench/browser/parts/compositePart.ts
+@@ -513,6 +513,14 @@ export abstract class CompositePart<T extends Composite, MementoType extends obj
+ 	}
+ 
+ 	override layout(width: number, height: number, top: number, left: number): void {
++		// OpenIDE: los docks (sidebar/panel/auxiliarybar) se dibujan como "islas"
++		// flotantes con un borde transparente (gap) via CSS. Para que VS Code
++		// dimensione el contenido al tamaño REAL disponible (y no quede recortado por
++		// el overflow del part), restamos el gap antes de medir el contenido.
++		const gap = 8; // debe coincidir con el border de .part.sidebar/panel/auxiliarybar en el CSS de layout
++		width = Math.max(0, width - gap * 2);
++		height = Math.max(0, height - gap * 2);
++
+ 		super.layout(width, height, top, left);
+ 
+ 		// Layout contents
