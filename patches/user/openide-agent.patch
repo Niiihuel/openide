@@ -604,10 +604,10 @@ index 00000000..aca3a345
 +}
 diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideChatView.ts b/src/vs/workbench/contrib/openideAgent/browser/openideChatView.ts
 new file mode 100644
-index 00000000..4fc6a875
+index 00000000..428fb942
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/browser/openideChatView.ts
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,123 @@
 +/*---------------------------------------------------------------------------------------------
 + *  OpenIDE — ViewPane del chat (dock derecho / auxiliary bar). Hostea un webview overlay con
 + *  la UI del chat y puentea los mensajes con el motor agéntico (IOpenideAgentService).
@@ -675,6 +675,7 @@ index 00000000..4fc6a875
 +			title: 'OpenIDE Chat',
 +			options: { purpose: WebviewContentPurpose.WebviewView },
 +			contentOptions: { allowScripts: true },
++			extension: undefined,
 +		});
 +		this._webview.value = webview;
 +		webview.setHtml(getOpenideChatHtml(nonce));
