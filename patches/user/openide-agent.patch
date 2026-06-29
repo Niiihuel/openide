@@ -1,9 +1,9 @@
 diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts b/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts
 new file mode 100644
-index 00000000..f30ec5ce
+index 00000000..2623b8b9
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,200 @@
 +/*---------------------------------------------------------------------------------------------
 + *  OpenIDE — contribución del motor agéntico: servicio, config (catálogo + custom providers),
 + *  y comandos para elegir provider, configurar API key y probar el agente (Output channel).
@@ -17,6 +17,7 @@ index 00000000..f30ec5ce
 +import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 +import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 +import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
++import { INotificationService } from '../../../../platform/notification/common/notification.js';
 +import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
 +import { Extensions as OutputExtensions, IOutputChannelRegistry, IOutputService } from '../../../services/output/common/output.js';
 +import { IOpenideAgentService } from './openideAgentService.js';
@@ -89,6 +90,43 @@ index 00000000..f30ec5ce
 +		const picked = await quickInput.pick(items, { placeHolder: localize('openide.agent.selectProvider.ph', "Elegí el proveedor de IA") });
 +		if (picked) {
 +			await configurationService.updateValue('openide.agent.provider', picked.id);
++		}
++	}
++});
++
++// Comando: iniciar sesión OAuth en un provider que lo soporte (Claude Pro/Max, etc.).
++registerAction2(class extends Action2 {
++	constructor() {
++		super({
++			id: 'openide.agent.signIn',
++			title: localize2('openide.agent.signIn', 'OpenIDE Agent: Iniciar sesión (OAuth)'),
++			category: Categories.Help,
++			f1: true,
++		});
++	}
++
++	async run(accessor: ServicesAccessor): Promise<void> {
++		const quickInput = accessor.get(IQuickInputService);
++		const agent = accessor.get(IOpenideAgentService);
++		const notificationService = accessor.get(INotificationService);
++		const items: (IQuickPickItem & { id: string })[] = agent.listProviders()
++			.filter(p => p.auth === 'oauth')
++			.map(p => ({ id: p.id, label: p.label }));
++		if (!items.length) {
++			notificationService.info(localize('openide.agent.signIn.none', "No hay proveedores OAuth en el catálogo."));
++			return;
++		}
++		const picked = await quickInput.pick(items, { placeHolder: localize('openide.agent.signIn.pick', "¿En qué proveedor iniciar sesión?") });
++		if (!picked) {
++			return;
++		}
++		try {
++			const ok = await agent.signIn(picked.id);
++			notificationService.info(ok
++				? localize('openide.agent.signIn.ok', "Sesión iniciada en {0}.", picked.label)
++				: localize('openide.agent.signIn.cancel', "Inicio de sesión cancelado."));
++		} catch (e) {
++			notificationService.error(localize('openide.agent.signIn.err', "Error de OAuth: {0}", e instanceof Error ? e.message : String(e)));
 +		}
 +	}
 +});
@@ -168,10 +206,10 @@ index 00000000..f30ec5ce
 +});
 diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts b/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts
 new file mode 100644
-index 00000000..dd9279a0
+index 00000000..116c858c
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,161 @@
 +/*---------------------------------------------------------------------------------------------
 + *  OpenIDE — servicio del motor agéntico. Resuelve el provider desde el CATÁLOGO (datos),
 + *  el adaptador de PROTOCOLO correcto, y la credencial vía la capa de AUTH; corre el
@@ -184,9 +222,12 @@ index 00000000..dd9279a0
 +import { IFileService } from '../../../../platform/files/common/files.js';
 +import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 +import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
++import { IOpenerService } from '../../../../platform/opener/common/opener.js';
++import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 +import { IRequestService } from '../../../../platform/request/common/request.js';
 +import { ISecretStorageService } from '../../../../platform/secrets/common/secrets.js';
 +import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
++import { OpenideOAuthManager } from './openideOAuth.js';
 +import { AgentLoopEvent, IChatMessage, ICredential, ILLMProvider } from '../common/openideAgentTypes.js';
 +import { findProvider, IProviderEntry, resolveProviders } from '../common/openideProviderCatalog.js';
 +import { AnthropicProvider } from '../common/providers/anthropicProvider.js';
@@ -203,6 +244,8 @@ index 00000000..dd9279a0
 +	getActiveProviderId(): string;
 +	setApiKey(providerId: string, key: string): Promise<void>;
 +	hasApiKey(providerId: string): Promise<boolean>;
++	/** Inicia el flujo OAuth (device-code / PKCE) para un provider que lo soporte. */
++	signIn(providerId: string): Promise<boolean>;
 +	runAgent(prompt: string, onEvent: (e: AgentLoopEvent) => void, token?: CancellationToken): Promise<void>;
 +}
 +
@@ -216,6 +259,7 @@ index 00000000..dd9279a0
 +	/** Adaptadores de PROTOCOLO (pocos). Los providers son datos del catálogo. */
 +	private readonly protocols = new Map<string, ILLMProvider>();
 +	private readonly auth: OpenideAuthManager;
++	private readonly oauth: OpenideOAuthManager;
 +	private readonly tools: OpenideToolRegistry;
 +
 +	constructor(
@@ -224,11 +268,14 @@ index 00000000..dd9279a0
 +		@IConfigurationService private readonly configurationService: IConfigurationService,
 +		@IFileService fileService: IFileService,
 +		@IWorkspaceContextService contextService: IWorkspaceContextService,
++		@IOpenerService openerService: IOpenerService,
++		@IQuickInputService quickInputService: IQuickInputService,
 +	) {
 +		super();
 +		this.protocols.set('anthropic', new AnthropicProvider(requestService));
 +		this.protocols.set('openai', new OpenAICompatibleProvider(requestService));
-+		this.auth = new OpenideAuthManager(secretStorage);
++		this.oauth = new OpenideOAuthManager(requestService, secretStorage, openerService, quickInputService);
++		this.auth = new OpenideAuthManager(secretStorage, this.oauth);
 +		this.tools = new OpenideToolRegistry(fileService, contextService);
 +	}
 +
@@ -250,6 +297,14 @@ index 00000000..dd9279a0
 +
 +	hasApiKey(providerId: string): Promise<boolean> {
 +		return this.auth.hasApiKey(providerId);
++	}
++
++	async signIn(providerId: string): Promise<boolean> {
++		const entry = findProvider(this.customProviders(), providerId);
++		if (!entry) {
++			throw new Error(`Provider desconocido: "${providerId}".`);
++		}
++		return this.oauth.signIn(entry);
 +	}
 +
 +	async runAgent(prompt: string, onEvent: (e: AgentLoopEvent) => void, token: CancellationToken = CancellationToken.None): Promise<void> {
@@ -318,25 +373,28 @@ index 00000000..dd9279a0
 +registerSingleton(IOpenideAgentService, OpenideAgentService, InstantiationType.Delayed);
 diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideAuth.ts b/src/vs/workbench/contrib/openideAgent/browser/openideAuth.ts
 new file mode 100644
-index 00000000..d1035978
+index 00000000..2808b976
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/browser/openideAuth.ts
 @@ -0,0 +1,40 @@
 +/*---------------------------------------------------------------------------------------------
-+ *  OpenIDE — capa de autenticación pluggable. Hoy: API key (SecretStorage).
-+ *  El branch OAuth queda preparado para el siguiente paso (device-code / PKCE).
++ *  OpenIDE — capa de autenticación pluggable: API key (SecretStorage) u OAuth (delegado al
++ *  OpenideOAuthManager, que maneja device-code / PKCE + refresh).
 + *--------------------------------------------------------------------------------------------*/
 +
 +import { ISecretStorageService } from '../../../../platform/secrets/common/secrets.js';
 +import { ICredential } from '../common/openideAgentTypes.js';
 +import { IProviderEntry } from '../common/openideProviderCatalog.js';
++import { OpenideOAuthManager } from './openideOAuth.js';
 +
 +export const SECRET_APIKEY_PREFIX = 'openide.agent.apiKey.';
-+export const SECRET_OAUTH_PREFIX = 'openide.agent.oauth.';
 +
 +export class OpenideAuthManager {
 +
-+	constructor(private readonly secretStorage: ISecretStorageService) { }
++	constructor(
++		private readonly secretStorage: ISecretStorageService,
++		private readonly oauth: OpenideOAuthManager,
++	) { }
 +
 +	async setApiKey(providerId: string, key: string): Promise<void> {
 +		await this.secretStorage.set(SECRET_APIKEY_PREFIX + providerId, key);
@@ -349,10 +407,7 @@ index 00000000..d1035978
 +	/** Resuelve la credencial para un provider; lanza con mensaje claro si falta. */
 +	async resolveCredential(entry: IProviderEntry): Promise<ICredential> {
 +		if (entry.auth === 'oauth') {
-+			const token = await this.secretStorage.get(SECRET_OAUTH_PREFIX + entry.id);
-+			if (!token) {
-+				throw new Error(`El provider "${entry.id}" usa OAuth y todavía no iniciaste sesión. (Los flujos OAuth llegan en el próximo paso.)`);
-+			}
++			const token = await this.oauth.getValidToken(entry);
 +			return { kind: 'oauth', token };
 +		}
 +		const key = await this.secretStorage.get(SECRET_APIKEY_PREFIX + entry.id);
@@ -360,6 +415,246 @@ index 00000000..d1035978
 +			throw new Error(`Falta la API key de "${entry.id}". Ejecutá "OpenIDE Agent: Configurar API key".`);
 +		}
 +		return { kind: 'apiKey', value: key };
++	}
++}
+diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideOAuth.ts b/src/vs/workbench/contrib/openideAgent/browser/openideOAuth.ts
+new file mode 100644
+index 00000000..8ad07aec
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/browser/openideOAuth.ts
+@@ -0,0 +1,234 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — motor OAuth para providers que lo soportan. Dos flujos pensados para correr
++ *  desde el renderer (sin server local ni URI handler):
++ *    - 'device' : device-code (se muestra un código, se abre la URL, y se hace polling).
++ *    - 'pkce'   : authorize-code + PKCE donde el usuario PEGA el código devuelto.
++ *  Tokens (access + refresh + expiración) en SecretStorage.
++ *--------------------------------------------------------------------------------------------*/
++
++import { timeout } from '../../../../base/common/async.js';
++import { CancellationToken } from '../../../../base/common/cancellation.js';
++import { VSBuffer, VSBufferReadableStream } from '../../../../base/common/buffer.js';
++import { listenStream } from '../../../../base/common/stream.js';
++import { URI } from '../../../../base/common/uri.js';
++import { IHeaders } from '../../../../base/parts/request/common/request.js';
++import { IOpenerService } from '../../../../platform/opener/common/opener.js';
++import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
++import { IRequestService } from '../../../../platform/request/common/request.js';
++import { ISecretStorageService } from '../../../../platform/secrets/common/secrets.js';
++import { IProviderEntry } from '../common/openideProviderCatalog.js';
++import { challengeS256, randomState, randomVerifier } from '../common/openidePkce.js';
++
++const SECRET_OAUTH_PREFIX = 'openide.agent.oauth.';
++
++interface IStoredToken {
++	accessToken: string;
++	refreshToken?: string;
++	expiresAt?: number;
++}
++
++function readText(stream: VSBufferReadableStream): Promise<string> {
++	return new Promise<string>(resolve => {
++		let buf = '';
++		listenStream(stream, {
++			onData: (c: VSBuffer) => { buf += c.toString(); },
++			onError: () => resolve(buf),
++			onEnd: () => resolve(buf),
++		});
++	});
++}
++
++export class OpenideOAuthManager {
++
++	constructor(
++		private readonly requestService: IRequestService,
++		private readonly secretStorage: ISecretStorageService,
++		private readonly openerService: IOpenerService,
++		private readonly quickInputService: IQuickInputService,
++	) { }
++
++	async isSignedIn(providerId: string): Promise<boolean> {
++		return !!(await this.read(providerId));
++	}
++
++	async signOut(providerId: string): Promise<void> {
++		await this.secretStorage.set(SECRET_OAUTH_PREFIX + providerId, '');
++	}
++
++	/** Devuelve un access token válido (refrescando si expiró). Lanza si no hay sesión. */
++	async getValidToken(entry: IProviderEntry): Promise<string> {
++		const stored = await this.read(entry.id);
++		if (!stored) {
++			throw new Error(`No iniciaste sesión en "${entry.id}". Ejecutá "OpenIDE Agent: Iniciar sesión (OAuth)".`);
++		}
++		if (stored.expiresAt && Date.now() > stored.expiresAt - 60_000 && stored.refreshToken && entry.oauth) {
++			const refreshed = await this.refresh(entry, stored.refreshToken);
++			await this.write(entry.id, refreshed);
++			return refreshed.accessToken;
++		}
++		return stored.accessToken;
++	}
++
++	async signIn(entry: IProviderEntry): Promise<boolean> {
++		if (!entry.oauth) {
++			throw new Error(`El provider "${entry.id}" no tiene config OAuth.`);
++		}
++		const token = entry.oauth.flow === 'device' ? await this.deviceFlow(entry) : await this.pkceFlow(entry);
++		if (token && token.accessToken) {
++			await this.write(entry.id, token);
++			return true;
++		}
++		return false;
++	}
++
++	// ---- flujos ----
++
++	private async pkceFlow(entry: IProviderEntry): Promise<IStoredToken | undefined> {
++		const cfg = entry.oauth!;
++		const verifier = randomVerifier();
++		const challenge = await challengeS256(verifier);
++		const state = randomState();
++		const redirectUri = cfg.redirectUri || 'https://console.anthropic.com/oauth/code/callback';
++
++		const authUrl = `${cfg.authorizationUrl}?` + new URLSearchParams({
++			client_id: cfg.clientId,
++			response_type: 'code',
++			redirect_uri: redirectUri,
++			scope: cfg.scopes.join(' '),
++			code_challenge: challenge,
++			code_challenge_method: 'S256',
++			state,
++		}).toString();
++
++		await this.openerService.open(URI.parse(authUrl));
++		const pasted = await this.quickInputService.input({
++			prompt: `Autorizá en el navegador y pegá acá el código que te devuelve ${entry.label}`,
++			ignoreFocusLost: true,
++		});
++		if (!pasted) {
++			return undefined;
++		}
++		// Algunos providers devuelven "code#state".
++		const code = pasted.split('#')[0].trim();
++
++		const json = await this.postToken(cfg.tokenUrl, {
++			grant_type: 'authorization_code',
++			code,
++			state,
++			client_id: cfg.clientId,
++			redirect_uri: redirectUri,
++			code_verifier: verifier,
++		}, cfg.tokenContentType === 'json');
++
++		return this.toStored(json);
++	}
++
++	private async deviceFlow(entry: IProviderEntry): Promise<IStoredToken | undefined> {
++		const cfg = entry.oauth!;
++		const useJson = cfg.tokenContentType === 'json';
++		if (!cfg.deviceAuthorizationUrl) {
++			throw new Error(`El provider "${entry.id}" no tiene deviceAuthorizationUrl.`);
++		}
++		const start = await this.postToken(cfg.deviceAuthorizationUrl, {
++			client_id: cfg.clientId,
++			scope: cfg.scopes.join(' '),
++		}, useJson);
++
++		const deviceCode = start.device_code;
++		const userCode = start.user_code;
++		const verificationUri = start.verification_uri_complete || start.verification_uri;
++		const interval = (start.interval || 5) * 1000;
++		const expiresAt = Date.now() + (start.expires_in || 600) * 1000;
++
++		if (verificationUri) {
++			await this.openerService.open(URI.parse(verificationUri));
++		}
++		// Mostramos el código (no bloqueante) para que el usuario lo ingrese en el navegador.
++		this.quickInputService.input({
++			prompt: `Abrí ${verificationUri} e ingresá el código: ${userCode}`,
++			value: userCode,
++			ignoreFocusLost: true,
++		});
++
++		while (Date.now() < expiresAt) {
++			await timeout(interval);
++			let res: any;
++			try {
++				res = await this.postToken(cfg.tokenUrl, {
++					grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
++					device_code: deviceCode,
++					client_id: cfg.clientId,
++				}, useJson, true);
++			} catch {
++				continue;
++			}
++			if (res.access_token) {
++				return this.toStored(res);
++			}
++			if (res.error && res.error !== 'authorization_pending' && res.error !== 'slow_down') {
++				throw new Error(`OAuth: ${res.error_description || res.error}`);
++			}
++		}
++		throw new Error('El código expiró antes de autorizar.');
++	}
++
++	private async refresh(entry: IProviderEntry, refreshToken: string): Promise<IStoredToken> {
++		const cfg = entry.oauth!;
++		const json = await this.postToken(cfg.tokenUrl, {
++			grant_type: 'refresh_token',
++			refresh_token: refreshToken,
++			client_id: cfg.clientId,
++		}, cfg.tokenContentType === 'json');
++		const stored = this.toStored(json);
++		if (!stored.refreshToken) {
++			stored.refreshToken = refreshToken; // algunos no rotan el refresh token
++		}
++		return stored;
++	}
++
++	// ---- helpers ----
++
++	private async postToken(url: string, params: Record<string, string>, useJson: boolean, tolerateError = false): Promise<any> {
++		const headers: IHeaders = { 'Accept': 'application/json' };
++		let body: string;
++		if (useJson) {
++			headers['Content-Type'] = 'application/json';
++			body = JSON.stringify(params);
++		} else {
++			headers['Content-Type'] = 'application/x-www-form-urlencoded';
++			body = new URLSearchParams(params).toString();
++		}
++		const ctx = await this.requestService.request({ type: 'POST', url, headers, data: body, callSite: 'openideOAuth' }, CancellationToken.None);
++		const text = await readText(ctx.stream);
++		let json: any;
++		try { json = text ? JSON.parse(text) : {}; } catch { json = {}; }
++		const status = ctx.res.statusCode ?? 0;
++		if ((status < 200 || status >= 300) && !tolerateError) {
++			throw new Error(`OAuth ${status}: ${text.slice(0, 300)}`);
++		}
++		return json;
++	}
++
++	private toStored(json: any): IStoredToken {
++		return {
++			accessToken: json.access_token,
++			refreshToken: json.refresh_token,
++			expiresAt: json.expires_in ? Date.now() + json.expires_in * 1000 : undefined,
++		};
++	}
++
++	private async read(providerId: string): Promise<IStoredToken | undefined> {
++		const raw = await this.secretStorage.get(SECRET_OAUTH_PREFIX + providerId);
++		if (!raw) { return undefined; }
++		try {
++			const parsed = JSON.parse(raw) as IStoredToken;
++			return parsed.accessToken ? parsed : undefined;
++		} catch {
++			return undefined;
++		}
++	}
++
++	private async write(providerId: string, token: IStoredToken): Promise<void> {
++		await this.secretStorage.set(SECRET_OAUTH_PREFIX + providerId, JSON.stringify(token));
 +	}
 +}
 diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideTools.ts b/src/vs/workbench/contrib/openideAgent/browser/openideTools.ts
@@ -547,12 +842,43 @@ index 00000000..d51d4ee4
 +	| { type: 'usage'; inputTokens?: number; outputTokens?: number }
 +	| { type: 'done'; reason?: string }
 +	| { type: 'error'; message: string };
+diff --git a/src/vs/workbench/contrib/openideAgent/common/openidePkce.ts b/src/vs/workbench/contrib/openideAgent/common/openidePkce.ts
+new file mode 100644
+index 00000000..8c44c9d3
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/common/openidePkce.ts
+@@ -0,0 +1,25 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — helpers PKCE (RFC 7636) usando utilidades de VS Code (common-safe) + Web Crypto.
++ *--------------------------------------------------------------------------------------------*/
++
++import { encodeBase64, VSBuffer } from '../../../../base/common/buffer.js';
++
++function randomBytes(n: number): Uint8Array {
++	const arr = new Uint8Array(n);
++	crypto.getRandomValues(arr);
++	return arr;
++}
++
++export function randomVerifier(): string {
++	return encodeBase64(VSBuffer.wrap(randomBytes(32)), false, true);
++}
++
++export function randomState(): string {
++	return encodeBase64(VSBuffer.wrap(randomBytes(16)), false, true);
++}
++
++export async function challengeS256(verifier: string): Promise<string> {
++	const input = VSBuffer.fromString(verifier).buffer;
++	const digest = await crypto.subtle.digest('sha-256', input as ArrayBufferView<ArrayBuffer>);
++	return encodeBase64(VSBuffer.wrap(new Uint8Array(digest)), false, true);
++}
 diff --git a/src/vs/workbench/contrib/openideAgent/common/openideProviderCatalog.ts b/src/vs/workbench/contrib/openideAgent/common/openideProviderCatalog.ts
 new file mode 100644
-index 00000000..17a469a0
+index 00000000..78f8a22e
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/common/openideProviderCatalog.ts
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,100 @@
 +/*---------------------------------------------------------------------------------------------
 + *  OpenIDE — catálogo de proveedores como DATOS. La idea: pocos "protocolos" (código) y
 + *  muchos providers (data). Sumar un provider = una entrada acá o un custom en settings.
@@ -562,15 +888,17 @@ index 00000000..17a469a0
 +export type AuthKind = 'apiKey' | 'oauth';
 +
 +export interface IOAuthConfig {
-+	/** 'pkce' = authorize code + PKCE (redirect); 'device' = device code (polling, sin redirect). */
++	/** 'pkce' = authorize code + PKCE (el usuario pega el código); 'device' = device code (polling). */
 +	readonly flow: 'pkce' | 'device';
 +	readonly authorizationUrl?: string;
 +	readonly deviceAuthorizationUrl?: string;
 +	readonly tokenUrl: string;
 +	readonly clientId: string;
 +	readonly scopes: string[];
-+	/** Headers extra que algunos providers piden en el intercambio OAuth. */
-+	readonly extraTokenHeaders?: Record<string, string>;
++	/** Redirect URI registrada en el provider (para PKCE-paste suele mostrar el código). */
++	readonly redirectUri?: string;
++	/** Algunos token endpoints esperan JSON en vez de form-urlencoded. */
++	readonly tokenContentType?: 'json' | 'form';
 +}
 +
 +export interface IProviderEntry {
@@ -590,7 +918,19 @@ index 00000000..17a469a0
 + * así que sumar uno nuevo suele ser solo {id, label, baseUrl}.
 + */
 +export const OPENIDE_BUILTIN_PROVIDERS: ReadonlyArray<IProviderEntry> = [
-+	{ id: 'anthropic', label: 'Anthropic (Claude)', protocol: 'anthropic', auth: 'apiKey', defaultModel: 'claude-sonnet-4-5' },
++	{ id: 'anthropic', label: 'Anthropic (Claude · API key)', protocol: 'anthropic', auth: 'apiKey', defaultModel: 'claude-sonnet-4-5' },
++	{
++		id: 'claude-oauth', label: 'Claude (suscripción Pro/Max · OAuth)', protocol: 'anthropic', auth: 'oauth', defaultModel: 'claude-sonnet-4-5',
++		oauth: {
++			flow: 'pkce',
++			authorizationUrl: 'https://claude.ai/oauth/authorize',
++			tokenUrl: 'https://console.anthropic.com/v1/oauth/token',
++			clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
++			scopes: ['org:create_api_key', 'user:profile', 'user:inference'],
++			redirectUri: 'https://console.anthropic.com/oauth/code/callback',
++			tokenContentType: 'json',
++		},
++	},
 +	{ id: 'openai', label: 'OpenAI', protocol: 'openai', baseUrl: 'https://api.openai.com/v1', auth: 'apiKey', defaultModel: 'gpt-4o' },
 +	{ id: 'openrouter', label: 'OpenRouter', protocol: 'openai', baseUrl: 'https://openrouter.ai/api/v1', auth: 'apiKey', defaultModel: 'openai/gpt-4o' },
 +	{ id: 'groq', label: 'Groq', protocol: 'openai', baseUrl: 'https://api.groq.com/openai/v1', auth: 'apiKey', defaultModel: 'llama-3.3-70b-versatile' },
