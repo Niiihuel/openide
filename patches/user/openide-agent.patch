@@ -1,9 +1,9 @@
 diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts b/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts
 new file mode 100644
-index 00000000..d9b57423
+index 00000000..3d82813b
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts
-@@ -0,0 +1,200 @@
+@@ -0,0 +1,231 @@
 +/*---------------------------------------------------------------------------------------------
 + *  OpenIDE — contribución del motor agéntico: servicio, config (catálogo + custom providers),
 + *  y comandos para elegir provider, configurar API key y probar el agente (Output channel).
@@ -20,7 +20,13 @@ index 00000000..d9b57423
 +import { INotificationService } from '../../../../platform/notification/common/notification.js';
 +import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
 +import { Extensions as OutputExtensions, IOutputChannelRegistry, IOutputService } from '../../../services/output/common/output.js';
++import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
++import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
++import { Codicon } from '../../../../base/common/codicons.js';
++import { ViewPaneContainer } from '../../../browser/parts/views/viewPaneContainer.js';
++import { IViewContainersRegistry, IViewDescriptor, IViewsRegistry, ViewContainer, ViewContainerLocation, Extensions as ViewExtensions } from '../../../common/views.js';
 +import { IOpenideAgentService } from './openideAgentService.js';
++import { OpenideChatViewPane } from './openideChatView.js';
 +
 +const CHANNEL_ID = 'openideAgent';
 +
@@ -29,6 +35,31 @@ index 00000000..d9b57423
 +	label: 'OpenIDE Agent',
 +	log: false,
 +});
++
++// Vista del chat en el dock derecho (auxiliary bar). isDefault → reemplaza el toggle del secondary sidebar.
++const OPENIDE_CHAT_CONTAINER_ID = 'workbench.view.openideChat';
++const OPENIDE_CHAT_VIEW_ID = 'workbench.view.openideChat.view';
++const openideChatIcon = registerIcon('openide-chat', Codicon.sparkle, localize('openide.chat.icon', "Icono del chat de OpenIDE"));
++
++const openideChatContainer: ViewContainer = Registry.as<IViewContainersRegistry>(ViewExtensions.ViewContainersRegistry).registerViewContainer({
++	id: OPENIDE_CHAT_CONTAINER_ID,
++	title: localize2('openide.chat.container', "OpenIDE Chat"),
++	icon: openideChatIcon,
++	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [OPENIDE_CHAT_CONTAINER_ID, { mergeViewWithContainerWhenSingleView: true }]),
++	storageId: OPENIDE_CHAT_CONTAINER_ID,
++	order: 0,
++	hideIfEmpty: false,
++}, ViewContainerLocation.AuxiliaryBar, { isDefault: true });
++
++const openideChatViewDescriptor: IViewDescriptor = {
++	id: OPENIDE_CHAT_VIEW_ID,
++	name: localize2('openide.chat.view', "OpenIDE Chat"),
++	containerIcon: openideChatIcon,
++	ctorDescriptor: new SyncDescriptor(OpenideChatViewPane),
++	canToggleVisibility: false,
++	canMoveView: true,
++};
++Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([openideChatViewDescriptor], openideChatContainer);
 +
 +Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 +	id: 'openideAgent',
@@ -415,6 +446,288 @@ index 00000000..2808b976
 +			throw new Error(`Falta la API key de "${entry.id}". Ejecutá "OpenIDE Agent: Configurar API key".`);
 +		}
 +		return { kind: 'apiKey', value: key };
++	}
++}
+diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideChatHtml.ts b/src/vs/workbench/contrib/openideAgent/browser/openideChatHtml.ts
+new file mode 100644
+index 00000000..aca3a345
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/browser/openideChatHtml.ts
+@@ -0,0 +1,148 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — HTML/CSS/JS del webview del chat (dock derecho). UI propia, estilada con las
++ *  variables de tema que VS Code inyecta en los webviews. Se comunica con el host por postMessage.
++ *--------------------------------------------------------------------------------------------*/
++
++export function getOpenideChatHtml(nonce: string): string {
++	return `<!DOCTYPE html>
++<html lang="es">
++<head>
++<meta charset="UTF-8">
++<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
++<meta name="viewport" content="width=device-width, initial-scale=1.0">
++<style>
++	* { box-sizing: border-box; }
++	html, body { height: 100%; margin: 0; padding: 0; }
++	body {
++		display: flex; flex-direction: column;
++		font-family: var(--vscode-font-family); font-size: 13px;
++		color: var(--vscode-foreground);
++		background: transparent;
++	}
++	#messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 14px; }
++	.msg { display: flex; flex-direction: column; gap: 4px; }
++	.msg .role { font-size: 11px; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.04em; }
++	.msg .body { white-space: pre-wrap; word-wrap: break-word; line-height: 1.5; }
++	.msg.user .body { background: var(--vscode-list-hoverBackground, #2a2a2a); border-radius: 8px; padding: 8px 10px; }
++	.tool { border: 1px solid var(--vscode-widget-border, #333); border-radius: 6px; padding: 6px 8px; font-size: 12px; opacity: 0.9; }
++	.tool .name { font-weight: 600; }
++	.tool .result { white-space: pre-wrap; opacity: 0.75; margin-top: 4px; max-height: 160px; overflow: auto; }
++	.tool.error { border-color: var(--vscode-inputValidation-errorBorder, #a85050); }
++	#empty { margin: auto; text-align: center; opacity: 0.6; padding: 24px; }
++	#empty .logo { font-size: 40px; }
++	#inputRow { border-top: 1px solid var(--vscode-widget-border, #333); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
++	#prompt {
++		width: 100%; resize: none; min-height: 54px; max-height: 200px;
++		background: var(--vscode-input-background); color: var(--vscode-input-foreground);
++		border: 1px solid var(--vscode-input-border, transparent); border-radius: 6px; padding: 8px; font-family: inherit; font-size: 13px;
++	}
++	#prompt:focus { outline: 1px solid var(--vscode-focusBorder); }
++	#bottom { display: flex; align-items: center; justify-content: space-between; }
++	#provider { font-size: 11px; opacity: 0.6; }
++	button {
++		cursor: pointer; border: none; border-radius: 5px; padding: 6px 14px; font-size: 12px;
++		background: var(--vscode-button-background); color: var(--vscode-button-foreground);
++	}
++	button:hover { background: var(--vscode-button-hoverBackground); }
++	button:disabled { opacity: 0.5; cursor: default; }
++</style>
++</head>
++<body>
++	<div id="messages"><div id="empty"><div class="logo">🚀</div><div>Preguntale algo al agente de OpenIDE.</div></div></div>
++	<div id="inputRow">
++		<textarea id="prompt" placeholder="Escribí tu mensaje…  (Enter para enviar, Shift+Enter salto de línea)"></textarea>
++		<div id="bottom">
++			<span id="provider"></span>
++			<button id="send">Enviar</button>
++		</div>
++	</div>
++<script nonce="${nonce}">
++	const vscode = acquireVsCodeApi();
++	const messagesEl = document.getElementById('messages');
++	const emptyEl = document.getElementById('empty');
++	const promptEl = document.getElementById('prompt');
++	const sendBtn = document.getElementById('send');
++	const providerEl = document.getElementById('provider');
++	let busy = false;
++	let currentAssistant = null;
++
++	function clearEmpty() { if (emptyEl) { emptyEl.remove(); } }
++	function scrollDown() { messagesEl.scrollTop = messagesEl.scrollHeight; }
++
++	function addMessage(role) {
++		clearEmpty();
++		const wrap = document.createElement('div');
++		wrap.className = 'msg ' + role;
++		const r = document.createElement('div'); r.className = 'role'; r.textContent = role === 'user' ? 'Vos' : 'OpenIDE';
++		const b = document.createElement('div'); b.className = 'body';
++		wrap.appendChild(r); wrap.appendChild(b);
++		messagesEl.appendChild(wrap);
++		scrollDown();
++		return b;
++	}
++
++	function addTool(name, args) {
++		clearEmpty();
++		const el = document.createElement('div');
++		el.className = 'tool';
++		const n = document.createElement('div'); n.className = 'name'; n.textContent = '🔧 ' + name;
++		const a = document.createElement('div'); a.className = 'result'; a.textContent = args || '';
++		el.appendChild(n); el.appendChild(a);
++		messagesEl.appendChild(el);
++		scrollDown();
++		return el;
++	}
++
++	function setBusy(b) {
++		busy = b;
++		sendBtn.disabled = b;
++		sendBtn.textContent = b ? 'Pensando…' : 'Enviar';
++	}
++
++	function send() {
++		const text = promptEl.value.trim();
++		if (!text || busy) { return; }
++		addMessage('user').textContent = text;
++		promptEl.value = '';
++		currentAssistant = null;
++		setBusy(true);
++		vscode.postMessage({ type: 'send', text });
++	}
++
++	sendBtn.addEventListener('click', send);
++	promptEl.addEventListener('keydown', e => {
++		if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
++	});
++
++	window.addEventListener('message', event => {
++		const m = event.data;
++		switch (m.type) {
++			case 'text':
++				if (!currentAssistant) { currentAssistant = addMessage('assistant'); }
++				currentAssistant.textContent += m.delta;
++				scrollDown();
++				break;
++			case 'toolStart':
++				currentAssistant = null;
++				addTool(m.name, m.argumentsJson);
++				break;
++			case 'toolResult': {
++				const el = addTool(m.name + (m.isError ? ' (error)' : ' ✓'), '');
++				if (m.isError) { el.classList.add('error'); }
++				const r = el.querySelector('.result'); if (r) { r.textContent = (m.result || '').slice(0, 4000); }
++				break;
++			}
++			case 'done': setBusy(false); currentAssistant = null; break;
++			case 'error': {
++				const el = addMessage('assistant'); el.textContent = '⚠️ ' + m.message; el.style.color = 'var(--vscode-inputValidation-errorBorder, #a85050)';
++				setBusy(false); currentAssistant = null; break;
++			}
++			case 'provider': providerEl.textContent = m.label || ''; break;
++		}
++	});
++
++	vscode.postMessage({ type: 'ready' });
++</script>
++</body>
++</html>`;
++}
+diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideChatView.ts b/src/vs/workbench/contrib/openideAgent/browser/openideChatView.ts
+new file mode 100644
+index 00000000..4fc6a875
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/browser/openideChatView.ts
+@@ -0,0 +1,122 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — ViewPane del chat (dock derecho / auxiliary bar). Hostea un webview overlay con
++ *  la UI del chat y puentea los mensajes con el motor agéntico (IOpenideAgentService).
++ *--------------------------------------------------------------------------------------------*/
++
++import { findParentWithClass, getWindow } from '../../../../base/browser/dom.js';
++import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
++import { MutableDisposable } from '../../../../base/common/lifecycle.js';
++import { generateUuid } from '../../../../base/common/uuid.js';
++import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
++import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
++import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
++import { IHoverService } from '../../../../platform/hover/browser/hover.js';
++import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
++import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
++import { IOpenerService } from '../../../../platform/opener/common/opener.js';
++import { IThemeService } from '../../../../platform/theme/common/themeService.js';
++import { IViewPaneOptions, ViewPane } from '../../../browser/parts/views/viewPane.js';
++import { IViewDescriptorService } from '../../../common/views.js';
++import { IOverlayWebview, IWebviewService, WebviewContentPurpose } from '../../webview/browser/webview.js';
++import { getOpenideChatHtml } from './openideChatHtml.js';
++import { IOpenideAgentService } from './openideAgentService.js';
++
++export class OpenideChatViewPane extends ViewPane {
++
++	private readonly _webview = this._register(new MutableDisposable<IOverlayWebview>());
++	private _container: HTMLElement | undefined;
++	private _rootContainer: HTMLElement | undefined;
++	private _runCts: CancellationTokenSource | undefined;
++
++	constructor(
++		options: IViewPaneOptions,
++		@IKeybindingService keybindingService: IKeybindingService,
++		@IContextMenuService contextMenuService: IContextMenuService,
++		@IConfigurationService configurationService: IConfigurationService,
++		@IContextKeyService contextKeyService: IContextKeyService,
++		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
++		@IInstantiationService instantiationService: IInstantiationService,
++		@IOpenerService openerService: IOpenerService,
++		@IThemeService themeService: IThemeService,
++		@IHoverService hoverService: IHoverService,
++		@IWebviewService private readonly webviewService: IWebviewService,
++		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
++	) {
++		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
++		this._register(this.onDidChangeBodyVisibility(() => this.updateVisibility()));
++	}
++
++	protected override renderBody(container: HTMLElement): void {
++		super.renderBody(container);
++		this._container = container;
++		this._rootContainer = undefined;
++		if (!this._webview.value) {
++			this.createWebview();
++		}
++		this.layoutWebview();
++		this.updateVisibility();
++	}
++
++	private createWebview(): void {
++		const nonce = generateUuid().replace(/-/g, '');
++		const webview = this.webviewService.createWebviewOverlay({
++			origin: generateUuid(),
++			providedViewType: 'openideChat',
++			title: 'OpenIDE Chat',
++			options: { purpose: WebviewContentPurpose.WebviewView },
++			contentOptions: { allowScripts: true },
++		});
++		this._webview.value = webview;
++		webview.setHtml(getOpenideChatHtml(nonce));
++
++		this._register(webview.onMessage(e => {
++			const msg: any = e.message;
++			if (!msg) {
++				return;
++			}
++			if (msg.type === 'ready') {
++				webview.postMessage({ type: 'provider', label: this.agentService.getActiveProviderId() });
++			} else if (msg.type === 'send' && typeof msg.text === 'string') {
++				this._runCts?.cancel();
++				this._runCts = new CancellationTokenSource();
++				this.agentService.runAgent(msg.text, ev => { webview.postMessage(ev); }, this._runCts.token);
++			} else if (msg.type === 'abort') {
++				this._runCts?.cancel();
++			}
++		}));
++	}
++
++	private updateVisibility(): void {
++		const webview = this._webview.value;
++		if (!webview) {
++			return;
++		}
++		if (this.isBodyVisible()) {
++			webview.claim(this, getWindow(this.element), undefined);
++			this.layoutWebview();
++		} else {
++			webview.release(this);
++		}
++	}
++
++	protected override layoutBody(height: number, width: number): void {
++		super.layoutBody(height, width);
++		this.layoutWebview();
++	}
++
++	private layoutWebview(): void {
++		const webview = this._webview.value;
++		if (!this._container || !webview) {
++			return;
++		}
++		if (!this._rootContainer || !this._rootContainer.isConnected) {
++			this._rootContainer = findParentWithClass(this._container, 'monaco-scrollable-element') ?? undefined;
++		}
++		webview.setAnchorElement(this._container, this._rootContainer);
++	}
++
++	override focus(): void {
++		super.focus();
++		this._webview.value?.focus();
 +	}
 +}
 diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideOAuth.ts b/src/vs/workbench/contrib/openideAgent/browser/openideOAuth.ts
@@ -1343,10 +1656,10 @@ index 5d1c11fa..a2ed82a2 100644
  			id: 'editor',
  			label: localize('textEditor', "Text Editor"),
 diff --git a/src/vs/workbench/workbench.common.main.ts b/src/vs/workbench/workbench.common.main.ts
-index d8dcfef9..60f1fbbc 100644
+index 532c20d1..60f1fbbc 100644
 --- a/src/vs/workbench/workbench.common.main.ts
 +++ b/src/vs/workbench/workbench.common.main.ts
-@@ -377,6 +377,7 @@ import './contrib/surveys/browser/languageSurveys.contribution.js';
+@@ -377,14 +377,12 @@ import './contrib/surveys/browser/languageSurveys.contribution.js';
  
  // Welcome
  import './contrib/welcomeGettingStarted/browser/gettingStarted.contribution.js';
@@ -1354,3 +1667,11 @@ index d8dcfef9..60f1fbbc 100644
  import './contrib/welcomeAgentSessions/browser/agentSessionsWelcome.contribution.js';
  import './contrib/welcomeWalkthrough/browser/walkThrough.contribution.js';
  import './contrib/welcomeViews/common/viewsWelcome.contribution.js';
+ import './contrib/welcomeViews/common/newFile.contribution.js';
+ 
+-// Welcome Onboarding
+-import './contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.js';
+-
+ // Call Hierarchy
+ import './contrib/callHierarchy/browser/callHierarchy.contribution.js';
+ 
