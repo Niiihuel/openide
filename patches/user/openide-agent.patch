@@ -1,6 +1,6 @@
 diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts b/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts
 new file mode 100644
-index 00000000..2623b8b9
+index 00000000..d9b57423
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts
 @@ -0,0 +1,200 @@
@@ -39,7 +39,7 @@ index 00000000..2623b8b9
 +		'openide.agent.provider': {
 +			type: 'string',
 +			default: 'anthropic',
-+			markdownDescription: localize('openide.agent.provider.desc', "Id del provider activo (built-in o custom). Usá el comando **OpenIDE Agent: Elegir proveedor** para verlos."),
++			markdownDescription: localize('openide.agent.provider.desc', "Proveedor de IA activo. Elegilo con **OpenIDE Agent: Elegir proveedor**. Para credenciales: **Configurar API key** (se guarda cifrada en SecretStorage) o **Iniciar sesión (OAuth)** según el proveedor."),
 +		},
 +		'openide.agent.model': {
 +			type: 'string',
@@ -1326,6 +1326,22 @@ index 00000000..69322bb3
 +		return out;
 +	}
 +}
+diff --git a/src/vs/workbench/contrib/preferences/browser/settingsLayout.ts b/src/vs/workbench/contrib/preferences/browser/settingsLayout.ts
+index 5d1c11fa..a2ed82a2 100644
+--- a/src/vs/workbench/contrib/preferences/browser/settingsLayout.ts
++++ b/src/vs/workbench/contrib/preferences/browser/settingsLayout.ts
+@@ -70,6 +70,11 @@ export const tocData: ITOCEntry<string> = {
+ 	id: 'root',
+ 	label: 'root',
+ 	children: [
++		{
++			id: 'openideAgent',
++			label: localize('openideAgent', "OpenIDE Agent"),
++			settings: ['openide.agent.*']
++		},
+ 		{
+ 			id: 'editor',
+ 			label: localize('textEditor', "Text Editor"),
 diff --git a/src/vs/workbench/workbench.common.main.ts b/src/vs/workbench/workbench.common.main.ts
 index d8dcfef9..60f1fbbc 100644
 --- a/src/vs/workbench/workbench.common.main.ts
