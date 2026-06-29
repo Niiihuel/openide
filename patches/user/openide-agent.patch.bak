@@ -1656,10 +1656,10 @@ index 5d1c11fa..a2ed82a2 100644
  			id: 'editor',
  			label: localize('textEditor', "Text Editor"),
 diff --git a/src/vs/workbench/workbench.common.main.ts b/src/vs/workbench/workbench.common.main.ts
-index d8dcfef9..60f1fbbc 100644
+index 532c20d1..60f1fbbc 100644
 --- a/src/vs/workbench/workbench.common.main.ts
 +++ b/src/vs/workbench/workbench.common.main.ts
-@@ -377,6 +377,7 @@ import './contrib/surveys/browser/languageSurveys.contribution.js';
+@@ -377,14 +377,12 @@ import './contrib/surveys/browser/languageSurveys.contribution.js';
  
  // Welcome
  import './contrib/welcomeGettingStarted/browser/gettingStarted.contribution.js';
@@ -1667,3 +1667,11 @@ index d8dcfef9..60f1fbbc 100644
  import './contrib/welcomeAgentSessions/browser/agentSessionsWelcome.contribution.js';
  import './contrib/welcomeWalkthrough/browser/walkThrough.contribution.js';
  import './contrib/welcomeViews/common/viewsWelcome.contribution.js';
+ import './contrib/welcomeViews/common/newFile.contribution.js';
+ 
+-// Welcome Onboarding
+-import './contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.js';
+-
+ // Call Hierarchy
+ import './contrib/callHierarchy/browser/callHierarchy.contribution.js';
+ 
