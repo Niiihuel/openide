@@ -1,13 +1,13 @@
 diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts b/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts
 new file mode 100644
-index 00000000..e4301814
+index 00000000..f30ec5ce
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,162 @@
 +/*---------------------------------------------------------------------------------------------
-+ *  OpenIDE — contribución del motor agéntico: registra el servicio, la config de providers,
-+ *  y comandos para configurar la API key y probar el agente desde un Output channel.
-+ *  (La UI del chat en el dock derecho vendrá después; este es el "pilar" / backend.)
++ *  OpenIDE — contribución del motor agéntico: servicio, config (catálogo + custom providers),
++ *  y comandos para elegir provider, configurar API key y probar el agente (Output channel).
++ *  La UI del chat en el dock derecho vendrá después; esto es el backend / pilar.
 + *--------------------------------------------------------------------------------------------*/
 +
 +import { localize, localize2 } from '../../../../nls.js';
@@ -16,21 +16,19 @@ index 00000000..e4301814
 +import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 +import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 +import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
-+import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
++import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
 +import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
 +import { Extensions as OutputExtensions, IOutputChannelRegistry, IOutputService } from '../../../services/output/common/output.js';
 +import { IOpenideAgentService } from './openideAgentService.js';
 +
 +const CHANNEL_ID = 'openideAgent';
 +
-+// Output channel donde se vuelca la conversación de prueba.
 +Registry.as<IOutputChannelRegistry>(OutputExtensions.OutputChannels).registerChannel({
 +	id: CHANNEL_ID,
 +	label: 'OpenIDE Agent',
 +	log: false,
 +});
 +
-+// Configuración del motor agéntico.
 +Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 +	id: 'openideAgent',
 +	order: 100,
@@ -39,28 +37,63 @@ index 00000000..e4301814
 +	properties: {
 +		'openide.agent.provider': {
 +			type: 'string',
-+			enum: ['anthropic', 'openai'],
-+			enumDescriptions: [
-+				localize('openide.agent.provider.anthropic', "Anthropic (Claude)"),
-+				localize('openide.agent.provider.openai', "OpenAI-compatible (OpenAI, Groq, OpenRouter, Ollama, etc.)"),
-+			],
 +			default: 'anthropic',
-+			description: localize('openide.agent.provider.desc', "Proveedor LLM que usa el agente de OpenIDE."),
++			markdownDescription: localize('openide.agent.provider.desc', "Id del provider activo (built-in o custom). Usá el comando **OpenIDE Agent: Elegir proveedor** para verlos."),
 +		},
 +		'openide.agent.model': {
 +			type: 'string',
 +			default: '',
 +			description: localize('openide.agent.model.desc', "Modelo a usar (vacío = default del provider)."),
 +		},
-+		'openide.agent.baseUrl': {
-+			type: 'string',
-+			default: '',
-+			description: localize('openide.agent.baseUrl.desc', "Base URL custom para providers OpenAI-compatible (ej: http://localhost:11434/v1 para Ollama)."),
++		'openide.agent.customProviders': {
++			type: 'array',
++			default: [],
++			description: localize('openide.agent.custom.desc', "Providers custom (cualquier endpoint OpenAI-compatible)."),
++			items: {
++				type: 'object',
++				properties: {
++					id: { type: 'string', description: 'Identificador único' },
++					label: { type: 'string', description: 'Nombre visible' },
++					protocol: { type: 'string', enum: ['openai', 'anthropic'], default: 'openai' },
++					baseUrl: { type: 'string', description: 'Base URL del endpoint (ej: http://localhost:11434/v1)' },
++					defaultModel: { type: 'string' },
++				},
++				required: ['id'],
++			},
 +		},
 +	},
 +});
 +
-+// Comando: configurar la API key del provider actual (guardada en SecretStorage).
++// Comando: elegir el provider activo desde el catálogo.
++registerAction2(class extends Action2 {
++	constructor() {
++		super({
++			id: 'openide.agent.selectProvider',
++			title: localize2('openide.agent.selectProvider', 'OpenIDE Agent: Elegir proveedor'),
++			category: Categories.Help,
++			f1: true,
++		});
++	}
++
++	async run(accessor: ServicesAccessor): Promise<void> {
++		const quickInput = accessor.get(IQuickInputService);
++		const agent = accessor.get(IOpenideAgentService);
++		const configurationService = accessor.get(IConfigurationService);
++		const active = agent.getActiveProviderId();
++		const items: (IQuickPickItem & { id: string })[] = agent.listProviders().map(p => ({
++			id: p.id,
++			label: p.label,
++			description: `${p.protocol}${p.auth === 'oauth' ? ' · oauth' : ''}${p.id === active ? '  ✓ activo' : ''}`,
++			detail: p.baseUrl,
++		}));
++		const picked = await quickInput.pick(items, { placeHolder: localize('openide.agent.selectProvider.ph', "Elegí el proveedor de IA") });
++		if (picked) {
++			await configurationService.updateValue('openide.agent.provider', picked.id);
++		}
++	}
++});
++
++// Comando: configurar la API key de un provider (guardada en SecretStorage).
 +registerAction2(class extends Action2 {
 +	constructor() {
 +		super({
@@ -74,15 +107,21 @@ index 00000000..e4301814
 +	async run(accessor: ServicesAccessor): Promise<void> {
 +		const quickInput = accessor.get(IQuickInputService);
 +		const agent = accessor.get(IOpenideAgentService);
-+		const configurationService = accessor.get(IConfigurationService);
-+		const provider = configurationService.getValue<string>('openide.agent.provider') || 'anthropic';
++		const active = agent.getActiveProviderId();
++		const items: (IQuickPickItem & { id: string })[] = agent.listProviders()
++			.filter(p => p.auth === 'apiKey')
++			.map(p => ({ id: p.id, label: p.label, description: p.id === active ? 'activo' : undefined }));
++		const picked = await quickInput.pick(items, { placeHolder: localize('openide.agent.setApiKey.pick', "¿Para qué proveedor?") });
++		if (!picked) {
++			return;
++		}
 +		const key = await quickInput.input({
-+			prompt: localize('openide.agent.setApiKey.prompt', "Pegá la API key para {0}", provider),
++			prompt: localize('openide.agent.setApiKey.prompt', "Pegá la API key para {0}", picked.label),
 +			password: true,
 +			ignoreFocusLost: true,
 +		});
 +		if (key) {
-+			await agent.setApiKey(provider, key.trim());
++			await agent.setApiKey(picked.id, key.trim());
 +		}
 +	}
 +});
@@ -117,37 +156,26 @@ index 00000000..e4301814
 +
 +		await agent.runAgent(prompt, ev => {
 +			switch (ev.type) {
-+				case 'text':
-+					channel?.append(ev.delta);
-+					break;
-+				case 'toolStart':
-+					channel?.append(`\n\n[tool ▸ ${ev.name}] ${ev.argumentsJson}\n`);
-+					break;
-+				case 'toolResult':
-+					channel?.append(`[tool ◂ ${ev.name}${ev.isError ? ' ERROR' : ''}]\n${ev.result}\n\n`);
-+					break;
-+				case 'usage':
-+					channel?.append(`\n(tokens in:${ev.inputTokens ?? '?'} out:${ev.outputTokens ?? '?'})\n`);
-+					break;
-+				case 'done':
-+					channel?.append(`\n\n— fin${ev.reason ? ` (${ev.reason})` : ''} —\n`);
-+					break;
-+				case 'error':
-+					channel?.append(`\n\n[ERROR] ${ev.message}\n`);
-+					break;
++				case 'text': channel?.append(ev.delta); break;
++				case 'toolStart': channel?.append(`\n\n[tool ▸ ${ev.name}] ${ev.argumentsJson}\n`); break;
++				case 'toolResult': channel?.append(`[tool ◂ ${ev.name}${ev.isError ? ' ERROR' : ''}]\n${ev.result}\n\n`); break;
++				case 'usage': channel?.append(`\n(tokens in:${ev.inputTokens ?? '?'} out:${ev.outputTokens ?? '?'})\n`); break;
++				case 'done': channel?.append(`\n\n— fin${ev.reason ? ` (${ev.reason})` : ''} —\n`); break;
++				case 'error': channel?.append(`\n\n[ERROR] ${ev.message}\n`); break;
 +			}
 +		});
 +	}
 +});
 diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts b/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts
 new file mode 100644
-index 00000000..cd3a5f6e
+index 00000000..dd9279a0
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,144 @@
 +/*---------------------------------------------------------------------------------------------
-+ *  OpenIDE — servicio del motor agéntico: maneja providers, API keys (SecretStorage),
-+ *  y corre el agent loop (model → tool → model) con streaming.
++ *  OpenIDE — servicio del motor agéntico. Resuelve el provider desde el CATÁLOGO (datos),
++ *  el adaptador de PROTOCOLO correcto, y la credencial vía la capa de AUTH; corre el
++ *  agent loop (model → tool → model) con streaming.
 + *--------------------------------------------------------------------------------------------*/
 +
 +import { CancellationToken } from '../../../../base/common/cancellation.js';
@@ -159,21 +187,25 @@ index 00000000..cd3a5f6e
 +import { IRequestService } from '../../../../platform/request/common/request.js';
 +import { ISecretStorageService } from '../../../../platform/secrets/common/secrets.js';
 +import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
-+import { AgentLoopEvent, IChatMessage, ILLMProvider } from '../common/openideAgentTypes.js';
++import { AgentLoopEvent, IChatMessage, ICredential, ILLMProvider } from '../common/openideAgentTypes.js';
++import { findProvider, IProviderEntry, resolveProviders } from '../common/openideProviderCatalog.js';
 +import { AnthropicProvider } from '../common/providers/anthropicProvider.js';
 +import { OpenAICompatibleProvider } from '../common/providers/openaiProvider.js';
++import { OpenideAuthManager } from './openideAuth.js';
 +import { OpenideToolRegistry } from './openideTools.js';
 +
 +export const IOpenideAgentService = createDecorator<IOpenideAgentService>('openideAgentService');
 +
 +export interface IOpenideAgentService {
 +	readonly _serviceBrand: undefined;
++	/** Catálogo de providers (built-in + custom de settings). */
++	listProviders(): IProviderEntry[];
++	getActiveProviderId(): string;
 +	setApiKey(providerId: string, key: string): Promise<void>;
 +	hasApiKey(providerId: string): Promise<boolean>;
 +	runAgent(prompt: string, onEvent: (e: AgentLoopEvent) => void, token?: CancellationToken): Promise<void>;
 +}
 +
-+const SECRET_PREFIX = 'openide.agent.apiKey.';
 +const MAX_ITERATIONS = 12;
 +const SYSTEM_PROMPT = `Sos el asistente de OpenIDE, un editor de código basado en VS Code. Ayudás al usuario con tareas de programación de forma concisa y directa. Tenés herramientas para leer archivos y listar directorios del workspace: usalas cuando necesites contexto real del proyecto en vez de inventar. Respondé en el idioma del usuario.`;
 +
@@ -181,45 +213,69 @@ index 00000000..cd3a5f6e
 +
 +	declare readonly _serviceBrand: undefined;
 +
-+	private readonly providers = new Map<string, ILLMProvider>();
++	/** Adaptadores de PROTOCOLO (pocos). Los providers son datos del catálogo. */
++	private readonly protocols = new Map<string, ILLMProvider>();
++	private readonly auth: OpenideAuthManager;
 +	private readonly tools: OpenideToolRegistry;
 +
 +	constructor(
 +		@IRequestService requestService: IRequestService,
-+		@ISecretStorageService private readonly secretStorage: ISecretStorageService,
++		@ISecretStorageService secretStorage: ISecretStorageService,
 +		@IConfigurationService private readonly configurationService: IConfigurationService,
 +		@IFileService fileService: IFileService,
 +		@IWorkspaceContextService contextService: IWorkspaceContextService,
 +	) {
 +		super();
-+		this.providers.set('anthropic', new AnthropicProvider(requestService));
-+		this.providers.set('openai', new OpenAICompatibleProvider(requestService));
++		this.protocols.set('anthropic', new AnthropicProvider(requestService));
++		this.protocols.set('openai', new OpenAICompatibleProvider(requestService));
++		this.auth = new OpenideAuthManager(secretStorage);
 +		this.tools = new OpenideToolRegistry(fileService, contextService);
 +	}
 +
-+	async setApiKey(providerId: string, key: string): Promise<void> {
-+		await this.secretStorage.set(SECRET_PREFIX + providerId, key);
++	private customProviders(): any[] | undefined {
++		return this.configurationService.getValue<any[]>('openide.agent.customProviders');
 +	}
 +
-+	async hasApiKey(providerId: string): Promise<boolean> {
-+		return !!(await this.secretStorage.get(SECRET_PREFIX + providerId));
++	listProviders(): IProviderEntry[] {
++		return resolveProviders(this.customProviders());
++	}
++
++	getActiveProviderId(): string {
++		return this.configurationService.getValue<string>('openide.agent.provider') || 'anthropic';
++	}
++
++	setApiKey(providerId: string, key: string): Promise<void> {
++		return this.auth.setApiKey(providerId, key);
++	}
++
++	hasApiKey(providerId: string): Promise<boolean> {
++		return this.auth.hasApiKey(providerId);
 +	}
 +
 +	async runAgent(prompt: string, onEvent: (e: AgentLoopEvent) => void, token: CancellationToken = CancellationToken.None): Promise<void> {
 +		try {
-+			const providerId = this.configurationService.getValue<string>('openide.agent.provider') || 'anthropic';
-+			const provider = this.providers.get(providerId);
-+			if (!provider) {
-+				onEvent({ type: 'error', message: `Provider desconocido: ${providerId}` });
++			const providerId = this.getActiveProviderId();
++			const entry = findProvider(this.customProviders(), providerId);
++			if (!entry) {
++				onEvent({ type: 'error', message: `Provider desconocido: "${providerId}".` });
 +				return;
 +			}
-+			const apiKey = await this.secretStorage.get(SECRET_PREFIX + providerId);
-+			if (!apiKey) {
-+				onEvent({ type: 'error', message: `Falta la API key de "${providerId}". Ejecutá "OpenIDE Agent: Configurar API key".` });
++			const adapter = this.protocols.get(entry.protocol);
++			if (!adapter) {
++				onEvent({ type: 'error', message: `Protocolo no soportado: "${entry.protocol}".` });
 +				return;
 +			}
-+			const model = this.configurationService.getValue<string>('openide.agent.model') || (providerId === 'anthropic' ? 'claude-sonnet-4-5' : 'gpt-4o');
-+			const baseUrl = this.configurationService.getValue<string>('openide.agent.baseUrl') || undefined;
++
++			let credential: ICredential;
++			try {
++				credential = await this.auth.resolveCredential(entry);
++			} catch (e) {
++				onEvent({ type: 'error', message: e instanceof Error ? e.message : String(e) });
++				return;
++			}
++
++			const model = this.configurationService.getValue<string>('openide.agent.model') || entry.defaultModel || 'gpt-4o';
++			const baseUrl = entry.baseUrl;
 +
 +			const messages: IChatMessage[] = [{ role: 'user', content: prompt }];
 +			const toolDefs = this.tools.getDefinitions();
@@ -228,8 +284,8 @@ index 00000000..cd3a5f6e
 +				if (token.isCancellationRequested) {
 +					return;
 +				}
-+				const result = await provider.streamChat(
-+					{ apiKey, baseUrl, model, system: SYSTEM_PROMPT, messages, tools: toolDefs },
++				const result = await adapter.streamChat(
++					{ credential, baseUrl, model, system: SYSTEM_PROMPT, messages, tools: toolDefs },
 +					ev => {
 +						if (ev.type === 'text') { onEvent({ type: 'text', delta: ev.delta }); }
 +						else if (ev.type === 'reasoning') { onEvent({ type: 'reasoning', delta: ev.delta }); }
@@ -260,6 +316,52 @@ index 00000000..cd3a5f6e
 +}
 +
 +registerSingleton(IOpenideAgentService, OpenideAgentService, InstantiationType.Delayed);
+diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideAuth.ts b/src/vs/workbench/contrib/openideAgent/browser/openideAuth.ts
+new file mode 100644
+index 00000000..d1035978
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/browser/openideAuth.ts
+@@ -0,0 +1,40 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — capa de autenticación pluggable. Hoy: API key (SecretStorage).
++ *  El branch OAuth queda preparado para el siguiente paso (device-code / PKCE).
++ *--------------------------------------------------------------------------------------------*/
++
++import { ISecretStorageService } from '../../../../platform/secrets/common/secrets.js';
++import { ICredential } from '../common/openideAgentTypes.js';
++import { IProviderEntry } from '../common/openideProviderCatalog.js';
++
++export const SECRET_APIKEY_PREFIX = 'openide.agent.apiKey.';
++export const SECRET_OAUTH_PREFIX = 'openide.agent.oauth.';
++
++export class OpenideAuthManager {
++
++	constructor(private readonly secretStorage: ISecretStorageService) { }
++
++	async setApiKey(providerId: string, key: string): Promise<void> {
++		await this.secretStorage.set(SECRET_APIKEY_PREFIX + providerId, key);
++	}
++
++	async hasApiKey(providerId: string): Promise<boolean> {
++		return !!(await this.secretStorage.get(SECRET_APIKEY_PREFIX + providerId));
++	}
++
++	/** Resuelve la credencial para un provider; lanza con mensaje claro si falta. */
++	async resolveCredential(entry: IProviderEntry): Promise<ICredential> {
++		if (entry.auth === 'oauth') {
++			const token = await this.secretStorage.get(SECRET_OAUTH_PREFIX + entry.id);
++			if (!token) {
++				throw new Error(`El provider "${entry.id}" usa OAuth y todavía no iniciaste sesión. (Los flujos OAuth llegan en el próximo paso.)`);
++			}
++			return { kind: 'oauth', token };
++		}
++		const key = await this.secretStorage.get(SECRET_APIKEY_PREFIX + entry.id);
++		if (!key) {
++			throw new Error(`Falta la API key de "${entry.id}". Ejecutá "OpenIDE Agent: Configurar API key".`);
++		}
++		return { kind: 'apiKey', value: key };
++	}
++}
 diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideTools.ts b/src/vs/workbench/contrib/openideAgent/browser/openideTools.ts
 new file mode 100644
 index 00000000..b020b62d
@@ -366,10 +468,10 @@ index 00000000..b020b62d
 +}
 diff --git a/src/vs/workbench/contrib/openideAgent/common/openideAgentTypes.ts b/src/vs/workbench/contrib/openideAgent/common/openideAgentTypes.ts
 new file mode 100644
-index 00000000..e88a5dbf
+index 00000000..d51d4ee4
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/common/openideAgentTypes.ts
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,75 @@
 +/*---------------------------------------------------------------------------------------------
 + *  OpenIDE — tipos base del motor de chat agéntico.
 + *--------------------------------------------------------------------------------------------*/
@@ -377,6 +479,11 @@ index 00000000..e88a5dbf
 +import { CancellationToken } from '../../../../base/common/cancellation.js';
 +
 +export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
++
++/** Credencial resuelta para autenticar contra el provider (API key u OAuth). */
++export type ICredential =
++	| { readonly kind: 'apiKey'; readonly value: string }
++	| { readonly kind: 'oauth'; readonly token: string };
 +
 +export interface IToolCall {
 +	readonly id: string;
@@ -409,7 +516,8 @@ index 00000000..e88a5dbf
 +	| { type: 'usage'; inputTokens?: number; outputTokens?: number };
 +
 +export interface IProviderRequest {
-+	readonly apiKey: string;
++	/** Credencial ya resuelta (API key u OAuth bearer token). */
++	readonly credential: ICredential;
 +	readonly baseUrl?: string;
 +	readonly model: string;
 +	readonly system?: string;
@@ -424,6 +532,7 @@ index 00000000..e88a5dbf
 +	readonly stopReason?: string;
 +}
 +
++/** Un adaptador de PROTOCOLO (openai-compatible, anthropic, …). Pocos; los providers son datos. */
 +export interface ILLMProvider {
 +	readonly id: string;
 +	streamChat(req: IProviderRequest, onEvent: (e: AgentStreamEvent) => void, token: CancellationToken): Promise<IProviderResult>;
@@ -438,12 +547,104 @@ index 00000000..e88a5dbf
 +	| { type: 'usage'; inputTokens?: number; outputTokens?: number }
 +	| { type: 'done'; reason?: string }
 +	| { type: 'error'; message: string };
+diff --git a/src/vs/workbench/contrib/openideAgent/common/openideProviderCatalog.ts b/src/vs/workbench/contrib/openideAgent/common/openideProviderCatalog.ts
+new file mode 100644
+index 00000000..17a469a0
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/common/openideProviderCatalog.ts
+@@ -0,0 +1,86 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — catálogo de proveedores como DATOS. La idea: pocos "protocolos" (código) y
++ *  muchos providers (data). Sumar un provider = una entrada acá o un custom en settings.
++ *--------------------------------------------------------------------------------------------*/
++
++export type ProtocolId = 'openai' | 'anthropic';
++export type AuthKind = 'apiKey' | 'oauth';
++
++export interface IOAuthConfig {
++	/** 'pkce' = authorize code + PKCE (redirect); 'device' = device code (polling, sin redirect). */
++	readonly flow: 'pkce' | 'device';
++	readonly authorizationUrl?: string;
++	readonly deviceAuthorizationUrl?: string;
++	readonly tokenUrl: string;
++	readonly clientId: string;
++	readonly scopes: string[];
++	/** Headers extra que algunos providers piden en el intercambio OAuth. */
++	readonly extraTokenHeaders?: Record<string, string>;
++}
++
++export interface IProviderEntry {
++	readonly id: string;
++	readonly label: string;
++	readonly protocol: ProtocolId;
++	readonly baseUrl?: string;
++	readonly auth: AuthKind;
++	readonly defaultModel?: string;
++	readonly models?: string[];
++	readonly oauth?: IOAuthConfig;
++	readonly custom?: boolean;
++}
++
++/**
++ * Providers built-in. La mayoría hablan el protocolo OpenAI-compatible (estándar de facto),
++ * así que sumar uno nuevo suele ser solo {id, label, baseUrl}.
++ */
++export const OPENIDE_BUILTIN_PROVIDERS: ReadonlyArray<IProviderEntry> = [
++	{ id: 'anthropic', label: 'Anthropic (Claude)', protocol: 'anthropic', auth: 'apiKey', defaultModel: 'claude-sonnet-4-5' },
++	{ id: 'openai', label: 'OpenAI', protocol: 'openai', baseUrl: 'https://api.openai.com/v1', auth: 'apiKey', defaultModel: 'gpt-4o' },
++	{ id: 'openrouter', label: 'OpenRouter', protocol: 'openai', baseUrl: 'https://openrouter.ai/api/v1', auth: 'apiKey', defaultModel: 'openai/gpt-4o' },
++	{ id: 'groq', label: 'Groq', protocol: 'openai', baseUrl: 'https://api.groq.com/openai/v1', auth: 'apiKey', defaultModel: 'llama-3.3-70b-versatile' },
++	{ id: 'deepseek', label: 'DeepSeek', protocol: 'openai', baseUrl: 'https://api.deepseek.com', auth: 'apiKey', defaultModel: 'deepseek-chat' },
++	{ id: 'mistral', label: 'Mistral', protocol: 'openai', baseUrl: 'https://api.mistral.ai/v1', auth: 'apiKey', defaultModel: 'mistral-large-latest' },
++	{ id: 'xai', label: 'xAI (Grok)', protocol: 'openai', baseUrl: 'https://api.x.ai/v1', auth: 'apiKey', defaultModel: 'grok-2-latest' },
++	{ id: 'gemini', label: 'Google Gemini', protocol: 'openai', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', auth: 'apiKey', defaultModel: 'gemini-2.0-flash' },
++	{ id: 'together', label: 'Together', protocol: 'openai', baseUrl: 'https://api.together.xyz/v1', auth: 'apiKey', defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo' },
++	{ id: 'ollama', label: 'Ollama (local)', protocol: 'openai', baseUrl: 'http://localhost:11434/v1', auth: 'apiKey', defaultModel: 'llama3.2' },
++];
++
++/** Normaliza un provider custom venido de settings (tolerante a campos faltantes). */
++function normalizeCustom(raw: any): IProviderEntry | undefined {
++	if (!raw || typeof raw.id !== 'string' || !raw.id) {
++		return undefined;
++	}
++	const protocol: ProtocolId = raw.protocol === 'anthropic' ? 'anthropic' : 'openai';
++	return {
++		id: raw.id,
++		label: typeof raw.label === 'string' && raw.label ? raw.label : raw.id,
++		protocol,
++		baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : undefined,
++		auth: raw.auth === 'oauth' ? 'oauth' : 'apiKey',
++		defaultModel: typeof raw.defaultModel === 'string' ? raw.defaultModel : undefined,
++		custom: true,
++	};
++}
++
++/** Catálogo final = built-in + custom (los custom con el mismo id pisan al built-in). */
++export function resolveProviders(custom: any[] | undefined): IProviderEntry[] {
++	const map = new Map<string, IProviderEntry>();
++	for (const p of OPENIDE_BUILTIN_PROVIDERS) {
++		map.set(p.id, p);
++	}
++	if (Array.isArray(custom)) {
++		for (const raw of custom) {
++			const entry = normalizeCustom(raw);
++			if (entry) {
++				map.set(entry.id, entry);
++			}
++		}
++	}
++	return [...map.values()];
++}
++
++export function findProvider(custom: any[] | undefined, id: string): IProviderEntry | undefined {
++	return resolveProviders(custom).find(p => p.id === id);
++}
 diff --git a/src/vs/workbench/contrib/openideAgent/common/openideSse.ts b/src/vs/workbench/contrib/openideAgent/common/openideSse.ts
 new file mode 100644
-index 00000000..556d76fe
+index 00000000..dc3af836
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/common/openideSse.ts
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,97 @@
 +/*---------------------------------------------------------------------------------------------
 + *  OpenIDE — helper para hacer un POST y consumir la respuesta SSE de forma incremental,
 + *  vía IRequestService (que pasa por el proceso main → sin problemas de CORS).
@@ -484,6 +685,7 @@ index 00000000..556d76fe
 +): Promise<void> {
 +	const ctx = await requestService.request({
 +		type: 'POST',
++		callSite: 'openideAgent',
 +		url: options.url,
 +		headers: options.headers,
 +		data: options.body,
@@ -542,12 +744,12 @@ index 00000000..556d76fe
 +}
 diff --git a/src/vs/workbench/contrib/openideAgent/common/providers/anthropicProvider.ts b/src/vs/workbench/contrib/openideAgent/common/providers/anthropicProvider.ts
 new file mode 100644
-index 00000000..a17a0b14
+index 00000000..4f0bd420
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/common/providers/anthropicProvider.ts
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,126 @@
 +/*---------------------------------------------------------------------------------------------
-+ *  OpenIDE — provider Anthropic (Claude) con streaming nativo + tool use.
++ *  OpenIDE — adaptador de protocolo Anthropic (Claude): streaming nativo + tool use.
 + *--------------------------------------------------------------------------------------------*/
 +
 +import { CancellationToken } from '../../../../../base/common/cancellation.js';
@@ -577,17 +779,22 @@ index 00000000..a17a0b14
 +			body.tools = req.tools.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters }));
 +		}
 +
++		// Auth: API key usa x-api-key; OAuth (suscripción Claude) usa Bearer + header beta.
++		const headers: Record<string, string> = { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' };
++		if (req.credential.kind === 'apiKey') {
++			headers['x-api-key'] = req.credential.value;
++		} else {
++			headers['Authorization'] = `Bearer ${req.credential.token}`;
++			headers['anthropic-beta'] = 'oauth-2025-04-20';
++		}
++
 +		let text = '';
 +		const blocks = new Map<number, { type: 'text' | 'tool_use'; id?: string; name?: string; partial: string }>();
 +		let stopReason: string | undefined;
 +		let inputTokens: number | undefined;
 +		let outputTokens: number | undefined;
 +
-+		await ssePost(this.requestService, {
-+			url,
-+			headers: { 'Content-Type': 'application/json', 'x-api-key': req.apiKey, 'anthropic-version': '2023-06-01' },
-+			body: JSON.stringify(body),
-+		}, token, block => {
++		await ssePost(this.requestService, { url, headers, body: JSON.stringify(body) }, token, block => {
 +			const data = sseDataOf(block);
 +			if (!data) { return; }
 +			let json: any;
@@ -669,10 +876,10 @@ index 00000000..a17a0b14
 +}
 diff --git a/src/vs/workbench/contrib/openideAgent/common/providers/openaiProvider.ts b/src/vs/workbench/contrib/openideAgent/common/providers/openaiProvider.ts
 new file mode 100644
-index 00000000..6dfcb38c
+index 00000000..69322bb3
 --- /dev/null
 +++ b/src/vs/workbench/contrib/openideAgent/common/providers/openaiProvider.ts
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,106 @@
 +/*---------------------------------------------------------------------------------------------
 + *  OpenIDE — provider OpenAI-compatible (OpenAI, Groq, OpenRouter, Ollama, etc.) con streaming.
 + *--------------------------------------------------------------------------------------------*/
@@ -706,9 +913,10 @@ index 00000000..6dfcb38c
 +		const toolAcc = new Map<number, { id: string; name: string; args: string }>();
 +		let stopReason: string | undefined;
 +
++		const bearer = req.credential.kind === 'apiKey' ? req.credential.value : req.credential.token;
 +		await ssePost(this.requestService, {
 +			url,
-+			headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${req.apiKey}` },
++			headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${bearer}` },
 +			body: JSON.stringify(body),
 +		}, token, block => {
 +			const data = sseDataOf(block);
