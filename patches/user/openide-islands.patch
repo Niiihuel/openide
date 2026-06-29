@@ -17,3 +17,20 @@ index 8b631280..587fdabc 100644
  		super.layout(width, height, top, left);
  
  		// Layout contents
+diff --git a/src/vs/workbench/browser/parts/editor/editorPart.ts b/src/vs/workbench/browser/parts/editor/editorPart.ts
+index 54cfab50..86c18c89 100644
+--- a/src/vs/workbench/browser/parts/editor/editorPart.ts
++++ b/src/vs/workbench/browser/parts/editor/editorPart.ts
+@@ -1355,6 +1355,12 @@ export class EditorPart extends Part<IEditorPartMemento> implements IEditorPart,
+ 		this.top = top;
+ 		this.left = left;
+ 
++		// OpenIDE: el editor tambien se dibuja como "isla" flotante (borde transparente
++		// del CSS). Restamos el gap para que el contenido se dimensione al espacio real.
++		const gap = 8; // debe coincidir con el border de .part.editor en el CSS de layout
++		width = Math.max(0, width - gap * 2);
++		height = Math.max(0, height - gap * 2);
++
+ 		// Layout contents
+ 		const contentAreaSize = super.layoutContents(width, height).contentSize;
+ 
