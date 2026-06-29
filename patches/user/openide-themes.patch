@@ -23,7 +23,7 @@ index f4d04e5c..53637650 100644
          "label": "%light2026ThemeLabel%",
 diff --git a/extensions/theme-defaults/themes/openide-dark.json b/extensions/theme-defaults/themes/openide-dark.json
 new file mode 100644
-index 00000000..83372ae9
+index 00000000..66475879
 --- /dev/null
 +++ b/extensions/theme-defaults/themes/openide-dark.json
 @@ -0,0 +1,279 @@
@@ -131,11 +131,11 @@ index 00000000..83372ae9
 +
 +		"sideBar.background": "#171717",
 +		"sideBar.foreground": "#c2c2c2",
-+		"sideBar.border": "#212121",
++		"sideBar.border": "#00000000",
 +		"sideBarTitle.foreground": "#bdbdbd",
 +		"sideBarSectionHeader.background": "#171717",
 +		"sideBarSectionHeader.foreground": "#c2c2c2",
-+		"sideBarSectionHeader.border": "#212121",
++		"sideBarSectionHeader.border": "#00000000",
 +
 +		"list.activeSelectionBackground": "#2e2e2e",
 +		"list.activeSelectionForeground": "#ffffff",
@@ -152,7 +152,7 @@ index 00000000..83372ae9
 +		"activityBar.background": "#141414",
 +		"activityBar.foreground": "#d4d4d4",
 +		"activityBar.inactiveForeground": "#6e6e6e",
-+		"activityBar.border": "#212121",
++		"activityBar.border": "#00000000",
 +		"activityBar.activeBorder": "#cfcfcf",
 +		"activityBarBadge.background": "#5a5a5a",
 +		"activityBarBadge.foreground": "#ffffff",
@@ -161,11 +161,11 @@ index 00000000..83372ae9
 +		"titleBar.activeForeground": "#cccccc",
 +		"titleBar.inactiveBackground": "#141414",
 +		"titleBar.inactiveForeground": "#7e7e7e",
-+		"titleBar.border": "#212121",
++		"titleBar.border": "#00000000",
 +
 +		"statusBar.background": "#141414",
 +		"statusBar.foreground": "#b4b4b4",
-+		"statusBar.border": "#212121",
++		"statusBar.border": "#00000000",
 +		"statusBar.noFolderBackground": "#141414",
 +		"statusBar.noFolderForeground": "#b4b4b4",
 +		"statusBar.debuggingBackground": "#3a3a3a",
@@ -178,21 +178,21 @@ index 00000000..83372ae9
 +		"statusBarItem.remoteForeground": "#ffffff",
 +		"statusBarItem.focusBorder": "#5a5a5a",
 +
-+		"editorGroup.border": "#212121",
++		"editorGroup.border": "#00000000",
 +		"editorGroupHeader.tabsBackground": "#141414",
-+		"editorGroupHeader.tabsBorder": "#212121",
++		"editorGroupHeader.tabsBorder": "#00000000",
 +		"tab.activeBackground": "#1f1f1f",
 +		"tab.activeForeground": "#ffffff",
 +		"tab.inactiveBackground": "#141414",
 +		"tab.inactiveForeground": "#8e8e8e",
-+		"tab.border": "#212121",
++		"tab.border": "#00000000",
 +		"tab.activeBorder": "#1f1f1f",
 +		"tab.activeBorderTop": "#cfcfcf",
 +		"tab.hoverBackground": "#1f1f1f",
 +		"tab.unfocusedActiveForeground": "#bdbdbd",
 +
-+		"panel.background": "#141414",
-+		"panel.border": "#212121",
++		"panel.background": "#171717",
++		"panel.border": "#00000000",
 +		"panelInput.border": "#2e2e2e",
 +		"panelTitle.activeForeground": "#ffffff",
 +		"panelTitle.activeBorder": "#cfcfcf",
@@ -241,7 +241,7 @@ index 00000000..83372ae9
 +		"welcomePage.tileHoverBackground": "#262626",
 +		"welcomePage.progress.foreground": "#8a8a8a",
 +
-+		"terminal.background": "#141414",
++		"terminal.background": "#171717",
 +		"terminal.foreground": "#cccccc",
 +		"terminalCursor.foreground": "#d0d0d0",
 +		"terminal.ansiBlack": "#2a2a2a",
@@ -308,7 +308,7 @@ index 00000000..83372ae9
 +}
 diff --git a/extensions/theme-defaults/themes/openide-light.json b/extensions/theme-defaults/themes/openide-light.json
 new file mode 100644
-index 00000000..7e46d166
+index 00000000..9e535e8e
 --- /dev/null
 +++ b/extensions/theme-defaults/themes/openide-light.json
 @@ -0,0 +1,277 @@
@@ -414,11 +414,11 @@ index 00000000..7e46d166
 +
 +		"sideBar.background": "#f3f3f3",
 +		"sideBar.foreground": "#3a3a3a",
-+		"sideBar.border": "#e2e2e2",
++		"sideBar.border": "#00000000",
 +		"sideBarTitle.foreground": "#3a3a3a",
 +		"sideBarSectionHeader.background": "#f3f3f3",
 +		"sideBarSectionHeader.foreground": "#3a3a3a",
-+		"sideBarSectionHeader.border": "#e2e2e2",
++		"sideBarSectionHeader.border": "#00000000",
 +
 +		"list.activeSelectionBackground": "#e0e0e0",
 +		"list.activeSelectionForeground": "#1f1f1f",
@@ -435,7 +435,7 @@ index 00000000..7e46d166
 +		"activityBar.background": "#f3f3f3",
 +		"activityBar.foreground": "#2a2a2a",
 +		"activityBar.inactiveForeground": "#8a8a8a",
-+		"activityBar.border": "#e2e2e2",
++		"activityBar.border": "#00000000",
 +		"activityBar.activeBorder": "#2a2a2a",
 +		"activityBarBadge.background": "#5a5a5a",
 +		"activityBarBadge.foreground": "#ffffff",
@@ -444,11 +444,11 @@ index 00000000..7e46d166
 +		"titleBar.activeForeground": "#1f1f1f",
 +		"titleBar.inactiveBackground": "#f3f3f3",
 +		"titleBar.inactiveForeground": "#8a8a8a",
-+		"titleBar.border": "#e2e2e2",
++		"titleBar.border": "#00000000",
 +
 +		"statusBar.background": "#f3f3f3",
 +		"statusBar.foreground": "#3a3a3a",
-+		"statusBar.border": "#e2e2e2",
++		"statusBar.border": "#00000000",
 +		"statusBar.noFolderBackground": "#f3f3f3",
 +		"statusBar.noFolderForeground": "#3a3a3a",
 +		"statusBar.debuggingBackground": "#d6d6d6",
@@ -461,21 +461,21 @@ index 00000000..7e46d166
 +		"statusBarItem.remoteForeground": "#1f1f1f",
 +		"statusBarItem.focusBorder": "#9a9a9a",
 +
-+		"editorGroup.border": "#e2e2e2",
++		"editorGroup.border": "#00000000",
 +		"editorGroupHeader.tabsBackground": "#ececec",
-+		"editorGroupHeader.tabsBorder": "#e2e2e2",
++		"editorGroupHeader.tabsBorder": "#00000000",
 +		"tab.activeBackground": "#ffffff",
 +		"tab.activeForeground": "#1f1f1f",
 +		"tab.inactiveBackground": "#ececec",
 +		"tab.inactiveForeground": "#6a6a6a",
-+		"tab.border": "#e2e2e2",
++		"tab.border": "#00000000",
 +		"tab.activeBorder": "#ffffff",
 +		"tab.activeBorderTop": "#2a2a2a",
 +		"tab.hoverBackground": "#f6f6f6",
 +		"tab.unfocusedActiveForeground": "#3a3a3a",
 +
-+		"panel.background": "#ffffff",
-+		"panel.border": "#e2e2e2",
++		"panel.background": "#f3f3f3",
++		"panel.border": "#00000000",
 +		"panelInput.border": "#d0d0d0",
 +		"panelTitle.activeForeground": "#1f1f1f",
 +		"panelTitle.activeBorder": "#2a2a2a",
@@ -524,7 +524,7 @@ index 00000000..7e46d166
 +		"welcomePage.tileHoverBackground": "#e8e8e8",
 +		"welcomePage.progress.foreground": "#6a6a6a",
 +
-+		"terminal.background": "#ffffff",
++		"terminal.background": "#f3f3f3",
 +		"terminal.foreground": "#2a2a2a",
 +		"terminalCursor.foreground": "#2a2a2a",
 +		"terminal.ansiBlack": "#3a3a3a",

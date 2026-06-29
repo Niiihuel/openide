@@ -1,5 +1,5 @@
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
-index 993abe60..a951d295 100644
+index 993abe60..a90e4e83 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 @@ -17,7 +17,7 @@ import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/edit
@@ -11,12 +11,13 @@ index 993abe60..a951d295 100644
  import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
  import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
  import { workbenchConfigurationNodeBase } from '../../../common/configuration.js';
-@@ -29,14 +29,180 @@ import { IExtensionManagementServerService } from '../../../services/extensionMa
+@@ -29,14 +29,181 @@ import { IExtensionManagementServerService } from '../../../services/extensionMa
  import { IExtensionService } from '../../../services/extensions/common/extensions.js';
  import { StartupPageEditorResolverContribution, StartupPageRunnerContribution } from './startupPage.js';
  import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
 -import { DisposableStore } from '../../../../base/common/lifecycle.js';
 +import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
++import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
  import { AccessibleViewRegistry } from '../../../../platform/accessibility/browser/accessibleViewRegistry.js';
  import { GettingStartedAccessibleView } from './gettingStartedAccessibleView.js';
  import { AgentSessionsWelcomePage } from '../../welcomeAgentSessions/browser/agentSessionsWelcome.js';
@@ -193,7 +194,7 @@ index 993abe60..a951d295 100644
  registerAction2(class extends Action2 {
  	constructor() {
  		super({
-@@ -365,3 +531,377 @@ registerWorkbenchContribution2(StartupPageRunnerContribution.ID, StartupPageRunn
+@@ -365,3 +532,382 @@ registerWorkbenchContribution2(StartupPageRunnerContribution.ID, StartupPageRunn
  
  AccessibleViewRegistry.register(new GettingStartedAccessibleView());
  
@@ -529,16 +530,16 @@ index 993abe60..a951d295 100644
 +.monaco-workbench .part.sidebar,
 +.monaco-workbench .part.panel,
 +.monaco-workbench .part.auxiliarybar {
-+	border: 6px solid transparent !important;
++	border: 8px solid transparent !important;
 +	border-radius: 10px !important;
 +	background-clip: padding-box !important;
 +	overflow: hidden !important;
 +	box-shadow: none !important;
 +}
++/* mas aire en la zona inferior (sobre la status bar) */
 +.monaco-workbench .part.sidebar,
 +.monaco-workbench .part.auxiliarybar {
-+	border-left-width: 8px !important;
-+	border-right-width: 8px !important;
++	border-bottom-width: 12px !important;
 +}
 +/* quitar lineas internas de headers/secciones de los docks */
 +.monaco-workbench .part.sidebar .composite.title,
@@ -561,13 +562,18 @@ index 993abe60..a951d295 100644
 +
 +	static readonly ID = 'workbench.contrib.openideLayout';
 +
-+	constructor() {
++	constructor(
++		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
++	) {
 +		super();
 +		const style = mainWindow.document.createElement('style');
 +		style.id = 'openide-layout';
 +		style.textContent = OPENIDE_LAYOUT_CSS;
 +		mainWindow.document.head.appendChild(style);
 +		this._register(toDisposable(() => style.remove()));
++		// Forzar un relayout para que las action bars recalculen su overflow con el
++		// ancho reducido por los gaps de las islas (si no, recortan iconos como "Collapse Folders").
++		this.layoutService.layout();
 +	}
 +}
-+registerWorkbenchContribution2(OpenIDELayoutContribution.ID, OpenIDELayoutContribution, WorkbenchPhase.BlockRestore);
++registerWorkbenchContribution2(OpenIDELayoutContribution.ID, OpenIDELayoutContribution, WorkbenchPhase.AfterRestored);
