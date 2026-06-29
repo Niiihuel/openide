@@ -1,5 +1,5 @@
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
-index 993abe60..d2b2bee6 100644
+index 993abe60..f2b75271 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
 @@ -17,7 +17,7 @@ import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/edit
@@ -11,7 +11,7 @@ index 993abe60..d2b2bee6 100644
  import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
  import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
  import { workbenchConfigurationNodeBase } from '../../../common/configuration.js';
-@@ -29,14 +29,159 @@ import { IExtensionManagementServerService } from '../../../services/extensionMa
+@@ -29,14 +29,173 @@ import { IExtensionManagementServerService } from '../../../services/extensionMa
  import { IExtensionService } from '../../../services/extensions/common/extensions.js';
  import { StartupPageEditorResolverContribution, StartupPageRunnerContribution } from './startupPage.js';
  import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
@@ -64,121 +64,153 @@ index 993abe60..d2b2bee6 100644
 +	}
 +});
 +
-+// OpenIDE: comando del step "Importá desde VS Code" del walkthrough de bienvenida.
-+// Copia settings/keybindings de la instalacion de VS Code original y reinstala
-+// sus extensiones desde la galeria (con tolerancia: las que no esten en Open VSX se omiten).
++// OpenIDE: editores soportados para importar. Todos son forks de VS Code, asi que
++// comparten el formato de settings/extensiones; solo cambia la carpeta de datos.
++interface OpenIDEEditor { id: string; name: string; appDir: string; extDir: string; logo: string }
++const OPENIDE_EDITORS: ReadonlyArray<OpenIDEEditor> = [
++	{ id: 'vscode', name: 'VS Code', appDir: 'Code', extDir: '.vscode', logo: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxLjAxZW0iIGhlaWdodD0iMWVtIiB2aWV3Qm94PSIwIDAgMjU2IDI1NCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJTVkc2UTV3TWJOUSIgeDE9IjUwJSIgeDI9IjUwJSIgeTE9IjAlIiB5Mj0iMTAwJSI+PHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI2ZmZiIvPjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI2ZmZiIgc3RvcC1vcGFjaXR5PSIwIi8+PC9saW5lYXJHcmFkaWVudD48cGF0aCBpZD0iU1ZHV2haMTJkamsiIGQ9Ik0xODAuODI4IDI1Mi42MDVhMTUuODcgMTUuODcgMCAwIDAgMTIuNjUtLjQ4Nmw1Mi41MDEtMjUuMjYyYTE1Ljk0IDE1Ljk0IDAgMCAwIDkuMDI1LTE0LjM2NFY0MS4xOTdhMTUuOTQgMTUuOTQgMCAwIDAtOS4wMjUtMTQuMzYzbC01Mi41LTI1LjI2M2ExNS44OCAxNS44OCAwIDAgMC0xOC4xMTUgMy4wODRMNzQuODU3IDk2LjM1bC00My43OC0zMy4yMzJhMTAuNjE0IDEwLjYxNCAwIDAgMC0xMy41Ni42MDNMMy40NzYgNzYuNDk0Yy00LjYzIDQuMjExLTQuNjM1IDExLjQ5NS0uMDEyIDE1LjcxM2wzNy45NjcgMzQuNjM4bC0zNy45NjcgMzQuNjM3Yy00LjYyMyA0LjIxOS00LjYxOCAxMS41MDIuMDEyIDE1LjcxNGwxNC4wNDEgMTIuNzcyYTEwLjYxNCAxMC42MTQgMCAwIDAgMTMuNTYuNjA0bDQzLjc4LTMzLjIzM2wxMDAuNTA3IDkxLjY5NWExNS44NSAxNS44NSAwIDAgMCA1LjQ2NCAzLjU3MW0xMC40NjQtMTgzLjY0OWwtNzYuMjYyIDU3Ljg4OWw3Ni4yNjIgNTcuODg4eiIvPjwvZGVmcz48bWFzayBpZD0iU1ZHU0FRNThIMmYiIGZpbGw9IiNmZmYiPjx1c2UgaHJlZj0iI1NWR1doWjEyZGprIi8+PC9tYXNrPjxwYXRoIGZpbGw9IiMwMDY1YTkiIGQ9Ik0yNDYuMTM1IDI2Ljg3M0wxOTMuNTkzIDEuNTc1YTE1Ljg4NSAxNS44ODUgMCAwIDAtMTguMTIzIDMuMDhMMy40NjYgMTYxLjQ4MmMtNC42MjYgNC4yMTktNC42MiAxMS41MDIuMDEyIDE1LjcxNGwxNC4wNSAxMi43NzJhMTAuNjI1IDEwLjYyNSAwIDAgMCAxMy41NjkuNjA0TDIzOC4yMjkgMzMuNDM2YzYuOTQ5LTUuMjcxIDE2LjkzLS4zMTUgMTYuOTMgOC40MDd2LS42MWExNS45NCAxNS45NCAwIDAgMC05LjAyNC0xNC4zNiIgbWFzaz0idXJsKCNTVkdTQVE1OEgyZikiLz48cGF0aCBmaWxsPSIjMDA3YWNjIiBkPSJtMjQ2LjEzNSAyMjYuODE2bC01Mi41NDIgMjUuMjk4YTE1Ljg5IDE1Ljg5IDAgMCAxLTE4LjEyMy0zLjA4TDMuNDY2IDkyLjIwN2MtNC42MjYtNC4yMTgtNC42Mi0xMS41MDIuMDEyLTE1LjcxM2wxNC4wNS0xMi43NzNhMTAuNjI1IDEwLjYyNSAwIDAgMSAxMy41NjktLjYwM2wyMDcuMTMyIDE1Ny4xMzVjNi45NDkgNS4yNzEgMTYuOTMuMzE1IDE2LjkzLTguNDA4di42MTFhMTUuOTQgMTUuOTQgMCAwIDEtOS4wMjQgMTQuMzYiIG1hc2s9InVybCgjU1ZHU0FRNThIMmYpIi8+PHBhdGggZmlsbD0iIzFmOWNmMCIgZD0iTTE5My40MjggMjUyLjEzNGExNS44OSAxNS44OSAwIDAgMS0xOC4xMjUtMy4wODNjNS44ODEgNS44OCAxNS45MzggMS43MTUgMTUuOTM4LTYuNjAzVjExLjI3M2MwLTguMzE4LTEwLjA1Ny0xMi40ODMtMTUuOTM4LTYuNjAyYTE1Ljg5IDE1Ljg5IDAgMCAxIDE4LjEyNS0zLjA4NGw1Mi41MzMgMjUuMjYzYTE1Ljk0IDE1Ljk0IDAgMCAxIDkuMDMgMTQuMzYzVjIxMi41MWMwIDYuMTI1LTMuNTEgMTEuNzA5LTkuMDMgMTQuMzYzeiIgbWFzaz0idXJsKCNTVkdTQVE1OEgyZikiLz48cGF0aCBmaWxsPSJ1cmwoI1NWRzZRNXdNYk5RKSIgZmlsbC1vcGFjaXR5PSIuMjUiIGQ9Ik0xODAuODI4IDI1Mi42MDVhMTUuODcgMTUuODcgMCAwIDAgMTIuNjUtLjQ4Nmw1Mi41LTI1LjI2M2ExNS45NCAxNS45NCAwIDAgMCA5LjAyNi0xNC4zNjNWNDEuMTk3YTE1Ljk0IDE1Ljk0IDAgMCAwLTkuMDI1LTE0LjM2M0wxOTMuNDc3IDEuNTdhMTUuODggMTUuODggMCAwIDAtMTguMTE0IDMuMDg0TDc0Ljg1NyA5Ni4zNWwtNDMuNzgtMzMuMjMyYTEwLjYxNCAxMC42MTQgMCAwIDAtMTMuNTYuNjAzTDMuNDc2IDc2LjQ5NGMtNC42MyA0LjIxMS00LjYzNSAxMS40OTUtLjAxMiAxNS43MTNsMzcuOTY3IDM0LjYzOGwtMzcuOTY3IDM0LjYzN2MtNC42MjMgNC4yMTktNC42MTggMTEuNTAyLjAxMiAxNS43MTRsMTQuMDQxIDEyLjc3MmExMC42MTQgMTAuNjE0IDAgMCAwIDEzLjU2LjYwNGw0My43OC0zMy4yMzNsMTAwLjUwNiA5MS42OTVhMTUuOSAxNS45IDAgMCAwIDUuNDY1IDMuNTcxbTEwLjQ2NC0xODMuNjVsLTc2LjI2MiA1Ny44OWw3Ni4yNjIgNTcuODg4eiIgbWFzaz0idXJsKCNTVkdTQVE1OEgyZikiLz48L3N2Zz4=' },
++	{ id: 'cursor', name: 'Cursor', appDir: 'Cursor', extDir: '.cursor', logo: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxZW0iIGhlaWdodD0iMWVtIiB2aWV3Qm94PSIwIDAgMjQgMjQiPjxwYXRoIGZpbGw9ImN1cnJlbnRDb2xvciIgZD0iTTExLjUwMy4xMzFMMS44OTEgNS42NzhhLjg0Ljg0IDAgMCAwLS40Mi43MjZ2MTEuMTg4YzAgLjMuMTYyLjU3NS40Mi43MjRsOS42MDkgNS41NWExIDEgMCAwIDAgLjk5OCAwbDkuNjEtNS41NWEuODQuODQgMCAwIDAgLjQyLS43MjRWNi40MDRhLjg0Ljg0IDAgMCAwLS40Mi0uNzI2TDEyLjQ5Ny4xMzFhMS4wMSAxLjAxIDAgMCAwLS45OTYgME0yLjY1NyA2LjMzOGgxOC41NWMuMjYzIDAgLjQzLjI4Ny4yOTcuNTE1TDEyLjIzIDIyLjkxOGMtLjA2Mi4xMDctLjIyOS4wNjQtLjIyOS0uMDZWMTIuMzM1YS41OS41OSAwIDAgMC0uMjk1LS41MWwtOS4xMS01LjI1N2MtLjEwOS0uMDYzLS4wNjQtLjIzLjA2MS0uMjMiLz48L3N2Zz4=' },
++	{ id: 'windsurf', name: 'Windsurf', appDir: 'Windsurf', extDir: '.windsurf', logo: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxZW0iIGhlaWdodD0iMWVtIiB2aWV3Qm94PSIwIDAgMjQgMjQiPjxwYXRoIGZpbGw9ImN1cnJlbnRDb2xvciIgZD0iTTIzLjU1IDUuMDY3YTIuMTc3IDIuMTc3IDAgMCAwLTIuMTggMi4xNzd2NC44NjdhMS43NyAxLjc3IDAgMCAxLTEuNzYgMS43NmExLjgyIDEuODIgMCAwIDEtMS40NzItLjc2NmwtNC45NzEtNy4xYTIuMiAyLjIgMCAwIDAtMS44MS0uOTQyYy0xLjEzNCAwLTIuMTU0Ljk2NC0yLjE1NCAyLjE1M3Y0Ljg5NmMwIC45NzItLjc5NyAxLjc2LTEuNzYgMS43NmMtLjU3IDAtMS4xMzYtLjI4Ny0xLjQ3Mi0uNzY2TC40MDggNS4xNkEuMjI0LjIyNCAwIDAgMCAwIDUuMjg4djQuMjQ1YzAgLjIxNS4wNjYuNDIzLjE4OC42bDUuNDc1IDcuODE4Yy4zMjQuNDYyLjguODA1IDEuMzUxLjkzYTIuMTY0IDIuMTY0IDAgMCAwIDIuNjQ1LTIuMDk4VjExLjg5YzAtLjk3Mi43ODctMS43NiAxLjc2LTEuNzZoLjAwMmExLjggMS44IDAgMCAxIDEuNDcyLjc2Nmw0Ljk3MiA3LjFhMi4xNzIgMi4xNzIgMCAwIDAgMy45Ni0xLjIxMnYtNC44OTVhMS43NiAxLjc2IDAgMCAxIDEuNzYtMS43NmguMTk1YS4yMi4yMiAwIDAgMCAuMjItLjIyVjUuMjg3YS4yMi4yMiAwIDAgMC0uMjItLjIyWiIvPjwvc3ZnPg==' },
++	{ id: 'antigravity', name: 'Antigravity', appDir: 'Antigravity', extDir: '.antigravity', logo: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxZW0iIGhlaWdodD0iMWVtIiB2aWV3Qm94PSIwIDAgMjQgMjQiPjxwYXRoIGZpbGw9ImN1cnJlbnRDb2xvciIgZD0iTTE5Ljk0IDIwLjU5YzEuMDkuODIgMi43My4yNyAxLjIzLTEuMjNDMTYuNjcgMTUgMTcuNjIgMyAxMi4wMyAzUzcuMzkgMTUgMi44OSAxOS4zNmMtMS42NCAxLjY0LjE0IDIuMDUgMS4yMyAxLjIzYzQuMjMtMi44NiAzLjk1LTcuOTEgNy45MS03LjkxczMuNjggNS4wNSA3LjkxIDcuOTEiLz48L3N2Zz4=' },
++	{ id: 'vscodium', name: 'VSCodium', appDir: 'VSCodium', extDir: '.vscode-oss', logo: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxZW0iIGhlaWdodD0iMWVtIiB2aWV3Qm94PSIwIDAgMjQgMjQiPjxwYXRoIGZpbGw9ImN1cnJlbnRDb2xvciIgZD0iTTExLjU4My41NGExLjQ2NyAxLjQ2NyAwIDAgMC0uNDQxIDIuMDMyYzIuNDI2IDMuNzU4IDIuOTk5IDYuNTkyIDIuNzUgOS4wNzVjLTEuMDA0IDQuNzU2LTMuMTg3IDUuNzIxLTUuMDk0IDUuNzIxYy0xLjg2MyAwLTEuMzY0LTMuMDY1LjAzNi0zLjk2MmMuODM2LS41MjIgMS45MDYtLjg2MSAyLjcyOC0uODYxYy44MTQgMCAxLjQ3NC0uNjU4IDEuNDc0LTEuNDdzLS42Ni0xLjQ3LTEuNDc0LTEuNDdjLS45NiAwLTEuOTAxLjIwMi0yLjc4LjU0NWMuMTgtLjg0Ny4yNDYtMS43NjIuMDE0LTIuNzM1Yy0uMzUyLTEuNDc3LTEuMzY3LTIuODg5LTMuMTI4LTQuMjU3YTEuNDc2IDEuNDc2IDAgMCAwLTIuMDY5LjI1NmMtLjUuNjQtLjM4NCAxLjU2NC4yNTkgMi4wNjNjMS40MzUgMS4xMTQgMS45MDggMS45MzkgMi4wNyAyLjYxOHMuMDMyIDEuNDA3LS4yOTMgMi40MDhjLS40MTYgMS4zNDktLjkgMi41NTMtMS4xMSAzLjcwOGMtLjEwNS41NjgtLjExNCAxLjE4Ny0uMTQgMS42OGMtMS4wMzQtMS4wMDYtMS40MzgtMi4zMzYtMS40MzgtNC4yNzljMC0uODExLS42Ni0xLjQ3LTEuNDc0LTEuNDdBMS40NyAxLjQ3IDAgMCAwIDAgMTEuNjEyYzAgMi42NTQuNzc2IDUuMTc5IDIuODU1IDYuODYzYzEuODgzIDEuNzkzIDYuNjcgMS4xMyA2LjY3IDQuMDFjMCAuODEyIDEuMTkgMS4yMDggMi4wMDQgMS4yMDhjLjgzNCAwIDEuODg1LS41NTggMS44ODUtMS4yMDhjMC0zLjI2NyAzLjQ0My01LjI1MyA5LjExLTUuMjQ0QTEuNDcgMS40NyAwIDAgMCAyNCAxNS43NzNhMS40NyAxLjQ3IDAgMCAwLTEuNDctMS40NzNxLS41OC4wMDEtMS4xMzguMDM1Yy42MzQtMS40OS45MTUtMy4xMy44NTctNC45MDNhMS40NzMgMS40NzMgMCAwIDAtMS41MjItMS40MmExLjQ3IDEuNDcgMCAwIDAtMS40MjUgMS41MTdjLjA3NiAyLjMyLS4wMSA0LjM5My0xLjc0IDUuNDg1Yy0uNDkuMzEtMS4wNjIuNTgtMS42MDQuNThjLjQyLTEuMTQ1LjczOC0yLjM1My44NjktMy42NTVjLjA4My0uODMuMDkxLTEuODE4LS4wMDMtMi41ODVjLS4xNDgtMS4xODgtLjMyNS0yLjUzNS4xMjYtMy41NWMuNDA1LS44NzQgMS4zMTMtMS4yNCAyLjY0NS0xLjI0Yy44MTQgMCAxLjQ3My0uNjU5IDEuNDczLTEuNDdzLS42NTktMS40Ny0xLjQ3My0xLjQ3Yy0xLjk4IDAtMy40ODEgMS4wNDItNC4zMzIgMi4zQTI1IDI1IDAgMCAwIDEzLjYyMS45ODFhMS40NzQgMS40NzQgMCAwIDAtMi4wMzctLjQ0eiIvPjwvc3ZnPg==' },
++];
++
++// OpenIDE: importa settings/keybindings + extensiones de un editor (fork de VS Code).
++async function importFromEditor(accessor: ServicesAccessor, editor: OpenIDEEditor): Promise<void> {
++	const fileService = accessor.get(IFileService);
++	const notificationService = accessor.get(INotificationService);
++	const progressService = accessor.get(IProgressService);
++	const environmentService = accessor.get(IWorkbenchEnvironmentService);
++	const pathService = accessor.get(IPathService);
++	const profileService = accessor.get(IUserDataProfileService);
++	const galleryService = accessor.get(IExtensionGalleryService);
++	const extensionManagementService = accessor.get(IWorkbenchExtensionManagementService);
++
++	// La carpeta del editor de origen comparte el directorio de configuración con
++	// OpenIDE; solo cambia el nombre del producto. Derivamos su ruta desde la nuestra
++	// para que funcione en Linux/macOS/Windows.
++	const configDir = dirname(dirname(environmentService.userRoamingDataHome));
++	const stockUserDir = joinPath(configDir, editor.appDir, 'User');
++	const userHome = pathService.userHome({ preferLocal: true });
++	const stockExtensionsManifest = joinPath(userHome, editor.extDir, 'extensions', 'extensions.json');
++
++	await progressService.withProgress(
++		{ location: ProgressLocation.Notification, title: localize('openide.import.progress', "Importando desde {0}…", editor.name) },
++		async (progress) => {
++			const imported: string[] = [];
++			const failed: string[] = [];
++
++			// 1) settings.json y keybindings.json
++			const files = [
++				['settings.json', profileService.currentProfile.settingsResource],
++				['keybindings.json', profileService.currentProfile.keybindingsResource],
++			] as const;
++			for (const [name, target] of files) {
++				try {
++					const content = await fileService.readFile(joinPath(stockUserDir, name));
++					await fileService.writeFile(target, content.value);
++					imported.push(name);
++				} catch (e) {
++					if (toFileOperationResult(e as Error) !== FileOperationResult.FILE_NOT_FOUND) {
++						failed.push(name);
++					}
++				}
++			}
++
++			// 2) Extensiones desde <extDir>/extensions/extensions.json
++			try {
++				const manifest = await fileService.readFile(stockExtensionsManifest);
++				const entries = JSON.parse(manifest.value.toString()) as Array<{ identifier?: { id?: string; uuid?: string } }>;
++				const infos: IExtensionInfo[] = [];
++				for (const entry of entries) {
++					const id = entry.identifier?.id;
++					if (id) {
++						infos.push({ id, uuid: entry.identifier?.uuid });
++					}
++				}
++				if (infos.length) {
++					progress.report({ message: localize('openide.import.extensions', "Instalando {0} extensiones…", infos.length) });
++					const gallery = await galleryService.getExtensions(infos, CancellationToken.None);
++					const found = new Set(gallery.map(g => g.identifier.id.toLowerCase()));
++					for (const info of infos) {
++						if (!found.has(info.id.toLowerCase())) {
++							failed.push(info.id);
++						}
++					}
++					for (const g of gallery) {
++						try {
++							await extensionManagementService.installFromGallery(g);
++							imported.push(g.identifier.id);
++						} catch (e) {
++							failed.push(g.identifier.id);
++						}
++					}
++				}
++			} catch (e) {
++				if (toFileOperationResult(e as Error) !== FileOperationResult.FILE_NOT_FOUND) {
++					notificationService.warn(localize('openide.import.noExtensions', "No se pudieron leer las extensiones de {0}.", editor.name));
++				}
++			}
++
++			if (imported.length) {
++				const tail = failed.length
++					? ' ' + localize('openide.import.someFailed', "{0} no se pudieron importar (puede que no estén en Open VSX).", failed.length)
++					: '';
++				notificationService.info(localize('openide.import.done', "Se importaron {0} elementos desde {1}.", imported.length, editor.name) + tail);
++			} else if (failed.length) {
++				notificationService.warn(localize('openide.import.failed', "No se pudo importar desde {0}.", editor.name));
++			} else {
++				notificationService.info(localize('openide.import.nothing', "No se encontró una instalación de {0} para importar.", editor.name));
++			}
++		}
++	);
++}
++
++// OpenIDE: comando del step "Importá desde otro editor". Acepta el id del editor (default VS Code).
 +registerAction2(class extends Action2 {
 +	constructor() {
 +		super({
 +			id: 'openide.importFromVSCode',
-+			title: localize2('openide.importFromVSCode.title', 'OpenIDE: Importar configuración y extensiones de VS Code'),
++			title: localize2('openide.importFromVSCode.title', 'OpenIDE: Importar configuración y extensiones de otro editor'),
 +			category: Categories.Preferences,
 +			f1: true,
 +		});
 +	}
 +
-+	async run(accessor: ServicesAccessor) {
-+		const fileService = accessor.get(IFileService);
-+		const notificationService = accessor.get(INotificationService);
-+		const progressService = accessor.get(IProgressService);
-+		const environmentService = accessor.get(IWorkbenchEnvironmentService);
-+		const pathService = accessor.get(IPathService);
-+		const profileService = accessor.get(IUserDataProfileService);
-+		const galleryService = accessor.get(IExtensionGalleryService);
-+		const extensionManagementService = accessor.get(IWorkbenchExtensionManagementService);
-+
-+		// La carpeta del VS Code original comparte el directorio de configuración
-+		// con OpenIDE; solo cambia el nombre del producto ('Code'). Derivamos su ruta
-+		// desde la nuestra para que funcione en Linux/macOS/Windows.
-+		const ourUserDir = environmentService.userRoamingDataHome; // .../<Producto>/User
-+		const configDir = dirname(dirname(ourUserDir));
-+		const stockUserDir = joinPath(configDir, 'Code', 'User');
-+		const userHome = pathService.userHome({ preferLocal: true });
-+		const stockExtensionsManifest = joinPath(userHome, '.vscode', 'extensions', 'extensions.json');
-+
-+		await progressService.withProgress(
-+			{ location: ProgressLocation.Notification, title: localize('openide.import.progress', "Importando desde VS Code…") },
-+			async (progress) => {
-+				const imported: string[] = [];
-+				const failed: string[] = [];
-+
-+				// 1) settings.json y keybindings.json
-+				const files = [
-+					['settings.json', profileService.currentProfile.settingsResource],
-+					['keybindings.json', profileService.currentProfile.keybindingsResource],
-+				] as const;
-+				for (const [name, target] of files) {
-+					try {
-+						const content = await fileService.readFile(joinPath(stockUserDir, name));
-+						await fileService.writeFile(target, content.value);
-+						imported.push(name);
-+					} catch (e) {
-+						if (toFileOperationResult(e as Error) !== FileOperationResult.FILE_NOT_FOUND) {
-+							failed.push(name);
-+						}
-+					}
-+				}
-+
-+				// 2) Extensiones desde ~/.vscode/extensions/extensions.json
-+				try {
-+					const manifest = await fileService.readFile(stockExtensionsManifest);
-+					const entries = JSON.parse(manifest.value.toString()) as Array<{ identifier?: { id?: string; uuid?: string } }>;
-+					const infos: IExtensionInfo[] = [];
-+					for (const entry of entries) {
-+						const id = entry.identifier?.id;
-+						if (id) {
-+							infos.push({ id, uuid: entry.identifier?.uuid });
-+						}
-+					}
-+					if (infos.length) {
-+						progress.report({ message: localize('openide.import.extensions', "Instalando {0} extensiones…", infos.length) });
-+						const gallery = await galleryService.getExtensions(infos, CancellationToken.None);
-+						const found = new Set(gallery.map(g => g.identifier.id.toLowerCase()));
-+						for (const info of infos) {
-+							if (!found.has(info.id.toLowerCase())) {
-+								failed.push(info.id);
-+							}
-+						}
-+						for (const g of gallery) {
-+							try {
-+								await extensionManagementService.installFromGallery(g);
-+								imported.push(g.identifier.id);
-+							} catch (e) {
-+								failed.push(g.identifier.id);
-+							}
-+						}
-+					}
-+				} catch (e) {
-+					if (toFileOperationResult(e as Error) !== FileOperationResult.FILE_NOT_FOUND) {
-+						notificationService.warn(localize('openide.import.noExtensions', "No se pudieron leer las extensiones de VS Code."));
-+					}
-+				}
-+
-+				if (imported.length) {
-+					const tail = failed.length
-+						? ' ' + localize('openide.import.someFailed', "{0} no se pudieron importar (puede que no estén en Open VSX).", failed.length)
-+						: '';
-+					notificationService.info(localize('openide.import.done', "Se importaron {0} elementos desde VS Code.", imported.length) + tail);
-+				} else if (failed.length) {
-+					notificationService.warn(localize('openide.import.failed', "No se pudo importar desde VS Code."));
-+				} else {
-+					notificationService.info(localize('openide.import.nothing', "No se encontró una instalación de VS Code para importar."));
-+				}
-+			}
-+		);
++	async run(accessor: ServicesAccessor, editorId?: string) {
++		const editor = OPENIDE_EDITORS.find(e => e.id === editorId) ?? OPENIDE_EDITORS[0];
++		await importFromEditor(accessor, editor);
 +	}
 +});
 +
  registerAction2(class extends Action2 {
  	constructor() {
  		super({
-@@ -365,3 +510,142 @@ registerWorkbenchContribution2(StartupPageRunnerContribution.ID, StartupPageRunn
+@@ -365,3 +524,238 @@ registerWorkbenchContribution2(StartupPageRunnerContribution.ID, StartupPageRunn
  
  AccessibleViewRegistry.register(new GettingStartedAccessibleView());
  
++// OpenIDE: inyecta un SVG (data URI base64) como nodo inline, de forma segura
++// (sin innerHTML/Trusted Types). Asi los iconos monocromos heredan el color del tema.
++function openideAppendSvg(parent: HTMLElement, dataUri: string, size: number): void {
++	try {
++		const svgStr = atob(dataUri.slice(dataUri.indexOf(',') + 1));
++		const doc = new DOMParser().parseFromString(svgStr, 'image/svg+xml');
++		if (doc.getElementsByTagName('parsererror').length) {
++			return;
++		}
++		const svgEl = mainWindow.document.importNode(doc.documentElement, true) as unknown as HTMLElement;
++		svgEl.style.width = `${size}px`;
++		svgEl.style.height = `${size}px`;
++		parent.appendChild(svgEl);
++	} catch {
++		// ignorar logos invalidos
++	}
++}
++
 +// OpenIDE: dibuja la pantalla de bienvenida a pantalla completa (overlay) que
-+// tapa el IDE, con los 3 pasos. Reutilizable desde el primer arranque y el comando.
-+function showOpenIDEWelcomeOverlay(commandService: ICommandService): void {
++// tapa el IDE, con los 3 pasos interactivos. Reutilizable desde el arranque y el comando.
++function showOpenIDEWelcomeOverlay(commandService: ICommandService, configurationService: IConfigurationService, authenticationService: IAuthenticationService): void {
 +	// Evitar duplicados si ya hay un overlay abierto.
 +	if (mainWindow.document.querySelector('.openide-welcome-overlay')) {
 +		return;
@@ -198,7 +230,7 @@ index 993abe60..d2b2bee6 100644
 +	].join(';');
 +
 +	const card = append(overlay, $('div'));
-+	card.style.cssText = 'max-width:760px;width:100%;display:flex;flex-direction:column;gap:8px;';
++	card.style.cssText = 'max-width:820px;width:100%;display:flex;flex-direction:column;gap:14px;';
 +
 +	const logo = append(card, $('div'));
 +	logo.style.cssText = 'font-size:56px;text-align:center;line-height:1;';
@@ -209,40 +241,116 @@ index 993abe60..d2b2bee6 100644
 +	title.textContent = localize('openide.overlay.title', "Bienvenido a OpenIDE");
 +
 +	const subtitle = append(card, $('p'));
-+	subtitle.style.cssText = 'text-align:center;margin:0 0 24px;opacity:0.8;';
++	subtitle.style.cssText = 'text-align:center;margin:0 0 16px;opacity:0.8;';
 +	subtitle.textContent = localize('openide.overlay.subtitle', "Configurá tu editor en tres pasos. Podés saltarlos cuando quieras.");
 +
-+	const steps = [
-+		{ n: '1', title: localize('openide.overlay.step1.title', "Esto es OpenIDE"), desc: localize('openide.overlay.step1.desc', "Tu editor, sin telemetría y a tu manera. Elegí un tema para empezar."), button: localize('openide.overlay.step1.btn', "Elegir tema"), command: 'workbench.action.selectTheme' },
-+		{ n: '2', title: localize('openide.overlay.step2.title', "Conectá con GitHub"), desc: localize('openide.overlay.step2.desc', "Iniciá sesión para clonar, sincronizar y publicar tus repositorios."), button: localize('openide.overlay.step2.btn', "Conectar con GitHub"), command: 'openide.signInWithGitHub' },
-+		{ n: '3', title: localize('openide.overlay.step3.title', "Importá desde VS Code"), desc: localize('openide.overlay.step3.desc', "Traé tus configuraciones, atajos y extensiones de VS Code."), button: localize('openide.overlay.step3.btn', "Importar de VS Code"), command: 'openide.importFromVSCode' },
-+	];
-+
-+	for (const step of steps) {
++	// helper: tarjeta de paso (badge + titulo + descripcion) y devuelve el area de contenido.
++	const makeStep = (n: string, stTitle: string, stDesc: string): HTMLElement => {
 +		const row = append(card, $('div'));
-+		row.style.cssText = 'display:flex;gap:16px;align-items:center;padding:16px;border:1px solid var(--vscode-widget-border, #303031);border-radius:8px;';
++		row.style.cssText = 'display:flex;flex-direction:column;gap:14px;padding:18px 20px;border:1px solid var(--vscode-widget-border, #303031);border-radius:10px;';
++		const head = append(row, $('div'));
++		head.style.cssText = 'display:flex;gap:14px;align-items:flex-start;';
++		const badge = append(head, $('div'));
++		badge.style.cssText = 'flex:0 0 28px;height:28px;width:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--vscode-button-background, #0e639c);color:var(--vscode-button-foreground, #fff);font-weight:600;font-size:13px;';
++		badge.textContent = n;
++		const txt = append(head, $('div'));
++		txt.style.cssText = 'flex:1;min-width:0;';
++		const t = append(txt, $('div'));
++		t.style.cssText = 'font-weight:600;font-size:15px;';
++		t.textContent = stTitle;
++		const d = append(txt, $('div'));
++		d.style.cssText = 'opacity:0.8;font-size:13px;margin-top:2px;';
++		d.textContent = stDesc;
++		const content = append(row, $('div'));
++		content.style.cssText = 'padding-left:42px;';
++		return content;
++	};
 +
-+		const badge = append(row, $('div'));
-+		badge.style.cssText = 'flex:0 0 32px;height:32px;width:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--vscode-button-background, #0e639c);color:var(--vscode-button-foreground, #ffffff);font-weight:600;';
-+		badge.textContent = step.n;
++	// ---- Paso 1: elegir tema (blanco/negro nativos) ----
++	const themeContent = makeStep('1', localize('openide.overlay.step1.title', "Esto es OpenIDE"), localize('openide.overlay.step1.desc', "Tu editor, sin telemetría y a tu manera. Elegí tu tema."));
++	const swatches = append(themeContent, $('div'));
++	swatches.style.cssText = 'display:flex;gap:14px;';
++	const themeDefs = [
++		{ id: 'Default Light Modern', label: localize('openide.overlay.theme.light', "Claro nativo"), bg: '#ffffff', fg: '#1f1f1f' },
++		{ id: 'Default Dark Modern', label: localize('openide.overlay.theme.dark', "Oscuro nativo"), bg: '#1f1f1f', fg: '#ffffff' },
++	];
++	const swatchEls: HTMLElement[] = [];
++	for (const theme of themeDefs) {
++		const sw = append(swatches, $('div'));
++		sw.style.cssText = 'cursor:pointer;width:150px;border-radius:8px;overflow:hidden;border:2px solid transparent;';
++		const preview = append(sw, $('div'));
++		preview.style.cssText = `height:68px;background:${theme.bg};color:${theme.fg};display:flex;align-items:center;justify-content:center;font-size:13px;font-family:var(--vscode-editor-font-family, monospace);`;
++		preview.textContent = 'Aa  { }';
++		const lbl = append(sw, $('div'));
++		lbl.style.cssText = 'padding:7px 8px;font-size:12px;text-align:center;background:var(--vscode-button-secondaryBackground, #2a2d2e);';
++		lbl.textContent = theme.label;
++		swatchEls.push(sw);
++		store.add(addDisposableListener(sw, 'click', () => {
++			configurationService.updateValue('workbench.colorTheme', theme.id);
++			for (const el of swatchEls) { el.style.borderColor = 'transparent'; }
++			sw.style.borderColor = 'var(--vscode-focusBorder, #0e639c)';
++		}));
++	}
 +
-+		const text = append(row, $('div'));
-+		text.style.cssText = 'flex:1;display:flex;flex-direction:column;gap:2px;min-width:0;';
-+		const stTitle = append(text, $('div'));
-+		stTitle.style.cssText = 'font-weight:600;';
-+		stTitle.textContent = step.title;
-+		const stDesc = append(text, $('div'));
-+		stDesc.style.cssText = 'opacity:0.8;font-size:13px;';
-+		stDesc.textContent = step.desc;
++	// ---- Paso 2: conectar con GitHub (con estado conectado) ----
++	const ghContent = makeStep('2', localize('openide.overlay.step2.title', "Conectá con GitHub"), localize('openide.overlay.step2.desc', "Iniciá sesión para clonar, sincronizar y publicar tus repositorios."));
++	const ghStatus = append(ghContent, $('div'));
++	ghStatus.style.cssText = 'display:flex;align-items:center;gap:10px;min-height:34px;';
++	const renderGitHub = async () => {
++		ghStatus.textContent = '';
++		let connected: string | undefined;
++		try {
++			const sessions = await authenticationService.getSessions('github');
++			if (sessions.length) {
++				connected = sessions[0].account.label;
++			}
++		} catch {
++			// el proveedor puede no estar listo
++		}
++		if (connected) {
++			const ok = append(ghStatus, $('span.codicon.codicon-check'));
++			ok.style.cssText = 'color:var(--vscode-testing-iconPassed, #73c991);font-size:18px;';
++			const lbl = append(ghStatus, $('span'));
++			lbl.textContent = localize('openide.overlay.gh.connected', "Conectado como {0}", connected);
++		} else {
++			const btn = append(ghStatus, $('button'));
++			btn.style.cssText = 'cursor:pointer;border:none;border-radius:4px;padding:7px 16px;display:flex;align-items:center;gap:8px;background:var(--vscode-button-background, #0e639c);color:var(--vscode-button-foreground, #fff);';
++			const ic = append(btn, $('span.codicon.codicon-github'));
++			ic.style.cssText = 'font-size:16px;';
++			const lbl = append(btn, $('span'));
++			lbl.textContent = localize('openide.overlay.gh.connect', "Conectar con GitHub");
++			store.add(addDisposableListener(btn, 'click', async () => {
++				lbl.textContent = localize('openide.overlay.gh.connecting', "Conectando… seguí los pasos de GitHub");
++				(btn as HTMLButtonElement).disabled = true;
++				try {
++					await authenticationService.createSession('github', ['read:user', 'user:email', 'repo']);
++				} catch {
++					// cancelado o fallo: re-render para reintentar
++				}
++				renderGitHub();
++			}));
++		}
++	};
++	renderGitHub();
 +
-+		const btn = append(row, $('button'));
-+		btn.style.cssText = 'flex:0 0 auto;cursor:pointer;border:none;border-radius:4px;padding:6px 14px;background:var(--vscode-button-secondaryBackground, #3a3d41);color:var(--vscode-button-secondaryForeground, #ffffff);';
-+		btn.textContent = step.button;
-+		store.add(addDisposableListener(btn, 'click', () => commandService.executeCommand(step.command)));
++	// ---- Paso 3: importar desde otro editor (grid de logos) ----
++	const importContent = makeStep('3', localize('openide.overlay.step3.title', "Importá desde otro editor"), localize('openide.overlay.step3.desc', "Traé tus configuraciones, atajos y extensiones. Elegí desde qué editor."));
++	const grid = append(importContent, $('div'));
++	grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:14px;';
++	for (const editor of OPENIDE_EDITORS) {
++		const tile = append(grid, $('div'));
++		tile.style.cssText = 'cursor:pointer;width:104px;display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px 8px;border:1px solid var(--vscode-widget-border, #303031);border-radius:10px;background:var(--vscode-button-secondaryBackground, #2a2d2e);';
++		const iconWrap = append(tile, $('div'));
++		iconWrap.style.cssText = 'width:38px;height:38px;display:flex;align-items:center;justify-content:center;';
++		openideAppendSvg(iconWrap, editor.logo, 38);
++		const name = append(tile, $('div'));
++		name.style.cssText = 'font-size:12px;';
++		name.textContent = editor.name;
++		store.add(addDisposableListener(tile, 'click', () => commandService.executeCommand('openide.importFromVSCode', editor.id)));
 +	}
 +
 +	const footer = append(card, $('div'));
-+	footer.style.cssText = 'display:flex;gap:20px;align-items:center;justify-content:center;margin-top:24px;';
++	footer.style.cssText = 'display:flex;gap:20px;align-items:center;justify-content:center;margin-top:16px;';
 +
 +	const start = append(footer, $('button'));
 +	start.style.cssText = 'cursor:pointer;border:none;border-radius:4px;padding:8px 28px;font-size:14px;background:var(--vscode-button-background, #0e639c);color:var(--vscode-button-foreground, #ffffff);';
@@ -275,6 +383,8 @@ index 993abe60..d2b2bee6 100644
 +		@ICommandService private readonly commandService: ICommandService,
 +		@ILifecycleService private readonly lifecycleService: ILifecycleService,
 +		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
++		@IConfigurationService private readonly configurationService: IConfigurationService,
++		@IAuthenticationService private readonly authenticationService: IAuthenticationService,
 +	) {
 +		super();
 +		this.maybeShow();
@@ -294,7 +404,7 @@ index 993abe60..d2b2bee6 100644
 +		}
 +		await this.lifecycleService.when(LifecyclePhase.Restored);
 +		this.storageService.store(OpenIDEWelcomeOverlayContribution.STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
-+		showOpenIDEWelcomeOverlay(this.commandService);
++		showOpenIDEWelcomeOverlay(this.commandService, this.configurationService, this.authenticationService);
 +	}
 +}
 +registerWorkbenchContribution2(OpenIDEWelcomeOverlayContribution.ID, OpenIDEWelcomeOverlayContribution, WorkbenchPhase.AfterRestored);
@@ -311,7 +421,7 @@ index 993abe60..d2b2bee6 100644
 +	}
 +
 +	run(accessor: ServicesAccessor) {
-+		showOpenIDEWelcomeOverlay(accessor.get(ICommandService));
++		showOpenIDEWelcomeOverlay(accessor.get(ICommandService), accessor.get(IConfigurationService), accessor.get(IAuthenticationService));
 +	}
 +});
 +
