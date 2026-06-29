@@ -1,0 +1,792 @@
+diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts b/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts
+new file mode 100644
+index 00000000..e4301814
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/browser/openideAgent.contribution.ts
+@@ -0,0 +1,135 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — contribución del motor agéntico: registra el servicio, la config de providers,
++ *  y comandos para configurar la API key y probar el agente desde un Output channel.
++ *  (La UI del chat en el dock derecho vendrá después; este es el "pilar" / backend.)
++ *--------------------------------------------------------------------------------------------*/
++
++import { localize, localize2 } from '../../../../nls.js';
++import { Registry } from '../../../../platform/registry/common/platform.js';
++import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
++import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
++import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
++import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
++import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
++import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
++import { Extensions as OutputExtensions, IOutputChannelRegistry, IOutputService } from '../../../services/output/common/output.js';
++import { IOpenideAgentService } from './openideAgentService.js';
++
++const CHANNEL_ID = 'openideAgent';
++
++// Output channel donde se vuelca la conversación de prueba.
++Registry.as<IOutputChannelRegistry>(OutputExtensions.OutputChannels).registerChannel({
++	id: CHANNEL_ID,
++	label: 'OpenIDE Agent',
++	log: false,
++});
++
++// Configuración del motor agéntico.
++Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
++	id: 'openideAgent',
++	order: 100,
++	title: localize('openide.agent.title', "OpenIDE Agent"),
++	type: 'object',
++	properties: {
++		'openide.agent.provider': {
++			type: 'string',
++			enum: ['anthropic', 'openai'],
++			enumDescriptions: [
++				localize('openide.agent.provider.anthropic', "Anthropic (Claude)"),
++				localize('openide.agent.provider.openai', "OpenAI-compatible (OpenAI, Groq, OpenRouter, Ollama, etc.)"),
++			],
++			default: 'anthropic',
++			description: localize('openide.agent.provider.desc', "Proveedor LLM que usa el agente de OpenIDE."),
++		},
++		'openide.agent.model': {
++			type: 'string',
++			default: '',
++			description: localize('openide.agent.model.desc', "Modelo a usar (vacío = default del provider)."),
++		},
++		'openide.agent.baseUrl': {
++			type: 'string',
++			default: '',
++			description: localize('openide.agent.baseUrl.desc', "Base URL custom para providers OpenAI-compatible (ej: http://localhost:11434/v1 para Ollama)."),
++		},
++	},
++});
++
++// Comando: configurar la API key del provider actual (guardada en SecretStorage).
++registerAction2(class extends Action2 {
++	constructor() {
++		super({
++			id: 'openide.agent.setApiKey',
++			title: localize2('openide.agent.setApiKey', 'OpenIDE Agent: Configurar API key'),
++			category: Categories.Help,
++			f1: true,
++		});
++	}
++
++	async run(accessor: ServicesAccessor): Promise<void> {
++		const quickInput = accessor.get(IQuickInputService);
++		const agent = accessor.get(IOpenideAgentService);
++		const configurationService = accessor.get(IConfigurationService);
++		const provider = configurationService.getValue<string>('openide.agent.provider') || 'anthropic';
++		const key = await quickInput.input({
++			prompt: localize('openide.agent.setApiKey.prompt', "Pegá la API key para {0}", provider),
++			password: true,
++			ignoreFocusLost: true,
++		});
++		if (key) {
++			await agent.setApiKey(provider, key.trim());
++		}
++	}
++});
++
++// Comando: probar el agente desde un Output channel (validación del backend).
++registerAction2(class extends Action2 {
++	constructor() {
++		super({
++			id: 'openide.agent.run',
++			title: localize2('openide.agent.run', 'OpenIDE Agent: Preguntar (consola)'),
++			category: Categories.Help,
++			f1: true,
++		});
++	}
++
++	async run(accessor: ServicesAccessor): Promise<void> {
++		const quickInput = accessor.get(IQuickInputService);
++		const agent = accessor.get(IOpenideAgentService);
++		const outputService = accessor.get(IOutputService);
++
++		const prompt = await quickInput.input({
++			prompt: localize('openide.agent.run.prompt', "Preguntale al agente de OpenIDE"),
++			ignoreFocusLost: true,
++		});
++		if (!prompt) {
++			return;
++		}
++
++		const channel = outputService.getChannel(CHANNEL_ID);
++		await outputService.showChannel(CHANNEL_ID, true);
++		channel?.append(`\n\n=========================\n> ${prompt}\n=========================\n\n`);
++
++		await agent.runAgent(prompt, ev => {
++			switch (ev.type) {
++				case 'text':
++					channel?.append(ev.delta);
++					break;
++				case 'toolStart':
++					channel?.append(`\n\n[tool ▸ ${ev.name}] ${ev.argumentsJson}\n`);
++					break;
++				case 'toolResult':
++					channel?.append(`[tool ◂ ${ev.name}${ev.isError ? ' ERROR' : ''}]\n${ev.result}\n\n`);
++					break;
++				case 'usage':
++					channel?.append(`\n(tokens in:${ev.inputTokens ?? '?'} out:${ev.outputTokens ?? '?'})\n`);
++					break;
++				case 'done':
++					channel?.append(`\n\n— fin${ev.reason ? ` (${ev.reason})` : ''} —\n`);
++					break;
++				case 'error':
++					channel?.append(`\n\n[ERROR] ${ev.message}\n`);
++					break;
++			}
++		});
++	}
++});
+diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts b/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts
+new file mode 100644
+index 00000000..cd3a5f6e
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts
+@@ -0,0 +1,115 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — servicio del motor agéntico: maneja providers, API keys (SecretStorage),
++ *  y corre el agent loop (model → tool → model) con streaming.
++ *--------------------------------------------------------------------------------------------*/
++
++import { CancellationToken } from '../../../../base/common/cancellation.js';
++import { Disposable } from '../../../../base/common/lifecycle.js';
++import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
++import { IFileService } from '../../../../platform/files/common/files.js';
++import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
++import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
++import { IRequestService } from '../../../../platform/request/common/request.js';
++import { ISecretStorageService } from '../../../../platform/secrets/common/secrets.js';
++import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
++import { AgentLoopEvent, IChatMessage, ILLMProvider } from '../common/openideAgentTypes.js';
++import { AnthropicProvider } from '../common/providers/anthropicProvider.js';
++import { OpenAICompatibleProvider } from '../common/providers/openaiProvider.js';
++import { OpenideToolRegistry } from './openideTools.js';
++
++export const IOpenideAgentService = createDecorator<IOpenideAgentService>('openideAgentService');
++
++export interface IOpenideAgentService {
++	readonly _serviceBrand: undefined;
++	setApiKey(providerId: string, key: string): Promise<void>;
++	hasApiKey(providerId: string): Promise<boolean>;
++	runAgent(prompt: string, onEvent: (e: AgentLoopEvent) => void, token?: CancellationToken): Promise<void>;
++}
++
++const SECRET_PREFIX = 'openide.agent.apiKey.';
++const MAX_ITERATIONS = 12;
++const SYSTEM_PROMPT = `Sos el asistente de OpenIDE, un editor de código basado en VS Code. Ayudás al usuario con tareas de programación de forma concisa y directa. Tenés herramientas para leer archivos y listar directorios del workspace: usalas cuando necesites contexto real del proyecto en vez de inventar. Respondé en el idioma del usuario.`;
++
++export class OpenideAgentService extends Disposable implements IOpenideAgentService {
++
++	declare readonly _serviceBrand: undefined;
++
++	private readonly providers = new Map<string, ILLMProvider>();
++	private readonly tools: OpenideToolRegistry;
++
++	constructor(
++		@IRequestService requestService: IRequestService,
++		@ISecretStorageService private readonly secretStorage: ISecretStorageService,
++		@IConfigurationService private readonly configurationService: IConfigurationService,
++		@IFileService fileService: IFileService,
++		@IWorkspaceContextService contextService: IWorkspaceContextService,
++	) {
++		super();
++		this.providers.set('anthropic', new AnthropicProvider(requestService));
++		this.providers.set('openai', new OpenAICompatibleProvider(requestService));
++		this.tools = new OpenideToolRegistry(fileService, contextService);
++	}
++
++	async setApiKey(providerId: string, key: string): Promise<void> {
++		await this.secretStorage.set(SECRET_PREFIX + providerId, key);
++	}
++
++	async hasApiKey(providerId: string): Promise<boolean> {
++		return !!(await this.secretStorage.get(SECRET_PREFIX + providerId));
++	}
++
++	async runAgent(prompt: string, onEvent: (e: AgentLoopEvent) => void, token: CancellationToken = CancellationToken.None): Promise<void> {
++		try {
++			const providerId = this.configurationService.getValue<string>('openide.agent.provider') || 'anthropic';
++			const provider = this.providers.get(providerId);
++			if (!provider) {
++				onEvent({ type: 'error', message: `Provider desconocido: ${providerId}` });
++				return;
++			}
++			const apiKey = await this.secretStorage.get(SECRET_PREFIX + providerId);
++			if (!apiKey) {
++				onEvent({ type: 'error', message: `Falta la API key de "${providerId}". Ejecutá "OpenIDE Agent: Configurar API key".` });
++				return;
++			}
++			const model = this.configurationService.getValue<string>('openide.agent.model') || (providerId === 'anthropic' ? 'claude-sonnet-4-5' : 'gpt-4o');
++			const baseUrl = this.configurationService.getValue<string>('openide.agent.baseUrl') || undefined;
++
++			const messages: IChatMessage[] = [{ role: 'user', content: prompt }];
++			const toolDefs = this.tools.getDefinitions();
++
++			for (let i = 0; i < MAX_ITERATIONS; i++) {
++				if (token.isCancellationRequested) {
++					return;
++				}
++				const result = await provider.streamChat(
++					{ apiKey, baseUrl, model, system: SYSTEM_PROMPT, messages, tools: toolDefs },
++					ev => {
++						if (ev.type === 'text') { onEvent({ type: 'text', delta: ev.delta }); }
++						else if (ev.type === 'reasoning') { onEvent({ type: 'reasoning', delta: ev.delta }); }
++						else if (ev.type === 'usage') { onEvent({ type: 'usage', inputTokens: ev.inputTokens, outputTokens: ev.outputTokens }); }
++					},
++					token,
++				);
++
++				messages.push(result.message);
++				const calls = result.message.toolCalls;
++				if (!calls || !calls.length) {
++					onEvent({ type: 'done', reason: result.stopReason });
++					return;
++				}
++
++				for (const call of calls) {
++					onEvent({ type: 'toolStart', id: call.id, name: call.name, argumentsJson: call.argumentsJson });
++					const out = await this.tools.invoke(call.name, call.argumentsJson, token);
++					onEvent({ type: 'toolResult', id: call.id, name: call.name, result: out, isError: out.startsWith('Error') });
++					messages.push({ role: 'tool', toolCallId: call.id, content: out });
++				}
++			}
++			onEvent({ type: 'done', reason: 'max_iterations' });
++		} catch (e) {
++			onEvent({ type: 'error', message: e instanceof Error ? e.message : String(e) });
++		}
++	}
++}
++
++registerSingleton(IOpenideAgentService, OpenideAgentService, InstantiationType.Delayed);
+diff --git a/src/vs/workbench/contrib/openideAgent/browser/openideTools.ts b/src/vs/workbench/contrib/openideAgent/browser/openideTools.ts
+new file mode 100644
+index 00000000..b020b62d
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/browser/openideTools.ts
+@@ -0,0 +1,98 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — registry de herramientas del agente. Por ahora read-only (leer/listar archivos);
++ *  más adelante se agregan escritura/terminal con approval gate.
++ *--------------------------------------------------------------------------------------------*/
++
++import { CancellationToken } from '../../../../base/common/cancellation.js';
++import { URI } from '../../../../base/common/uri.js';
++import { IFileService } from '../../../../platform/files/common/files.js';
++import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
++import { IToolDefinition } from '../common/openideAgentTypes.js';
++
++export interface IAgentTool {
++	readonly def: IToolDefinition;
++	invoke(args: any, token: CancellationToken): Promise<string>;
++}
++
++export class OpenideToolRegistry {
++
++	private readonly tools = new Map<string, IAgentTool>();
++
++	constructor(
++		private readonly fileService: IFileService,
++		private readonly contextService: IWorkspaceContextService,
++	) {
++		this.register(this.readFileTool());
++		this.register(this.listFilesTool());
++	}
++
++	private register(tool: IAgentTool): void {
++		this.tools.set(tool.def.name, tool);
++	}
++
++	getDefinitions(): IToolDefinition[] {
++		return [...this.tools.values()].map(t => t.def);
++	}
++
++	async invoke(name: string, argumentsJson: string, token: CancellationToken): Promise<string> {
++		const tool = this.tools.get(name);
++		if (!tool) {
++			return `Error: herramienta desconocida "${name}".`;
++		}
++		let args: any = {};
++		try { args = JSON.parse(argumentsJson || '{}'); } catch { return `Error: argumentos JSON inválidos para ${name}.`; }
++		try {
++			return await tool.invoke(args, token);
++		} catch (e) {
++			return `Error ejecutando ${name}: ${e instanceof Error ? e.message : String(e)}`;
++		}
++	}
++
++	private resolvePath(p: string): URI | undefined {
++		const folder = this.contextService.getWorkspace().folders[0];
++		if (p.startsWith('/')) {
++			return URI.file(p);
++		}
++		if (!folder) {
++			return undefined;
++		}
++		return URI.joinPath(folder.uri, p);
++	}
++
++	private readFileTool(): IAgentTool {
++		return {
++			def: {
++				name: 'read_file',
++				description: 'Lee el contenido de un archivo del workspace. La ruta es relativa a la carpeta abierta (o absoluta si empieza con /).',
++				parameters: { type: 'object', properties: { path: { type: 'string', description: 'Ruta del archivo a leer' } }, required: ['path'] },
++			},
++			invoke: async (args) => {
++				const uri = this.resolvePath(String(args.path ?? ''));
++				if (!uri) { return 'Error: no hay carpeta abierta y la ruta no es absoluta.'; }
++				const content = await this.fileService.readFile(uri);
++				const text = content.value.toString();
++				return text.length > 60000 ? text.slice(0, 60000) + '\n…(truncado)' : text;
++			},
++		};
++	}
++
++	private listFilesTool(): IAgentTool {
++		return {
++			def: {
++				name: 'list_files',
++				description: 'Lista archivos y carpetas de un directorio del workspace.',
++				parameters: { type: 'object', properties: { path: { type: 'string', description: 'Ruta del directorio (vacío o "." = raíz del workspace)' } } },
++			},
++			invoke: async (args) => {
++				const uri = this.resolvePath(String(args.path ?? '.') || '.');
++				if (!uri) { return 'Error: no hay carpeta abierta.'; }
++				const stat = await this.fileService.resolve(uri);
++				if (!stat.children) { return '(no es un directorio o está vacío)'; }
++				return stat.children
++					.map(c => (c.isDirectory ? '[dir]  ' : '[file] ') + c.name)
++					.sort()
++					.join('\n');
++			},
++		};
++	}
++}
+diff --git a/src/vs/workbench/contrib/openideAgent/common/openideAgentTypes.ts b/src/vs/workbench/contrib/openideAgent/common/openideAgentTypes.ts
+new file mode 100644
+index 00000000..e88a5dbf
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/common/openideAgentTypes.ts
+@@ -0,0 +1,68 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — tipos base del motor de chat agéntico.
++ *--------------------------------------------------------------------------------------------*/
++
++import { CancellationToken } from '../../../../base/common/cancellation.js';
++
++export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
++
++export interface IToolCall {
++	readonly id: string;
++	readonly name: string;
++	/** Argumentos como JSON string (tal cual los emite el modelo). */
++	readonly argumentsJson: string;
++}
++
++export interface IChatMessage {
++	role: ChatRole;
++	content: string;
++	/** Solo en mensajes 'assistant' que invocan herramientas. */
++	toolCalls?: IToolCall[];
++	/** Solo en mensajes 'tool' (resultado de una herramienta). */
++	toolCallId?: string;
++}
++
++export interface IToolDefinition {
++	readonly name: string;
++	readonly description: string;
++	/** JSON Schema de los parámetros. */
++	readonly parameters: object;
++}
++
++/** Eventos que el provider emite mientras streamea la respuesta. */
++export type AgentStreamEvent =
++	| { type: 'text'; delta: string }
++	| { type: 'reasoning'; delta: string }
++	| { type: 'toolCall'; call: IToolCall }
++	| { type: 'usage'; inputTokens?: number; outputTokens?: number };
++
++export interface IProviderRequest {
++	readonly apiKey: string;
++	readonly baseUrl?: string;
++	readonly model: string;
++	readonly system?: string;
++	readonly messages: IChatMessage[];
++	readonly tools?: IToolDefinition[];
++	readonly maxTokens?: number;
++}
++
++export interface IProviderResult {
++	/** Mensaje 'assistant' final (texto + toolCalls si hubo). */
++	readonly message: IChatMessage;
++	readonly stopReason?: string;
++}
++
++export interface ILLMProvider {
++	readonly id: string;
++	streamChat(req: IProviderRequest, onEvent: (e: AgentStreamEvent) => void, token: CancellationToken): Promise<IProviderResult>;
++}
++
++/** Eventos de alto nivel que emite el agent loop hacia la UI/consumidor. */
++export type AgentLoopEvent =
++	| { type: 'text'; delta: string }
++	| { type: 'reasoning'; delta: string }
++	| { type: 'toolStart'; id: string; name: string; argumentsJson: string }
++	| { type: 'toolResult'; id: string; name: string; result: string; isError: boolean }
++	| { type: 'usage'; inputTokens?: number; outputTokens?: number }
++	| { type: 'done'; reason?: string }
++	| { type: 'error'; message: string };
+diff --git a/src/vs/workbench/contrib/openideAgent/common/openideSse.ts b/src/vs/workbench/contrib/openideAgent/common/openideSse.ts
+new file mode 100644
+index 00000000..556d76fe
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/common/openideSse.ts
+@@ -0,0 +1,96 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — helper para hacer un POST y consumir la respuesta SSE de forma incremental,
++ *  vía IRequestService (que pasa por el proceso main → sin problemas de CORS).
++ *--------------------------------------------------------------------------------------------*/
++
++import { CancellationToken } from '../../../../base/common/cancellation.js';
++import { VSBuffer, VSBufferReadableStream } from '../../../../base/common/buffer.js';
++import { listenStream } from '../../../../base/common/stream.js';
++import { IHeaders } from '../../../../base/parts/request/common/request.js';
++import { IRequestService } from '../../../../platform/request/common/request.js';
++
++export interface ISsePostOptions {
++	readonly url: string;
++	readonly headers: IHeaders;
++	readonly body: string;
++}
++
++function readAll(stream: VSBufferReadableStream): Promise<string> {
++	return new Promise<string>(resolve => {
++		let buf = '';
++		listenStream(stream, {
++			onData: (c: VSBuffer) => { buf += c.toString(); },
++			onError: () => resolve(buf),
++			onEnd: () => resolve(buf),
++		});
++	});
++}
++
++/**
++ * Hace el POST y va llamando `onBlock` por cada bloque SSE completo (texto entre
++ * líneas en blanco). El parseo específico de cada provider lo hace el caller.
++ */
++export async function ssePost(
++	requestService: IRequestService,
++	options: ISsePostOptions,
++	token: CancellationToken,
++	onBlock: (block: string) => void
++): Promise<void> {
++	const ctx = await requestService.request({
++		type: 'POST',
++		url: options.url,
++		headers: options.headers,
++		data: options.body,
++	}, token);
++
++	const status = ctx.res.statusCode ?? 0;
++	if (status < 200 || status >= 300) {
++		const errBody = await readAll(ctx.stream);
++		throw new Error(`HTTP ${status}: ${errBody.slice(0, 800)}`);
++	}
++
++	let buffer = '';
++	await new Promise<void>((resolve, reject) => {
++		listenStream(ctx.stream, {
++			onData: (chunk: VSBuffer) => {
++				buffer += chunk.toString();
++				let idx: number;
++				while ((idx = buffer.indexOf('\n\n')) !== -1) {
++					const block = buffer.slice(0, idx);
++					buffer = buffer.slice(idx + 2);
++					if (block.trim()) {
++						onBlock(block);
++					}
++				}
++			},
++			onError: err => reject(err),
++			onEnd: () => {
++				if (buffer.trim()) {
++					onBlock(buffer);
++				}
++				resolve();
++			},
++		}, token);
++	});
++}
++
++/** Extrae el valor `data:` de un bloque SSE (concatenando múltiples líneas data:). */
++export function sseDataOf(block: string): string | undefined {
++	const datas: string[] = [];
++	for (const line of block.split('\n')) {
++		if (line.startsWith('data:')) {
++			datas.push(line.slice(5).trimStart());
++		}
++	}
++	return datas.length ? datas.join('\n') : undefined;
++}
++
++/** Extrae el `event:` de un bloque SSE (usado por Anthropic). */
++export function sseEventOf(block: string): string | undefined {
++	for (const line of block.split('\n')) {
++		if (line.startsWith('event:')) {
++			return line.slice(6).trim();
++		}
++	}
++	return undefined;
++}
+diff --git a/src/vs/workbench/contrib/openideAgent/common/providers/anthropicProvider.ts b/src/vs/workbench/contrib/openideAgent/common/providers/anthropicProvider.ts
+new file mode 100644
+index 00000000..a17a0b14
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/common/providers/anthropicProvider.ts
+@@ -0,0 +1,121 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — provider Anthropic (Claude) con streaming nativo + tool use.
++ *--------------------------------------------------------------------------------------------*/
++
++import { CancellationToken } from '../../../../../base/common/cancellation.js';
++import { IRequestService } from '../../../../../platform/request/common/request.js';
++import { AgentStreamEvent, IChatMessage, ILLMProvider, IProviderRequest, IProviderResult, IToolCall } from '../openideAgentTypes.js';
++import { sseDataOf, ssePost } from '../openideSse.js';
++
++export class AnthropicProvider implements ILLMProvider {
++
++	readonly id = 'anthropic';
++
++	constructor(private readonly requestService: IRequestService) { }
++
++	async streamChat(req: IProviderRequest, onEvent: (e: AgentStreamEvent) => void, token: CancellationToken): Promise<IProviderResult> {
++		const base = (req.baseUrl?.replace(/\/+$/, '')) || 'https://api.anthropic.com';
++		const url = `${base}/v1/messages`;
++		const { system, messages } = this.toAnthropic(req);
++
++		const body: Record<string, unknown> = {
++			model: req.model,
++			max_tokens: req.maxTokens ?? 4096,
++			stream: true,
++			messages,
++		};
++		if (system) { body.system = system; }
++		if (req.tools?.length) {
++			body.tools = req.tools.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters }));
++		}
++
++		let text = '';
++		const blocks = new Map<number, { type: 'text' | 'tool_use'; id?: string; name?: string; partial: string }>();
++		let stopReason: string | undefined;
++		let inputTokens: number | undefined;
++		let outputTokens: number | undefined;
++
++		await ssePost(this.requestService, {
++			url,
++			headers: { 'Content-Type': 'application/json', 'x-api-key': req.apiKey, 'anthropic-version': '2023-06-01' },
++			body: JSON.stringify(body),
++		}, token, block => {
++			const data = sseDataOf(block);
++			if (!data) { return; }
++			let json: any;
++			try { json = JSON.parse(data); } catch { return; }
++
++			switch (json.type) {
++				case 'message_start':
++					inputTokens = json.message?.usage?.input_tokens;
++					break;
++				case 'content_block_start': {
++					const cb = json.content_block;
++					if (cb?.type === 'tool_use') {
++						blocks.set(json.index, { type: 'tool_use', id: cb.id, name: cb.name, partial: '' });
++					} else {
++						blocks.set(json.index, { type: 'text', partial: '' });
++					}
++					break;
++				}
++				case 'content_block_delta': {
++					const d = json.delta;
++					if (d?.type === 'text_delta' && d.text) {
++						text += d.text;
++						onEvent({ type: 'text', delta: d.text });
++					} else if (d?.type === 'thinking_delta' && d.thinking) {
++						onEvent({ type: 'reasoning', delta: d.thinking });
++					} else if (d?.type === 'input_json_delta') {
++						const b = blocks.get(json.index);
++						if (b) { b.partial += d.partial_json || ''; }
++					}
++					break;
++				}
++				case 'message_delta':
++					stopReason = json.delta?.stop_reason;
++					outputTokens = json.usage?.output_tokens;
++					break;
++			}
++		});
++
++		const toolCalls: IToolCall[] = [];
++		for (const b of blocks.values()) {
++			if (b.type === 'tool_use' && b.name) {
++				toolCalls.push({ id: b.id || `call_${toolCalls.length}`, name: b.name, argumentsJson: b.partial || '{}' });
++			}
++		}
++		for (const c of toolCalls) {
++			onEvent({ type: 'toolCall', call: c });
++		}
++		if (inputTokens !== undefined || outputTokens !== undefined) {
++			onEvent({ type: 'usage', inputTokens, outputTokens });
++		}
++
++		const message: IChatMessage = { role: 'assistant', content: text, toolCalls: toolCalls.length ? toolCalls : undefined };
++		return { message, stopReason };
++	}
++
++	private toAnthropic(req: IProviderRequest): { system?: string; messages: any[] } {
++		let system = req.system;
++		const messages: any[] = [];
++		for (const m of req.messages) {
++			if (m.role === 'system') {
++				system = (system ? system + '\n\n' : '') + m.content;
++			} else if (m.role === 'tool') {
++				messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: m.toolCallId, content: m.content }] });
++			} else if (m.role === 'assistant' && m.toolCalls?.length) {
++				const content: any[] = [];
++				if (m.content) { content.push({ type: 'text', text: m.content }); }
++				for (const tc of m.toolCalls) {
++					let input: any = {};
++					try { input = JSON.parse(tc.argumentsJson || '{}'); } catch { /* ignore */ }
++					content.push({ type: 'tool_use', id: tc.id, name: tc.name, input });
++				}
++				messages.push({ role: 'assistant', content });
++			} else {
++				messages.push({ role: m.role, content: m.content });
++			}
++		}
++		return { system, messages };
++	}
++}
+diff --git a/src/vs/workbench/contrib/openideAgent/common/providers/openaiProvider.ts b/src/vs/workbench/contrib/openideAgent/common/providers/openaiProvider.ts
+new file mode 100644
+index 00000000..6dfcb38c
+--- /dev/null
++++ b/src/vs/workbench/contrib/openideAgent/common/providers/openaiProvider.ts
+@@ -0,0 +1,105 @@
++/*---------------------------------------------------------------------------------------------
++ *  OpenIDE — provider OpenAI-compatible (OpenAI, Groq, OpenRouter, Ollama, etc.) con streaming.
++ *--------------------------------------------------------------------------------------------*/
++
++import { CancellationToken } from '../../../../../base/common/cancellation.js';
++import { IRequestService } from '../../../../../platform/request/common/request.js';
++import { AgentStreamEvent, IChatMessage, ILLMProvider, IProviderRequest, IProviderResult, IToolCall } from '../openideAgentTypes.js';
++import { sseDataOf, ssePost } from '../openideSse.js';
++
++export class OpenAICompatibleProvider implements ILLMProvider {
++
++	readonly id = 'openai';
++
++	constructor(private readonly requestService: IRequestService) { }
++
++	async streamChat(req: IProviderRequest, onEvent: (e: AgentStreamEvent) => void, token: CancellationToken): Promise<IProviderResult> {
++		const base = (req.baseUrl?.replace(/\/+$/, '')) || 'https://api.openai.com/v1';
++		const url = `${base}/chat/completions`;
++
++		const body: Record<string, unknown> = {
++			model: req.model,
++			messages: this.toMessages(req),
++			stream: true,
++		};
++		if (req.tools?.length) {
++			body.tools = req.tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
++			body.tool_choice = 'auto';
++		}
++
++		let text = '';
++		const toolAcc = new Map<number, { id: string; name: string; args: string }>();
++		let stopReason: string | undefined;
++
++		await ssePost(this.requestService, {
++			url,
++			headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${req.apiKey}` },
++			body: JSON.stringify(body),
++		}, token, block => {
++			const data = sseDataOf(block);
++			if (!data || data === '[DONE]') {
++				return;
++			}
++			let json: any;
++			try { json = JSON.parse(data); } catch { return; }
++
++			if (json.usage) {
++				onEvent({ type: 'usage', inputTokens: json.usage.prompt_tokens, outputTokens: json.usage.completion_tokens });
++			}
++			const choice = json.choices?.[0];
++			if (!choice) {
++				return;
++			}
++			const delta = choice.delta || {};
++			if (typeof delta.content === 'string' && delta.content.length) {
++				text += delta.content;
++				onEvent({ type: 'text', delta: delta.content });
++			}
++			if (Array.isArray(delta.tool_calls)) {
++				for (const tc of delta.tool_calls) {
++					const idx = typeof tc.index === 'number' ? tc.index : 0;
++					let acc = toolAcc.get(idx);
++					if (!acc) {
++						acc = { id: tc.id || `call_${idx}`, name: '', args: '' };
++						toolAcc.set(idx, acc);
++					}
++					if (tc.id) { acc.id = tc.id; }
++					if (tc.function?.name) { acc.name += tc.function.name; }
++					if (tc.function?.arguments) { acc.args += tc.function.arguments; }
++				}
++			}
++			if (choice.finish_reason) { stopReason = choice.finish_reason; }
++		});
++
++		const toolCalls: IToolCall[] = [...toolAcc.values()]
++			.filter(a => a.name)
++			.map(a => ({ id: a.id, name: a.name, argumentsJson: a.args || '{}' }));
++		for (const c of toolCalls) {
++			onEvent({ type: 'toolCall', call: c });
++		}
++
++		const message: IChatMessage = { role: 'assistant', content: text, toolCalls: toolCalls.length ? toolCalls : undefined };
++		return { message, stopReason };
++	}
++
++	private toMessages(req: IProviderRequest): any[] {
++		const out: any[] = [];
++		if (req.system) {
++			out.push({ role: 'system', content: req.system });
++		}
++		for (const m of req.messages) {
++			if (m.role === 'tool') {
++				out.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content });
++			} else if (m.role === 'assistant' && m.toolCalls?.length) {
++				out.push({
++					role: 'assistant',
++					content: m.content || null,
++					tool_calls: m.toolCalls.map(tc => ({ id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.argumentsJson } })),
++				});
++			} else {
++				out.push({ role: m.role, content: m.content });
++			}
++		}
++		return out;
++	}
++}
+diff --git a/src/vs/workbench/workbench.common.main.ts b/src/vs/workbench/workbench.common.main.ts
+index d8dcfef9..60f1fbbc 100644
+--- a/src/vs/workbench/workbench.common.main.ts
++++ b/src/vs/workbench/workbench.common.main.ts
+@@ -377,6 +377,7 @@ import './contrib/surveys/browser/languageSurveys.contribution.js';
+ 
+ // Welcome
+ import './contrib/welcomeGettingStarted/browser/gettingStarted.contribution.js';
++import './contrib/openideAgent/browser/openideAgent.contribution.js';
+ import './contrib/welcomeAgentSessions/browser/agentSessionsWelcome.contribution.js';
+ import './contrib/welcomeWalkthrough/browser/walkThrough.contribution.js';
+ import './contrib/welcomeViews/common/viewsWelcome.contribution.js';
