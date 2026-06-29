@@ -1,8 +1,8 @@
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts
-index 6f785eaa..ff177d57 100644
+index 4172f07f..1ec4cc8d 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts
-@@ -129,6 +129,11 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
+@@ -124,6 +124,11 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
  			this.storageService.store(telemetryOptOutStorageKey, true, StorageScope.PROFILE, StorageTarget.USER);
  		}
  
@@ -14,7 +14,7 @@ index 6f785eaa..ff177d57 100644
  		if (this.tryOpenWalkthroughForFolder()) {
  			return;
  		}
-@@ -172,6 +177,33 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
+@@ -167,6 +172,33 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
  		return false;
  	}
  

@@ -1,5 +1,5 @@
 diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts b/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts
-index cc836b56..896abd78 100644
+index 168a3d01..f8ce7742 100644
 --- a/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts
 +++ b/src/vs/workbench/contrib/welcomeGettingStarted/common/gettingStartedContent.ts
 @@ -71,6 +71,7 @@ gettingStartedContentRegistry.registerProvider('vs/workbench/contrib/welcomeGett
@@ -10,8 +10,8 @@ index cc836b56..896abd78 100644
  
  export type BuiltinGettingStartedStep = {
  	id: string;
-@@ -204,6 +205,41 @@ export const startEntries: GettingStartedStartEntryContent = [
- const Button = (title: string, href: string) => `[${title}](${href})`;
+@@ -250,6 +251,41 @@ function createCopilotSetupStep(id: string, button: string, when: string, includ
+ }
  
  export const walkthroughs: GettingStartedWalkthroughContent = [
 +	{
@@ -51,4 +51,4 @@ index cc836b56..896abd78 100644
 +	},
  	{
  		id: 'Setup',
- 		title: localize('gettingStarted.setup.title', "Get started with OpenIDE"),
+ 		title: localize('gettingStarted.setup.title', "Get started with VS Code"),
