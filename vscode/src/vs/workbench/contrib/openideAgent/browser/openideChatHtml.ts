@@ -665,7 +665,7 @@ export function getOpenideChatHtml(nonce: string, codiconCss: string): string {
 	.turn-body > .gen-row,
 	.turn-body > .explore-header { padding: 0; }
 	.turn-body > .part:not(.term-card):not(.edit-card) { padding: 0; }
-	.turn-body > .decision-row,
+	.turn-body > .decision-line,
 	.turn-body > .flatrow:not(.err) { padding: 2px 0; }
 	.turn-body > .flatrow.err,
 	.turn-body > .retry-row { margin: 6px 0; }
@@ -1088,12 +1088,12 @@ export function getOpenideChatHtml(nonce: string, codiconCss: string): string {
 	   Comparte la anatomía de las cards del browser pero sin barra lateral de color:
 	   identidad + badge arriba, contexto y acciones en un cuerpo colapsable. */
 	.approval { --approval-accent: var(--vscode-charts-purple, #a855f7); margin: 5px 0 7px; display: flex; flex-direction: column; overflow: visible; background: rgba(128, 128, 128, 0.035); border: 1px solid rgba(128, 128, 128, 0.26); border-radius: 8px; animation: qp-in 180ms cubic-bezier(0.16, 1, 0.3, 1); }
-	.approval.tool-kind-skill, .decision-row.tool-kind-skill,
-	.approval.tool-kind-mcp, .decision-row.tool-kind-mcp { --approval-accent: var(--vscode-descriptionForeground); }
+	.approval.tool-kind-skill,
+	.approval.tool-kind-mcp { --approval-accent: var(--vscode-descriptionForeground); }
 	.approval-head { width: 100%; min-height: 39px; padding: 6px 9px; display: flex; align-items: center; gap: 7px; min-width: 0; border: none; border-radius: 8px; background: transparent; color: var(--vscode-descriptionForeground); font-family: inherit; text-align: left; cursor: pointer; }
 	.approval-head:hover { color: var(--vscode-foreground); background: rgba(128, 128, 128, 0.045); }
 	.approval-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--vscode-editor-font-family, monospace); color: var(--vscode-foreground); }
-	.approval-kind, .decision-row .dkind { flex: 0 0 auto; padding: 2px 5px; border-radius: 3px; background: rgba(128, 128, 128, 0.14); color: var(--vscode-descriptionForeground); font-size: 9px; line-height: 1.2; font-weight: 650; letter-spacing: 0.035em; text-transform: uppercase; }
+	.approval-kind { flex: 0 0 auto; padding: 2px 5px; border-radius: 3px; background: rgba(128, 128, 128, 0.14); color: var(--vscode-descriptionForeground); font-size: 9px; line-height: 1.2; font-weight: 650; letter-spacing: 0.035em; text-transform: uppercase; }
 	.approval-chevron { display: inline-flex; flex: 0 0 auto; color: var(--vscode-descriptionForeground); }
 	.approval-body { display: none; padding: 8px 9px 9px; border-top: 1px solid rgba(128, 128, 128, 0.16); }
 	.approval.open .approval-body { display: block; }
@@ -1117,13 +1117,14 @@ export function getOpenideChatHtml(nonce: string, codiconCss: string): string {
 	.abtn.deny:hover { color: var(--vscode-errorForeground); background: color-mix(in srgb, var(--vscode-errorForeground) 12%, transparent); }
 	.abtn.detail { padding: 0 4px; }
 	.abtn-kbd { opacity: 0.58; font-size: 9.5px; }
-	/* Estado resuelto de la misma TOOL: más respiración, sin icono ni acento lateral. */
-	.decision-row { --approval-accent: var(--vscode-charts-purple, #a855f7); min-height: 30px; display: flex; align-items: center; gap: 7px; font-size: 12px; padding: 5px 8px 5px 9px; margin: 4px 0; color: var(--vscode-descriptionForeground); border: 1px solid rgba(128, 128, 128, 0.26); border-radius: 8px; background: rgba(128, 128, 128, 0.035); }
-	.decision-row .dtool { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--vscode-font-family); font-size: 12.5px; color: var(--vscode-descriptionForeground); }
-	.decision-row .dspace { flex: 1; min-width: 4px; }
-	.decision-row .dscope { white-space: nowrap; }
-	.decision-row.deny .dscope { color: var(--vscode-errorForeground); }
-	.decision-row .dscope { margin-left: 2px; }
+	/* Decisión de permiso resuelta: misma línea plana que Thinking/Exploring (sin card ni badges). */
+	.decision-line {
+		display: flex; align-items: center; gap: 6px;
+		min-height: 22px; margin: 1px 0; padding: 2px 0;
+		font-size: 12.5px; color: var(--vscode-descriptionForeground);
+	}
+	.decision-line .dlabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); }
+	.decision-line.deny .dlabel { color: var(--vscode-descriptionForeground); opacity: 0.85; }
 
 	/* ====================== composer ========================================= */
 	#inputCard {
@@ -4266,23 +4267,23 @@ export function getOpenideChatHtml(nonce: string, codiconCss: string): string {
 		el._cleanup = cleanup;
 		appendToFlow(el); approvals[m.id] = el; scrollDown();
 	}
-	// fila-resultado de una decisión (queda en el transcript, estilizada)
-	var DECISION_LABEL = { once: 'permitido', session: 'permitido esta sesión', always: 'permitido siempre', deny: 'rechazado' };
+	// Decisión de permiso resuelta. Las concesiones (once/session/always) NO dejan rastro:
+	// la tool card / edit-card ya es la representación canónica (shimmer + filename como
+	// Thinking). Sólo los rechazos se anotan, y como línea plana estilo reasoning — sin card,
+	// sin badge TOOL, sin "permitido".
 	function permissionToolLabel(name) {
-		var labels = { run_command: 'Run command', edit_file: 'Edit file', write_file: 'Write file', delete_file: 'Delete file' };
+		var labels = { run_command: 'Run command', edit_file: 'Edit file', write_file: 'Write file', delete_file: 'Delete file', terminal_send: 'Terminal send' };
 		return labels[name] || String(name || '').replace(/_/g, ' ');
 	}
 	function addDecisionRow(name, decision) {
-		// La terminal ya conserva su tarjeta real con comando, estado y salida. Repetir después
-		// run_command · TOOL · permitido agrega ruido sin aportar información accionable.
-		if (String(name || '') === 'run_command') { return; }
+		// Permitido: silencio. La edit-card / term-card / tool-activity (shimmer) ya cuenta la acción.
+		if (decision !== 'deny') { return; }
 		assistant = null; finalizeReasoning(); removeGenerating();
-		var visualKind = toolVisualKind(String(name || ''));
-		var row = document.createElement('div'); row.className = 'decision-row tool-kind-' + visualKind.id + ' ' + (decision === 'deny' ? 'deny' : 'ok');
-		row.innerHTML = '<span class="dtool"></span><span class="dspace"></span><span class="dkind"></span><span class="dscope"></span>';
-		row.querySelector('.dtool').textContent = permissionToolLabel(name);
-		row.querySelector('.dkind').textContent = visualKind.label;
-		row.querySelector('.dscope').textContent = DECISION_LABEL[decision] || decision;
+		// Misma línea plana que Thinking/Exploring: sin card, sin badge TOOL.
+		var row = document.createElement('div'); row.className = 'decision-line deny';
+		var label = document.createElement('span'); label.className = 'dlabel';
+		label.textContent = 'Rechazado · ' + permissionToolLabel(name);
+		row.appendChild(label);
 		appendToFlow(row); scrollDown();
 	}
 	function renderAsk(m) {
