@@ -9,15 +9,15 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        # Ninguno de estos jobs hace push: sin esto el token del checkout queda escrito en
-        # `.git/config` y puede viajar dentro de un artifact.
+        # None of these jobs push: without this the checkout token is written into `.git/config`
+        # and can travel inside an artifact.
         with: { persist-credentials: false }
       - name: Verify complete signed release
-        # El tag entra por `env`, NO interpolado en el script. `${{ }}` se expande al ARMAR el
-        # shell, antes de que corra una sola línea, así que la validación con regex de abajo llega
-        # tarde: un valor con comillas ya habría cerrado la asignación e inyectado sus propios
-        # comandos en el workflow que publica las releases. Por `env` el valor es un dato para bash,
-        # nunca parte del programa, y ahí sí la regex es la que decide.
+        # The tag arrives through `env`, NOT interpolated into the script. `${{ }}` expands while
+        # the shell is being ASSEMBLED, before a single line runs, so the regex check below arrives
+        # too late: a value containing a quote would already have closed the assignment and injected
+        # its own commands into the workflow that publishes releases. Through `env` the value is
+        # data to bash, never part of the program, and then the regex is what decides.
         env:
           GH_TOKEN: '${{ github.token }}'
           INPUT_TAG: '${{ inputs.tag }}'

@@ -19,11 +19,10 @@ jobs:
   zizmor:
     runs-on: ubuntu-latest
     permissions:
-      # `contents: read` es obligatorio desde que el repositorio es privado: el
-      # workflow declara `permissions: {}` arriba, así que el token no hereda
-      # nada, y un checkout sin permiso de lectura falla con "repository not
-      # found" — que suena a URL equivocada y es en realidad falta de permiso.
-      # En un repositorio público no hacía falta porque el clone es anónimo.
+      # `contents: read` is required now that the repository is private: the workflow declares
+      # `permissions: {}` above, so the token inherits nothing, and a checkout without read
+      # permission fails with "repository not found" — which sounds like a wrong URL and is in fact
+      # a missing permission. On a public repository it was not needed: the clone is anonymous.
       contents: read
       security-events: write
     steps:
@@ -35,16 +34,15 @@ jobs:
       - name: Run zizmor
         uses: zizmorcore/zizmor-action@b1d7e1fb5de872772f31590499237e7cce841e8e # v0.5.3
         with:
-          # Sólo NUESTROS workflows. Por defecto barre el repositorio entero, y eso incluye
-          # `vscode/.github/`, que son los workflows de Microsoft que vienen con el árbol
-          # vendorizado: hallazgos que no podemos arreglar y que además no corren nunca acá,
-          # porque GitHub sólo ejecuta lo que está en `.github/workflows/` de la raíz.
+          # OUR workflows only. By default it sweeps the whole repository, and that includes
+          # `vscode/.github/` — Microsoft's workflows that come with the vendored tree: findings we
+          # cannot fix and that never run here anyway, because GitHub only executes what lives in
+          # the root `.github/workflows/`.
           inputs: .github/workflows/
-          # Sin subir SARIF: la acción por defecto publica los hallazgos en code
-          # scanning, y eso en un repositorio PRIVADO exige GitHub Advanced
-          # Security. Sin ese plan la subida falla con "Resource not accessible
-          # by integration" y tumba el job aunque zizmor no haya encontrado
-          # nada — un lint que reprueba por dónde publica su informe, no por lo
-          # que dice. Los hallazgos van al log y el job falla si los hay.
-          # Cuando el repositorio pase a público, volver a activarlo.
+          # No SARIF upload: the action publishes its findings to code scanning by default, and on
+          # a PRIVATE repository that requires GitHub Advanced Security. Without that plan the
+          # upload fails with "Resource not accessible by integration" and takes the job down even
+          # when zizmor found nothing — a lint failing over where it files its report rather than
+          # over what it says. Findings go to the log and the job still fails when there are any.
+          # Turn this back on when the repository becomes public.
           advanced-security: false

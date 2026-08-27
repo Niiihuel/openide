@@ -24,6 +24,16 @@ const scanRoots = [
 	'vscode/src/vs/workbench/contrib/openideUpdate',
 	'vscode/src/vs/platform/openideAgentHost',
 	'vscode/src/vs/platform/openideBrowser',
+	// The codebase-memory engine: OpenIDE's, and the largest block that used to sit outside this
+	// audit. CONTRIBUTING promises English everywhere; a scope narrower than the promise turns the
+	// ratchet into a fence with a gap next to it.
+	'vscode/src/vs/code/common',
+	'vscode/src/vs/code/electron-utility/sharedProcess/contrib',
+	// The repository's own tooling and pipelines. They are read by anyone who wants to contribute,
+	// which makes them the FIRST thing a newcomer meets.
+	'dev',
+	'.github',
+	'vscode/resources/openide-icons',
 ];
 /** Individual OpenIDE files living inside otherwise-upstream directories. */
 const scanFiles = [
@@ -62,6 +72,10 @@ const STRONG = new Set([
 	'exige', 'despues', 'aqui', 'aca', 'asi', 'aunque',
 ]);
 const COMMENT_LINE = /^\s*(\/\/|\*|\/\*)/;
+/** Shell and YAML comment with `#`. Kept apart from COMMENT_LINE because `#` also starts a
+ *  private field in TS (`#count = 0`), and reading that as prose would flag real code. */
+const HASH_COMMENT_LINE = /^\s*#/;
+const HASH_COMMENT_EXTENSIONS = /\.(sh|yml|yaml)$/;
 
 function isSpanish(line) {
 	if (ACCENTED.test(line)) { return true; }
@@ -80,12 +94,19 @@ function walk(relative, out) {
 		for (const name of fs.readdirSync(absolute).sort()) { walk(path.join(relative, name), out); }
 		return;
 	}
-	if (!relative.endsWith('.ts')) { return; }
+	// Not just `.ts`: the build scripts and the workflows are OpenIDE's too, and they are what a
+	// contributor reads before touching any source. Upstream files that happen to live under a
+	// scanned directory are skipped by name — everything of ours carries the `openide` prefix,
+	// except the repository tooling in `dev/` and `.github/`, which is entirely ours.
+	const scannable = /\.(ts|mjs|js|sh|yml|yaml)$/.test(relative);
+	const ours = relative.startsWith('dev/') || relative.startsWith('.github/') || /openide/i.test(path.basename(relative));
+	if (!scannable || !ours) { return; }
 	const normalized = relative.replaceAll('\\', '/');
 	const lines = fs.readFileSync(absolute, 'utf8').split('\n');
 	const hits = [];
 	lines.forEach((line, i) => {
-		if (COMMENT_LINE.test(line) && isSpanish(line)) { hits.push({ line: i + 1, text: line.trim() }); }
+		const isComment = HASH_COMMENT_EXTENSIONS.test(normalized) ? HASH_COMMENT_LINE.test(line) : COMMENT_LINE.test(line);
+		if (isComment && isSpanish(line)) { hits.push({ line: i + 1, text: line.trim() }); }
 	});
 	if (hits.length) { out.set(normalized, hits); }
 }

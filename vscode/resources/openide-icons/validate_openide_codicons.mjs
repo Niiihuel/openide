@@ -168,11 +168,11 @@ assert.deepEqual(privateOverrides, declaredPrivateIcons, 'private font overrides
 
 const webviewCss = fs.readFileSync(path.join(root, 'resources/openide-icons/codicon-webview.css'), 'utf8');
 assert.equal(webviewCss, buildWebviewCodiconCss(), 'codicon-webview.css is stale');
-// Alguien tiene que consumir de verdad la variante `filled`, o FontForge la descarta en silencio
-// y el chip de modo del composer se queda con el glyph de trazo. Vivía en `openideChatHtml.ts`,
-// que desapareció cuando el chat pasó a DOM nativo; el consumidor ahora es el composer. La
-// aserción se afloja a las dos clases juntas porque el nativo las compone en dos lugares (al
-// crear el ícono y al reconstruir su className), no en un literal único.
+// Something has to actually consume the `filled` variant, or FontForge drops it silently and the
+// composer's mode chip is left with the outline glyph. It used to live in `openideChatHtml.ts`,
+// which disappeared when the chat moved to native DOM; the consumer is the composer now. The
+// assertion is relaxed to the two classes separately because native composes them in two places
+// (creating the icon and rebuilding its className) rather than in a single literal.
 const composerControls = fs.readFileSync(path.join(root, 'src/vs/workbench/contrib/openideAgent/browser/chat/openideChatComposerControls.ts'), 'utf8');
 assert.match(composerControls, /codicon-filled/, 'no explicit filled icon consumer');
 assert.match(composerControls, /openide-mode-agent/, 'the mode chip no longer names its own icon');

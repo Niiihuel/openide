@@ -5,10 +5,10 @@ on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
 
-# Nada por defecto: cada job pide lo suyo. `contents: write` acá arriba se lo daba también al
-# job `build`, que compila código de terceros (npm install corre scripts) y sólo necesita LEER.
-# Un token con permiso de escritura en un job que ejecuta dependencias es la diferencia entre un
-# build comprometido y un repositorio comprometido.
+# Nothing by default: every job asks for what it needs. `contents: write` up here also handed it
+# to the `build` job, which compiles third-party code (npm install runs scripts) and only needs to
+# READ. A write-capable token in a job that executes dependencies is the difference between a
+# compromised build and a compromised repository.
 permissions: {}
 
 jobs:
@@ -36,15 +36,15 @@ jobs:
       OPENIDE_UPDATE_PRIVATE_KEY_CONTENT: ${{ secrets.OPENIDE_UPDATE_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        # El token del checkout queda escrito en `.git/config` y este job sube artefactos: sin esto
-        # una credencial puede viajar dentro de un artifact. Acá no hace falta — nadie hace push.
+        # The checkout token is written into `.git/config` and this job uploads artifacts: without
+        # this a credential can travel inside one. Nothing here pushes, so it is not needed.
         with: { persist-credentials: false }
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-        # `package-manager-cache: false` en el pipeline que FIRMA los binarios. setup-node v6
-        # restaura la caché de npm por defecto, y una caché es escribible por cualquier rama del
-        # repositorio: un push a una rama cualquiera podría dejar ahí un paquete envenenado que
-        # termina dentro del binario que después firmamos. En CI la caché es velocidad; acá es
-        # superficie de ataque, y un release se construye una vez por versión.
+        # `package-manager-cache: false` in the pipeline that SIGNS the binaries. setup-node v6
+        # restores the npm cache by default, and a cache is writable from any branch of the
+        # repository: a push to any branch could leave a poisoned package there that ends up inside
+        # the binary we then sign. In CI a cache is speed; here it is attack surface, and a release
+        # is built once per version.
         with: { node-version-file: .nvmrc, package-manager-cache: false }
       - name: Validate signing prerequisites
         shell: bash
@@ -72,22 +72,22 @@ jobs:
           if [[ '${{ matrix.platform }}' == darwin ]]; then ./dev/sign-macos.sh; fi
           if [[ '${{ matrix.platform }}' == win32 ]]; then ./dev/sign-windows.sh; fi
       - name: Upload unsigned feed inputs
-        # Pineado al commit, no al tag: un tag es movible, así que `@v4` deja que quien controle
-        # la acción cambie qué código corre en el pipeline que firma tus binarios.
+        # Pinned to the commit, not the tag: a tag is movable, so `@v4` lets whoever controls the
+        # action change what code runs in the pipeline that signs your binaries.
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with: { name: 'openide-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.target }}', path: 'assets/*' }
 
   publish:
     needs: build
     runs-on: ubuntu-22.04
-    # El único job que escribe: crea el release y publica el feed firmado.
+    # The only job that writes: it creates the release and publishes the signed feed.
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        # Publica con `gh` y su propio GH_TOKEN, no con las credenciales de git.
+        # It publishes with `gh` and its own GH_TOKEN, not with git's credentials.
         with: { persist-credentials: false }
-      # Pineado al commit por la misma razón que el upload de arriba.
+      # Pinned to the commit for the same reason as the upload above.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: { path: release-assets, merge-multiple: true }
       - name: Publish draft release and signed feeds
@@ -99,7 +99,7 @@ jobs:
           . ./version.sh
           printf '%s' "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" > "$RUNNER_TEMP/openide-update.pem"
           gh release create "v${RELEASE_VERSION}" release-assets/* --draft --verify-tag --title "OpenIDE ${RELEASE_VERSION}"
-          # Cada artefacto debe tener mapping explícito en release-assets/manifest-inputs.json.
+          # Every artifact must have an explicit mapping in release-assets/manifest-inputs.json.
           test -f release-assets/manifest-inputs.json
           jq -c '.[]' release-assets/manifest-inputs.json | while read -r row; do
             asset=$(jq -r .asset <<<"$row"); platform=$(jq -r .platform <<<"$row"); arch=$(jq -r .arch <<<"$row"); target=$(jq -r .target <<<"$row")

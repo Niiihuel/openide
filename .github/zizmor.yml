@@ -1,12 +1,12 @@
-# Configuración de zizmor (auditoría de seguridad de los workflows).
+# zizmor configuration (security audit of the workflows).
 #
-# Las reglas se listan acá sólo cuando el hallazgo es un falso positivo PARA ESTE
-# repositorio y se puede explicar por qué. Un `ignore` sin motivo es una regla
-# apagada que nadie se anima a volver a prender.
+# A rule is listed here only when the finding is a false positive FOR THIS repository and the
+# reason can be written down. An `ignore` without a reason is a rule switched off that nobody
+# dares switch back on.
 rules:
   artipacked:
     ignore:
-      # `sync-codeoss` empuja la rama que abre el PR de actualización, así que
-      # necesita las credenciales de git en `.git/config`. Los demás checkouts
-      # del repositorio ya usan `persist-credentials: false`; éste no puede.
+      # `sync-codeoss` pushes the branch that opens the update PR, so it needs git's credentials
+      # in `.git/config`. Every other checkout in the repository uses `persist-credentials: false`;
+      # this one cannot.
       - sync-codeoss.yml
