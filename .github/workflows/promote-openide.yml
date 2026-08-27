@@ -9,6 +9,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        # Ninguno de estos jobs hace push: sin esto el token del checkout queda escrito en
+        # `.git/config` y puede viajar dentro de un artifact.
+        with: { persist-credentials: false }
       - name: Verify complete signed release
         # El tag entra por `env`, NO interpolado en el script. `${{ }}` se expande al ARMAR el
         # shell, antes de que corra una sola línea, así que la validación con regex de abajo llega
