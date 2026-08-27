@@ -66,6 +66,9 @@ jobs:
         shell: bash
         env: { SKIP_ASSETS: 'no' }
         run: ./prepare_assets.sh
+      - name: Record which asset the update feed points at
+        shell: bash
+        run: ./dev/write-manifest-input.sh '${{ matrix.platform }}' '${{ matrix.arch }}' '${{ matrix.target }}'
       - name: Native sign and notarize
         shell: bash
         run: |
@@ -84,9 +87,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      # This one KEEPS its credentials, unlike every other checkout in the repository. The release
+      # is published with `gh`, but `dev/publish-update-feed.sh` also does a real `git push` to the
+      # `updates` branch that carries the signed feed — the branch the IDE polls for updates. Take
+      # the credentials away and the release still gets created and the feed still gets built, and
+      # then the push fails at the very last step: shipped binaries nobody can update to.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        # It publishes with `gh` and its own GH_TOKEN, not with git's credentials.
-        with: { persist-credentials: false }
       # Pinned to the commit for the same reason as the upload above.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: { path: release-assets, merge-multiple: true }
@@ -98,10 +104,22 @@ jobs:
           set -euo pipefail
           . ./version.sh
           printf '%s' "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" > "$RUNNER_TEMP/openide-update.pem"
+
+          # Each build job left a fragment naming the one file of its output the updater installs.
+          # Merged BEFORE the release is created, and then moved out of the way: they are build
+          # bookkeeping, and uploading them would put six stray JSON files on the release page next
+          # to the binaries. An empty list is refused outright — it would ship a release whose
+          # update feed points nowhere, and only a user whose IDE refuses to update would find out.
+          mkdir -p feed-inputs
+          jq -s '.' release-assets/manifest-input-*.json >feed-inputs/manifest-inputs.json
+          [[ $(jq 'length' feed-inputs/manifest-inputs.json) -eq 6 ]] || {
+            echo "Expected 6 platform mappings, got $(jq 'length' feed-inputs/manifest-inputs.json)." >&2
+            jq -r '.[].asset' feed-inputs/manifest-inputs.json >&2; exit 1
+          }
+          rm -f release-assets/manifest-input-*.json
+
           gh release create "v${RELEASE_VERSION}" release-assets/* --draft --verify-tag --title "OpenIDE ${RELEASE_VERSION}"
-          # Every artifact must have an explicit mapping in release-assets/manifest-inputs.json.
-          test -f release-assets/manifest-inputs.json
-          jq -c '.[]' release-assets/manifest-inputs.json | while read -r row; do
+          jq -c '.[]' feed-inputs/manifest-inputs.json | while read -r row; do
             asset=$(jq -r .asset <<<"$row"); platform=$(jq -r .platform <<<"$row"); arch=$(jq -r .arch <<<"$row"); target=$(jq -r .target <<<"$row")
             OPENIDE_UPDATE_PRIVATE_KEY="$RUNNER_TEMP/openide-update.pem" ./dev/generate-update-manifest.sh "$platform" "$arch" "release-assets/$asset" update-feed "$target"
           done

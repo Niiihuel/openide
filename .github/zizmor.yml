@@ -10,3 +10,7 @@ rules:
       # in `.git/config`. Every other checkout in the repository uses `persist-credentials: false`;
       # this one cannot.
       - sync-codeoss.yml
+      # The `publish` job of the release pushes the signed update feed to the `updates` branch
+      # (`dev/publish-update-feed.sh`). Its `build` job, which is the one that runs third-party
+      # code and uploads artifacts, does drop its credentials.
+      - release-openide.yml
