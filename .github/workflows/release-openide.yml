@@ -49,6 +49,11 @@ jobs:
       GH_REPO_PATH: ${{ github.repository }}
       VSCODE_ARCH: ${{ matrix.arch }}
       VSCODE_QUALITY: stable
+      # At JOB level, not on one step. `prepare_assets.sh` dispatches on this to pick the platform's
+      # packager, and it was only set on the build step: the packaging step fell through to the
+      # `else` branch and every Windows and macOS runner tried to build a Linux .deb, dying on
+      # `fakeroot is not recognized`. It describes the matrix row, so it belongs to the whole job.
+      OS_NAME: ${{ matrix.platform == 'win32' && 'windows' || matrix.platform == 'darwin' && 'osx' || 'linux' }}
       OPENIDE_UPDATE_PRIVATE_KEY_CONTENT: ${{ secrets.OPENIDE_UPDATE_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -104,7 +109,6 @@ jobs:
         run: sudo apt-get update -y && sudo apt-get install -y libkrb5-dev
       - name: Build canonical product
         shell: bash
-        env: { OS_NAME: '${{ matrix.platform == ''win32'' && ''windows'' || matrix.platform == ''darwin'' && ''osx'' || ''linux'' }}' }
         run: ./dev/build.sh
       - name: Package release assets
         shell: bash
