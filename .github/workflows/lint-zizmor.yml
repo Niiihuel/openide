@@ -19,6 +19,12 @@ jobs:
   zizmor:
     runs-on: ubuntu-latest
     permissions:
+      # `contents: read` es obligatorio desde que el repositorio es privado: el
+      # workflow declara `permissions: {}` arriba, así que el token no hereda
+      # nada, y un checkout sin permiso de lectura falla con "repository not
+      # found" — que suena a URL equivocada y es en realidad falta de permiso.
+      # En un repositorio público no hacía falta porque el clone es anónimo.
+      contents: read
       security-events: write
     steps:
       - name: Checkout repo
