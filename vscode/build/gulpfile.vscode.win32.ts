@@ -111,8 +111,21 @@ function buildWin32Setup(arch: string, target: string): task.CallbackTask {
 			Quality: quality
 		};
 
-		if (quality === 'stable' || quality === 'insider') {
-			definitions['AppxPackage'] = `${quality === 'stable' ? 'code' : 'code_insider'}_${arch}.appx`;
+		// OPENIDE: the `.appx` is only referenced when it was actually produced.
+		//
+		// The sparse package that powers the Windows 11 context menu is copied from
+		// `.build/win32/appx/`, which Microsoft's internal pipeline fills with a prebuilt, signed
+		// package. A fork has no such package, so that directory is empty — but these definitions
+		// were set unconditionally, and `code.iss` then declared a `Source:` line for a file that
+		// does not exist. InnoSetup refuses the whole installer over it:
+		//   Error on line 108 in code.iss: Source file "...\appx\code_x64.appx" does not exist.
+		// Gating on the file means a build that HAS the package still ships the context menu, and
+		// one that does not simply ships without it, which is a missing nicety rather than no
+		// installer at all.
+		const appxPackageName = `${quality === 'stable' ? 'code' : 'code_insider'}_${arch}.appx`;
+		const hasAppxPackage = fs.existsSync(path.join(sourcePath, 'appx', appxPackageName));
+		if (hasAppxPackage && (quality === 'stable' || quality === 'insider')) {
+			definitions['AppxPackage'] = appxPackageName;
 			definitions['AppxPackageDll'] = `${quality === 'stable' ? 'code' : 'code_insider'}_explorer_command_${arch}.dll`;
 			definitions['AppxPackageName'] = `${product.win32AppUserModelId}`;
 			const ctxMenu = (product as { win32ContextMenu?: Record<string, { clsid: string }> }).win32ContextMenu;
