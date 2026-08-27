@@ -78,7 +78,7 @@ Node is pinned in [`.nvmrc`](.nvmrc). You also need `git`, `jq`, `python3` and
 [the build guide](./BUILD.md).
 
 ```sh
-git clone https://github.com/Niihuel/openide.git
+git clone https://github.com/Niiihuel/openide.git
 cd openide/vscode
 npm ci
 ```
@@ -193,5 +193,5 @@ build itself; see [BUILD.md](./BUILD.md).
 - If you changed behaviour that a user can observe, update the relevant page
   under [`docs/`](./docs/).
 
-[issues]: https://github.com/Niihuel/openide/issues
-[new-issue]: https://github.com/Niihuel/openide/issues/new?labels=bug&template=bug_report.md
+[issues]: https://github.com/Niiihuel/openide/issues
+[new-issue]: https://github.com/Niiihuel/openide/issues/new?labels=bug&template=bug_report.md

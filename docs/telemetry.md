@@ -58,9 +58,9 @@ By default, we keep the preference `telemetry.feedback.enabled` enabled. It's us
 
 ## <a id="replacements"></a>Replacements to Microsoft Online Services
 
-When searching the `@tag:usesOnlineServices` filter, note that while the "Update: Mode" setting description still says "The updates are fetched from a Microsoft online service", OpenIDE sets [`updateUrl`](https://github.com/Niihuel/openide/blob/master/vscode/product.json) in `product.json` to its own release feed, so enabling that setting won't actually result in any calls to the Microsoft online service.
+When searching the `@tag:usesOnlineServices` filter, note that while the "Update: Mode" setting description still says "The updates are fetched from a Microsoft online service", OpenIDE sets [`updateUrl`](https://github.com/Niiihuel/openide/blob/master/vscode/product.json) in `product.json` to its own release feed, so enabling that setting won't actually result in any calls to the Microsoft online service.
 
-Likewise, while the descriptions for "Extensions: Auto Check Updates" and "Extensions: Auto Update" include the same phrase, OpenIDE points [`extensionsGallery`](https://github.com/Niihuel/openide/blob/master/vscode/product.json) at Open VSX instead of the Visual Studio Marketplace, so these settings won't call Microsoft either.
+Likewise, while the descriptions for "Extensions: Auto Check Updates" and "Extensions: Auto Update" include the same phrase, OpenIDE points [`extensionsGallery`](https://github.com/Niiihuel/openide/blob/master/vscode/product.json) at Open VSX instead of the Visual Studio Marketplace, so these settings won't call Microsoft either.
 
 ## <a id="checking"></a>Checking for telemetry
 

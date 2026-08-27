@@ -344,7 +344,7 @@ function packageTask(type: string, platform: string, arch: string, sourceFolderN
 
 		let productJsonContents = '';
 		const productJsonStream = gulp.src(['product.json'], { base: '.' })
-			.pipe(jsonEditor({ commit, date: readISODate(sourceFolderName), version, serverDownloadUrlTemplate: 'https://github.com/Niihuel/openide/releases/download/1.121.04319/openide-reh-${os}-${arch}-1.121.04319.tar.gz' }))
+			.pipe(jsonEditor({ commit, date: readISODate(sourceFolderName), version, serverDownloadUrlTemplate: 'https://github.com/Niiihuel/openide/releases/download/1.121.04319/openide-reh-${os}-${arch}-1.121.04319.tar.gz' }))
 			.pipe(es.through(function (file) {
 				productJsonContents = file.contents.toString();
 				this.emit('data', file);

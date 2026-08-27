@@ -10,7 +10,7 @@ case "${PLATFORM}" in linux) TARGET=${TARGET:-appimage};; darwin) TARGET=${TARGE
 [[ -f "${ASSET}" ]] || { echo "Falta asset ${ASSET}" >&2; exit 1; }
 [[ -n "${OPENIDE_UPDATE_PRIVATE_KEY:-}" ]] || { echo "Falta OPENIDE_UPDATE_PRIVATE_KEY (PEM Ed25519)." >&2; exit 1; }
 KEY_ID=$(jq -er '.updater.keyId' openide-version.json)
-ASSET_NAME=$(basename "${ASSET}") REPOSITORY=${GITHUB_REPOSITORY:-Niihuel/openide}
+ASSET_NAME=$(basename "${ASSET}") REPOSITORY=${GITHUB_REPOSITORY:-Niiihuel/openide}
 TAG="v${RELEASE_VERSION}"
 URL="https://github.com/${REPOSITORY}/releases/download/${TAG}/${ASSET_NAME}"
 SIZE=$(stat -c %s "${ASSET}" 2>/dev/null || stat -f %z "${ASSET}")

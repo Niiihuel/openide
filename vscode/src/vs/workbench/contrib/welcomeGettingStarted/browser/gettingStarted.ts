@@ -1255,7 +1255,7 @@ export class GettingStartedPage extends EditorPane {
 
 			if (showExtras) {
 				const branch = this.productService.quality === 'insider' ? 'insider' : 'master';
-				await fetch(`https://raw.githubusercontent.com/Niihuel/openide/${branch}/announcements-extra.json`)
+				await fetch(`https://raw.githubusercontent.com/Niiihuel/openide/${branch}/announcements-extra.json`)
 					.then(async res => {
 						if (res.ok) {
 							var extraAnnouncements = await res.json() as AnnouncementEntry[];

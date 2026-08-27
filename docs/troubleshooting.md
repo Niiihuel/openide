@@ -148,7 +148,7 @@ If the **"Open with OpenIDE"** option does not appear after installation (even w
 
 Some users report Windows Defender detecting the OpenIDE installer as `Cinjo` or another threat. This is a **false positive** caused by the unsigned nature of certain build artifacts.
 
-- Download OpenIDE **only from the official [GitHub Releases page](https://github.com/Niihuel/openide/releases)**.
+- Download OpenIDE **only from the official [GitHub Releases page](https://github.com/Niiihuel/openide/releases)**.
 - Verify the SHA256/SHA512 checksum of the downloaded file against the `.sha256` or `.sha512` file published alongside each release.
 - If Defender blocks the installer, add an exclusion for the downloaded file, run the install, then remove the exclusion.
 - You can also report the false positive directly to Microsoft via the [Windows Defender Security Intelligence submission portal](https://www.microsoft.com/en-us/wdsi/filesubmission).

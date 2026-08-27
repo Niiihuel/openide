@@ -17,11 +17,11 @@ const reviewGuidanceLabel = localize( // intentionally not escaped because of it
 	{
 		key: 'reviewGuidanceLabel',
 		comment: [
-			'{Locked="<a href=\"https://github.com/Niihuel/openide/wiki/Submitting-Bugs-and-Suggestions\" target=\"_blank\">"}',
+			'{Locked="<a href=\"https://github.com/Niiihuel/openide/wiki/Submitting-Bugs-and-Suggestions\" target=\"_blank\">"}',
 			'{Locked="</a>"}'
 		]
 	},
-	'Before you report an issue here please <a href="https://github.com/Niihuel/openide/wiki/Submitting-Bugs-and-Suggestions" target="_blank">review the guidance we provide</a>. Please complete the form in English.'
+	'Before you report an issue here please <a href="https://github.com/Niiihuel/openide/wiki/Submitting-Bugs-and-Suggestions" target="_blank">review the guidance we provide</a>. Please complete the form in English.'
 );
 
 export default (): string => `

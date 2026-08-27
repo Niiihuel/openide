@@ -309,7 +309,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 				json.date = readISODate(out);
 				json.checksums = checksums;
 				json.version = version;
-				json.serverDownloadUrlTemplate = 'https://github.com/Niihuel/openide/releases/download/1.121.04319/openide-reh-${os}-${arch}-1.121.04319.tar.gz';
+				json.serverDownloadUrlTemplate = 'https://github.com/Niiihuel/openide/releases/download/1.121.04319/openide-reh-${os}-${arch}-1.121.04319.tar.gz';
 				return json;
 			}))
 			.pipe(es.through(function (file) {

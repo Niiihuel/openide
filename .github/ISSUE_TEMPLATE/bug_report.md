@@ -14,7 +14,7 @@ A clear and concise description of what the bug is.
 - [ ] This bug doesn't happen if I use Microsoft's Visual Studio Code. It only happens in OpenIDE.
 
 **Please confirm that the issue/resolution isn't already documented**
-- [ ] I checked [the Docs page](https://github.com/Niihuel/openide/blob/master/docs/index.md) and [the Troubleshooting page](https://github.com/Niihuel/openide/blob/master/docs/troubleshooting.md) and my issue is not mentioned there.
+- [ ] I checked [the Docs page](https://github.com/Niiihuel/openide/blob/master/docs/index.md) and [the Troubleshooting page](https://github.com/Niiihuel/openide/blob/master/docs/troubleshooting.md) and my issue is not mentioned there.
 
 **To Reproduce**
 Steps to reproduce the behavior:

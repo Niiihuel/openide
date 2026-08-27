@@ -853,7 +853,7 @@ export class BaseIssueReporterService extends Disposable {
 
 	public searchVSCodeIssues(title: string, issueDescription?: string): void {
 		if (title) {
-			this.searchGitHub('Niihuel/openide', title);
+			this.searchGitHub('Niiihuel/openide', title);
 		} else {
 			this.clearSearchResults();
 		}

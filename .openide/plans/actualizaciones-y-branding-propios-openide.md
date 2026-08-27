@@ -18,7 +18,7 @@ El repositorio ya tiene parte del camino hecho, pero el producto todavía mezcla
 | Capa | Estado actual | Problema |
 |---|---|---|
 | Identidad del producto | `vscode/product.json` ya usa `OpenIDE`, IDs propios, protocolo `openide`, iconos propios y URLs de GitHub de OpenIDE | Persisten URLs Microsoft/VSCodium, textos heredados, fixtures, documentación, scripts y superficies visibles no auditadas |
-| Runtime de updates | Conserva `IUpdateService`, `AbstractUpdateService` y estados de Code OSS; el feed fue parcheado a `https://raw.githubusercontent.com/Niihuel/openide/updates/.../latest.json` | Linux sólo abre la página de releases; no descarga, verifica, reemplaza ni revierte AppImage. La UX sigue siendo genérica/heredada |
+| Runtime de updates | Conserva `IUpdateService`, `AbstractUpdateService` y estados de Code OSS; el feed fue parcheado a `https://raw.githubusercontent.com/Niiihuel/openide/updates/.../latest.json` | Linux sólo abre la página de releases; no descarga, verifica, reemplaza ni revierte AppImage. La UX sigue siendo genérica/heredada |
 | Publicación | `.github/workflows/release-openide.yml` compila sólo Linux x64, publica release y genera un `latest.json` en la rama `updates` | No hay macOS/Windows, firma criptográfica del manifiesto, firma nativa, promoción stable/insider ni rollback de feed |
 | Integridad | El manifest contiene SHA-1 y SHA-256; Windows verifica SHA-256 al descargar | El manifest no está autenticado. Un atacante que altere manifest + hash puede sustituir el artefacto |
 | Versionado | `openide-version.json` separa versión OpenIDE, canal y base Code OSS; `version.sh` valida la línea API | Hay valores de build heredados/hardcodeados (`1.121.04319`) en templates generados y no existe una política completa de promoción de canales |
@@ -97,12 +97,12 @@ Campos mínimos versionados:
   "publishedAt": "<ISO-8601>",
   "minimumUpdaterVersion": 1,
   "artifact": {
-    "url": "https://github.com/Niihuel/openide/releases/download/v1.121.2/OpenIDE-1.121.2-x86_64.AppImage",
+    "url": "https://github.com/Niiihuel/openide/releases/download/v1.121.2/OpenIDE-1.121.2-x86_64.AppImage",
     "size": 229927416,
     "sha256": "...",
     "signatureUrl": "...minisig"
   },
-  "releaseNotesUrl": "https://github.com/Niihuel/openide/releases/tag/v1.121.2",
+  "releaseNotesUrl": "https://github.com/Niiihuel/openide/releases/tag/v1.121.2",
   "rollout": { "percentage": 100, "seed": "1.121.2-stable" }
 }
 ```

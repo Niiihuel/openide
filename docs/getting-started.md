@@ -14,7 +14,7 @@ This guide will help you get started with OpenIDE.
 
 ## <a id="installation"></a>Installation
 
-OpenIDE can be installed on Windows, macOS, and Linux. Visit the [download page](https://github.com/Niihuel/openide#install) for installation instructions.
+OpenIDE can be installed on Windows, macOS, and Linux. Visit the [download page](https://github.com/Niiihuel/openide#install) for installation instructions.
 
 ## <a id="first-steps"></a>First Steps
 
@@ -46,5 +46,5 @@ Here are some essential keyboard shortcuts to get you started:
 Once you're comfortable with the basics, you might want to:
 
 - Explore the [documentation](./index.md) for more details
-- Join the [community](https://github.com/Niihuel/openide/discussions) to ask questions and share tips
+- Join the [community](https://github.com/Niiihuel/openide/discussions) to ask questions and share tips
 - Contribute to the [project](../CONTRIBUTING.md) if you're interested

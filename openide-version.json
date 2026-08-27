@@ -5,8 +5,8 @@
   "updater": {
     "schemaVersion": 2,
     "minimumUpdaterVersion": 1,
-    "manifestBaseUrl": "https://raw.githubusercontent.com/Niihuel/openide/updates",
-    "releaseBaseUrl": "https://github.com/Niihuel/openide/releases",
+    "manifestBaseUrl": "https://raw.githubusercontent.com/Niiihuel/openide/updates",
+    "releaseBaseUrl": "https://github.com/Niiihuel/openide/releases",
     "keyId": "openide-release-2026-01",
     "publicKey": "MCowBQYDK2VwAyEACT6LDWJj7B/A3bA7l5thvgAeCCcdkfTFcrR7R/Y6GD8="
   },

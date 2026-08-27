@@ -93,7 +93,7 @@ function trustedUrl(raw: unknown, field: string, allowedHosts: readonly string[]
 	let parsed: URL;
 	try { parsed = new URL(value); } catch { throw new OpenideUpdateManifestError('invalid-url', `${field} no es una URL válida.`); }
 	if (parsed.protocol !== 'https:' || parsed.username || parsed.password || !allowedHosts.includes(parsed.hostname)) { throw new OpenideUpdateManifestError('untrusted-url', `${field} apunta a un host no confiable.`); }
-	const allowedPath = parsed.hostname === 'github.com' ? /^\/Niihuel\/openide\/(?:releases|blob)\// : parsed.hostname === 'raw.githubusercontent.com' ? /^\/Niihuel\/openide\/updates\// : /^\//;
+	const allowedPath = parsed.hostname === 'github.com' ? /^\/Niiihuel\/openide\/(?:releases|blob)\// : parsed.hostname === 'raw.githubusercontent.com' ? /^\/Niiihuel\/openide\/updates\// : /^\//;
 	if (!allowedPath.test(parsed.pathname)) { throw new OpenideUpdateManifestError('untrusted-url', `${field} está fuera de las rutas OpenIDE permitidas.`); }
 	return parsed.toString();
 }

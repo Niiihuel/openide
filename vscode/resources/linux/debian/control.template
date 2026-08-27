@@ -5,7 +5,7 @@ Depends: @@DEPENDS@@
 Recommends: @@RECOMMENDS@@
 Priority: optional
 Architecture: @@ARCHITECTURE@@
-Maintainer: OpenIDE Team https://github.com/Niihuel/openide/graphs/contributors
+Maintainer: OpenIDE Team https://github.com/Niiihuel/openide/graphs/contributors
 Homepage: https://openide.com/
 Installed-Size: @@INSTALLEDSIZE@@
 Provides: visual-studio-@@NAME@@
@@ -14,5 +14,5 @@ Replaces: visual-studio-@@NAME@@
 Description: Code editing. Redefined.
  OpenIDE is a new choice of tool that combines the simplicity of
  a code editor with what developers need for the core edit-build-debug cycle.
- See https://github.com/Niihuel/openide#download-install for installation
+ See https://github.com/Niiihuel/openide#download-install for installation
  instructions and FAQ.

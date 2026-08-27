@@ -2,9 +2,9 @@
 
 APP_NAME="${APP_NAME:-OpenIDE}"
 APP_NAME_LC="$( echo "${APP_NAME}" | awk '{print tolower($0)}' )"
-ASSETS_REPOSITORY="${ASSETS_REPOSITORY:-Niihuel/openide}"
+ASSETS_REPOSITORY="${ASSETS_REPOSITORY:-Niiihuel/openide}"
 BINARY_NAME="${BINARY_NAME:-openide}"
-GH_REPO_PATH="${GH_REPO_PATH:-Niihuel/openide}"
+GH_REPO_PATH="${GH_REPO_PATH:-Niiihuel/openide}"
 ORG_NAME="${ORG_NAME:-Nihuel Prieto Rellan}"
 TUNNEL_APP_NAME="${TUNNEL_APP_NAME:-"${BINARY_NAME}-tunnel"}"
 

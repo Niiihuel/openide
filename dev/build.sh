@@ -6,10 +6,10 @@
 ###
 
 export APP_NAME="OpenIDE"
-export ASSETS_REPOSITORY="Niihuel/openide"
+export ASSETS_REPOSITORY="Niiihuel/openide"
 export BINARY_NAME="openide"
 export CI_BUILD="no"
-export GH_REPO_PATH="Niihuel/openide"
+export GH_REPO_PATH="Niiihuel/openide"
 export ORG_NAME="Nihuel Prieto Rellan"
 export SHOULD_BUILD="yes"
 export SKIP_ASSETS="yes"
@@ -20,7 +20,7 @@ export VSCODE_SKIP_NODE_VERSION_CHECK="yes"
 while getopts ":iop" opt; do
   case "$opt" in
     i)
-      export ASSETS_REPOSITORY="Niihuel/openide"
+      export ASSETS_REPOSITORY="Niiihuel/openide"
       export BINARY_NAME="openide-insiders"
       export VSCODE_QUALITY="insider"
       ;;

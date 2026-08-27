@@ -15,7 +15,7 @@ suite('OpenIDE update manifest', () => {
 	const valid = () => ({
 		schemaVersion: 2, product: 'openide', channel: 'stable', platform: 'linux', architecture: 'x64', target: 'appimage',
 		productVersion: '1.121.2', buildVersion: 'a'.repeat(40), codeOssVersion: '1.121.0', publishedAt: '2026-07-22T00:00:00.000Z', minimumUpdaterVersion: 1,
-		artifact: { url: 'https://github.com/Niihuel/openide/releases/download/v1.121.2/OpenIDE.AppImage', size: 42, sha256: 'b'.repeat(64)  },
+		artifact: { url: 'https://github.com/Niiihuel/openide/releases/download/v1.121.2/OpenIDE.AppImage', size: 42, sha256: 'b'.repeat(64)  },
 	});
 
 	test('parses a valid platform-bound manifest', () => assert.strictEqual(parseOpenideUpdateManifest(valid(), context).productVersion, '1.121.2'));
