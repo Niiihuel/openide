@@ -1,6 +1,12 @@
+# Configuración de zizmor (auditoría de seguridad de los workflows).
+#
+# Las reglas se listan acá sólo cuando el hallazgo es un falso positivo PARA ESTE
+# repositorio y se puede explicar por qué. Un `ignore` sin motivo es una regla
+# apagada que nadie se anima a volver a prender.
 rules:
-  superfluous-actions:
+  artipacked:
     ignore:
-      # allows `svenstaro/upload-release-action` action
-      - publish-insider-linux.yml:482
-      - publish-stable-linux.yml:487
+      # `sync-codeoss` empuja la rama que abre el PR de actualización, así que
+      # necesita las credenciales de git en `.git/config`. Los demás checkouts
+      # del repositorio ya usan `persist-credentials: false`; éste no puede.
+      - sync-codeoss.yml
