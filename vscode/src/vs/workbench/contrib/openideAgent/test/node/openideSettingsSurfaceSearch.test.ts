@@ -23,13 +23,20 @@ import { openideSettingsSurfaceSearch } from '../../../openideSettings/browser/o
  */
 suite('OpenIDE settings surface search', () => {
 
-	const settingsRoot = path.join(__dirname, '..', '..', '..', 'openideSettings', 'browser');
+	// Contrato estático sobre el REPO: corre desde `out/` (ESM, sin `__dirname`) pero lee fuentes
+	// `.ts`, así que hay que volver a `src/`. Mismo idioma que `openideSettingsContract.test.ts`.
+	const sourceDir = import.meta.dirname.replace(`${path.sep}out${path.sep}`, `${path.sep}src${path.sep}`);
+	const settingsRoot = path.join(sourceDir, '..', '..', '..', 'openideSettings', 'browser');
 	const editorSource = fs.readFileSync(path.join(settingsRoot, 'openideSettingsEditor.ts'), 'utf8');
 
 	/** Categories with their own section registered in the editor. Since MCP and Providers
-	 *  migrated, no page remains in a webview, so this is the complete list. */
+	 *  migrated, no page remains in a webview, so this is the complete list.
+	 *
+	 *  El prefijo NO se fija a `openideAgent/`: cuando se agregó `workbench/language` esta regex
+	 *  dejó de verla y la declaró "no registrada", así que el test acusaba al índice de apuntar a
+	 *  una superficie muerta que en realidad existe. Cualquier `grupo/nombre` cuenta. */
 	function registeredCategories(): string[] {
-		return [...new Set([...editorSource.matchAll(/\[\s*'(openideAgent\/[a-zA-Z]+)'\s*,\s*Openide\w+Section\s*\]/g)].map(match => match[1]))];
+		return [...new Set([...editorSource.matchAll(/\[\s*'([a-zA-Z]+\/[a-zA-Z]+)'\s*,\s*Openide\w+Section\s*\]/g)].map(match => match[1]))];
 	}
 
 	test('every registered settings surface declares what it offers', () => {
@@ -48,7 +55,12 @@ suite('OpenIDE settings surface search', () => {
 	test('the search index stays free of UI imports', () => {
 		const source = fs.readFileSync(path.join(settingsRoot, 'openideSettingsSurfaceSearch.ts'), 'utf8');
 		const imports = [...source.matchAll(/^import .*from '([^']+)';$/gm)].map(match => match[1]);
-		assert.deepStrictEqual(imports, ['./openideSettingsSearch.js'], 'el índice sólo puede importar el tipo de entrada');
+		// Lo que el invariante protege es que el índice no dependa de la UI, que es como navegación
+		// y búsqueda se separaron la vez pasada. Un módulo de `common/` no es UI: es lógica pura
+		// que también corre sin workbench, y el índice necesita al menos el diccionario i18n para
+		// que sus títulos estén traducidos. La lista literal de antes prohibía eso por accidente.
+		const ui = imports.filter(specifier => !/(^\.\/openideSettingsSearch\.js$)|(\/common\/[\w.]+\.js$)/.test(specifier));
+		assert.deepStrictEqual(ui, [], 'el índice sólo puede importar el tipo de entrada y módulos de common/');
 	});
 
 	test('every entry carries keywords a user would actually type', () => {

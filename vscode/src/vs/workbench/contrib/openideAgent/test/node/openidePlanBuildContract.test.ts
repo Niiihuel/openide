@@ -26,8 +26,11 @@ import * as path from 'path';
  */
 suite('OpenIDE plan build contract', () => {
 
-	const chatView = fs.readFileSync(path.join(__dirname, '..', '..', 'browser', 'openideChatView.ts'), 'utf8');
-	const agentService = fs.readFileSync(path.join(__dirname, '..', '..', 'browser', 'openideAgentService.ts'), 'utf8');
+	// Contrato estático sobre el REPO: corre desde `out/` (ESM, sin `__dirname`) pero lee fuentes
+	// `.ts`, así que hay que volver a `src/`. Mismo idioma que `openideSettingsContract.test.ts`.
+	const sourceDir = import.meta.dirname.replace(`${path.sep}out${path.sep}`, `${path.sep}src${path.sep}`);
+	const chatView = fs.readFileSync(path.join(sourceDir, '..', '..', 'browser', 'openideChatView.ts'), 'utf8');
+	const agentService = fs.readFileSync(path.join(sourceDir, '..', '..', 'browser', 'openideAgentService.ts'), 'utf8');
 
 	test('el turno TERMINA al guardar el plan: la decisión es del usuario', () => {
 		// Without this cut the model received the plan_save result and kept working: it

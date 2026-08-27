@@ -22,7 +22,19 @@ import * as path from 'path';
  */
 suite('OpenIDE breadcrumb height', () => {
 
-	const editorRoot = path.join(__dirname, '..', '..', '..', '..', '..', 'browser', 'parts', 'editor');
+	// Dos cosas, y las dos rompían la carga del módulo — que en mocha aborta el runner entero y
+	// deja TODA la tanda de node sin correr, no solo esta prueba:
+	//
+	// 1. `import.meta.dirname`, no `__dirname`: el build emite ESM y `package.json` declara
+	//    `"type": "module"`, así que `__dirname` no existe.
+	// 2. Esta prueba es un contrato estático sobre el REPO, pero se ejecuta desde `out/`, donde no
+	//    hay archivos `.ts`. Hay que volver a `src/`, igual que `openideSettingsContract.test.ts`.
+	//
+	// La profundidad también estaba mal: desde `contrib/openideAgent/test/node` son cuatro saltos
+	// hasta `workbench/`, no cinco. Con cinco apuntaba a `vs/browser/parts/editor`, que no existe.
+	const compiledDir = import.meta.dirname;
+	const sourceDir = compiledDir.replace(`${path.sep}out${path.sep}`, `${path.sep}src${path.sep}`);
+	const editorRoot = path.join(sourceDir, '..', '..', '..', '..', 'browser', 'parts', 'editor');
 	const control = fs.readFileSync(path.join(editorRoot, 'breadcrumbsControl.ts'), 'utf8');
 	const css = fs.readFileSync(path.join(editorRoot, 'media', 'editortitlecontrol.css'), 'utf8');
 
