@@ -25,8 +25,13 @@ suite('OpenIDE browser cursor', () => {
 		assert.strictEqual(source.includes('import '), false);
 		assert.strictEqual(/\brequire\(/.test(source), false);
 		// The exported constants are repeated as literals in there on purpose.
-		assert.strictEqual(source.includes(`'${OPENIDE_CURSOR_HOST_ID}'`), true);
-		assert.strictEqual(source.includes(`'${OPENIDE_CURSOR_GLOBAL}'`), true);
+		//
+		// Matched WITHOUT the surrounding quotes. `source` is transpiled output, and the transpiler
+		// does not promise a quote style: the same string comes out `'...'` from one pass and
+		// `"..."` from the next, which made this whole file pass or fail depending on which build
+		// ran last. What is worth pinning is that the literal is inlined, not how it is quoted.
+		assert.strictEqual(source.includes(OPENIDE_CURSOR_HOST_ID), true);
+		assert.strictEqual(source.includes(OPENIDE_CURSOR_GLOBAL), true);
 	});
 
 	test('el script de instalación es una expresión evaluable', () => {
@@ -38,7 +43,7 @@ suite('OpenIDE browser cursor', () => {
 
 	test('no puede robar un click ni tapar la página', () => {
 		assert.strictEqual(source.includes('pointer-events:none'), true);
-		assert.strictEqual(source.includes("attachShadow({ mode: 'closed' })"), true);
+		assert.strictEqual(/attachShadow\(\{\s*mode:\s*['"]closed['"]\s*\}\)/.test(source), true);
 	});
 
 	test('sólo espeja entrada real, nunca eventos sintéticos de la página', () => {
@@ -53,7 +58,10 @@ suite('OpenIDE browser cursor', () => {
 		// any user hover over the preview would move the agent's cursor.
 		assert.strictEqual(source.includes('let engaged = false'), true);
 		assert.strictEqual((source.match(/!engaged/g) ?? []).length >= 2, true);
-		assert.strictEqual(source.includes('engage(on: boolean): void'), true);
+		// `engage(` and not `engage(on: boolean): void`: `source` is the runtime serialized with
+		// toString(), which is the TRANSPILED function — the type annotations are gone by then, so
+		// asserting on TypeScript syntax here could only ever fail.
+		assert.strictEqual(/\bengage\(/.test(source), true, 'no hay forma de encender el espejo');
 	});
 
 	test('expone las piezas que usan las tools', () => {
@@ -65,7 +73,7 @@ suite('OpenIDE browser cursor', () => {
 	test('el recuadro tampoco puede robar un click', () => {
 		// It is inside the same layer with pointer-events:none, but it declares it anyway: it is the
 		// element drawn RIGHT on top of the one about to be clicked.
-		assert.strictEqual(source.includes("'.box{position:absolute"), true);
+		assert.strictEqual(source.includes('.box{position:absolute'), true);
 		// The rule is split across two strings of the CSS array, so the match crosses quotes.
 		assert.strictEqual(/\.box\{[\s\S]{0,320}?pointer-events:none\}/.test(source), true);
 	});

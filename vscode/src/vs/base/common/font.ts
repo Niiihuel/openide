@@ -51,6 +51,7 @@ export const FONT = {
 };
 
 // Activity bar coefficients (base 16)
+const ACTIVITY_BAR_COEFF_16 = 16/16;
 const ACTIVITY_BAR_COEFF_24 = 24/16;
 const ACTIVITY_BAR_COEFF_32 = 32/16;
 const ACTIVITY_BAR_COEFF_36 = 36/16;
@@ -133,6 +134,11 @@ export function getFontSize(configurationService: IConfigurationService, key: st
 
 export function updateActivityBarSize(size: number): void {
 	FONT.activityBarSize = size;
+	// La variante compacta faltaba: quedaba clavada en su valor inicial de 16, así que subir el
+	// tamaño de la barra de actividad agrandaba los íconos normales y dejaba los compactos chicos.
+	// El coeficiente es 1 por definición (la compacta ES el tamaño base), pero se escribe igual que
+	// las otras para que la lista se lea como lo que es: una tabla completa, no cuatro de cinco.
+	FONT.activityBarSize16 = size * ACTIVITY_BAR_COEFF_16;
 	FONT.activityBarSize24 = size * ACTIVITY_BAR_COEFF_24;
 	FONT.activityBarSize32 = size * ACTIVITY_BAR_COEFF_32;
 	FONT.activityBarSize36 = size * ACTIVITY_BAR_COEFF_36;

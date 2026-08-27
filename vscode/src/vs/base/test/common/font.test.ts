@@ -319,13 +319,17 @@ suite('FONT - Tabs Size', () => {
 	});
 
 	test('proportional scaling preserves tab height/width ratios at 2x', () => {
+		// assertClose y no strictEqual: los coeficientes son fracciones (120/13 y compañía), así que
+		// el producto cae a un ulp del entero — 26 * (120/13) da 239.99999999999997. La proporción es
+		// lo que importa; exigir el entero exacto es exigir que la aritmética de punto flotante sea
+		// otra de la que es.
 		updateTabsSize(26);
 		assert.strictEqual(FONT.tabsSize, 26);
-		assert.strictEqual(FONT.tabsSize22, 44);
-		assert.strictEqual(FONT.tabsSize35, 70);
-		assert.strictEqual(FONT.tabsSize38, 76);
-		assert.strictEqual(FONT.tabsSize80, 160);
-		assert.strictEqual(FONT.tabsSize120, 240);
+		assertClose(FONT.tabsSize22, 44);
+		assertClose(FONT.tabsSize35, 70);
+		assertClose(FONT.tabsSize38, 76);
+		assertClose(FONT.tabsSize80, 160);
+		assertClose(FONT.tabsSize120, 240);
 	});
 
 	test('non-divisible size (7)', () => {
@@ -352,14 +356,15 @@ suite('FONT - Tabs Size', () => {
 	});
 
 	test('reset to default restores all values', () => {
+		// Mismo motivo que arriba: volver al default recorre las mismas fracciones.
 		updateTabsSize(20);
 		updateTabsSize(13);
 		assert.strictEqual(FONT.tabsSize, 13);
-		assert.strictEqual(FONT.tabsSize22, 22);
-		assert.strictEqual(FONT.tabsSize35, 35);
-		assert.strictEqual(FONT.tabsSize38, 38);
-		assert.strictEqual(FONT.tabsSize80, 80);
-		assert.strictEqual(FONT.tabsSize120, 120);
+		assertClose(FONT.tabsSize22, 22);
+		assertClose(FONT.tabsSize35, 35);
+		assertClose(FONT.tabsSize38, 38);
+		assertClose(FONT.tabsSize80, 80);
+		assertClose(FONT.tabsSize120, 120);
 	});
 });
 
