@@ -26,8 +26,9 @@ jobs:
           tag="$INPUT_TAG"; [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           gh release view "$tag" --json isDraft,isPrerelease --jq 'select(.isDraft == true and .isPrerelease == false)' >/dev/null
           assets=$(gh release view "$tag" --json assets --jq '[.assets[].name]')
-          # PLATFORM COUNT: mirrors the build matrix of release-openide.yml. macOS is out until the
-          # signing keychain is provisioned; add darwin-x64 and darwin-arm64 back together with it,
-          # or a release with no mac build would be promoted as if it were complete.
+          # PLATFORM COUNT: mirrors the build matrix of release-openide.yml — every row, whether or
+          # not it feeds the updater, because this checks what people can DOWNLOAD. macOS is out
+          # until the signing keychain is provisioned; add darwin-x64 and darwin-arm64 back
+          # together with it, or a release with no mac build gets promoted as if it were complete.
           for required in linux-x64 linux-arm64 win32-x64 win32-arm64; do jq -e --arg p "$required" 'any(.[]; contains($p))' <<<"$assets" >/dev/null; done
           gh release edit "$tag" --draft=false --latest

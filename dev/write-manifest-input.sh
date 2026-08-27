@@ -23,6 +23,10 @@ PLATFORM=$1 ARCH=$2 TARGET=$3
 # than a literal because the AppImage carries the tool's own version in the name.
 case "${PLATFORM}:${TARGET}" in
 	linux:appimage) PATTERN="assets/*.AppImage" ;;
+	# Built and downloadable, but not something the updater installs on Linux — see the `feed`
+	# column of the release matrix. Listed so an accidental call names the reason instead of
+	# falling into the catch-all below.
+	linux:archive)  echo 'Linux archives are not served by the updater; nothing to record.' >&2; exit 1 ;;
 	darwin:archive) PATTERN="assets/${APP_NAME}-darwin-${ARCH}-${RELEASE_VERSION}.zip" ;;
 	win32:user)     PATTERN="assets/${APP_NAME}UserSetup-${ARCH}-${RELEASE_VERSION}.exe" ;;
 	*) echo "No installable is defined for ${PLATFORM}/${TARGET}." >&2; exit 1 ;;
