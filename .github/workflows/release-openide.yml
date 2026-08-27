@@ -46,12 +46,35 @@ jobs:
         # the binary we then sign. In CI a cache is speed; here it is attack surface, and a release
         # is built once per version.
         with: { node-version-file: .nvmrc, package-manager-cache: false }
+      # Every secret the platform's signing script actually reads, checked BEFORE a two-hour build
+      # instead of after it. It used to check two of the five and name none of the missing ones, so
+      # a release died deep inside `codesign` with "Missing APPLE_TEAM_ID" after the whole compile.
       - name: Validate signing prerequisites
         shell: bash
+        env:
+          APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_PROFILE }}
+          WINDOWS_SIGNING_CERT: ${{ secrets.WINDOWS_SIGNING_CERT }}
+          WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
         run: |
-          test -n "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" || { echo 'Missing OPENIDE_UPDATE_PRIVATE_KEY'; exit 1; }
-          if [[ '${{ matrix.platform }}' == darwin ]]; then test -n '${{ secrets.APPLE_DEVELOPER_ID }}' || exit 1; fi
-          if [[ '${{ matrix.platform }}' == win32 ]]; then test -n '${{ secrets.WINDOWS_SIGNING_CERT }}' || exit 1; fi
+          set -euo pipefail
+          missing=()
+          [[ -n "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" ]] || missing+=(OPENIDE_UPDATE_PRIVATE_KEY)
+          if [[ '${{ matrix.platform }}' == darwin ]]; then
+            for name in APPLE_DEVELOPER_ID APPLE_TEAM_ID APPLE_NOTARY_PROFILE; do
+              [[ -n "${!name}" ]] || missing+=("$name")
+            done
+          fi
+          if [[ '${{ matrix.platform }}' == win32 ]]; then
+            for name in WINDOWS_SIGNING_CERT WINDOWS_SIGNING_PASSWORD; do
+              [[ -n "${!name}" ]] || missing+=("$name")
+            done
+          fi
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "Missing repository secrets for ${{ matrix.platform }}: ${missing[*]}" >&2
+            exit 1
+          fi
       - name: Materialize update signing key
         shell: bash
         run: printf '%s' "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" > "$RUNNER_TEMP/openide-update.pem" && chmod 600 "$RUNNER_TEMP/openide-update.pem"
@@ -69,8 +92,16 @@ jobs:
       - name: Record which asset the update feed points at
         shell: bash
         run: ./dev/write-manifest-input.sh '${{ matrix.platform }}' '${{ matrix.arch }}' '${{ matrix.target }}'
+      # The secrets have to reach the scripts. They did not: the step declared no `env`, so both
+      # signers aborted on their first `:?` guard with the build already done.
       - name: Native sign and notarize
         shell: bash
+        env:
+          APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_PROFILE }}
+          WINDOWS_SIGNING_CERT: ${{ secrets.WINDOWS_SIGNING_CERT }}
+          WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
         run: |
           if [[ '${{ matrix.platform }}' == darwin ]]; then ./dev/sign-macos.sh; fi
           if [[ '${{ matrix.platform }}' == win32 ]]; then ./dev/sign-windows.sh; fi
