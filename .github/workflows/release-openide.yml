@@ -107,9 +107,36 @@ jobs:
       - name: Install Linux dependencies
         if: matrix.platform == 'linux'
         run: sudo apt-get update -y && sudo apt-get install -y libkrb5-dev
+
+      # Two Linux runners died mid-build with no logs uploaded — the shape of a runner that ran out
+      # of room, not of a build that failed. A GitHub runner starts with ~14 GB free, and this job
+      # produces out-build, out-vscode, out-vscode-min, the REH bundles, the packaged app and then
+      # a deb, an rpm and an AppImage on top. The images ship ~30 GB of toolchains this build never
+      # touches, so reclaiming them is free headroom.
+      - name: Free disk space
+        if: matrix.platform == 'linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean || true
+          df -h /
+
+      # Printed before AND after: if a runner dies again, the numbers say whether it was running out
+      # of room, and how fast. Guessing at that costs a 45-minute build per guess.
+      - name: Resources before build
+        shell: bash
+        run: |
+          df -h . || true
+          if command -v free >/dev/null 2>&1; then free -h; fi
       - name: Build canonical product
         shell: bash
         run: ./dev/build.sh
+      - name: Resources after build
+        if: always()
+        shell: bash
+        run: |
+          df -h . || true
+          if command -v free >/dev/null 2>&1; then free -h; fi
+
       - name: Package release assets
         shell: bash
         env: { SKIP_ASSETS: 'no' }
