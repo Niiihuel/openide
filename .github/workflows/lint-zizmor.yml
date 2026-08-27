@@ -34,3 +34,12 @@ jobs:
 
       - name: Run zizmor
         uses: zizmorcore/zizmor-action@b1d7e1fb5de872772f31590499237e7cce841e8e # v0.5.3
+        with:
+          # Sin subir SARIF: la acción por defecto publica los hallazgos en code
+          # scanning, y eso en un repositorio PRIVADO exige GitHub Advanced
+          # Security. Sin ese plan la subida falla con "Resource not accessible
+          # by integration" y tumba el job aunque zizmor no haya encontrado
+          # nada — un lint que reprueba por dónde publica su informe, no por lo
+          # que dice. Los hallazgos van al log y el job falla si los hay.
+          # Cuando el repositorio pase a público, volver a activarlo.
+          advanced-security: false
