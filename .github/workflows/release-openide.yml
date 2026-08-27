@@ -158,13 +158,66 @@ jobs:
           swapon --show
           free -h
 
+      # The Windows half of the same problem. It fails at the identical point -- the line after the
+      # last `Bundled entry point` -- but reports it properly instead of dying silently:
+      #
+      #   'vscode-min-prepack' errored after 11 min
+      #   Error: The service was stopped   at esbuild/lib/main.js
+      #
+      # "The service was stopped" is esbuild's child process being killed. Same cause as Linux, same
+      # instant, better error: on Linux the kernel took the runner agent with it, so there was
+      # nothing left to write a message.
+      #
+      # Windows has no swapfile to add; the equivalent is the pagefile, which is system-managed and
+      # grows only as fast as the pressure that is already killing the build. Setting an explicit
+      # floor means the room is there before it is needed rather than after.
+      #
+      # Kept non-fatal on purpose. Some size changes only take effect after a reboot, which a runner
+      # cannot do mid-job, so this is an attempt that helps when it lands -- not a step worth failing
+      # a 40-minute build over. The instrumentation below reports what actually took effect.
+      - name: Enlarge pagefile
+        if: matrix.platform == 'win32'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          try {
+            $cs = Get-CimInstance Win32_ComputerSystem
+            if ($cs.AutomaticManagedPagefile) {
+              Set-CimInstance -InputObject $cs -Property @{ AutomaticManagedPagefile = $false }
+            }
+            $setting = Get-CimInstance Win32_PageFileSetting -ErrorAction SilentlyContinue
+            if ($setting) {
+              Set-CimInstance -InputObject $setting -Property @{ InitialSize = 16384; MaximumSize = 16384 }
+            } else {
+              New-CimInstance -ClassName Win32_PageFileSetting -Property @{ Name = 'C:\pagefile.sys'; InitialSize = 16384; MaximumSize = 16384 }
+            }
+            Get-CimInstance Win32_PageFileSetting | Format-List Name, InitialSize, MaximumSize
+          } catch {
+            Write-Host "Could not resize the pagefile: $_"
+          }
+          exit 0
+
       # Printed before AND after: if a runner dies again, the numbers say whether it was running out
       # of room, and how fast. Guessing at that costs a 45-minute build per guess.
       - name: Resources before build
         shell: bash
         run: |
           df -h . || true
-          if command -v free >/dev/null 2>&1; then free -h; fi
+          # `free` does not exist on the Windows runners, so this step reported nothing at all there
+          # -- which is how three Windows builds were diagnosed with no memory numbers to look at.
+          if command -v free >/dev/null 2>&1; then
+            free -h
+            swapon --show || true
+          elif command -v powershell >/dev/null 2>&1; then
+            powershell -NoProfile -Command '
+              $os = Get-CimInstance Win32_OperatingSystem
+              "RAM total : {0:N1} GB" -f ($os.TotalVisibleMemorySize / 1MB)
+              "RAM free  : {0:N1} GB" -f ($os.FreePhysicalMemory / 1MB)
+              "Commit max: {0:N1} GB" -f ($os.TotalVirtualMemorySize / 1MB)
+              Get-CimInstance Win32_PageFileUsage |
+                ForEach-Object { "Pagefile  : {0} ({1} MB allocated, {2} MB peak)" -f $_.Name, $_.AllocatedBaseSize, $_.PeakUsage }
+            ' || true
+          fi
       - name: Build canonical product
         shell: bash
         run: ./dev/build.sh
@@ -173,7 +226,21 @@ jobs:
         shell: bash
         run: |
           df -h . || true
-          if command -v free >/dev/null 2>&1; then free -h; fi
+          # `free` does not exist on the Windows runners, so this step reported nothing at all there
+          # -- which is how three Windows builds were diagnosed with no memory numbers to look at.
+          if command -v free >/dev/null 2>&1; then
+            free -h
+            swapon --show || true
+          elif command -v powershell >/dev/null 2>&1; then
+            powershell -NoProfile -Command '
+              $os = Get-CimInstance Win32_OperatingSystem
+              "RAM total : {0:N1} GB" -f ($os.TotalVisibleMemorySize / 1MB)
+              "RAM free  : {0:N1} GB" -f ($os.FreePhysicalMemory / 1MB)
+              "Commit max: {0:N1} GB" -f ($os.TotalVirtualMemorySize / 1MB)
+              Get-CimInstance Win32_PageFileUsage |
+                ForEach-Object { "Pagefile  : {0} ({1} MB allocated, {2} MB peak)" -f $_.Name, $_.AllocatedBaseSize, $_.PeakUsage }
+            ' || true
+          fi
 
       - name: Package release assets
         shell: bash
