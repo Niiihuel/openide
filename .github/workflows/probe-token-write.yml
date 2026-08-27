@@ -1,0 +1,24 @@
+name: Probe token write access
+
+# Temporary: proves the release job will be able to push the signed update feed to the `updates`
+# branch. Nothing is created — `git push --dry-run` still authenticates, so a success here means
+# the token really has write access, and a failure means it does not.
+on:
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Dry-run push
+        run: |
+          set -euo pipefail
+          git config user.name openide-bot
+          git config user.email openide-bot@users.noreply.github.com
+          git push --dry-run origin "HEAD:refs/heads/probe-token-write-check"
+          echo "OK: the workflow token can write to this repository."
