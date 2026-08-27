@@ -202,7 +202,11 @@ export function compactExploreDetail(meta: IOpenideToolMeta, detail: string): st
 }
 
 function resultLineCount(result: string): number {
-	const value = String(result ?? '').replace(/\n?…\(truncado\)$/, '');
+	// `…` and not a literal `…`: esbuild rewrites non-ASCII inside STRINGS to escapes, but not
+	// inside regex literals, so this one character survived into the minified bundle and the release
+	// build refused it — VS Code forbids non-ASCII in minified output because it slows loading. The
+	// check only runs in `vscode-min-prepack`, so `npm run compile` never saw it.
+	const value = String(result ?? '').replace(/\n?\u2026\(truncado\)$/, '');
 	return value ? value.split(/\r?\n/).length : 0;
 }
 

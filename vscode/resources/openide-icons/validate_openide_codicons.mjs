@@ -166,8 +166,14 @@ const privateOverrides = Object.entries(overrides.glyphs)
 const declaredPrivateIcons = productIcons.map(icon => `${icon.id}:${icon.codepoint}`).sort();
 assert.deepEqual(privateOverrides, declaredPrivateIcons, 'private font overrides and runtime product icons differ');
 
+// Line endings normalized on both sides. `.gitattributes` declares `* text=auto`, so on Windows
+// this file is checked out with CRLF while the generator always emits LF: a byte-for-byte compare
+// then fails on a Windows runner while passing on Linux, reporting "stale" about a file whose
+// content is identical. What this assertion is for is the CONTENT being regenerated, not the
+// terminators the checkout chose.
+const normalizeEol = text => text.replace(/\r\n/g, '\n');
 const webviewCss = fs.readFileSync(path.join(root, 'resources/openide-icons/codicon-webview.css'), 'utf8');
-assert.equal(webviewCss, buildWebviewCodiconCss(), 'codicon-webview.css is stale');
+assert.equal(normalizeEol(webviewCss), normalizeEol(buildWebviewCodiconCss()), 'codicon-webview.css is stale');
 // Something has to actually consume the `filled` variant, or FontForge drops it silently and the
 // composer's mode chip is left with the outline glyph. It used to live in `openideChatHtml.ts`,
 // which disappeared when the chat moved to native DOM; the consumer is the composer now. The
