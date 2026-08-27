@@ -22,16 +22,16 @@ import * as path from 'path';
  */
 suite('OpenIDE breadcrumb height', () => {
 
-	// Dos cosas, y las dos rompían la carga del módulo — que en mocha aborta el runner entero y
-	// deja TODA la tanda de node sin correr, no solo esta prueba:
+	// Two things, and both broke module LOADING — which in mocha aborts the whole runner and
+	// leaves the entire node suite unexecuted, not just this test:
 	//
-	// 1. `import.meta.dirname`, no `__dirname`: el build emite ESM y `package.json` declara
-	//    `"type": "module"`, así que `__dirname` no existe.
-	// 2. Esta prueba es un contrato estático sobre el REPO, pero se ejecuta desde `out/`, donde no
-	//    hay archivos `.ts`. Hay que volver a `src/`, igual que `openideSettingsContract.test.ts`.
+	// 1. `import.meta.dirname`, not `__dirname`: the build emits ESM and `package.json` declares
+	//    `"type": "module"`, so `__dirname` does not exist.
+	// 2. This is a static contract over the REPO, but it runs from `out/`, where no `.ts` files
+	//    live. It has to map back to `src/`, like `openideSettingsContract.test.ts` does.
 	//
-	// La profundidad también estaba mal: desde `contrib/openideAgent/test/node` son cuatro saltos
-	// hasta `workbench/`, no cinco. Con cinco apuntaba a `vs/browser/parts/editor`, que no existe.
+	// The depth was wrong too: from `contrib/openideAgent/test/node` it is four hops up to
+	// `workbench/`, not five. Five pointed at `vs/browser/parts/editor`, which does not exist.
 	const compiledDir = import.meta.dirname;
 	const sourceDir = compiledDir.replace(`${path.sep}out${path.sep}`, `${path.sep}src${path.sep}`);
 	const editorRoot = path.join(sourceDir, '..', '..', '..', '..', 'browser', 'parts', 'editor');

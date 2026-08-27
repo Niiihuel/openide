@@ -79,10 +79,10 @@ suite('OpenIDE chat rollback', () => {
 		});
 
 		assert.strictEqual(outcome.committed, true);
-		// El turno objetivo y todo lo posterior desaparecen; lo anterior queda intacto.
+		// The target turn and everything after it go; everything before stays untouched.
 		assert.deepStrictEqual(messages.map(message => message.messageId), ['u1', 'a1']);
 		assert.deepStrictEqual(outcome.removedMessageIds, ['u2', 'a2']);
-		// Una sola vez: un save duplicado deja el transcript parpadeando y puede pisar un turno nuevo.
+		// Exactly once: a duplicate save makes the transcript flicker and can clobber a fresh turn.
 		assert.strictEqual(calls.saved.length, 1);
 		assert.deepStrictEqual(calls.saved[0], { id: 'c1', count: 2, hasError: false });
 		assert.deepStrictEqual(calls.removed, [{ id: 'c1', messageIds: ['u2', 'a2'] }]);
@@ -90,8 +90,8 @@ suite('OpenIDE chat rollback', () => {
 	});
 
 	test('the composer comes back with the rolled-back turn, not a neighbour turn', async () => {
-		// El turno anterior corrió con OTRO provider, modelo y modo. Ese es justo el error que el
-		// gate vigila: restaurar el texto correcto pero heredar los ajustes del turno equivocado.
+		// The previous turn ran with a DIFFERENT provider, model and mode. That is exactly the bug
+		// the gate watches for: restoring the right text but inheriting the wrong turn's settings.
 		const target = userMessage('u2', {
 			displayText: 'lo que el usuario escribió',
 			content: 'lo que el usuario escribió\n\n<context>ruido</context>',
@@ -114,8 +114,8 @@ suite('OpenIDE chat rollback', () => {
 			restoreComposer: true, drainRun: async () => { },
 		});
 
-		// `displayText` y no `content`: el composer recibe lo que la persona tipeó, sin el contexto
-		// que el motor le había anexado.
+		// `displayText`, not `content`: the composer gets what the person typed, without the context
+		// the engine had appended to it.
 		assert.strictEqual(outcome.composer?.text, 'lo que el usuario escribió');
 		assert.strictEqual(outcome.composer?.images?.length, 1);
 		assert.strictEqual(outcome.composer?.capabilities?.length, 1);
@@ -151,13 +151,13 @@ suite('OpenIDE chat rollback', () => {
 			restoreComposer: false, drainRun: async () => { },
 		});
 
-		// Segundo intento forzando los no conflictivos: revertir lo que se pueda es mejor que nada.
+		// A second attempt forcing the non-conflicting ones: reverting what it can beats nothing.
 		assert.deepStrictEqual(attempts, [false, true]);
-		// Navegar la historia SIEMPRE funciona, aunque el workspace no se pueda dejar igual.
+		// Navigating history ALWAYS works, even when the workspace cannot be put back exactly.
 		assert.strictEqual(outcome.committed, true);
 		assert.deepStrictEqual(messages.map(message => message.messageId), ['u1']);
 		assert.strictEqual(calls.saved.length, 1);
-		// Y el conflicto se dice, con los archivos que quedaron fuera de sincronía.
+		// And the conflict is stated, naming the files left out of sync.
 		assert.strictEqual(typeof outcome.warning, 'string');
 		assert.strictEqual(outcome.warning?.includes('file:///a.ts'), true);
 		assert.strictEqual(outcome.warning?.includes('file:///b.ts'), false, 'un archivo revertido no es un conflicto');
@@ -196,9 +196,9 @@ suite('OpenIDE chat rollback', () => {
 	});
 
 	test('a turn admitted before the barrier went up aborts the rollback', async () => {
-		// El caso de carrera que el comentario del módulo describe: `drainRun` espera, y mientras
-		// tanto un turno que ya había sido admitido se agrega adelante y corre el índice. Cortar
-		// igual se llevaría puesto un mensaje que el usuario nunca pidió borrar.
+		// The race the module's own comment describes: `drainRun` waits, and meanwhile a turn that
+		// had already been admitted is appended ahead and shifts the index. Cutting anyway would take
+		// down a message the user never asked to delete.
 		const messages = [userMessage('u1'), userMessage('u2')];
 		const { sessions, calls } = fakeSessions(messages);
 		const { agentService } = fakeAgentService([]);

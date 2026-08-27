@@ -97,8 +97,8 @@ const STRINGS = {
 	'projectMap.analyzing': { es: 'El agente está analizando…', en: 'The agent is analyzing…' },
 	'projectMap.analysis': { es: 'Análisis del agente', en: 'Agent analysis' },
 	'projectMap.analyzePrompt': { es: 'Analizá el nodo {0} ({1}) y sus relaciones de arquitectura, callers, callees, dependencias y tests relacionados.', en: 'Analyse node {0} ({1}) and its architecture relations, callers, callees, dependencies and related tests.' },
-	// Cards del mapa: el head es el toggle, así que el tooltip del chevron es genérico salvo que el
-	// panel diga el suyo.
+	// Project Map cards: the head itself is the toggle, so the chevron's tooltip is generic
+	// unless a panel supplies its own.
 	'projectMap.card.collapse': { es: 'Compactar', en: 'Collapse' },
 	'projectMap.card.expand': { es: 'Expandir', en: 'Expand' },
 	'projectMap.scope': { es: 'Alcance', en: 'Scope' },
@@ -126,7 +126,7 @@ const STRINGS = {
 	'projectMap.zoomIn': { es: 'Acercar', en: 'Zoom in' },
 	'projectMap.zoomOut': { es: 'Alejar', en: 'Zoom out' },
 	'projectMap.fit': { es: 'Ajustar a la vista', en: 'Fit to view' },
-	// Etiquetas de relación: eran un mapa solo en español dentro del editor.
+	// Relation labels: these used to be a Spanish-only map inside the editor.
 	'projectMap.rel.IMPORTS': { es: 'importa', en: 'imports' },
 	'projectMap.rel.EXPORTS': { es: 'exporta', en: 'exports' },
 	'projectMap.rel.DEPENDS_ON': { es: 'depende de', en: 'depends on' },

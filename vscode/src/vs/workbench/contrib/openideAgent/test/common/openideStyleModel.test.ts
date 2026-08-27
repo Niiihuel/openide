@@ -75,7 +75,7 @@ suite('OpenIDE style model', () => {
 		assert.strictEqual(parsed.get('font-size'), '14px');
 		assert.strictEqual(parsed.has('sin-dos-puntos'), false);
 		assert.strictEqual(parsed.size, 3);
-		// Nunca tira, ni con basura ni con vacío.
+		// It never throws, on garbage or on empty.
 		assert.strictEqual(parseComputedStyles('').size, 0);
 	});
 
@@ -84,9 +84,9 @@ suite('OpenIDE style model', () => {
 		assert.deepStrictEqual(parseLength('1.5rem'), { amount: 1.5, unit: 'rem' });
 		assert.deepStrictEqual(parseLength('-4px'), { amount: -4, unit: 'px' });
 		assert.deepStrictEqual(parseLength('50%'), { amount: 50, unit: '%' });
-		// Un número pelado es px, que es lo que el usuario quiere decir al tipear "8".
+		// A bare number means px, which is what the user means when they type "8".
 		assert.deepStrictEqual(parseLength('8'), { amount: 8, unit: 'px' });
-		// Keywords NO son longitudes: convertirlas en 0 destruiría el valor.
+		// Keywords are NOT lengths: turning them into 0 would destroy the value.
 		assert.strictEqual(parseLength('auto'), undefined);
 		assert.strictEqual(parseLength('normal'), undefined);
 		assert.strictEqual(parseLength('calc(100% - 4px)'), undefined);
@@ -109,7 +109,7 @@ suite('OpenIDE style model', () => {
 		assert.strictEqual(styleDiffCss(original, edited), 'padding-top: 16px');
 		assert.strictEqual(hasStyleEdits(original, edited), true);
 
-		// Una propiedad nueva (no estaba en el computado) también es un cambio.
+		// A new property (absent from the computed set) is a change too.
 		edited.set('gap', '4px');
 		assert.strictEqual(styleDiffCss(original, edited), 'padding-top: 16px; gap: 4px');
 	});
@@ -117,15 +117,15 @@ suite('OpenIDE style model', () => {
 	test('styleDiffCss ignores whitespace-only differences and empty values', () => {
 		const original = parseComputedStyles('color: rgb(255, 0, 0);');
 		const edited = new Map(original);
-		// Mismo color, otro espaciado: NO es una edición.
+		// Same colour, different spacing: NOT an edit.
 		edited.set('color', 'rgb(255,0,0)');
 		assert.strictEqual(styleDiffCss(original, edited), '');
 		edited.set('color', 'RGB(255, 0, 0)');
 		assert.strictEqual(styleDiffCss(original, edited), '');
-		// Vaciar un campo no debe emitir una declaración rota.
+		// Emptying a field must not emit a broken declaration.
 		edited.set('color', '   ');
 		assert.strictEqual(styleDiffCss(original, edited), '');
-		// Un color realmente distinto sí.
+		// A genuinely different colour does.
 		edited.set('color', 'rgb(0, 0, 255)');
 		assert.strictEqual(styleDiffCss(original, edited), 'color: rgb(0, 0, 255)');
 	});

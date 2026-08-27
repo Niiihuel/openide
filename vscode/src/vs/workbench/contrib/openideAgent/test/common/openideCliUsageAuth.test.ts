@@ -48,7 +48,7 @@ suite('OpenIDE CLI usage credential stores', () => {
 			claudeAiOauth: { accessToken: 'sk-ant-oat-x', refreshToken: 'sk-ant-ort-y', expiresAt: 1_756_000_000_000, scopes: ['user:inference'], subscriptionType: 'max' },
 		}));
 		assert.deepStrictEqual(parsed, { token: 'sk-ant-oat-x', expiresAt: 1_756_000_000_000, refreshToken: 'sk-ant-ort-y', plan: 'max' });
-		// Sin accessToken no hay cuenta, aunque el resto esté.
+		// No accessToken, no account — even when everything else is there.
 		assert.strictEqual(parseClaudeCliCredentials(JSON.stringify({ claudeAiOauth: { refreshToken: 'r' } })), undefined);
 	});
 
@@ -58,7 +58,7 @@ suite('OpenIDE CLI usage credential stores', () => {
 		assert.strictEqual(parsed?.token, token);
 		assert.strictEqual(parsed?.expiresAt, 1_756_000_000_000);
 		assert.strictEqual(parsed?.refreshToken, 'rt');
-		// Un access_token opaco (sin exp legible) queda sin expiry: el 401 decide.
+		// An opaque access_token (no readable exp) gets no expiry: the 401 decides.
 		const opaque = parseCodexCliAuth(JSON.stringify({ tokens: { access_token: 'opaco' } }));
 		assert.strictEqual(opaque?.expiresAt, null);
 	});
@@ -75,13 +75,13 @@ suite('OpenIDE CLI usage credential stores', () => {
 			'https://auth.x.ai': { key: 'preferido', expires_at: fresh },
 		}));
 		assert.strictEqual(both?.token, 'preferido');
-		// Un preferido vencido gana igual sobre el alterno (la fila dice la verdad: expirado).
+		// An expired preferred entry still beats the alternate one (the row tells the truth: expired).
 		const expiredPreferred = parseGrokCliAuth(JSON.stringify({
 			'https://otro.issuer': { key: 'alterno', expires_at: fresh },
 			'https://auth.x.ai::team': { key: 'preferido-vencido', expires_at: new Date(Date.now() - 1000).toISOString() },
 		}));
 		assert.strictEqual(expiredPreferred?.token, 'preferido-vencido');
-		// El alterno solo cuenta cuando NO existe ninguna entrada del issuer por defecto.
+		// The alternate only counts when NO entry of the default issuer exists at all.
 		const fallbackOnly = parseGrokCliAuth(JSON.stringify({ 'https://otro.issuer': { key: 'alterno' } }));
 		assert.strictEqual(fallbackOnly?.token, 'alterno');
 		const emptyPreferred = parseGrokCliAuth(JSON.stringify({ 'https://auth.x.ai': {}, 'https://otro.issuer': { key: 'alterno' } }));

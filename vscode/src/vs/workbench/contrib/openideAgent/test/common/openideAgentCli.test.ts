@@ -112,8 +112,8 @@ suite('OpenIDE CLI sessions — catálogo, resume, estado y agrupación', () => 
 		});
 
 		test('en Windows habla cmd, no sh', () => {
-			// El shell de login lo elige el sistema: main lo corre por ComSpec, y cmd encadena con
-			// `&`, no con `;`. Mandarle sintaxis de sh devuelve cero binarios sin decir por qué.
+			// The system picks the login shell: main runs it through ComSpec, and cmd chains with
+			// `&`, not `;`. Handing it sh syntax returns zero binaries without saying why.
 			const probe = buildExecutableProbe(['claude'], true);
 			assert.ok(probe.includes('where claude'));
 			assert.equal(probe.includes('command -v'), false);

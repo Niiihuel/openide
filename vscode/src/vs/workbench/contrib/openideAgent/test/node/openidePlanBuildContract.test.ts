@@ -26,8 +26,8 @@ import * as path from 'path';
  */
 suite('OpenIDE plan build contract', () => {
 
-	// Contrato estático sobre el REPO: corre desde `out/` (ESM, sin `__dirname`) pero lee fuentes
-	// `.ts`, así que hay que volver a `src/`. Mismo idioma que `openideSettingsContract.test.ts`.
+	// A static contract over the REPO: it runs from `out/` (ESM, no `__dirname`) but reads `.ts`
+	// sources, so it has to map back to `src/`. Same idiom as `openideSettingsContract.test.ts`.
 	const sourceDir = import.meta.dirname.replace(`${path.sep}out${path.sep}`, `${path.sep}src${path.sep}`);
 	const chatView = fs.readFileSync(path.join(sourceDir, '..', '..', 'browser', 'openideChatView.ts'), 'utf8');
 	const agentService = fs.readFileSync(path.join(sourceDir, '..', '..', 'browser', 'openideAgentService.ts'), 'utf8');
