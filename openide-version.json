@@ -1,17 +1,17 @@
 {
-  "schemaVersion": 2,
-  "version": "1.121.1",
-  "channel": "stable",
-  "updater": {
-    "schemaVersion": 2,
-    "minimumUpdaterVersion": 1,
-    "manifestBaseUrl": "https://raw.githubusercontent.com/Niiihuel/openide/updates",
-    "releaseBaseUrl": "https://github.com/Niiihuel/openide/releases",
-    "keyId": "openide-release-2026-01",
-    "publicKey": "MCowBQYDK2VwAyEACT6LDWJj7B/A3bA7l5thvgAeCCcdkfTFcrR7R/Y6GD8="
-  },
-  "codeOss": {
-    "version": "1.121.0",
-    "commit": "987c9597516278c9fcf10d963a0592ce1384ab93"
-  }
+	"schemaVersion": 2,
+	"version": "1.121.1",
+	"channel": "stable",
+	"updater": {
+		"schemaVersion": 2,
+		"minimumUpdaterVersion": 1,
+		"manifestBaseUrl": "https://raw.githubusercontent.com/Niiihuel/openide/updates",
+		"releaseBaseUrl": "https://github.com/Niiihuel/openide/releases",
+		"keyId": "openide-release-2026-08",
+		"publicKey": "MCowBQYDK2VwAyEAncmywsS7Ph9n1QHN7NIYLa1CLuemUjrN6asibvMS4ys="
+	},
+	"codeOss": {
+		"version": "1.121.0",
+		"commit": "987c9597516278c9fcf10d963a0592ce1384ab93"
+	}
 }
