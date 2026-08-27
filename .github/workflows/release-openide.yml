@@ -126,6 +126,38 @@ jobs:
           sudo apt-get clean || true
           df -h /
 
+      # Both Linux builds die in the same place -- the last line of `bundle-vscode`, the peak of the
+      # whole build -- and neither dies reliably: arm64 failed two runs out of three, x64 one out of
+      # two, with no error, just "The runner has received a shutdown signal". That is the shape of
+      # the kernel killing the runner agent to reclaim memory, and it is a coin flip because 7.7 GB
+      # is right at the edge of what this build needs at that instant.
+      #
+      # Lowering Node's heap ceiling did not help: the pressure is the whole gulp process tree plus
+      # page cache, not one process overshooting its own limit.
+      #
+      # Swap does not make the build faster -- it makes the peak survivable, trading a few slow
+      # minutes for not losing a 40-minute job. The image ships 3 GB of it; this adds 12 GB on /mnt,
+      # which is the large scratch disk and has the room to spare.
+      #
+      # The real fix is a bigger runner: GitHub gives private repositories 7 GB and public ones 16.
+      # This is what makes the private build finish in the meantime.
+      - name: Enlarge swap
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SWAPFILE=/mnt/openide-swap
+          [[ -d /mnt ]] || SWAPFILE=/openide-swap
+          sudo rm -f "${SWAPFILE}"
+          # Added alongside the image's own swap rather than replacing it -- `swapoff -a` first would
+          # only shrink what is available if this step then failed.
+          sudo fallocate -l 12G "${SWAPFILE}"
+          sudo chmod 600 "${SWAPFILE}"
+          sudo mkswap "${SWAPFILE}"
+          sudo swapon "${SWAPFILE}"
+          swapon --show
+          free -h
+
       # Printed before AND after: if a runner dies again, the numbers say whether it was running out
       # of room, and how fast. Guessing at that costs a 45-minute build per guess.
       - name: Resources before build

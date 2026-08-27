@@ -17,12 +17,45 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(jq -er '.version' "${ROOT_DIR}/openide-version.json")"
-APPIMAGE="${ROOT_DIR}/assets/OpenIDE-${VERSION}-x86_64.AppImage"
 
-if [[ ! -x "${APPIMAGE}" ]]; then
-	echo "Falta ${APPIMAGE}. Generá primero:  bash dev/build-appimage.sh" >&2
+# The AppImage goes by two names depending on who built it, and only one was accepted. A local
+# build produces `OpenIDE-<version>-x86_64.AppImage`; CI puts the glibc it linked against in the
+# middle of the name -- `OpenIDE-1.121.1.glibc2.34-x86_64.AppImage` -- because that is part of which
+# systems the binary can run on. So an AppImage downloaded from a release could not be installed
+# with this script, which is exactly when someone reaches for it.
+#
+# Exactly one candidate is allowed. Picking the alphabetically first of several would install some
+# arbitrary version, and installing the wrong one silently is worse than refusing.
+APPIMAGE=""
+CANDIDATES=()
+shopt -s nullglob
+# Filtered on existence rather than relying on nullglob alone: the first pattern has no wildcards,
+# and a literal path joins the array whether or not the file is there.
+for candidate in \
+	"${ROOT_DIR}/assets/OpenIDE-${VERSION}-x86_64.AppImage" \
+	"${ROOT_DIR}/assets/OpenIDE-${VERSION}."*"-x86_64.AppImage"
+do
+	[[ -f "${candidate}" ]] && CANDIDATES+=( "${candidate}" )
+done
+shopt -u nullglob
+
+if [[ ${#CANDIDATES[@]} -eq 1 ]]; then
+	APPIMAGE="${CANDIDATES[0]}"
+elif [[ ${#CANDIDATES[@]} -gt 1 ]]; then
+	echo "More than one ${VERSION} AppImage in assets/; refusing to guess:" >&2
+	printf '  %s\n' "${CANDIDATES[@]}" >&2
+	echo "Leave exactly one and run again." >&2
 	exit 1
 fi
+
+if [[ -z "${APPIMAGE}" || ! -x "${APPIMAGE}" ]]; then
+	echo "No executable ${VERSION} AppImage found in ${ROOT_DIR}/assets/." >&2
+	echo "Build one with:  bash dev/build-appimage.sh" >&2
+	echo "Or drop one from a release into assets/ and chmod +x it." >&2
+	exit 1
+fi
+
+echo "Installing ${APPIMAGE##*/}"
 
 APPIMAGE_RUN="$(command -v appimage-run || true)"
 if [[ -z "${APPIMAGE_RUN}" ]]; then
