@@ -69,10 +69,14 @@ jobs:
       # what the CSS paints measure the same, and that a plan Build cannot start on top of a live
       # run. They were left out of CI when they were added: all four were broken with nothing
       # saying so, and two of them were hiding real problems.
+      # `--timeout 30000` rather than the 10s the rest use: these walk and read the ~7,600 sources
+      # under `vscode/src`, so their cost is disk, not compute. On the runner's cold disk they
+      # grazed the limit and failed on timeout — which reads as a flake and gets re-run instead of
+      # read. The suite takes under a second on a warm disk; the margin is for the cold start.
       - name: Test OpenIDE repository contracts
         working-directory: vscode
         run: >-
-          ./node_modules/.bin/mocha --ui tdd --timeout 10000 --exit
+          ./node_modules/.bin/mocha --ui tdd --timeout 30000 --exit
           out/vs/workbench/contrib/openideAgent/test/node/*.test.js
 
       - name: Install Chromium for browser tests

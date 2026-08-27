@@ -41,6 +41,20 @@ suite('OpenIDE settings contract', () => {
 		return out;
 	}
 
+	/**
+	 * The whole tree, walked and read ONCE.
+	 *
+	 * Both tests below need every `.ts` under `src/vs` — about 7,600 files. Doing that per test read
+	 * the tree twice and pushed the suite against mocha's 10s timeout: it passed on a warm local
+	 * disk and timed out on CI, which is the worst shape a test can have, because the failure looks
+	 * like a flake and gets re-run instead of read.
+	 */
+	let cachedSources: { file: string; text: string }[] | undefined;
+	function allSources(): { file: string; text: string }[] {
+		cachedSources ??= readAllSources(sourceRoot).map(file => ({ file, text: fs.readFileSync(file, 'utf8') }));
+		return cachedSources;
+	}
+
 	function declaredSettings(): { key: string; def: string }[] {
 		const contribution = fs.readFileSync(path.join(contribRoot, 'openideAgent.contribution.ts'), 'utf8');
 		const settings: { key: string; def: string }[] = [];
@@ -57,9 +71,9 @@ suite('OpenIDE settings contract', () => {
 	test('every declared setting is read somewhere', () => {
 		const settings = declaredSettings();
 		assert.strictEqual(settings.length > 0, true, 'el escaneo del schema no encontró settings');
-		const sources = readAllSources(sourceRoot)
-			.filter(file => !file.endsWith('openideAgent.contribution.ts') && !file.endsWith('openideSettingsContract.test.ts'))
-			.map(file => fs.readFileSync(file, 'utf8'))
+		const sources = allSources()
+			.filter(entry => !entry.file.endsWith('openideAgent.contribution.ts') && !entry.file.endsWith('openideSettingsContract.test.ts'))
+			.map(entry => entry.text)
 			.join('\n');
 		const huerfanos = settings.filter(setting => !sources.includes(setting.key)).map(setting => setting.key);
 		assert.deepStrictEqual(huerfanos, [], 'settings declarados que nadie lee (o los implementás, o los sacás)');
@@ -68,9 +82,7 @@ suite('OpenIDE settings contract', () => {
 	test('numeric defaults are not duplicated with a different value in code', () => {
 		// The dangerous pattern: getValue('key') ... || N  /  ?? N with N different from the schema's.
 		const settings = declaredSettings().filter(setting => /^-?\d+$/.test(setting.def));
-		const sources = readAllSources(sourceRoot)
-			.filter(file => !file.endsWith('openideAgent.contribution.ts'))
-			.map(file => ({ file, text: fs.readFileSync(file, 'utf8') }));
+		const sources = allSources().filter(entry => !entry.file.endsWith('openideAgent.contribution.ts'));
 		const conflictos: string[] = [];
 		for (const setting of settings) {
 			for (const { file, text } of sources) {
