@@ -42,6 +42,12 @@ jobs:
           # - { os: macos-14, platform: darwin, arch: arm64, target: archive }
           # - { os: macos-13, platform: darwin, arch: x64, target: archive }
     runs-on: ${{ matrix.os }}
+    # A build that finishes takes about 40 minutes; the longest so far was Windows x64 at 43. This
+    # is not a deadline for a slow build, it is a bound on a stuck one. The x64 Linux build of
+    # v1.121.1 went silent inside `bundle-vscode` and was killed by the runner an hour later with
+    # "The runner has received a shutdown signal" -- no error, no failing step, and six hours of
+    # default budget it could have burned through instead. A hang should cost minutes and say so.
+    timeout-minutes: 120
     env:
       APP_NAME: OpenIDE
       ASSETS_REPOSITORY: ${{ github.repository }}

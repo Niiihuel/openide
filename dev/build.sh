@@ -82,13 +82,14 @@ if [[ -z "${VSCODE_ARCH:-}" ]]; then
 fi
 export VSCODE_ARCH
 
-export NODE_OPTIONS="--max-old-space-size=8192"
+. ./node-heap.sh
 
 echo "OS_NAME=\"${OS_NAME}\""
 echo "SKIP_BUILD=\"${SKIP_BUILD}\""
 echo "SKIP_ASSETS=\"${SKIP_ASSETS}\""
 echo "VSCODE_ARCH=\"${VSCODE_ARCH}\""
 echo "VSCODE_QUALITY=\"${VSCODE_QUALITY}\""
+echo "NODE_OPTIONS=\"${NODE_OPTIONS}\""
 
 . version.sh
 

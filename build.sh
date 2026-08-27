@@ -10,7 +10,7 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
   echo "MS_COMMIT=\"${MS_COMMIT}\""
   cd vscode || { echo "'vscode' dir not found"; exit 1; }
 
-  export NODE_OPTIONS="--max-old-space-size=8192"
+  . ../node-heap.sh
   export VSCODE_PUBLISH_COUNTER=1
 
   # OpenIDE mantiene un árbol fuente completo. En CI (o en un checkout nuevo)
