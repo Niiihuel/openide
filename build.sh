@@ -4,6 +4,7 @@
 set -ex
 
 . version.sh
+. build-targets.sh
 
 if [[ "${SHOULD_BUILD}" == "yes" ]]; then
   echo "MS_COMMIT=\"${MS_COMMIT}\""
@@ -49,11 +50,6 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
       node build/lib/policies/policyGenerator.ts build/lib/policies/policyData.jsonc win32
 
       npm run gulp "vscode-win32-${VSCODE_ARCH}-min-packing"
-
-      if [[ "${VSCODE_ARCH}" != "x64" ]]; then
-        SHOULD_BUILD_REH="no"
-        SHOULD_BUILD_REH_WEB="no"
-      fi
 
       . ../build_cli.sh
     fi

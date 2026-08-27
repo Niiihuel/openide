@@ -3,6 +3,13 @@
 
 set -e
 
+# CI runs this as its own process, one step after the build. Sourced here so it resolves the same
+# environment the build did instead of inheriting a partial one: without `version.sh` every asset
+# was named with an empty RELEASE_VERSION -- `OpenIDE-linux-arm64-.tar.gz` -- and the job still
+# reported success, because nothing downstream of the name checks it.
+. ./version.sh
+. ./build-targets.sh
+
 APP_NAME_LC="$( echo "${APP_NAME}" | awk '{print tolower($0)}' )"
 
 mkdir -p assets
