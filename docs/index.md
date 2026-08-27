@@ -34,6 +34,7 @@
 ## Contributing
 
 - [Contributing Guidelines](../CONTRIBUTING.md)
+- [Fork architecture](./fork-architecture.md) — how the vendored Code OSS tree is laid out, where OpenIDE's own code goes, and how upstream updates land
 - [Building OpenIDE](../BUILD.md)
 - [Reliability gates](./reliability.md) — invariants that must hold before a release
 - [Surfaces and themes](./theming-surfaces.md) — how OpenIDE's own UI gets its colours, and the four ways it has gone wrong
