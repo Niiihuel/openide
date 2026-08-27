@@ -1,0 +1,43 @@
+name: Verify update signing key
+
+# Answers "is the secret I pasted the right thing?" without publishing anything.
+#
+# A GitHub secret is write-only: once saved, nobody — including whoever saved it — can read it
+# back. So the only way to know whether `OPENIDE_UPDATE_PRIVATE_KEY` holds a usable private key
+# whose public half matches the one pinned in `openide-version.json` is to use it. This does
+# exactly that and nothing else.
+#
+# Worth having as a button because the alternative is finding out during a release, and the
+# failure it catches is the silent one: a wrong key still publishes a perfectly good release, and
+# only an already-installed IDE ever notices that every update is refused.
+
+on:
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with: { persist-credentials: false }
+
+      - name: Check the secret against the pinned public key
+        env:
+          OPENIDE_UPDATE_PRIVATE_KEY_CONTENT: ${{ secrets.OPENIDE_UPDATE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" ]]; then
+            echo 'OPENIDE_UPDATE_PRIVATE_KEY is not set in this repository.' >&2
+            exit 1
+          fi
+          # Written to the runner's temp dir and removed on the way out. The checker prints only
+          # public halves, so nothing secret can reach the log even if it fails.
+          KEY="$RUNNER_TEMP/openide-update.pem"
+          trap 'rm -f "$KEY"' EXIT
+          printf '%s' "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" >"$KEY"
+          chmod 600 "$KEY"
+          node dev/update-signing-key.mjs check "$KEY"

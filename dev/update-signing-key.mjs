@@ -33,7 +33,18 @@ function publicKeyBase64(privateKeyPem) {
 function readPrivateKey(file) {
 	if (!file) { fail('Missing <path> to the private key.'); }
 	if (!fs.existsSync(file)) { fail(`No such file: ${file}`); }
-	return fs.readFileSync(file, 'utf8');
+	const pem = fs.readFileSync(file, 'utf8');
+	// The easy mistake, and the one worth naming: pasting the PUBLIC key. Both are PEM, both look
+	// like a key, and the public one is the half that gets shown around — it is in
+	// `openide-version.json` and in every explanation of how this works. Without this check the
+	// failure is an OpenSSL stack trace that names nothing.
+	if (/BEGIN PUBLIC KEY/.test(pem)) {
+		fail('That is a PUBLIC key. The secret needs the PRIVATE half — the file whose header says BEGIN PRIVATE KEY.');
+	}
+	if (!/BEGIN (PRIVATE|ED25519 PRIVATE) KEY/.test(pem)) {
+		fail('This does not look like a PEM private key. It should start with "-----BEGIN PRIVATE KEY-----".');
+	}
+	return pem;
 }
 
 function pinnedPublicKey() {
@@ -81,7 +92,12 @@ if (command === 'check') {
 	// A real sign/verify round trip, not just a string compare: it also proves the key is usable
 	// for the algorithm the client verifies with, which a matching string alone would not.
 	const probe = Buffer.from('openide-update-key-selftest');
-	const usable = verify(null, probe, createPublicKey(pem), sign(null, probe, pem));
+	let usable = false;
+	try {
+		usable = verify(null, probe, createPublicKey(pem), sign(null, probe, pem));
+	} catch (error) {
+		fail(`This key cannot sign: ${error instanceof Error ? error.message : String(error)}`);
+	}
 	console.log(`keyId in ${VERSION_FILE}: ${pinned.keyId}`);
 	console.log(`pinned public key:  ${pinned.publicKey}`);
 	console.log(`this key's public:  ${derived}`);
