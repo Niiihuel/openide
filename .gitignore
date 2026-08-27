@@ -46,3 +46,11 @@ result-*
 # escrito a mano (skills, planes, MEMORY.md) sí se versiona.
 /.openide/memory-indexes/
 /.openide/codegraph/
+
+# Claves privadas. Una clave de firma commiteada no se "borra" con un commit
+# siguiente: queda en el historial y hay que rotarla. La regla es amplia a
+# propósito — es más barato ignorar de más que filtrar una vez.
+*.pem
+*.p12
+*.pfx
+*.key

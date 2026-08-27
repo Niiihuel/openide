@@ -20,3 +20,23 @@ La instalación mutable soportada vive en `~/.local/bin/OpenIDE.AppImage`. El re
 ## Secrets de release
 
 CI falla cerrado si falta `OPENIDE_UPDATE_PRIVATE_KEY`: sin esa clave no hay manifest firmado y no hay actualización posible. La firma de Windows es opcional y sólo se rechaza a medio configurar (certificado sin contraseña, o al revés), porque esa combinación produce instaladores sin firma con apariencia de configurada. Esos secretos nunca se guardan en el repositorio ni en artifacts.
+
+### `OPENIDE_UPDATE_PRIVATE_KEY`
+
+Es la clave privada Ed25519, en PEM PKCS#8, que firma los manifests. Su mitad pública está fijada en `openide-version.json` (`updater.publicKey`) y viaja dentro de cada cliente publicado: **las dos son un par**. Cambiar una sin la otra hace que todo cliente instalado rechace las actualizaciones por firma inválida, y ese fallo es invisible desde CI — los releases se publican bien y sólo lo nota una IDE ya instalada.
+
+Si ya tenés la clave, confirmá que sea la correcta antes de cargarla:
+
+```sh
+node dev/update-signing-key.mjs check ruta/a/openide-update.pem
+```
+
+Si no la tenés, generá un par nuevo. El comando escribe la privada en el archivo (permisos 600, nunca la imprime) y muestra sólo la pública:
+
+```sh
+node dev/update-signing-key.mjs new ~/openide-update.pem
+```
+
+Después, y **antes de publicar un release firmado con ella**, poné la pública que imprimió en `updater.publicKey` de `openide-version.json` y commiteá ese cambio. Recién entonces pegá el contenido del `.pem` —incluidas las líneas `BEGIN`/`END`— en el secret `OPENIDE_UPDATE_PRIVATE_KEY` del repositorio.
+
+Guardá el `.pem` fuera del repositorio y con backup: es lo único que permite publicar una actualización que los clientes existentes acepten. Si se pierde, hay que cambiar la pública y quienes ya tengan OpenIDE instalado deben reinstalar a mano. `.gitignore` ignora `*.pem`, `*.p12`, `*.pfx` y `*.key` para que un descuido no la publique — una clave commiteada no se borra con el commit siguiente, queda en el historial y hay que rotarla.
