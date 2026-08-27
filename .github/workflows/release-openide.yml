@@ -1,0 +1,87 @@
+name: Release OpenIDE
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, platform: linux, arch: x64, target: appimage }
+          - { os: ubuntu-24.04-arm, platform: linux, arch: arm64, target: appimage }
+          - { os: macos-14, platform: darwin, arch: arm64, target: archive }
+          - { os: macos-13, platform: darwin, arch: x64, target: archive }
+          - { os: windows-2022, platform: win32, arch: x64, target: user }
+          - { os: windows-11-arm, platform: win32, arch: arm64, target: user }
+    runs-on: ${{ matrix.os }}
+    env:
+      APP_NAME: OpenIDE
+      ASSETS_REPOSITORY: ${{ github.repository }}
+      BINARY_NAME: openide
+      GH_REPO_PATH: ${{ github.repository }}
+      VSCODE_ARCH: ${{ matrix.arch }}
+      VSCODE_QUALITY: stable
+      OPENIDE_UPDATE_PRIVATE_KEY_CONTENT: ${{ secrets.OPENIDE_UPDATE_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with: { node-version-file: .nvmrc }
+      - name: Validate signing prerequisites
+        shell: bash
+        run: |
+          test -n "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" || { echo 'Missing OPENIDE_UPDATE_PRIVATE_KEY'; exit 1; }
+          if [[ '${{ matrix.platform }}' == darwin ]]; then test -n '${{ secrets.APPLE_DEVELOPER_ID }}' || exit 1; fi
+          if [[ '${{ matrix.platform }}' == win32 ]]; then test -n '${{ secrets.WINDOWS_SIGNING_CERT }}' || exit 1; fi
+      - name: Materialize update signing key
+        shell: bash
+        run: printf '%s' "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" > "$RUNNER_TEMP/openide-update.pem" && chmod 600 "$RUNNER_TEMP/openide-update.pem"
+      - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update -y && sudo apt-get install -y libkrb5-dev
+      - name: Build canonical product
+        shell: bash
+        env: { OS_NAME: '${{ matrix.platform == ''win32'' && ''windows'' || matrix.platform == ''darwin'' && ''osx'' || ''linux'' }}' }
+        run: ./dev/build.sh
+      - name: Package release assets
+        shell: bash
+        env: { SKIP_ASSETS: 'no' }
+        run: ./prepare_assets.sh
+      - name: Native sign and notarize
+        shell: bash
+        run: |
+          if [[ '${{ matrix.platform }}' == darwin ]]; then ./dev/sign-macos.sh; fi
+          if [[ '${{ matrix.platform }}' == win32 ]]; then ./dev/sign-windows.sh; fi
+      - name: Upload unsigned feed inputs
+        uses: actions/upload-artifact@v4
+        with: { name: 'openide-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.target }}', path: 'assets/*' }
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/download-artifact@v4
+        with: { path: release-assets, merge-multiple: true }
+      - name: Publish draft release and signed feeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENIDE_UPDATE_PRIVATE_KEY_CONTENT: ${{ secrets.OPENIDE_UPDATE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          . ./version.sh
+          printf '%s' "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" > "$RUNNER_TEMP/openide-update.pem"
+          gh release create "v${RELEASE_VERSION}" release-assets/* --draft --verify-tag --title "OpenIDE ${RELEASE_VERSION}"
+          # Cada artefacto debe tener mapping explícito en release-assets/manifest-inputs.json.
+          test -f release-assets/manifest-inputs.json
+          jq -c '.[]' release-assets/manifest-inputs.json | while read -r row; do
+            asset=$(jq -r .asset <<<"$row"); platform=$(jq -r .platform <<<"$row"); arch=$(jq -r .arch <<<"$row"); target=$(jq -r .target <<<"$row")
+            OPENIDE_UPDATE_PRIVATE_KEY="$RUNNER_TEMP/openide-update.pem" ./dev/generate-update-manifest.sh "$platform" "$arch" "release-assets/$asset" update-feed "$target"
+          done
+          ./dev/publish-update-feed.sh update-feed updates

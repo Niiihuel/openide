@@ -1,52 +1,197 @@
-# Contributing
+# Contributing to OpenIDE
 
-:+1::tada: First off, thanks for taking the time to contribute! :tada::+1:
-
-#### Table Of Contents
+Thanks for taking the time to contribute!
 
 - [Code of Conduct](#code-of-conduct)
-- [Reporting Bugs](#reporting-bugs)
-- [Making Changes](#making-changes)
+- [Use of AI](#use-of-ai)
+- [Reporting bugs](#reporting-bugs)
+- [How the repository is laid out](#how-the-repository-is-laid-out)
+- [Setting up](#setting-up)
+- [Making a change](#making-a-change)
+- [Validating your change](#validating-your-change)
+- [Opening a pull request](#opening-a-pull-request)
 
 ## Code of Conduct
 
-This project and everyone participating in it is governed by the [VSCodium Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
+This project and everyone participating in it is governed by the
+[OpenIDE Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are
+expected to uphold this code.
 
 ## Use of AI
 
-We welcome use of AI tools to help draft discussions, issues, or code, but please follow these rules:
+We welcome use of AI tools to help draft discussions, issues, or code, but
+please follow these rules:
 
 - Use AI tools responsibly and disclose their use.
 - Ensure all content passes a human review for authenticity and quality.
-- Be concise. Do not write verbose discussions, issues or PR.
+- Be concise. Do not write verbose discussions, issues or pull requests.
 
-Discussions, issues or PR that consist solely of unvetted AI outputs may be closed at the maintainer's discretion.
+Discussions, issues or pull requests that consist solely of unvetted AI output
+may be closed at the maintainer's discretion.
 
-## Reporting Bugs
+## Reporting bugs
 
-### Before Submitting an Issue
+Before opening an issue, check the [existing issues][issues] and the
+[troubleshooting page](./docs/troubleshooting.md) — you may find that you don't
+need to file one.
 
-Before creating bug reports, please check existing issues and [the Troubleshooting page](https://github.com/VSCodium/vscodium/blob/master/docs/troubleshooting.md) as you might find out that you don't need to create one.
-When you are creating a bug report, please include as many details as possible. Fill out [the required template](https://github.com/VSCodium/vscodium/issues/new?&labels=bug&&template=bug_report.md), the information it asks for helps us resolve issues faster.
+When you do file a bug, fill out the [bug report template][new-issue] and
+include as many details as you can. The information it asks for is what makes a
+bug reproducible.
 
-## Making Changes
+## How the repository is laid out
 
-If you want to make changes, please read [the Build page](./docs/howto-build.md).
+**OpenIDE keeps its full source tree in `vscode/`. That folder is the source of
+truth: you edit it directly, and no build command ever resets, replaces, or
+regenerates it.**
 
-### Building VSCodium
+This matters because OpenIDE started as a fork of VSCodium, which customizes
+VS Code by applying a stack of `.patch` files at build time. OpenIDE does not
+do that anymore. There is no `patches/` directory, no patch script, and no
+"regenerate the patch after editing" step. If you find documentation or tooling
+that still describes a patch workflow, it is stale — please report it.
 
-To build VSCodium, please follow the command found in the section [`Build Scripts`](./docs/howto-build.md#build-scripts).
+The version scheme is `majorCodeOss.minorCodeOss.openideRevision`. For example,
+`1.121.1` is OpenIDE revision 1 on top of the Code OSS 1.121 API. This keeps
+extensions compatible while allowing independent releases.
 
-### Updating patches
+Code that belongs to OpenIDE rather than to upstream VS Code lives in:
 
-If you want to update the existing patches, please follow the section [`Patch Update Process - Semi-Automated`](./docs/howto-build.md#patch-update-process-semiauto).
+| Path | What it holds |
+| --- | --- |
+| `vscode/src/vs/workbench/contrib/openideAgent/` | The agent engine, chat UI, providers, tools, subagents, MCP, skills and codebase memory |
+| `vscode/src/vs/workbench/contrib/openideSettings/` | The OpenIDE settings surfaces |
+| `vscode/src/vs/workbench/contrib/openideUpdate/` | Update UI |
+| `vscode/src/vs/platform/openideAgentHost/` | Agent host running in the main process |
+| `vscode/src/vs/platform/openideBrowser/` | Browser automation service |
+| `vscode/src/vs/platform/update/openide*` | Signed update manifest, verifier and AppImage updater |
 
-### Add a new patch
+Everything else under `vscode/` is upstream VS Code source. Prefer keeping your
+changes inside the OpenIDE-owned paths above; touching upstream files is
+sometimes necessary, but each such change is one more thing to reconcile when
+Code OSS is updated, so keep them small and obvious.
 
-- first, you need to build VSCodium
-- then use the command `./dev/patch.sh <your patch name>`, to initiate a new patch
-- when the script pauses at `Press any key when the conflict have been resolved...`, open `vscode` directory in **VSCodium**
-- run `npm run watch`
-- run `./script/code.sh`
-- make your changes
-- press any key to continue the script `patch.sh`
+## Setting up
+
+Node is pinned in [`.nvmrc`](.nvmrc). You also need `git`, `jq`, `python3` and
+`rustup`, plus the platform build dependencies listed in
+[the build guide](./BUILD.md).
+
+```sh
+git clone https://github.com/Niihuel/openide.git
+cd openide/vscode
+npm ci
+```
+
+On NixOS, use the FHS sandbox instead of installing dependencies globally — see
+[BUILD.md](./BUILD.md).
+
+## Making a change
+
+Compile the TypeScript and launch a development instance:
+
+```sh
+cd vscode
+npm run compile
+./scripts/code.sh
+```
+
+For an incremental loop, run `npm run watch` in a second terminal and restart
+`./scripts/code.sh` when you need a fresh window.
+
+The development instance keeps its own profile in `~/.config/code-oss-dev`, so
+it will not disturb an installed copy of OpenIDE.
+
+### Layering rules
+
+The source is split into `common/`, `browser/`, `node/` and `electron-*/`
+layers, and the split is enforced:
+
+- `common/` must not import from any other layer. Keep pure logic here — it is
+  also the easiest layer to unit test.
+- `browser/` may import `common/`, and may use DOM APIs.
+- `node/` and `electron-*/` may import `common/`, and may use Node APIs.
+
+Run `npm run valid-layers-check` to verify. A layering violation will fail CI.
+
+New logic that can be expressed without DOM or Node access belongs in `common/`
+with a test next to it in `test/common/`.
+
+### Language
+
+Code, comments and documentation are written in English.
+
+Parts of the codebase still carry Spanish comments from before that rule
+existed. They are being translated, and
+[`dev/comment-language-allowlist.json`](dev/comment-language-allowlist.json)
+tracks what is left, per file. It works as a ratchet: a file may never exceed
+its recorded budget, so the debt can only shrink.
+
+```sh
+node dev/audit-comment-language.mjs                 # check (CI runs this)
+node dev/audit-comment-language.mjs --list <path>   # show what is pending in a file
+node dev/audit-comment-language.mjs --update        # after translating, lower the budgets
+```
+
+If you touch a file that still has pending lines, translating them as you go is
+welcome — just run `--update` so the allowlist reflects the new total.
+
+## Validating your change
+
+Run what CI runs, in this order. From the repository root:
+
+```sh
+# 1. Reliability gates — invariants that must hold before a release
+node dev/check-reliability-gates.mjs
+node --test dev/reliability-gates.test.mjs
+
+# 2. Branding audit — catches upstream branding leaking into the product
+node dev/audit-branding.mjs
+
+# 3. Comment language — code and comments are written in English
+node dev/audit-comment-language.mjs
+```
+
+Then from `vscode/`:
+
+```sh
+# 4. Compile
+npm run compile
+
+# 5. Unit tests that run in Node
+./node_modules/.bin/mocha --ui tdd --timeout 10000 --exit \
+  out/vs/platform/openideAgentHost/test/common/openideAgentHost.test.js \
+  'out/vs/workbench/contrib/openideAgent/test/common/*.test.js'
+
+# 6. Unit tests that need a DOM
+npm run test-browser-no-install -- \
+  --runGlob 'vs/workbench/contrib/openideAgent/test/browser/*.test.js' \
+  --browser chromium
+```
+
+If your change affects the UI, also verify it in a real product window —
+compiling is not evidence that a surface renders correctly.
+
+If your change touches an invariant covered by
+[`dev/reliability-gates.json`](dev/reliability-gates.json) — updates, chat
+rollback, subagent permissions and similar — read
+[docs/reliability.md](./docs/reliability.md) first. Those gates have explicit
+promotion and demotion rules, and weakening one is a reviewable decision, not a
+side effect.
+
+A full product build is only needed when you are changing packaging or the
+build itself; see [BUILD.md](./BUILD.md).
+
+## Opening a pull request
+
+- Keep the pull request focused on one change. Unrelated cleanups belong in
+  their own commit or pull request.
+- Explain *why* the change is needed, not only what it does. The diff already
+  says what it does.
+- State how you verified it — which of the checks above you ran, and whether
+  you exercised the change in a real window.
+- If you changed behaviour that a user can observe, update the relevant page
+  under [`docs/`](./docs/).
+
+[issues]: https://github.com/Niihuel/openide/issues
+[new-issue]: https://github.com/Niihuel/openide/issues/new?labels=bug&template=bug_report.md

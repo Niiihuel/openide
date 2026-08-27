@@ -1,0 +1,52 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Base for every provider mark, loaded by the adapter that paints them
+   (`openideProviderIcons.ts`) so no surface can mount one without it.
+
+   `applyProviderIcon` only sets `mask-image` inline; a mask paints the element's OWN background
+   through the silhouette, so without `background-color` and `mask-size` here the mark is an
+   invisible box. Three surfaces (status bar, usage popover, plan breadcrumb) used to carry their
+   own copy of these declarations, which is why the logo showed there and nowhere else — the
+   Settings provider rows, the menu rows and the dock's view tabs all drew blanks.
+
+   Deliberately NO width/height: every surface sizes its own slot (22px in Settings, 15px in the
+   composer, 14px in menus) and those rules have the same specificity as this one, so a size here
+   would win or lose by import order. */
+
+.openide-provider-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	box-sizing: border-box;
+	color: var(--vscode-foreground);
+	line-height: 1;
+	user-select: none;
+}
+
+/* The mark is the element's background seen through the SVG: `currentColor` keeps it on the
+   surface's own foreground, which is what makes a third-party logo read as part of the IDE. */
+.openide-provider-icon.logo-ready {
+	background-color: currentColor;
+	-webkit-mask-size: contain;
+	mask-size: contain;
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+	mask-position: center;
+}
+
+/* Fallback for a provider SVGL and models.dev do not publish (Amp, vLLM, Jan, SambaNova…):
+   its initials in the same slot, framed so they read as a mark and not as clipped text. */
+.openide-provider-icon.monogram {
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 30%, transparent);
+	border-radius: var(--vscode-cornerRadius-small, 4px);
+	background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+	font-size: 8px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+}

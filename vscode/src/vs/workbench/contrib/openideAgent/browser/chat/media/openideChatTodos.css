@@ -1,0 +1,137 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat: the to-do card.
+ *
+ *  SOURCE OF TRUTH: browser/openideChatHtml.ts:629-657. The card frame comes from `.todo-update`
+ *  (:652-657) and the internals from `.tt-head` / `.tt-toggle` / `.tt-title` / `.tt-prog` /
+ *  `.tt-body` / `.tt-row` / `.tt-icon` / `.tt-text` (:636-649). Values are transcribed, not
+ *  re-decided.
+ *
+ *  What is deliberately NOT ported: `.turn-todos` (:629-635), the skirt that tucks under the user
+ *  bubble with `border-radius: 0 0 8px 8px` and a negative margin. It only makes sense glued to the
+ *  composer's turn, and in the native transcript this content is a row of the list like any other.
+ *--------------------------------------------------------------------------------------------*/
+
+.openide-chat-todos-card {
+	overflow: hidden;
+	min-width: 0;
+	margin: 2px 0;
+	border: 1px solid rgba(128, 128, 128, 0.28);
+	border-radius: 8px;
+	background: rgba(128, 128, 128, 0.035);
+}
+
+/* An empty list removes the panel in the webview (`renderTodos`, :4319-4323); here the row keeps
+   its part but paints nothing, so the virtualized list measures 0 instead of an empty box. */
+.openide-chat-todos-card.openide-chat-todos-empty {
+	display: none;
+}
+
+/* `.todo-update .tt-head` overrides the base padding (:656). */
+.openide-chat-tt-head {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	min-height: 22px;
+	padding: 5px 9px;
+}
+
+.openide-chat-tt-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	flex: 1;
+	min-width: 0;
+	padding: 0;
+	border: none;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font-family: inherit;
+	font-size: 11.5px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.openide-chat-tt-toggle:hover {
+	color: var(--vscode-foreground);
+}
+
+.openide-chat-tt-toggle .codicon {
+	flex: 0 0 auto;
+	font-size: 12px;
+}
+
+/* The webview marquees this title when it overflows; here it ellipsizes. A marquee is an animation
+   that never stops inside a virtualized list, and the full text is one hover away via `title`. */
+.openide-chat-tt-title {
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	color: var(--vscode-foreground);
+	font-weight: 500;
+}
+
+.openide-chat-tt-prog {
+	flex: 0 0 auto;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	font-variant-numeric: tabular-nums;
+}
+
+/* `.todo-update .tt-body` (:657): its own padding plus the hairline that separates it from the
+   head, which the base `.tt-body` does not have. */
+.openide-chat-tt-body {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	padding: 4px 9px 7px;
+	border-top: 1px solid rgba(128, 128, 128, 0.16);
+}
+
+.openide-chat-tt-body.hidden {
+	display: none;
+}
+
+.openide-chat-tt-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	min-width: 0;
+	padding: 1px 0;
+	font-size: 11.5px;
+	line-height: 1.4;
+}
+
+.openide-chat-tt-icon {
+	flex: 0 0 auto;
+	margin-top: 1px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* The task title wraps instead of scrolling: the list runs with `horizontalScrolling: false`, so a
+   long task escaping this row would widen every other row in the transcript. */
+.openide-chat-tt-text {
+	flex: 1;
+	min-width: 0;
+	color: var(--vscode-descriptionForeground);
+	overflow-wrap: anywhere;
+}
+
+.openide-chat-tt-s-completed .openide-chat-tt-icon {
+	color: var(--openide-green);
+}
+
+.openide-chat-tt-s-completed .openide-chat-tt-text {
+	opacity: 0.55;
+	text-decoration: line-through;
+}
+
+.openide-chat-tt-s-in-progress .openide-chat-tt-icon {
+	color: var(--vscode-foreground);
+}
+
+.openide-chat-tt-s-in-progress .openide-chat-tt-text {
+	color: var(--vscode-foreground);
+	font-weight: 600;
+}

@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "gates": [
+    {
+      "id": "signed-update-contract",
+      "owner": "updates",
+      "layer": "release",
+      "maturity": "soak",
+      "invariant": "OpenIDE sólo acepta manifests v2 firmados, vinculados a canal, plataforma, arquitectura y target, con anti-rollback por versión, build y hash.",
+      "platforms": ["linux", "darwin", "win32"],
+      "commands": [
+        "cd vscode && npm run compile-check-ts-native",
+        "cd vscode && ./node_modules/.bin/mocha --ui tdd --timeout 10000 --exit out/vs/platform/update/test/common/openideUpdateManifest.test.js out/vs/platform/update/test/node/openideUpdateVerifier.test.js"
+      ],
+      "tests": [
+        "vscode/src/vs/platform/update/test/common/openideUpdateManifest.test.ts",
+        "vscode/src/vs/platform/update/test/node/openideUpdateVerifier.test.ts"
+      ],
+      "knownGaps": [
+        "Falta ejecutar la matriz de updater real en runners nativos macOS y Windows."
+      ],
+      "promotionCriteria": [
+        "Los fixtures de firma inválida, downgrade, cross-target y artifact integrity pasan en CI.",
+        "La instalación N-1 a N y recovery pasan en los tres sistemas soportados."
+      ],
+      "demotionRule": "Cualquier aceptación fail-open, downgrade o artefacto no vinculado bloquea releases."
+    },
+    {
+      "id": "appimage-atomic-recovery",
+      "owner": "updates",
+      "layer": "desktop-runtime",
+      "maturity": "soak",
+      "invariant": "El updater AppImage verifica los bytes descargados, conserva una versión recuperable y reemplaza el ejecutable sin dejar una ruta current ausente.",
+      "platforms": ["linux"],
+      "commands": [
+        "cd vscode && ./node_modules/.bin/mocha --ui tdd --timeout 10000 --exit out/vs/platform/update/test/electron-main/openideAppImageUpdater.test.js"
+      ],
+      "tests": [
+        "vscode/src/vs/platform/update/test/electron-main/openideAppImageUpdater.test.ts"
+      ],
+      "knownGaps": [
+        "Falta un E2E empaquetado que simule crash y power-loss alrededor del commit."
+      ],
+      "promotionCriteria": [
+        "Al menos 100 ejecuciones de soak sin pérdida de current ni previous.",
+        "E2E empaquetado cubre update, health marker y recovery."
+      ],
+      "demotionRule": "Cualquier pérdida del ejecutable actual, TOCTOU o rollback no durable vuelve el gate a experimental."
+    },
+    {
+      "id": "chat-message-rollback",
+      "owner": "agent-experience",
+      "layer": "workbench",
+      "maturity": "soak",
+      "invariant": "Volver a un mensaje reemplaza transcript y composer una sola vez, preserva conflictos y no mezcla provider, modelo o modo de otros turnos.",
+      "platforms": ["linux", "darwin", "win32"],
+      "commands": [
+        "cd vscode && npm run test-browser-no-install -- --browser chromium --runGlob 'vs/workbench/contrib/openideAgent/test/browser/{openideChatRollback,openideMessageChangeSetService}.test.js'"
+      ],
+      "tests": [
+        "vscode/src/vs/workbench/contrib/openideAgent/test/browser/openideChatRollback.test.ts",
+        "vscode/src/vs/workbench/contrib/openideAgent/test/browser/openideMessageChangeSetService.test.ts"
+      ],
+      "knownGaps": [
+        "Falta una prueba host-side con rollbacks concurrentes y filesystem real."
+      ],
+      "promotionCriteria": [
+        "Cada request recibe exactamente un commit o rejection terminal.",
+        "Los tests cubren concurrencia, cambio de sesión y cancelación durante un run."
+      ],
+      "demotionRule": "Duplicación del turno, pérdida de cambios ajenos o rollback parcial no informado bloquea merge."
+    },
+    {
+      "id": "agent-host-process-lifecycle",
+      "owner": "agent-runtime",
+      "layer": "main-process",
+      "maturity": "experimental",
+      "invariant": "Los procesos MCP tienen timeout, keepalive, parking, limpieza de árbol y nunca conservan tools fantasma después de una caída.",
+      "platforms": ["linux", "darwin", "win32"],
+      "commands": [
+        "cd vscode && ./node_modules/.bin/mocha --ui tdd --timeout 10000 --exit out/vs/platform/openideAgentHost/test/common/openideAgentHost.test.js"
+      ],
+      "tests": [
+        "vscode/src/vs/platform/openideAgentHost/test/common/openideAgentHost.test.ts"
+      ],
+      "knownGaps": [
+        "Faltan pruebas Electron multiproceso para kill-tree, SSE incremental, disconnect HTTP y crash-loop en los tres sistemas; el consentimiento MCP por fingerprint sigue pendiente."
+      ],
+      "promotionCriteria": [
+        "Environment allowlist, límites de IPC y restart backoff tienen tests unitarios y de integración Electron.",
+        "No quedan procesos hijos después del cierre o timeout en Linux, macOS y Windows."
+      ],
+      "demotionRule": "Zombie, fuga de secretos, cola no acotada o tools de un proceso muerto vuelven el gate experimental."
+    },
+    {
+      "id": "distributed-branding",
+      "owner": "release",
+      "layer": "packaging",
+      "maturity": "soak",
+      "invariant": "Las superficies distribuidas usan branding OpenIDE y toda referencia heredada visible requiere una excepción documentada.",
+      "platforms": ["linux", "darwin", "win32"],
+      "commands": [
+        "node dev/audit-branding.mjs"
+      ],
+      "tests": [
+        "dev/audit-branding.mjs",
+        "dev/branding-allowlist.json"
+      ],
+      "knownGaps": [
+        "La auditoría de artefactos empaquetados todavía no cubre todos los formatos de instalación."
+      ],
+      "promotionCriteria": [
+        "AppImage, DEB, RPM, macOS y Windows pasan auditoría post-packaging."
+      ],
+      "demotionRule": "Branding heredado visible no allowlisted bloquea el artefacto afectado."
+    }
+  ]
+}

@@ -1,0 +1,706 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — chrome del dock del chat. El título nativo del composite ("OpenIDE Chat" + sus
+ *  acciones +/expandir/cerrar) duplica nuestra propia tab bar (que vive DENTRO del webview,
+ *  con su propio +/historial) — la tab bar reemplaza al título nativo como único header.
+ *  El título se elimina del LAYOUT en auxiliaryBarPart.ts (hasTitle:false); esta regla queda
+ *  como red de seguridad si ese flag volviera a true (ocultarlo solo por CSS deja un hueco de
+ *  35px al fondo del island: el composite reserva la altura del título igual).
+ *--------------------------------------------------------------------------------------------*/
+
+.monaco-workbench .part.auxiliarybar > .composite.title {
+	display: none;
+	height: 0 !important;
+	min-height: 0 !important;
+	padding: 0 !important;
+	border: none !important;
+}
+
+/* ==== Review inline de ediciones del agente (integrado) — openideEditReview.ts ==== */
+
+/* Colores y controles del review inline. */
+.monaco-editor .openide-review-added-line {
+	background: color-mix(in srgb, var(--vscode-editor-background) 78%, var(--openide-green));
+}
+.monaco-editor .openide-review-modified-line {
+	background: color-mix(in srgb, var(--vscode-editor-background) 78%, var(--openide-green));
+}
+/* Typewriter visual del agente. El modelo ya contiene el archivo completo: cubrimos las líneas
+ * pendientes con el fondo del editor, ocultamos su texto y devolvemos el verde solamente al
+ * prefijo revelado. No genera undo stops ni autosaves parciales. */
+.monaco-editor .openide-agent-typewriter-pending-line {
+	background: var(--vscode-editor-background) !important;
+}
+.monaco-editor .openide-agent-typewriter-complete-line {
+	background: color-mix(in srgb, var(--vscode-editor-background) 78%, var(--openide-green));
+}
+.monaco-editor .openide-agent-typewriter-hidden {
+	opacity: 0 !important;
+}
+.monaco-editor .openide-agent-typewriter-cursor {
+	position: relative;
+	background: color-mix(in srgb, var(--vscode-focusBorder) 28%, transparent);
+}
+.monaco-editor .openide-agent-typewriter-cursor::after {
+	content: '';
+	position: absolute;
+	right: -1px;
+	top: 1px;
+	bottom: 1px;
+	width: 2px;
+	background: var(--vscode-focusBorder);
+	animation: openide-agent-typewriter-blink 680ms steps(1, end) infinite;
+}
+@keyframes openide-agent-typewriter-blink { 50% { opacity: 0.22; } }
+@media (prefers-reduced-motion: reduce) {
+	.monaco-editor .openide-agent-typewriter-pending-line {
+		background: color-mix(in srgb, var(--vscode-editor-background) 78%, var(--openide-green)) !important;
+	}
+	.monaco-editor .openide-agent-typewriter-hidden { opacity: 1 !important; }
+	.monaco-editor .openide-agent-typewriter-cursor::after { animation: none; }
+}
+
+/* Usage popover — the roster of Orca's UsageRosterPanel.
+ *
+ * The SURFACE is not described here: the container carries `.openide-menu`, so the background,
+ * border, radius, shadow, font and the row/section/empty anatomy all come from the product's
+ * popover stylesheet (chat/media/openideChatMenus.css) exactly as they do for the model, mode and
+ * history pickers. What follows is only what the roster invents on top — the account block and the
+ * usage bars — and it reads its values from the `--oi-*` tokens (openideSurfaceCss.ts) instead of
+ * repeating the theme's fallback chain. Those tokens are declared on `:root, .monaco-workbench`
+ * and the context view is parented into `.monaco-workbench`, so they DO resolve in here.
+ *
+ * The list is the only scroller (DomScrollableElement); the heading and the two navigation rows
+ * sit outside it so they do not scroll away. */
+.openide-menu.openide-usage-menu {
+	width: 320px;
+	max-height: min(440px, calc(100vh - 60px));
+	font-size: 12px;
+}
+/* The family's section heading, carrying the freshness line and the refresh action. Scoped under
+   the menu class so it outranks `.openide-menu-section`'s own padding whichever stylesheet the
+   bundler happens to emit second — the two rules are otherwise the same specificity. */
+.openide-usage-menu .openide-usage-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 0 0 auto;
+	padding: 8px 6px 4px 12px;
+}
+.openide-usage-header-title { flex: 1; min-width: 0; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.openide-usage-updated { flex: 0 0 auto; color: var(--oi-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.openide-usage-refresh {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small, 4px);
+	background: transparent;
+	color: var(--oi-text-muted);
+	cursor: pointer;
+}
+.monaco-workbench .openide-usage-menu .openide-usage-refresh .codicon[class*="codicon-"] { font-size: 14px; color: inherit; }
+.openide-usage-refresh:hover { background: var(--oi-hover-strong); color: var(--oi-text); }
+.openide-usage-refresh:focus-visible { outline: 1px solid var(--oi-focus); outline-offset: -1px; }
+.openide-usage-refresh[disabled] { cursor: default; }
+.openide-usage-refresh.loading .codicon { animation: codicon-spin 1.5s steps(30) infinite; }
+/* Same contract as the Project Map's cards (see openideProjectMap.css for the full reasoning):
+   DomScrollableElement measures the CONTENT element, so the roster has to be clipped to the
+   popover or the slider comes out as tall as its track and the last accounts are unreachable. The
+   popover's height is `max-height` + content — indefinite — so `height: 100%` has nothing to
+   resolve against; `flex: 1 1 0` sizes the list from what the popover allowed instead. */
+.openide-usage-scroll { display: flex; flex: 1 1 auto; min-height: 0; }
+.openide-usage-scroll > .openide-usage-list { flex: 1 1 0; min-height: 0; }
+.openide-usage-list { display: flex; flex-direction: column; box-sizing: border-box; padding: 2px 0 6px; overflow: hidden; }
+/* Same reason as the heading: it refines `.openide-menu-empty`, so it has to outrank it. */
+.openide-usage-menu .openide-usage-empty { min-height: 0; padding: 8px 12px; font-size: 11.5px; line-height: 1.4; }
+.openide-usage-account {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	padding: 7px 12px;
+}
+.openide-usage-account + .openide-usage-account { border-top: 1px solid var(--oi-border-soft); }
+.openide-usage-account.stale .openide-usage-windows { opacity: 0.55; }
+.openide-usage-account-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* Flat, monochrome brand mark: currentColor through the mask, no chip behind it. */
+.openide-usage-provider-logo { flex: 0 0 16px; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--oi-text); opacity: 0.85; }
+.openide-usage-provider-logo.logo-ready { background-color: currentColor; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
+.openide-usage-provider-logo.monogram { font-size: 9px; font-weight: 600; line-height: 1; }
+.openide-usage-account-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.openide-usage-account-name strong { font-weight: 500; }
+.openide-usage-plan { color: var(--oi-text-muted); font-size: 11px; text-transform: capitalize; }
+.openide-usage-account-trailing { flex: 0 0 auto; display: inline-flex; align-items: center; color: var(--oi-text-muted); }
+.openide-usage-account-trailing .codicon { font-size: 12px; }
+.openide-usage-windows { display: flex; flex-direction: column; gap: 4px; padding-left: 24px; }
+.openide-usage-metric { display: flex; align-items: center; gap: 8px; }
+.openide-usage-window-label { flex: 0 0 56px; overflow: hidden; color: var(--oi-text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.openide-usage-bar { flex: 1; min-width: 40px; height: 3px; overflow: hidden; border-radius: 999px; background: var(--oi-border); }
+.openide-usage-bar-fill { display: block; height: 100%; border-radius: inherit; background: var(--oi-success); transition: width 240ms ease; }
+.openide-usage-bar-fill.warn { background: var(--oi-warn); }
+.openide-usage-bar-fill.danger { background: var(--openide-red); }
+.openide-usage-percent { flex: 0 0 34px; text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; }
+.openide-usage-reset { color: var(--oi-text-muted); font-size: 11px; }
+.openide-usage-credits-value { flex: 1; font-size: 11px; font-variant-numeric: tabular-nums; }
+.openide-usage-note { padding-left: 24px; color: var(--oi-text-muted); font-size: 11px; line-height: 1.4; }
+.openide-usage-note.error { color: var(--oi-danger); }
+/* Navigation rows: `.openide-menu-row`, so height, hover and icon gutter are the family's. Only
+   the trailing chevron and the strip around them belong to this popover. */
+.openide-usage-footer { flex: 0 0 auto; display: flex; flex-direction: column; padding: 4px; border-top: 1px solid var(--oi-border-soft); }
+.monaco-workbench .openide-usage-menu .openide-usage-footer .openide-menu-row { font-size: 12px; }
+.monaco-workbench .openide-usage-menu .openide-usage-footer-chevron { margin-left: auto; opacity: 0.7; }
+
+/* Líneas eliminadas: view zone roja con el contenido del baseline. */
+.monaco-editor .openide-review-deleted-zone {
+	box-sizing: border-box;
+	margin-left: -2px;
+	padding-left: 2px;
+	background: color-mix(in srgb, var(--vscode-editor-background) 68%, #8c2f4b);
+	border-left: 2px solid var(--vscode-gitDecoration-modifiedResourceForeground, #e5c07b);
+	overflow: hidden;
+	white-space: pre;
+	color: var(--vscode-editor-foreground);
+}
+.monaco-editor .openide-review-deleted-line {
+	display: flex;
+	align-items: baseline;
+	min-width: max-content;
+}
+.monaco-editor .openide-review-deleted-sign {
+	flex: 0 0 54px;
+	box-sizing: border-box;
+	padding-right: 8px;
+	text-align: right;
+	color: var(--openide-red);
+	text-decoration: none;
+	user-select: none;
+}
+.monaco-editor .openide-review-deleted-code {
+	flex: 1 0 auto;
+	padding-left: 8px;
+	text-decoration: line-through;
+	text-decoration-color: rgba(194, 76, 101, 0.58);
+}
+
+/* Fase 1 del seguimiento: el baseline se presenta como código real, todavía neutro. Cada línea
+ * pasa completa a rojo al confirmarse como eliminada; después comienza el typewriter verde del
+ * reemplazo. El color por línea evita el ruido de una mancha que avanza por carácter. */
+.monaco-editor .openide-review-deleted-zone.openide-agent-delete-pending {
+	background: var(--vscode-editor-background);
+}
+.monaco-editor .openide-review-deleted-zone.openide-agent-delete-pending .openide-review-deleted-line {
+	background: var(--vscode-editor-background);
+}
+.monaco-editor .openide-review-deleted-zone.openide-agent-delete-pending .openide-review-deleted-sign {
+	opacity: 0;
+}
+.monaco-editor .openide-review-deleted-zone.openide-agent-delete-pending .openide-review-deleted-code {
+	text-decoration: none;
+}
+.monaco-editor .openide-review-deleted-zone.openide-agent-delete-pending .openide-review-deleted-line.openide-agent-delete-revealed {
+	background: color-mix(in srgb, var(--vscode-editor-background) 68%, #8c2f4b);
+}
+.monaco-editor .openide-review-deleted-zone.openide-agent-delete-pending .openide-review-deleted-line.openide-agent-delete-revealed .openide-review-deleted-sign {
+	opacity: 1;
+}
+.monaco-editor .openide-review-deleted-zone.openide-agent-delete-pending .openide-review-deleted-line.openide-agent-delete-revealed .openide-review-deleted-code {
+	text-decoration: line-through;
+	text-decoration-color: rgba(194, 76, 101, 0.58);
+}
+
+/* Barra global del review — compacta, cuadrada, integrada (Cursor).
+   El selector no depende de .monaco-editor porque, con breadcrumbs activos, el widget
+   vive en .breadcrumbs-control (hermano del canvas Monaco). */
+.openide-review-header {
+	--openide-review-keep: color-mix(in srgb, var(--openide-green) 74%, var(--vscode-editor-background));
+	--openide-review-keep-hover: color-mix(in srgb, var(--openide-green) 88%, var(--vscode-editor-background));
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	margin: 4px 12px 0 0;
+	padding: 0;
+	background: transparent;
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+	font-size: 11px;
+	color: var(--vscode-foreground);
+	z-index: 50;
+	line-height: 1;
+}
+.oreview-file-nav,
+.oreview-stepper {
+	display: inline-flex;
+	align-items: center;
+	gap: 0;
+	min-height: 22px;
+	padding: 0;
+	border: none;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+.oreview-file-label,
+.oreview-count {
+	color: var(--vscode-descriptionForeground);
+	white-space: nowrap;
+	font-size: 11px;
+	font-family: var(--vscode-font-family);
+	font-variant-numeric: tabular-nums;
+	padding: 0 3px;
+	min-width: 0;
+	text-align: center;
+}
+.openide-review-sep {
+	width: 1px;
+	height: 14px;
+	align-self: center;
+	background: rgba(128, 128, 128, 0.32);
+	margin: 0 4px;
+}
+.openide-review-nav,
+.oreview-chev {
+	appearance: none;
+	border: none;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	width: 16px;
+	height: 18px;
+	padding: 0;
+	border-radius: 3px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	line-height: 1;
+}
+.openide-review-nav:hover,
+.oreview-chev:hover {
+	background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+	color: var(--vscode-foreground);
+}
+.openide-review-nav:disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+.openide-review-nav:disabled:hover {
+	background: transparent;
+}
+.openide-review-nav .codicon,
+.oreview-chev .codicon {
+	font-size: 11px;
+}
+.openide-review-btn {
+	appearance: none;
+	border: 1px solid rgba(128, 128, 128, 0.28);
+	cursor: pointer;
+	font-size: 11px;
+	font-family: inherit;
+	min-height: 22px;
+	padding: 1px 8px;
+	border-radius: 4px;
+	background: rgba(128, 128, 128, 0.14);
+	color: var(--vscode-foreground);
+	white-space: nowrap;
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	box-shadow: none;
+	margin-left: 2px;
+}
+.oreview-btn-label {
+	font-weight: 500;
+}
+.oreview-kbd {
+	font-size: 10px;
+	opacity: 0.7;
+	font-family: var(--vscode-font-family);
+}
+.openide-review-btn:hover {
+	background: rgba(128, 128, 128, 0.24);
+}
+.openide-review-btn.primary {
+	background: var(--openide-review-keep);
+	border-color: var(--openide-review-keep);
+	color: var(--vscode-button-foreground, #ffffff);
+}
+.openide-review-btn.primary:hover {
+	background: var(--openide-review-keep-hover);
+	border-color: var(--openide-review-keep-hover);
+}
+.openide-review-btn.primary .oreview-kbd {
+	opacity: 0.88;
+	color: inherit;
+}
+
+/* barra anclada a la FILA DEL BREADCRUMB — variante densa */
+/* La fila completa conserva la superficie propia del breadcrumb, nunca el fondo más oscuro
+ * del tab/editor que puede transparentarse al montar la toolbar de review. */
+.breadcrumbs-control.openide-review-host {
+	background: var(--vscode-breadcrumb-background, var(--vscode-editor-background)) !important;
+}
+.breadcrumbs-control .openide-review-header.in-breadcrumbs {
+	position: absolute;
+	background: var(--vscode-breadcrumb-background, var(--vscode-editor-background));
+	right: 6px;
+	top: 50%;
+	transform: translateY(-50%);
+	margin: 0;
+	padding: 0;
+	gap: 2px;
+	z-index: 10;
+	box-shadow: none;
+}
+.openide-review-header.in-breadcrumbs .openide-review-btn {
+	min-height: 18px;
+	height: 18px;
+	padding: 0 6px;
+	font-size: 10px;
+	border-radius: 3px;
+}
+.openide-review-header.in-breadcrumbs .oreview-kbd {
+	font-size: 9px;
+}
+.openide-review-header.in-breadcrumbs .oreview-stepper,
+.openide-review-header.in-breadcrumbs .oreview-file-nav {
+	min-height: 20px;
+}
+.openide-review-header.in-breadcrumbs .oreview-chev,
+.openide-review-header.in-breadcrumbs .openide-review-nav {
+	width: 15px;
+	height: 16px;
+}
+.openide-review-header.in-breadcrumbs .oreview-count,
+.openide-review-header.in-breadcrumbs .oreview-file-label {
+	font-size: 10.5px;
+	padding: 0 2px;
+}
+.openide-review-header.in-breadcrumbs .openide-review-sep {
+	height: 12px;
+	margin: 0 3px;
+}
+
+/* BreadcrumbsControl envuelve el path en un MonacoScrollableElement. Reservamos en el nodo
+ * efectivo el ancho real de la barra y desvanecemos el último tramo antes de las acciones.
+ * Así el path puede seguir siendo largo sin cruzarse con Undo/Keep File. */
+.breadcrumbs-control.openide-review-host > .monaco-scrollable-element {
+	position: relative;
+	box-sizing: border-box;
+	max-width: calc(100% - var(--openide-review-header-width, 0px));
+	margin-right: var(--openide-review-header-width, 0px);
+	overflow: hidden !important;
+}
+.breadcrumbs-control.openide-review-host > .monaco-scrollable-element > .monaco-breadcrumbs {
+	box-sizing: border-box;
+	min-width: 0;
+	padding-right: 0 !important;
+}
+.breadcrumbs-control.openide-review-host::after {
+	content: '';
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	right: max(0px, calc(var(--openide-review-header-width, 0px) - 1px));
+	width: var(--openide-review-fade-width, 34px);
+	pointer-events: none;
+	z-index: 11;
+	background: linear-gradient(to right, transparent, var(--vscode-breadcrumb-background, var(--vscode-editor-background)) 82%);
+}
+
+/* Pill del hunk activo. Vive en la capa de content widgets de Monaco con overflow=false:
+ * aunque se desplace al borde derecho, el viewport del editor lo clippea antes del chat. */
+.monaco-editor .openide-review-block,
+.monaco-editor .contentWidgets .openide-review-block {
+	--openide-review-keep: color-mix(in srgb, var(--openide-green) 74%, var(--vscode-editor-background));
+	--openide-review-keep-hover: color-mix(in srgb, var(--openide-green) 88%, var(--vscode-editor-background));
+	/* ContentWidgetManager escribe display:block inline en cada layout. */
+	display: inline-flex !important;
+	align-items: center;
+	gap: 4px;
+	height: 22px;
+	min-height: 0;
+	box-sizing: border-box;
+	padding: 0;
+	border: none;
+	border-radius: 0;
+	background: transparent;
+	color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+	z-index: 40;
+	white-space: nowrap;
+	font: 11.5px/1 var(--vscode-font-family);
+	box-shadow: none;
+}
+.monaco-editor .openide-review-block.hidden {
+	display: none;
+}
+.oreview-block-stepper {
+	display: inline-flex;
+	align-items: center;
+	height: 22px;
+	min-height: 0;
+	box-sizing: border-box;
+	padding: 0 2px;
+	border: 1px solid rgba(128, 128, 128, 0.3);
+	border-radius: 6px;
+	background: var(--vscode-editor-background);
+	box-shadow: none;
+}
+.oreview-block-chev {
+	appearance: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 20px;
+	padding: 0;
+	border: 0;
+	border-radius: 3px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+}
+.oreview-block-chev:hover {
+	background: rgba(128, 128, 128, 0.22);
+	color: var(--vscode-foreground);
+}
+.oreview-block-chev .codicon {
+	font-size: 11px;
+}
+.oreview-block-count {
+	min-width: 46px;
+	padding: 0 3px;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+	color: var(--vscode-foreground);
+}
+.oreview-block-action {
+	appearance: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: 22px;
+	min-height: 0;
+	box-sizing: border-box;
+	padding: 0 6px;
+	border: 1px solid rgba(128, 128, 128, 0.3);
+	border-radius: 5px;
+	background: var(--vscode-editor-background);
+	color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+	cursor: pointer;
+	font: inherit;
+	box-shadow: none;
+}
+.oreview-block-action:hover {
+	background: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.24));
+}
+.oreview-block-action.primary {
+	border-color: var(--openide-review-keep);
+	background: var(--openide-review-keep);
+	color: var(--vscode-button-foreground, #ffffff);
+}
+.oreview-block-action.primary:hover {
+	border-color: var(--openide-review-keep-hover);
+	background: var(--openide-review-keep-hover);
+}
+.oreview-block-kbd {
+	opacity: 0.72;
+	font-size: 10.5px;
+}
+.oreview-block-action.primary .oreview-block-kbd {
+	opacity: 0.9;
+}
+
+/* ============ tabs del editor integrados a la isla ============
+   La isla del editor es quien recorta la esquina. El tab no replica radio ni borde:
+   hacerlo genera un escalón visible de 1 px con zoom/DPI fraccional. */
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab {
+	border-left: none !important;
+	border-top: none !important;
+	border-right: none !important;
+	border-radius: 0 !important;
+}
+/* la línea recta nativa de arriba/abajo del tab se reemplaza por el borde curvado */
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab > .tab-border-top-container,
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab > .tab-border-bottom-container {
+	display: none !important;
+}
+
+/* ==== Plan: model chip + run button in the breadcrumb row (openidePlanBreadcrumbActions.ts) ==== */
+/* Host row: the actions sit at the right edge and the path fades under them, exactly as the
+   edit review's toolbar does. No background of its own: one surface for the whole row. */
+.monaco-workbench .breadcrumbs-control > .openide-plan-breadcrumb-actions {
+	display: none;
+	align-items: center;
+	gap: 2px;
+	margin-left: auto;
+	padding: 0 6px 0 16px;
+	height: 100%;
+	background: none;
+}
+.monaco-workbench .breadcrumbs-control:has(.openide-plan-breadcrumb-actions > *) {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	background: var(--vscode-breadcrumb-background, var(--vscode-editor-background));
+}
+.monaco-workbench .breadcrumbs-control:has(.openide-plan-breadcrumb-actions > *) > .monaco-scrollable-element {
+	min-width: 0;
+	flex: 1 1 auto;
+	order: 0;
+	background: none;
+	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent 100%);
+	mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent 100%);
+}
+.monaco-workbench .breadcrumbs-control:has(.openide-plan-breadcrumb-actions > *) > .openide-plan-breadcrumb-actions {
+	display: inline-flex;
+	flex: 0 0 auto;
+	order: 1;
+}
+
+/* The chip is the composer's trigger at the breadcrumb's scale. */
+.monaco-workbench .openide-plan-breadcrumb-actions .openide-plan-model-chip {
+	height: 18px;
+	max-width: min(220px, 30vw);
+	padding: 0 3px 0 4px;
+	gap: 4px;
+	font-size: 11px;
+	margin-right: 4px;
+}
+.monaco-workbench .openide-plan-breadcrumb-actions .openide-plan-model-chip.unset .openide-composer-trigger-label {
+	color: var(--vscode-descriptionForeground);
+	font-weight: 400;
+}
+.monaco-workbench .openide-plan-breadcrumb-actions .openide-composer-provider-icon {
+	width: 14px;
+	height: 14px;
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+}
+.monaco-workbench .openide-plan-breadcrumb-actions .openide-composer-provider-icon[hidden] { display: none; }
+/* The mask paints with currentColor; the chat root sets this up for the composer, the
+   breadcrumb row has to say it itself. */
+.monaco-workbench .openide-plan-breadcrumb-actions .openide-provider-icon.logo-ready {
+	background-color: currentColor;
+	-webkit-mask-size: contain;
+	mask-size: contain;
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+	mask-position: center;
+	color: var(--vscode-foreground);
+}
+.monaco-workbench .openide-plan-breadcrumb-actions .openide-composer-provider-icon.monogram {
+	border: 1px solid rgba(128, 128, 128, 0.35);
+	border-radius: var(--vscode-cornerRadius-small, 4px);
+	background: rgba(128, 128, 128, 0.1);
+	font-size: 7px;
+	font-weight: 700;
+}
+.monaco-workbench .openide-plan-breadcrumb-actions .openide-composer-chevron {
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	flex: 0 0 auto;
+}
+
+/* Run/Stop: the review's dense breadcrumb metric (.openide-review-header.in-breadcrumbs). */
+.monaco-workbench .openide-plan-run {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	/* The review scopes its Keep tint to its own header; the plan's run button is the same
+	   button outside that header, so it carries the tokens itself. */
+	--openide-review-keep: color-mix(in srgb, var(--openide-green) 74%, var(--vscode-editor-background));
+	--openide-review-keep-hover: color-mix(in srgb, var(--openide-green) 88%, var(--vscode-editor-background));
+}
+/* A plan an external agent is parked on: the bar says WHO is waiting before it offers the two
+   buttons, because the same row otherwise reads as OpenIDE's own run controls. Muted and
+   non-interactive — it is a label, not a third action. */
+/* A file some hosted CLI changed, announced in the breadcrumb next to its undo. Muted and
+   non-interactive: it labels the two buttons, it is not a third one. */
+.monaco-workbench .openide-agent-file-label {
+	margin-right: 6px;
+	font-size: 11px;
+	line-height: 18px;
+	color: var(--vscode-descriptionForeground);
+	white-space: nowrap;
+}
+
+/* The restore point was taken one write late (the file was already dirty when the session
+   began), so the button carries the same warning colour the tooltip spells out. Undo that
+   quietly restores the wrong "before" is worse than undo the user was warned about. */
+.monaco-workbench .openide-agent-file-inexact .oreview-btn-label {
+	color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground));
+}
+
+.monaco-workbench .openide-plan-external-waiting {
+	margin-right: 6px;
+	font-size: 11px;
+	line-height: 18px;
+	color: var(--vscode-descriptionForeground);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 220px;
+}
+
+.monaco-workbench .openide-plan-run .openide-review-btn {
+	min-height: 18px;
+	height: 18px;
+	padding: 0 6px;
+	font-size: 10px;
+	border-radius: var(--vscode-cornerRadius-small, 3px);
+	margin-left: 2px;
+}
+.monaco-workbench .openide-plan-run .openide-review-btn .codicon {
+	font-size: 11px;
+}
+.monaco-workbench .openide-plan-run .openide-review-btn:disabled {
+	cursor: default;
+}
+.monaco-workbench .openide-plan-run .openide-plan-run-btn.running {
+	background: rgba(128, 128, 128, 0.14);
+	border-color: rgba(128, 128, 128, 0.28);
+	color: var(--vscode-foreground);
+}
+.monaco-workbench .openide-plan-run .openide-plan-run-btn.completed {
+	opacity: 0.9;
+}
+.monaco-workbench .openide-plan-run .openide-plan-stop-btn {
+	padding: 0 4px;
+}
+.monaco-workbench .openide-plan-run .openide-plan-stop-btn:hover {
+	color: var(--openide-red);
+}
+
+/* Usage item without data: the brand mark alone, dimmed (the popover explains why). */
+.monaco-workbench .statusbar-item .openide-status-provider-icon.dimmed { opacity: 0.45; }
+/* The status bar's brand mark: same flat mask as the popover. The item is a block whose label is an
+   inline anchor, so `content` lands on a second line — the mark is pinned at the item's left edge
+   and the label makes room for it. */
+.monaco-workbench .statusbar-item:has(> .openide-status-provider-icon) { position: relative; }
+.monaco-workbench .part.statusbar > .items-container > .statusbar-item:has(> .openide-status-provider-icon) > .statusbar-item-label { padding-left: 23px; }
+.monaco-workbench .statusbar-item .openide-status-provider-icon {
+	position: absolute;
+	left: 5px;
+	top: 50%;
+	transform: translateY(-50%);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 13px;
+	height: 13px;
+	color: currentColor;
+	pointer-events: none;
+}
+.monaco-workbench .statusbar-item .openide-status-provider-icon.logo-ready {
+	background-color: currentColor;
+	-webkit-mask-size: contain;
+	mask-size: contain;
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+	mask-position: center;
+}
+.monaco-workbench .statusbar-item .openide-status-provider-icon.monogram { font-size: 8px; font-weight: 600; line-height: 1; }

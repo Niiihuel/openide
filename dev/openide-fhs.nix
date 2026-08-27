@@ -29,6 +29,8 @@ let
     libxkbcommon
     mesa
     libgbm
+    libglvnd
+    wayland
     alsa-lib
     fontconfig
     freetype
@@ -72,6 +74,12 @@ let
     dpkg
     rpm
     imagemagick
+    rustup # build_cli.sh compila el CLI en Rust; llama "rustup target add ..." directo
+
+    # Empaquetado AppImage (dev/build-appimage.sh): appimagetool los requiere.
+    file
+    squashfsTools # mksquashfs
+    cpio
   ];
 in
 pkgs.buildFHSEnv {

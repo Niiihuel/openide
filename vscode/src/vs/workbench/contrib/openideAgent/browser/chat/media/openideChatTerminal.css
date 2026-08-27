@@ -1,0 +1,199 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Transcribed value by value from the webview, the visual source of truth: `.part.term-card` and
+   the `.term-*` family at openideChatHtml.ts:395-427, plus the `.part-head` / `.part-body` base at
+   :310 and :330 that the card inherits there. The base rules are inlined here instead of imported
+   from openideChatActivity.css because the card overrides most of them anyway, and a partial
+   inheritance would make the padding depend on the load order of two stylesheets. */
+
+.openide-chat-term-card {
+	min-width: 0;
+	margin: 6px 0;
+	position: relative;
+	border: 1px solid rgba(128, 128, 128, 0.28);
+	border-radius: 8px;
+	background: rgba(128, 128, 128, 0.035);
+}
+
+/* The webview keeps `overflow: visible` here so the ⋯ popover can escape a collapsed card. The
+   native menu is a context view rendered outside the list, so nothing needs to escape — but the
+   value is kept because a clipped card would also clip the focus ring of the head button. */
+.openide-chat-term-card {
+	overflow: visible;
+}
+
+.openide-chat-term-head {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	width: 100%;
+	min-height: 20px;
+	padding: 5px 6px 5px 10px;
+	border: none;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font-family: inherit;
+	font-size: 12.5px;
+	text-align: left;
+	cursor: pointer;
+	transition: color 120ms ease;
+}
+
+.openide-chat-term-head:hover {
+	color: var(--vscode-foreground);
+}
+
+.openide-chat-term-glyph {
+	flex: 0 0 auto;
+	display: inline-flex;
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .openide-chat-term-glyph .codicon {
+	font-size: 13px;
+}
+
+.openide-chat-term-title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--vscode-foreground);
+	font-size: 12.5px;
+}
+
+.openide-chat-term-spacer {
+	flex: 1;
+}
+
+.openide-chat-term-dots {
+	width: 22px;
+	height: 22px;
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+}
+
+.openide-chat-term-dots:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .openide-chat-term-dots .codicon {
+	font-size: 13px;
+}
+
+.openide-chat-term-body {
+	display: none;
+	margin: 0;
+	padding: 0;
+	border: none;
+	border-top: 1px solid rgba(128, 128, 128, 0.2);
+	border-radius: 0;
+}
+
+.openide-chat-term-card.openide-chat-term-open .openide-chat-term-body {
+	display: block;
+}
+
+/* R3: the list runs with `horizontalScrolling: false`, so a 400-column line of build output has to
+   scroll INSIDE this box. Without `overflow: auto` here it would widen every row in the transcript. */
+.openide-chat-term-out {
+	max-height: 240px;
+	padding: 8px 10px 4px;
+	overflow: auto;
+	color: var(--vscode-descriptionForeground);
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11.5px;
+	line-height: 1.55;
+}
+
+.openide-chat-term-line {
+	white-space: pre-wrap;
+	word-break: break-word;
+	min-height: 1.1em;
+}
+
+.openide-chat-term-line.openide-chat-term-line-cmd {
+	color: var(--vscode-foreground);
+}
+
+.openide-chat-term-dollar {
+	margin-right: 7px;
+	user-select: none;
+	color: var(--vscode-charts-orange, #d18616);
+}
+
+.openide-chat-term-in {
+	display: none;
+	align-items: center;
+	gap: 7px;
+	padding: 2px 10px 8px;
+}
+
+/* stdin only exists while the process can still read it: a finished command with a live input line
+   would silently swallow whatever the user types. */
+.openide-chat-term-card.openide-chat-term-running.openide-chat-term-open .openide-chat-term-in,
+.openide-chat-term-card.openide-chat-term-awaiting.openide-chat-term-open .openide-chat-term-in {
+	display: flex;
+}
+
+.openide-chat-term-card.openide-chat-term-awaiting {
+	border-color: color-mix(in srgb, var(--vscode-charts-orange, #d18616) 55%, rgba(128, 128, 128, 0.28));
+}
+
+.openide-chat-term-card.openide-chat-term-awaiting .openide-chat-term-title::after {
+	content: ' · esperando input';
+	color: var(--vscode-charts-orange, #d18616);
+	font-weight: 500;
+	font-size: 11px;
+}
+
+.openide-chat-term-caret {
+	user-select: none;
+	color: var(--vscode-descriptionForeground);
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11.5px;
+}
+
+.openide-chat-term-input {
+	flex: 1;
+	min-width: 0;
+	border: none;
+	outline: none;
+	background: transparent;
+	color: var(--vscode-foreground);
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11.5px;
+}
+
+.openide-chat-term-input::placeholder {
+	color: var(--vscode-descriptionForeground);
+	opacity: 0.55;
+}
+
+/* Failure marker of `finishTermCard` (openideChatHtml.ts:3050-3053): the status glyph, shown only
+   when the command exited non-zero. */
+.openide-chat-term-status {
+	display: none;
+	flex: 0 0 auto;
+	color: var(--vscode-errorForeground);
+}
+
+.openide-chat-term-card.openide-chat-term-error .openide-chat-term-status {
+	display: inline-flex;
+}
+
+.monaco-workbench .openide-chat-term-status .codicon {
+	font-size: 13px;
+}

@@ -2,17 +2,17 @@
 
 # Getting all telemetry out
 
-This page explains how VSCodium handles telemetry and how it enhances your privacy.
+This page explains how OpenIDE handles telemetry and how it enhances your privacy.
 
 ## Table of contents
 
-- [Telemetry in VSCodium](#telemetry)
+- [Telemetry in OpenIDE](#telemetry)
 - [Replacements to Microsoft Online Services](#replacements)
 - [Checking for telemetry](#checking)
-- [VSCodium announcements](#announcements)
+- [OpenIDE announcements](#announcements)
 - [Malicious & deprecated extensions](#malicious-extensions)
 
-## <a id="telemetry"></a>Telemetry in VSCodium
+## <a id="telemetry"></a>Telemetry in OpenIDE
 
 Even though we do not pass the telemetry build flags and go out of our way to cripple the baked-in telemetry, Microsoft still can track usage by default depending on your settings.
 
@@ -58,9 +58,9 @@ By default, we keep the preference `telemetry.feedback.enabled` enabled. It's us
 
 ## <a id="replacements"></a>Replacements to Microsoft Online Services
 
-When searching the `@tag:usesOnlineServices` filter, note that while the "Update: Mode" setting description still says "The updates are fetched from a Microsoft online service", VSCodium's build script [sets the `updateUrl` field](https://github.com/VSCodium/vscodium/blob/8cc366bb76d6c0ddb64374f9530b42094646a660/prepare_vscode.sh#L132-L133) in `product.json` directly to the GitHub page, so enabling that setting won't actually result in any calls to the Microsoft online service.
+When searching the `@tag:usesOnlineServices` filter, note that while the "Update: Mode" setting description still says "The updates are fetched from a Microsoft online service", OpenIDE sets [`updateUrl`](https://github.com/Niihuel/openide/blob/master/vscode/product.json) in `product.json` to its own release feed, so enabling that setting won't actually result in any calls to the Microsoft online service.
 
-Likewise, while the descriptions for "Extensions: Auto Check Updates" and "Extensions: Auto Update" include the same phrase, VSCodium [replaces](https://github.com/VSCodium/vscodium/blob/8cc366bb76d6c0ddb64374f9530b42094646a660/prepare_vscode.sh#L119) the Visual Studio Marketplace with Open VSX, so these settings won't call Microsoft either.
+Likewise, while the descriptions for "Extensions: Auto Check Updates" and "Extensions: Auto Update" include the same phrase, OpenIDE points [`extensionsGallery`](https://github.com/Niihuel/openide/blob/master/vscode/product.json) at Open VSX instead of the Visual Studio Marketplace, so these settings won't call Microsoft either.
 
 ## <a id="checking"></a>Checking for telemetry
 
@@ -72,9 +72,9 @@ If you want to verify that no telemetry is being sent, you can use network monit
 
 Look for connections to Microsoft domains and telemetry endpoints.
 
-## <a id="announcements"></a>VSCodium announcements
+## <a id="announcements"></a>OpenIDE announcements
 
-The welcome page in VSCodium displays announcements that are fetched via the internet from the project's GitHub repository.
+The welcome page in OpenIDE displays announcements that are fetched via the internet from the project's GitHub repository.
 
 If you prefer to disable this feature, you can disable the preference `workbench.welcomePage.extraAnnouncements`.
 

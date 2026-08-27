@@ -1,0 +1,2 @@
+- Los archivos `.openide/plans/*.md` deben abrirse y permanecer siempre en el preview visual de planes; nunca mostrarse como Markdown crudo, incluso tras actualizaciones automáticas.
+- Para la evolución basada en Orca, OpenIDE no desarrollará una app móvil. Se priorizarán exclusivamente calidad, seguridad, confiabilidad, robustez, recuperación, testing, supply chain y mantenibilidad del IDE de escritorio.

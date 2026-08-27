@@ -1,44 +1,44 @@
-# Documentation
+<!-- order: 1 -->
 
-## Table of Contents
+# OpenIDE Documentation
 
-- [Getting Started with VSCodium](https://github.com/VSCodium/vscodium/blob/master/docs/getting-started.md)
-  - [Installation](https://github.com/VSCodium/vscodium/blob/master/docs/getting-started.md#installation)
-  - [First Steps](https://github.com/VSCodium/vscodium/blob/master/docs/getting-started.md#first-steps)
-  - [Basic Usage](https://github.com/VSCodium/vscodium/blob/master/docs/getting-started.md#basic-usage)
-  - [Keyboard Shortcuts](https://github.com/VSCodium/vscodium/blob/master/docs/getting-started.md#keyboard-shortcuts)
-  - [Next Steps](https://github.com/VSCodium/vscodium/blob/master/docs/getting-started.md#next-steps)
-- [Getting all the Telemetry Out](https://github.com/VSCodium/vscodium/blob/master/docs/telemetry.md)
-  - [Telemetry in VSCodium](https://github.com/VSCodium/vscodium/blob/master/docs/telemetry.md#telemetry)
-  - [Replacements to Microsoft Online Services](https://github.com/VSCodium/vscodium/blob/master/docs/telemetry.md#replacements)
-  - [Checking for Telemetry](https://github.com/VSCodium/vscodium/blob/master/docs/telemetry.md#checking)
-  - [Additional Privacy Settings](https://github.com/VSCodium/vscodium/blob/master/docs/telemetry.md#additional-settings)
-  - [VSCodium Announcements](https://github.com/VSCodium/vscodium/blob/master/docs/telemetry.md#announcements)
-  - [Malicious & Deprecated Extensions](https://github.com/VSCodium/vscodium/blob/master/docs/telemetry.md#malicious-extensions)
-- [Extensions and Marketplace](https://github.com/VSCodium/vscodium/blob/master/docs/extensions.md)
-  - [Marketplace](https://github.com/VSCodium/vscodium/blob/master/docs/extensions.md#marketplace)
-  - [How to use the OpenVSX Marketplace](https://github.com/VSCodium/vscodium/blob/master/docs/extensions.md#howto-openvsx-marketplace)
-  - [How to use a different extension gallery](https://github.com/VSCodium/vscodium/blob/master/docs/extensions.md#howto-switch-marketplace)
-  - [How to self host your own extension gallery](https://github.com/VSCodium/vscodium/blob/master/docs/extensions.md#howto-selfhost-marketplace)
-  - [Visual Studio Marketplace](https://github.com/VSCodium/vscodium/blob/master/docs/extensions.md#visual-studio-marketplace)
-  - [Proprietary Debugging Tools](https://github.com/VSCodium/vscodium/blob/master/docs/extensions.md#proprietary-debugging-tools)
-  - [Proprietary Extensions](https://github.com/VSCodium/vscodium/blob/master/docs/extensions.md#proprietary-extensions)
-  - [Using the "VSIX Manager" Extension](https://github.com/VSCodium/vscodium/blob/master/docs/extensions.md#vsix-manager)
-  - [Extensions compatibility](https://github.com/VSCodium/vscodium/blob/master/docs/extensions-compatibility.md)
-  - [Ext: GitHub Copilot](https://github.com/VSCodium/vscodium/blob/master/docs/ext-github-copilot.md)
-- [Migration](https://github.com/VSCodium/vscodium/blob/master/docs/migration.md)
-  - [Manual Migration from Visual Studio Code to VSCodium](https://github.com/VSCodium/vscodium/blob/master/docs/migration.md#manual-migration)
-  - [Semi-Automatic Migration with "Sync Settings" Extension](https://github.com/VSCodium/vscodium/blob/master/docs/migration.md#semi-automatic-migration)
-- [Usage](https://github.com/VSCodium/vscodium/blob/master/docs/usage.md)
-  - [Sign in with GitHub](https://github.com/VSCodium/vscodium/blob/master/docs/usage.md#signin-github)
-  - [Accounts authentication](https://github.com/VSCodium/vscodium/blob/master/docs/accounts-authentication.md)
-  - [How do I run VSCodium in portable mode?](https://github.com/VSCodium/vscodium/blob/master/docs/usage.md#portable)
-  - [How do I fix the default file manager?](https://github.com/VSCodium/vscodium/blob/master/docs/usage.md#file-manager)
-  - [How do I press and hold a key and have it repeat in VSCodium?](https://github.com/VSCodium/vscodium/blob/master/docs/usage.md#press-and-hold)
-  - [How do I open VSCodium from the terminal?](https://github.com/VSCodium/vscodium/blob/master/docs/usage.md#terminal-support)
-- [Troubleshooting](https://github.com/VSCodium/vscodium/blob/master/docs/troubleshooting.md)
-  - [Linux](https://github.com/VSCodium/vscodium/blob/master/docs/troubleshooting.md#linux)
-- [Other Resources](https://github.com/VSCodium/vscodium/blob/master/docs/others.md)
-  - [What are reh and reh-web archives?](https://github.com/VSCodium/vscodium/blob/master/docs/others.md#reh)
-- [Contributing Guidelines](https://github.com/VSCodium/vscodium/blob/master/CONTRIBUTING.md)
-- [Building VSCodium](https://github.com/VSCodium/vscodium/blob/master/docs/howto-build.md)
+## Using OpenIDE
+
+- [Getting Started](./getting-started.md) — installation, first steps, basic usage
+- [Usage](./usage.md) — portable mode, terminal integration, and other everyday questions
+  - [Sign in with GitHub](./usage.md#signin-github)
+  - [Accounts authentication](./accounts-authentication.md)
+- [Keyboard Shortcuts](./keyboard-shortcuts.md)
+- [Updates](./updates.md) — how OpenIDE checks for and applies updates
+- [Migration](./migration.md) — moving from Visual Studio Code to OpenIDE
+- [Troubleshooting](./troubleshooting.md)
+
+## Extensions
+
+- [Extensions and Marketplace](./extensions.md)
+  - [How to use the Open VSX Marketplace](./extensions.md#howto-openvsx-marketplace)
+  - [How to use a different extension gallery](./extensions.md#howto-switch-marketplace)
+  - [How to self-host your own extension gallery](./extensions.md#howto-selfhost-marketplace)
+  - [Proprietary extensions and debugging tools](./extensions.md#proprietary-extensions)
+- [Extensions compatibility](./extensions-compatibility.md)
+- [GitHub Copilot](./ext-github-copilot.md)
+
+## Privacy
+
+- [Privacy](./privacy.md)
+- [Telemetry](./telemetry.md) — what is disabled, and what replaces Microsoft's online services
+  - [Replacements to Microsoft Online Services](./telemetry.md#replacements)
+  - [Checking for telemetry](./telemetry.md#checking)
+  - [Additional privacy settings](./telemetry.md#additional-settings)
+
+## Contributing
+
+- [Contributing Guidelines](../CONTRIBUTING.md)
+- [Building OpenIDE](../BUILD.md)
+- [Reliability gates](./reliability.md) — invariants that must hold before a release
+- [Surfaces and themes](./theming-surfaces.md) — how OpenIDE's own UI gets its colours, and the four ways it has gone wrong
+
+## Other
+
+- [Other Resources](./others.md)
+  - [What are reh and reh-web archives?](./others.md#reh)

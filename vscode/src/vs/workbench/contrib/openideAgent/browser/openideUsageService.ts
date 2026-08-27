@@ -1,7 +1,11 @@
 /*---------------------------------------------------------------------------------------------
- *  OpenIDE — servicio de usage/billing OAuth por provider.
- *  Scope inicial: Anthropic OAuth → GET https://api.anthropic.com/api/oauth/usage.
- *  Nunca loguea ni expone el bearer token.
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — OAuth usage/billing service for Anthropic, Codex and Grok.
+ *  It never logs nor exposes the bearer token.
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationToken } from '../../../../base/common/cancellation.js';
@@ -14,29 +18,59 @@ import { OPENIDE_REQUEST_CHANNEL, OpenideRequestChannelClient } from '../../../.
 import {
 	IProviderRateLimits,
 	normalizeAnthropicUsageJson,
-	providerSupportsAnthropicUsage,
+	normalizeCodexUsageJson,
+	normalizeGeminiQuotaJson,
+	normalizeGrokUsageJson,
+	normalizeOpenRouterCreditsJson,
+	providerSupportsUsage,
+	UsageFailureKind,
 } from '../common/openideUsage.js';
+import { chatGptAccountIdFromJwt, stringClaimFromJwt } from '../common/openideJwt.js';
+import { usageAccountKeyFromToken } from '../common/openideUsageIdentity.js';
 
 export const IOpenideUsageService = createDecorator<IOpenideUsageService>('openideUsageService');
 
 export interface IOpenideUsageService {
 	readonly _serviceBrand: undefined;
-	/** Usage cacheado o undefined si nunca se consultó / no aplica. */
+	/** Cached usage, or undefined when never queried / not applicable. */
 	getCached(providerId: string): IProviderRateLimits | undefined;
-	/** Invalida el cache de un provider (o de todos). */
+	/** Invalidates a provider's cache (or all of them). */
 	invalidate(providerId?: string): void;
 	/**
-	 * Consulta usage del provider. `accessToken` es el bearer OAuth ya resuelto por el caller
-	 * (el servicio NO toca SecretStorage). Devuelve ventanas normalizadas o error suave.
+	 * Queries the provider's usage. `accessToken` is the OAuth bearer already resolved by the caller
+	 * (the service does NOT touch SecretStorage). Returns normalized windows or a soft error.
 	 */
 	fetchAnthropicOAuthUsage(providerId: string, accessToken: string, opts?: { force?: boolean }): Promise<IProviderRateLimits>;
-	/** Helper: ¿este entry del catálogo soporta el endpoint de usage Anthropic? */
+	fetchCodexOAuthUsage(providerId: string, accessToken: string, opts?: { force?: boolean }): Promise<IProviderRateLimits>;
+	fetchGrokOAuthUsage(providerId: string, accessToken: string, opts?: { force?: boolean }): Promise<IProviderRateLimits>;
+	/** Google Code Assist quota (Antigravity / Gemini CLI accounts): one bucket per model. */
+	fetchGeminiQuota(providerId: string, accessToken: string, opts?: { force?: boolean; projectOverride?: string }): Promise<IProviderRateLimits>;
+	/** OpenRouter prepaid balance (`/api/v1/credits`), keyed by the API key. */
+	fetchOpenRouterCredits(providerId: string, apiKey: string, opts?: { force?: boolean }): Promise<IProviderRateLimits>;
+	/** Helper: does this catalog entry support an OAuth usage query? */
 	supportsProvider(entry: { protocol?: string; auth?: string; baseUrl?: string; id?: string } | undefined): boolean;
 }
 
 const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
-/** Cache corto: evita martillar billing en cada expand de la fila. */
+const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
+const GROK_USAGE_URL = 'https://cli-chat-proxy.grok.com/v1/billing?format=credits';
+const GROK_FALLBACK_USAGE_URL = 'https://cli-chat-proxy.grok.com/v1/billing';
+const GEMINI_CODE_ASSIST_BASE = 'https://cloudcode-pa.googleapis.com/v1internal';
+const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/api/v1/credits';
+/** Same metadata the chat provider sends: loadCodeAssist keys the managed project on it. */
+const GEMINI_CLIENT_METADATA = { ideType: 'IDE_UNSPECIFIED', platform: 'PLATFORM_UNSPECIFIED', pluginType: 'GEMINI' };
+/** Short cache: avoids hammering billing on every row expand. */
 const CACHE_TTL_MS = 60_000;
+
+/**
+ * Stamps the account identity onto a usage result, for EVERY OAuth provider and without naming
+ * any of them: the key is read from the token's own claims, so a provider added tomorrow gets
+ * deduplicated against its CLI with no change here. A token that says nothing gets no key, and a
+ * row with no key never merges — see openideUsageIdentity.ts.
+ */
+function withAccountKey(usage: IProviderRateLimits, token: string): IProviderRateLimits {
+	return { ...usage, accountKey: usageAccountKeyFromToken(token) ?? null };
+}
 
 export class OpenideUsageService extends Disposable implements IOpenideUsageService {
 
@@ -49,12 +83,125 @@ export class OpenideUsageService extends Disposable implements IOpenideUsageServ
 		@IMainProcessService mainProcessService: IMainProcessService,
 	) {
 		super();
-		// Mismo canal MAIN que OAuth/providers: sin CORS y sin filtrar el bearer al renderer log.
+		// Same MAIN channel as OAuth/providers: no CORS and no leaking the bearer into the renderer log.
 		this.net = new OpenideRequestChannelClient(mainProcessService.getChannel(OPENIDE_REQUEST_CHANNEL));
 	}
 
 	supportsProvider(entry: { protocol?: string; auth?: string; baseUrl?: string; id?: string } | undefined): boolean {
-		return providerSupportsAnthropicUsage(entry);
+		return providerSupportsUsage(entry);
+	}
+
+	/** Orca keeps the HTTP failure kind and the Retry-After: the monitor's backoff needs both. */
+	private failure(providerId: string, status: number, headers: Record<string, string | string[] | undefined> | undefined, message: string): IProviderRateLimits {
+		const kind: UsageFailureKind = status === 401 || status === 403 ? 'stale-token' : status === 429 ? 'rate-limited' : status >= 500 ? 'server' : 'unknown';
+		let retryAt: number | null = null;
+		if (status === 429) {
+			const raw = headers?.['retry-after'];
+			const value = Array.isArray(raw) ? raw[0] : raw;
+			const seconds = Number(value);
+			retryAt = Number.isFinite(seconds) && seconds > 0 ? Date.now() + seconds * 1000 : Date.now() + 60 * 60 * 1000;
+		}
+		const result: IProviderRateLimits = { providerId, fetchedAt: Date.now(), windows: [], status: 'error', failureKind: kind, retryAt, error: message };
+		this.cache.set(providerId, result);
+		return result;
+	}
+
+	private networkFailure(providerId: string, message: string): IProviderRateLimits {
+		const result: IProviderRateLimits = { providerId, fetchedAt: Date.now(), windows: [], status: 'error', failureKind: 'network', error: message };
+		this.cache.set(providerId, result);
+		return result;
+	}
+
+	async fetchGeminiQuota(providerId: string, accessToken: string, opts?: { force?: boolean; projectOverride?: string }): Promise<IProviderRateLimits> {
+		const token = (accessToken ?? '').trim();
+		if (!providerId || !token) {
+			return { providerId, fetchedAt: Date.now(), windows: [], status: 'error', failureKind: 'missing-credentials', error: 'Sin token OAuth para consultar la cuota.' };
+		}
+		if (!opts?.force) {
+			const cached = this.getCached(providerId);
+			if (cached && !cached.error) { return cached; }
+		}
+		const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': 'GeminiCLI/0.10.0 (linux; x64)' };
+		try {
+			// The quota is per project: loadCodeAssist answers with the account's managed project
+			// once the account is onboarded (the chat provider does the onboarding on first use).
+			const override = (opts?.projectOverride ?? '').trim();
+			const load = await this.net.request({
+				type: 'POST', url: `${GEMINI_CODE_ASSIST_BASE}:loadCodeAssist`, headers,
+				data: JSON.stringify({ ...(override ? { cloudaicompanionProject: override } : {}), metadata: { ...GEMINI_CLIENT_METADATA, ...(override ? { duetProject: override } : {}) } }),
+				callSite: 'openideUsageGemini',
+			}, CancellationToken.None);
+			const loadStatus = load.res.statusCode ?? 0;
+			const loadText = (await asText(load)) ?? '';
+			if (loadStatus < 200 || loadStatus >= 300) {
+				return this.failure(providerId, loadStatus, load.res.headers, loadStatus === 401 || loadStatus === 403 ? 'La sesión de Google expiró o no tiene permiso para Code Assist.' : `Google Code Assist respondió HTTP ${loadStatus}.`);
+			}
+			let loaded: Record<string, unknown> | undefined;
+			try { loaded = loadText ? JSON.parse(loadText) as Record<string, unknown> : undefined; } catch { loaded = undefined; }
+			const project = typeof loaded?.cloudaicompanionProject === 'string' ? loaded.cloudaicompanionProject
+				: typeof (loaded?.cloudaicompanionProject as { id?: unknown } | undefined)?.id === 'string' ? (loaded!.cloudaicompanionProject as { id: string }).id
+					: override;
+			if (!project) {
+				const result: IProviderRateLimits = { providerId, fetchedAt: Date.now(), windows: [], status: 'unavailable', failureKind: 'not-onboarded', error: 'La cuenta todavía no tiene proyecto de Code Assist: mandá un mensaje con este proveedor y volvé a consultar.' };
+				this.cache.set(providerId, result);
+				return result;
+			}
+			const ctx = await this.net.request({
+				type: 'POST', url: `${GEMINI_CODE_ASSIST_BASE}:retrieveUserQuota`, headers,
+				data: JSON.stringify({ project }),
+				callSite: 'openideUsageGemini',
+			}, CancellationToken.None);
+			const status = ctx.res.statusCode ?? 0;
+			const text = (await asText(ctx)) ?? '';
+			if (status < 200 || status >= 300) {
+				return this.failure(providerId, status, ctx.res.headers, status === 401 || status === 403 ? 'La sesión de Google expiró o no tiene permiso para leer la cuota.' : `Google no devolvió la cuota (HTTP ${status}).`);
+			}
+			let json: unknown;
+			try { json = text ? JSON.parse(text) : null; } catch {
+				const bad: IProviderRateLimits = { providerId, fetchedAt: Date.now(), windows: [], status: 'error', failureKind: 'parse', error: 'Google devolvió una cuota que no se pudo leer.' };
+				this.cache.set(providerId, bad);
+				return bad;
+			}
+			const result = withAccountKey(normalizeGeminiQuotaJson(json, providerId), token);
+			this.cache.set(providerId, result);
+			return result;
+		} catch {
+			return this.networkFailure(providerId, 'No se pudo consultar la cuota de Google (red o servicio caído).');
+		}
+	}
+
+	async fetchOpenRouterCredits(providerId: string, apiKey: string, opts?: { force?: boolean }): Promise<IProviderRateLimits> {
+		const key = (apiKey ?? '').trim();
+		if (!providerId || !key) {
+			return { providerId, fetchedAt: Date.now(), windows: [], status: 'error', failureKind: 'missing-credentials', error: 'Sin API key para consultar los créditos.' };
+		}
+		if (!opts?.force) {
+			const cached = this.getCached(providerId);
+			if (cached && !cached.error) { return cached; }
+		}
+		try {
+			const ctx = await this.net.request({
+				type: 'GET', url: OPENROUTER_CREDITS_URL,
+				headers: { 'Authorization': `Bearer ${key}`, 'Accept': 'application/json' },
+				callSite: 'openideUsageOpenRouter',
+			}, CancellationToken.None);
+			const status = ctx.res.statusCode ?? 0;
+			const text = (await asText(ctx)) ?? '';
+			if (status < 200 || status >= 300) {
+				return this.failure(providerId, status, ctx.res.headers, status === 401 || status === 403 ? 'OpenRouter rechazó la API key.' : `OpenRouter no devolvió los créditos (HTTP ${status}).`);
+			}
+			let json: unknown;
+			try { json = text ? JSON.parse(text) : null; } catch {
+				const bad: IProviderRateLimits = { providerId, fetchedAt: Date.now(), windows: [], status: 'error', failureKind: 'parse', error: 'OpenRouter devolvió una respuesta que no se pudo leer.' };
+				this.cache.set(providerId, bad);
+				return bad;
+			}
+			const result = normalizeOpenRouterCreditsJson(json, providerId);
+			this.cache.set(providerId, result);
+			return result;
+		} catch {
+			return this.networkFailure(providerId, 'No se pudo consultar los créditos de OpenRouter.');
+		}
 	}
 
 	getCached(providerId: string): IProviderRateLimits | undefined {
@@ -127,7 +274,9 @@ export class OpenideUsageService extends Disposable implements IOpenideUsageServ
 				this.cache.set(providerId, bad);
 				return bad;
 			}
-			const normalized = normalizeAnthropicUsageJson(json, providerId);
+			// Anthropic's tokens are opaque, so this resolves to no key and the row never merges.
+			// Applied anyway: the rule is "ask the credential", not "ask the provider we remembered".
+			const normalized = withAccountKey(normalizeAnthropicUsageJson(json, providerId), token);
 			this.cache.set(providerId, normalized);
 			return normalized;
 		} catch {
@@ -140,6 +289,85 @@ export class OpenideUsageService extends Disposable implements IOpenideUsageServ
 			this.cache.set(providerId, fail);
 			return fail;
 		}
+	}
+
+	async fetchCodexOAuthUsage(providerId: string, accessToken: string, opts?: { force?: boolean }): Promise<IProviderRateLimits> {
+		const token = (accessToken ?? '').trim();
+		if (!providerId || !token) {
+			return { providerId, fetchedAt: Date.now(), windows: [], error: 'Sin token OAuth para consultar usage.' };
+		}
+		if (!opts?.force) {
+			const cached = this.getCached(providerId);
+			if (cached && !cached.error) { return cached; }
+		}
+		const accountId = chatGptAccountIdFromJwt(token);
+		try {
+			const ctx = await this.net.request({
+				type: 'GET',
+				url: CODEX_USAGE_URL,
+				headers: {
+					'Authorization': `Bearer ${token}`,
+					'User-Agent': 'codex_cli_rs/0.0.0 (OpenIDE)',
+					'originator': 'codex_cli_rs',
+					'Accept': 'application/json',
+					...(accountId ? { 'ChatGPT-Account-ID': accountId } : {}),
+				},
+				callSite: 'openideUsageCodex',
+			}, CancellationToken.None);
+			const status = ctx.res.statusCode ?? 0;
+			const text = (await asText(ctx)) ?? '';
+			if (status < 200 || status >= 300) {
+				const error = { providerId, fetchedAt: Date.now(), windows: [], error: status === 401 || status === 403 ? 'Usage de Codex no disponible (sesión expirada).' : `Usage de Codex no disponible (HTTP ${status}).` };
+				this.cache.set(providerId, error);
+				return error;
+			}
+			const result = withAccountKey(normalizeCodexUsageJson(text ? JSON.parse(text) : null, providerId), token);
+			this.cache.set(providerId, result);
+			return result;
+		} catch {
+			const error = { providerId, fetchedAt: Date.now(), windows: [], error: 'No se pudo consultar usage de Codex.' };
+			this.cache.set(providerId, error);
+			return error;
+		}
+	}
+
+	async fetchGrokOAuthUsage(providerId: string, accessToken: string, opts?: { force?: boolean }): Promise<IProviderRateLimits> {
+		const token = (accessToken ?? '').trim();
+		if (!providerId || !token) {
+			return { providerId, fetchedAt: Date.now(), windows: [], error: 'Sin token OAuth para consultar usage.' };
+		}
+		if (!opts?.force) {
+			const cached = this.getCached(providerId);
+			if (cached && !cached.error) { return cached; }
+		}
+		const userId = stringClaimFromJwt(token, 'sub');
+		const headers = {
+			'Authorization': `Bearer ${token}`,
+			'X-XAI-Token-Auth': 'xai-grok-cli',
+			'Accept': 'application/json',
+			...(userId ? { 'x-userid': userId } : {}),
+		};
+		try {
+			for (const url of [GROK_USAGE_URL, GROK_FALLBACK_USAGE_URL]) {
+				const ctx = await this.net.request({ type: 'GET', url, headers, callSite: 'openideUsageGrok' }, CancellationToken.None);
+				const status = ctx.res.statusCode ?? 0;
+				const text = (await asText(ctx)) ?? '';
+				if (status === 401 || status === 403) {
+					const error = { providerId, fetchedAt: Date.now(), windows: [], error: 'Usage de Grok no disponible (sesión expirada).' };
+					this.cache.set(providerId, error);
+					return error;
+				}
+				if (status < 200 || status >= 300) { continue; }
+				const result = withAccountKey(normalizeGrokUsageJson(text ? JSON.parse(text) : null, providerId), token);
+				if (result.windows.length) {
+					this.cache.set(providerId, result);
+					return result;
+				}
+			}
+		} catch { /* se normaliza abajo */ }
+		const error = { providerId, fetchedAt: Date.now(), windows: [], error: 'No se pudo consultar usage de Grok.' };
+		this.cache.set(providerId, error);
+		return error;
 	}
 }
 

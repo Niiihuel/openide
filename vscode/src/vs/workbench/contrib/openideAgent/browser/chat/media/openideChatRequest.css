@@ -1,0 +1,155 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat, the user's turn.
+ *
+ *  Split out of openideChatNative.css only for size. Same rule as that file: every literal is
+ *  transcribed from the webview (browser/openideChatHtml.ts `.msg.user` and friends, lines 67-120
+ *  and 1235-1237), never re-designed.
+ *--------------------------------------------------------------------------------------------*/
+
+/* ---- Request row: the webview's `.msg.user` ---- */
+
+/* Cursor's request block: a full-width, centred block on a subtle surface with a hairline and
+   large radius — not VS Code's right-aligned bubble (the user's explicit choice). */
+.openide-chat-row-request {
+	line-height: 1.45;
+}
+
+.openide-chat-request-bubble {
+	position: relative;
+	width: 100%;
+	box-sizing: border-box;
+	padding: 8px 12px;
+	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-chat-requestBorder, rgba(128, 128, 128, 0.22));
+	border-radius: var(--vscode-cornerRadius-large, 8px);
+	background: var(--vscode-chat-requestBubbleBackground, color-mix(in srgb, var(--vscode-foreground) 5%, var(--vscode-editor-background)));
+	cursor: text;
+}
+
+.openide-chat-request-text {
+	overflow-wrap: break-word;
+}
+
+.openide-chat-request-text:empty {
+	display: none;
+}
+
+/* ~3 lines, then the message is clamped and expands on click. The mask is a separate class because
+   only a clamped message may fade: on a short one it would eat the last line for no reason. */
+.openide-chat-request-collapsed {
+	max-height: var(--openide-chat-clamp-height, 72px);
+	overflow: hidden;
+	cursor: pointer;
+}
+
+.openide-chat-request-faded {
+	-webkit-mask-image: linear-gradient(180deg, #000 40%, transparent 98%);
+	mask-image: linear-gradient(180deg, #000 40%, transparent 98%);
+}
+
+/* ---- Request row: mentions, attachments and actions ---- */
+
+.openide-chat-request-capabilities {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 5px;
+	margin: 0 0 5px;
+}
+
+/* Copilot's slash-command pill (chatColors.ts:36-46): tinted text on the slash background, editor
+   font, small radius. One look for every kind — the color IS the design token upstream uses. */
+.openide-chat-capability-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: 18px;
+	max-width: min(260px, 100%);
+	padding: 0 6px;
+	border-radius: 4px;
+	background: var(--vscode-chat-slashCommandBackground, #26477866);
+	color: var(--vscode-chat-slashCommandForeground, #85b6ff);
+	font: 12px/1 var(--vscode-editor-font-family, monospace);
+}
+
+.openide-chat-capability-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.openide-chat-request-images {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 6px;
+}
+
+/* A frame, not a button: the webview's thumbnail opens a lightbox that the native chat does not
+   have yet, and a `zoom-in` cursor over dead pixels is worse than no affordance. */
+.openide-chat-request-image {
+	width: 72px;
+	height: 72px;
+	border: 1px solid rgba(128, 128, 128, 0.3);
+	border-radius: 2px;
+	overflow: hidden;
+	background: transparent;
+}
+
+.openide-chat-request-image img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
+
+/* Hover-only, exactly as in the webview: the action is destructive, so it stays out of the way
+   until the pointer is on the turn it would revert. */
+.openide-chat-request-actions {
+	position: absolute;
+	right: 6px;
+	bottom: 6px;
+	display: flex;
+	gap: 4px;
+	opacity: 0;
+	transition: opacity 120ms ease;
+}
+
+/* `:focus-within` on the CONTAINER, not on the button: a child cannot be more opaque than the
+   parent that is at `opacity: 0`, so styling the focused button alone would leave it invisible and
+   the row unreachable by keyboard. */
+.openide-chat-request-bubble:hover .openide-chat-request-actions,
+.openide-chat-request-actions:focus-within {
+	opacity: 1;
+}
+
+.openide-chat-request-action {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+}
+
+.openide-chat-request-action:hover {
+	color: var(--vscode-foreground);
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .openide-chat-native .openide-chat-request-bubble .openide-chat-request-action .codicon[class*="codicon-"] {
+	font-size: 13px;
+	color: inherit;
+}
+
+/* Armed for the duration of the transaction: the row is about to be spliced out, and a second
+   click would queue a rollback against a transcript the first one is already truncating. */
+.openide-chat-request-action:disabled {
+	opacity: 0.45;
+	cursor: default;
+}

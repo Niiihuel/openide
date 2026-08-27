@@ -14,9 +14,9 @@
 
 Most Microsoft extensions are limited to run on only MS products by their license and by running additional checks in their proprietary code.
 
-Extensions incompatible with VSCodium **include**:
+Extensions incompatible with OpenIDE **include**:
 - [C/C++](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools)
-- [LaTeX Workshop](https://marketplace.visualstudio.com/items?itemName=James-Yu.latex-workshop) (explicitly unsupported, as [indicated in the FAQ](https://github.com/James-Yu/LaTeX-Workshop/wiki/FAQ#vscodium-is-not-officially-supported))
+- [LaTeX Workshop](https://marketplace.visualstudio.com/items?itemName=James-Yu.latex-workshop) (explicitly unsupported, as [indicated in the FAQ](https://github.com/James-Yu/LaTeX-Workshop/wiki/FAQ#openide-is-not-officially-supported))
 - [Live Share](https://marketplace.visualstudio.com/items?itemName=MS-vsliveshare.vsliveshare)
 - [Python](https://marketplace.visualstudio.com/items?itemName=ms-python.python)
 - [Remote - Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)

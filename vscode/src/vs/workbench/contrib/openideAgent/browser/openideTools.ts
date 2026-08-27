@@ -1,7 +1,12 @@
 /*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------
  *  OpenIDE — registry de herramientas del agente. Lectura (read/list/search/find) = 'safe';
- *  escritura (write/edit) = 'write'; terminal (run_command) = 'exec'. El gate de aprobación lo
- *  aplica el servicio (OpenideApprovalManager) ANTES de invocar las tools 'write'/'exec'.
+ *  writes (write/edit) = 'write'; terminal (run_command) = 'exec'. The approval gate is applied
+ *  by the service (OpenideApprovalManager) BEFORE invoking 'write'/'exec' tools.
  *--------------------------------------------------------------------------------------------*/
 
 import { timeout } from '../../../../base/common/async.js';
@@ -25,9 +30,9 @@ import { ITerminalInstance, ITerminalService } from '../../terminal/browser/term
 import { IAgentLocation, IBackgroundTerminalEvent, IFileEditEvent, IToolDefinition, ToolRisk } from '../common/openideAgentTypes.js';
 import { resolvePathInsideWorkspace } from '../common/openideWorkspacePath.js';
 
-/** Deja el output del pty como texto plano: fuera OSC (incl. shell integration 633/133),
- *  CSI, escapes sueltos y controles que no sean \n/\t. El \r queda: el webview lo usa para
- *  pisar la línea en curso (barras de progreso). */
+/** Leaves the pty output as plain text: strips OSC (including shell integration 633/133),
+ *  CSI, stray escapes and controls other than \n/\t. The \r stays: the webview uses it to
+ *  overwrite the current line (progress bars). */
 function stripAnsi(data: string): string {
 	return data
 		.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, '')  // OSC ... BEL|ST
@@ -36,11 +41,11 @@ function stripAnsi(data: string): string {
 		.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');        // controles (quedan \n \t \r)
 }
 
-/** Heurística de awaiting-input: el comando lleva corriendo un mínimo, ya emitió salida y
- *  lleva un rato en silencio (prompt y/N, password, menú). No dispara con streams continuos
- *  (barras de progreso) ni con hangs sin salida (eso es timeout real).
+/** awaiting-input heuristic: the command has run for a minimum time, already emitted output and
+ *  has been silent for a while (y/N prompt, password, menu). It does not fire on continuous
+ *  streams (progress bars) nor on hangs with no output (that is a real timeout).
  *  Defaults conservadores: 12s runtime + 6s de silencio — builds con pausas cortas no
- *  deberían disparar falso positivo tan fácil como con 5s/3s. */
+ *  should not produce a false positive as easily as with 5s/3s. */
 export function shouldDetectAwaitingInput(opts: {
 	readonly now: number;
 	readonly startTime: number;
@@ -67,8 +72,8 @@ export type ShellCaptureResult = {
 	readonly timedOut?: boolean;
 };
 
-/** Solo comandos de larga duración (dev servers, watchers) van al tray "background terminal"
- *  del composer — no lecturas rápidas (cat/grep/git status) ni builds one-shot. */
+/** Only long-running commands (dev servers, watchers) go to the composer's "background
+ *  terminal" tray — not quick reads (cat/grep/git status) nor one-shot builds. */
 export function isBackgroundTrayWorthy(command: string): boolean {
 	const c = command.trim().toLowerCase();
 	if (!c) {
@@ -105,13 +110,20 @@ export interface IToolApprovalInfo {
 export interface IAgentToolContext {
 	readonly messageId?: string;
 	readonly workspaceRoot?: URI;
+	/**
+	 * The call came from an EXTERNAL agent (a CLI in the dock), not from OpenIDE's own loop.
+	 *
+	 * It matters for artefacts that carry an action: a plan an external agent wrote must not be
+	 * offered a "Build" that would launch OUR agent on it. Whoever asked is the one who executes.
+	 */
+	readonly external?: boolean;
 }
 
 export interface IAgentTool {
 	readonly def: IToolDefinition;
 	readonly risk: ToolRisk;
 	approvalInfo?(args: any): IToolApprovalInfo;
-	/** Destino visual que puede seguir el workspace mientras corre esta tool. */
+	/** Visual destination the workspace can follow while this tool runs. */
 	agentLocation?(args: any): IAgentLocation | undefined;
 	invoke(args: any, token: CancellationToken, context?: IAgentToolContext): Promise<string>;
 }
@@ -121,9 +133,9 @@ export class OpenideToolRegistry extends Disposable {
 	private readonly tools = new Map<string, IAgentTool>();
 	private agentTerminal: ITerminalInstance | undefined;
 	/**
-	 * Sesión interactiva abierta: sólo válida mientras un run_command devolvió awaiting-input
-	 * y el proceso sigue vivo. terminal_send exige esta sesión (no escribe a un shell libre).
-	 * TTL duro: si shell integration no emite finish, la sesión expira sola.
+	 * Open interactive session: valid only while a run_command returned awaiting-input and the
+	 * process is still alive. terminal_send requires this session (it never writes to a free shell).
+	 * Hard TTL: if shell integration does not emit finish, the session expires on its own.
 	 */
 	private static readonly INTERACTIVE_SESSION_TTL_MS = 10 * 60_000;
 	private interactiveSession: {
@@ -140,8 +152,8 @@ export class OpenideToolRegistry extends Disposable {
 	readonly onDidEdit: Event<IFileEditEvent> = this._onDidEdit.event;
 	private readonly _onDidChangeBackgroundTerminal = this._register(new Emitter<IBackgroundTerminalEvent>());
 	readonly onDidChangeBackgroundTerminal: Event<IBackgroundTerminalEvent> = this._onDidChangeBackgroundTerminal.event;
-	/** Output incremental (texto plano, sin ANSI) del comando que corre en la terminal del
-	 *  agente — alimenta la terminal embebida del chat mientras run_command está en vuelo. */
+	/** Incremental output (plain text, no ANSI) of the command running in the agent terminal —
+	 *  it feeds the chat's embedded terminal while run_command is in flight. */
 	private readonly _onDidShellData = this._register(new Emitter<string>());
 	readonly onDidShellData: Event<string> = this._onDidShellData.event;
 
@@ -170,7 +182,7 @@ export class OpenideToolRegistry extends Disposable {
 		this.register(this.terminalSendTool());
 	}
 
-	// ---- tools interceptadas por el servicio (su invoke es un fallback) ----
+	// ---- tools intercepted by the service (their invoke is a fallback) ----
 
 	private updateTodosTool(): IAgentTool {
 		return {
@@ -233,12 +245,12 @@ export class OpenideToolRegistry extends Disposable {
 		};
 	}
 
-	/** terminal_send: responde a prompts interactivos de la terminal del agente (y/N, passwords,
-	 *  menús). Interceptada en openideAgentService porque necesita la terminal viva del run actual. */
+	/** terminal_send: answers interactive prompts from the agent terminal (y/N, passwords, menus).
+	 *  Intercepted in openideAgentService because it needs the live terminal of the current run. */
 	private terminalSendTool(): IAgentTool {
 		return {
-			// exec: escribir al pty es tan privilegiado como run_command; el gate de aprobación
-			// aplica. Además exige sesión awaiting-input (no shell libre post-exit).
+			// exec: writing to the pty is as privileged as run_command; the approval gate applies.
+			// It also requires an awaiting-input session (not a free shell after exit).
 			risk: 'exec',
 			def: {
 				name: 'terminal_send',
@@ -251,7 +263,7 @@ export class OpenideToolRegistry extends Disposable {
 					required: ['text'],
 				},
 			},
-			// Nunca echo del payload: puede ser password / secreto del prompt.
+			// Never echo the payload: it may be a password / a secret from the prompt.
 			approvalInfo: () => ({ title: 'Responder prompt de terminal', detail: 'Respuesta interactiva (oculta)', command: 'terminal_send' }),
 			invoke: async () => 'Error: no hay una terminal interactiva activa.', // interceptada en openideAgentService
 		};
@@ -261,18 +273,18 @@ export class OpenideToolRegistry extends Disposable {
 		this.tools.set(tool.def.name, tool);
 	}
 
-	/** Registra una tool construida afuera (ej: `memory`, que necesita servicios que el registry no tiene). */
+	/** Registers a tool built elsewhere (e.g. `memory`, which needs services the registry lacks). */
 	registerTool(tool: IAgentTool): void {
 		this.register(tool);
 	}
 
-	/** Saca una tool registrada dinámicamente (tools MCP cuando su server cae/recarga) —
-	 *  getDefinitions() lee el registry vivo, así que la tool desaparece del turno siguiente. */
+	/** Removes a dynamically registered tool (MCP tools when their server drops/reloads) —
+	 *  getDefinitions() reads the live registry, so the tool disappears from the next turn. */
 	deregisterTool(name: string): void {
 		this.tools.delete(name);
 	}
 
-	/** Guard de colisión para registradores dinámicos: jamás pisar una tool existente. */
+	/** Collision guard for dynamic registrars: never overwrite an existing tool. */
 	hasTool(name: string): boolean {
 		return this.tools.has(name);
 	}
@@ -281,7 +293,7 @@ export class OpenideToolRegistry extends Disposable {
 		return this.tools.get(name);
 	}
 
-	/** Resuelve la ubicación visual de una tool. Las built-in usan metadata explícita; para MCP
+	/** Resolves a tool's visual location. Built-ins use explicit metadata; for MCP
 	 *  y herramientas instaladas conservamos un fallback deliberadamente acotado. */
 	agentLocation(name: string, argumentsJson: string): IAgentLocation | undefined {
 		let args: any = {};
@@ -311,7 +323,7 @@ export class OpenideToolRegistry extends Disposable {
 		return { kind: 'file', path, line: Number.isFinite(line) && line > 0 ? Math.floor(line) : undefined, activity };
 	}
 
-	/** Resuelve un path dentro de alguna raíz abierta; usado por el diff del chat. */
+	/** Resolves a path inside one of the open roots; used by the chat diff. */
 	resolveWorkspacePath(path: string, workspaceRoot?: URI): URI | undefined {
 		return this.resolvePath(path, workspaceRoot);
 	}
@@ -321,6 +333,15 @@ export class OpenideToolRegistry extends Disposable {
 	}
 
 	async invoke(name: string, argumentsJson: string, token: CancellationToken, messageId?: string, workspaceRoot?: URI): Promise<string> {
+		return this.run(name, argumentsJson, token, { messageId, workspaceRoot });
+	}
+
+	/** Same call, marked as coming from an external agent. */
+	async invokeExternal(name: string, argumentsJson: string, token: CancellationToken): Promise<string> {
+		return this.run(name, argumentsJson, token, { external: true });
+	}
+
+	private async run(name: string, argumentsJson: string, token: CancellationToken, context: IAgentToolContext): Promise<string> {
 		const tool = this.tools.get(name);
 		if (!tool) {
 			return `Error: herramienta desconocida "${name}".`;
@@ -328,7 +349,7 @@ export class OpenideToolRegistry extends Disposable {
 		let args: any = {};
 		try { args = JSON.parse(argumentsJson || '{}'); } catch { return `Error: argumentos JSON inválidos para ${name}.`; }
 		try {
-			return await tool.invoke(args, token, { messageId, workspaceRoot });
+			return await tool.invoke(args, token, context);
 		} catch (e) {
 			return `Error ejecutando ${name}: ${e instanceof Error ? e.message : String(e)}`;
 		}
@@ -355,9 +376,9 @@ export class OpenideToolRegistry extends Disposable {
 		return this.contextService.getWorkspace().folders.map(f => f.uri);
 	}
 
-	/** Diagnósticos LSP/linters de un archivo, formateados para el modelo. Abre una referencia
-	 *  al text model para que los language features lo validen (un archivo NO abierto no tiene
-	 *  markers) y deja un margen para que la validación corra después de un write. */
+	/** LSP/linter diagnostics for a file, formatted for the model. It opens a reference to the text
+	 *  model so language features validate it (a file that is NOT open has no markers) and leaves
+	 *  some slack so validation can run after a write. */
 	private async collectDiagnostics(uri: URI, waitMs = 1200): Promise<string> {
 		try {
 			const ref = await this.textModelService.createModelReference(uri);
@@ -386,7 +407,7 @@ export class OpenideToolRegistry extends Disposable {
 		return lines.join('\n');
 	}
 
-	/** Sufijo de diagnósticos para el resultado de write/edit: feedback inmediato al modelo. */
+	/** Diagnostics suffix for the write/edit result: immediate feedback to the model. */
 	private async diagnosticsSuffix(uri: URI): Promise<string> {
 		const diag = await this.collectDiagnostics(uri);
 		return diag ? `\n\nDiagnósticos del archivo tras la edición (corregí los que hayas introducido):\n${diag}` : '';
@@ -394,7 +415,7 @@ export class OpenideToolRegistry extends Disposable {
 
 	// ---- @menciones del composer (autocomplete + contexto adjunto) ----
 
-	/** Búsqueda fuzzy de archivos del workspace para el autocomplete de @ del composer. */
+	/** Fuzzy search of workspace files for the composer's @ autocomplete. */
 	async searchFilesForMention(query: string, maxResults = 12, token?: CancellationToken): Promise<string[]> {
 		const folders = this.folders();
 		if (!folders.length) {
@@ -406,7 +427,7 @@ export class OpenideToolRegistry extends Disposable {
 		return result.results.map(r => this.relPath(r.resource));
 	}
 
-	/** Lee un archivo mencionado con @ (capado) para adjuntarlo como contexto del mensaje. */
+	/** Reads an @-mentioned file (capped) to attach it as message context. */
 	async readMentionedFile(path: string, capChars = 20000): Promise<string | undefined> {
 		const uri = this.resolvePath(path);
 		if (!uri) {
@@ -612,9 +633,9 @@ export class OpenideToolRegistry extends Disposable {
 		};
 	}
 
-	/** Matching tolerante a whitespace para edit_file cuando el exacto falla (con límites independientes del modelo):
-	 *  pasada 1 ignora whitespace al FINAL de cada línea; pasada 2 compara líneas con .trim()
-	 *  y re-indenta new_string según la indentación real del archivo. Exige match ÚNICO. */
+	/** Whitespace-tolerant matching for edit_file when the exact one fails (with limits independent of the model):
+	 *  pass 1 ignores whitespace at the END of each line; pass 2 compares lines with .trim()
+	 *  and re-indents new_string to the file's real indentation. It requires a UNIQUE match. */
 	private fuzzyReplace(current: string, oldStr: string, newStr: string): { updated?: string; error?: string } {
 		const eol = current.includes('\r\n') ? '\r\n' : '\n';
 		const fileLines = current.split(/\r?\n/);
@@ -796,8 +817,8 @@ export class OpenideToolRegistry extends Disposable {
 			invoke: async (args, token) => {
 				const command = String(args.command ?? '').trim();
 				if (!command) { return 'Error: empty command.'; }
-				// background_persistent siempre va al dock (visible, sin auto-dispose), aunque el
-				// comando no sea "tray-worthy". background:true solo para servers/watchers.
+				// background_persistent always goes to the dock (visible, no auto-dispose), even when the
+				// command is not "tray-worthy". background:true is only for servers/watchers.
 				if (args.background_persistent) {
 					return this.startBackgroundCommand(command, true);
 				}
@@ -805,7 +826,7 @@ export class OpenideToolRegistry extends Disposable {
 					if (isBackgroundTrayWorthy(command)) {
 						return this.startBackgroundCommand(command, false);
 					}
-					// background:true mal usado (lectura rápida) → foreground con captura
+					// background:true misused (a quick read) → foreground with capture
 				}
 				const timeoutSec = Math.min(600, Math.max(5, Number(args.timeoutSeconds) || 120));
 				const finished = await this.runShellCaptured(command, token, timeoutSec * 1000);
@@ -827,8 +848,8 @@ export class OpenideToolRegistry extends Disposable {
 	}
 
 	/**
-	 * Cierra la sesión interactiva. Por defecto NO dispose del pty (el comando puede
-	 * seguir vivo y terminal_send/finish lo necesitan). Con `killPty` sí mata y desengancha
+	 * Closes the interactive session. By default it does NOT dispose the pty (the command may
+	 * still be alive and terminal_send/finish need it). With `killPty` it does kill and detach
 	 * agentTerminal (TTL / abandon / nuevo run_command).
 	 */
 	private clearInteractiveSession(term?: ITerminalInstance, opts?: { killPty?: boolean }): void {
@@ -865,14 +886,14 @@ export class OpenideToolRegistry extends Disposable {
 		if (s.ttlTimer) { clearTimeout(s.ttlTimer); }
 		const term = s.term;
 		s.ttlTimer = setTimeout(() => {
-			// Solo mata si sigue siendo la misma sesión.
+			// Only kill if it is still the same session.
 			if (this.interactiveSession?.term === term) {
 				this.clearInteractiveSession(term, { killPty: true });
 			}
 		}, OpenideToolRegistry.INTERACTIVE_SESSION_TTL_MS);
 	}
 
-	/** True si la sesión apunta exactamente a este term y sigue viva (y dentro del TTL). */
+	/** True when the session points exactly at this term and is still alive (and within the TTL). */
 	private sessionStillOwns(term: ITerminalInstance): boolean {
 		if (!this.hasInteractiveSession()) {
 			return false;
@@ -888,15 +909,15 @@ export class OpenideToolRegistry extends Disposable {
 			return false;
 		}
 		if (s.term.isDisposed) {
-			// Metadata huérfana: el pty ya murió.
+			// Orphaned metadata: the pty is already dead.
 			this.clearInteractiveSession();
 			if (this.agentTerminal === s.term) {
 				this.agentTerminal = undefined;
 			}
 			return false;
 		}
-		// TTL: si SI no emitió finish, cerramos gate Y matamos el pty huérfano para que
-		// el próximo run_command no reutilice un proceso colgado (freeze de consola).
+		// TTL: if SI never emitted finish, we close the gate AND kill the orphaned pty so the
+		// next run_command does not reuse a hung process (console freeze).
 		if (Date.now() - s.openedAt > OpenideToolRegistry.INTERACTIVE_SESSION_TTL_MS) {
 			this.clearInteractiveSession(undefined, { killPty: true });
 			return false;
@@ -904,14 +925,14 @@ export class OpenideToolRegistry extends Disposable {
 		return true;
 	}
 
-	/** Ejecuta un comando en la terminal oculta del agente capturando salida + exit code
-	 *  (shell integration). Lo usan run_command y el git flow.
-	 *  Si el comando NO termina (timeout o cancelación del run), la terminal compartida se
-	 *  MATA — el proceso colgado muere con ella y la próxima llamada crea una fresca. Si no,
-	 *  cada comando siguiente queda encolado detrás del colgado y "la consola se congela"
+	/** Runs a command in the agent's hidden terminal, capturing output + exit code
+	 *  (shell integration). Used by run_command and the git flow.
+	 *  If the command does NOT finish (timeout or run cancellation), the shared terminal is
+	 *  KILLED — the hung process dies with it and the next call creates a fresh one. Otherwise
+	 *  every following command queues behind the hung one and "the console freezes"
 	 *  (y el pty host termina unresponsive). */
 	async runShellCaptured(command: string, token: CancellationToken, timeoutMs = 120000): Promise<ShellCaptureResult | 'no-shell-integration' | undefined> {
-		// Sesión interactiva previa (o TTL que acaba de matar): no reusar ese pty.
+		// Previous interactive session (or a TTL that just killed it): do not reuse that pty.
 		if (this.hasInteractiveSession()) {
 			this.clearInteractiveSession(this.interactiveSession!.term, { killPty: true });
 		}
@@ -919,17 +940,17 @@ export class OpenideToolRegistry extends Disposable {
 		await term.processReady;
 		const cd = await this.waitForCommandDetection(term);
 		if (!cd) {
-			// Sin SI no hay captura fiable. Enviamos el comando y DESENGANCHAMOS la terminal
-			// compartida (el próximo getAgentTerminal crea una fresca) para no encolar detrás.
-			// No dispose: mataría el proceso al instante.
+			// Without SI there is no reliable capture. We send the command and DETACH the shared
+			// terminal (the next getAgentTerminal creates a fresh one) so nothing queues behind it.
+			// No dispose: that would kill the process instantly.
 			term.sendText(command, true);
 			if (this.agentTerminal === term) {
 				this.agentTerminal = undefined;
 			}
 			return 'no-shell-integration';
 		}
-		// Un único listener de finish: resuelve el race Y limpia la sesión interactiva.
-		// Nunca se dispose a medias entre race y open-session (evita shell libre con gate abierto).
+		// A single finish listener: it resolves the race AND clears the interactive session.
+		// It is never half-disposed between race and open-session (avoids a free shell with an open gate).
 		let finishedResolved: ShellCaptureResult | undefined;
 		let finishResolve: ((r: ShellCaptureResult) => void) | undefined;
 		const finishedP = new Promise<ShellCaptureResult>(resolve => { finishResolve = resolve; });
@@ -943,9 +964,9 @@ export class OpenideToolRegistry extends Disposable {
 		const cancelledP = new Promise<undefined>(resolve => {
 			cancelListener = token.onCancellationRequested(() => resolve(undefined));
 		});
-		// Streaming a la terminal embebida del chat: el pty crudo incluye el prompt y el eco
-		// del comando → recién empezamos a reenviar cuando command detection marca "ejecutando"
-		// (post-eco), y cortamos al terminar. Se stripea ANSI/OSC: la card muestra texto plano.
+		// Streaming to the chat's embedded terminal: the raw pty includes the prompt and the command
+		// echo → we only start forwarding once command detection marks "executing" (post-echo), and
+		// we stop at the end. ANSI/OSC is stripped: the card shows plain text.
 		let streaming = false;
 		let lastDataTime = 0;
 		let accumulatedOutput = '';
@@ -957,7 +978,7 @@ export class OpenideToolRegistry extends Disposable {
 		});
 		try {
 			term.sendText(command, true);
-			// Detección de awaiting-input: mínimo de runtime + hubo salida + silencio posterior
+			// awaiting-input detection: minimum runtime + there was output + subsequent silence
 			// (prompt y/N / password). No mata la terminal: terminal_send escribe al pty vivo.
 			const startTime = Date.now();
 			let awaitingResolved = false;
@@ -985,22 +1006,22 @@ export class OpenideToolRegistry extends Disposable {
 				}
 				return undefined;
 			}
-			// Finish normal (ganó finishedP o el comando terminó durante el race): sin sesión.
+			// Normal finish (finishedP won, or the command ended during the race): no session.
 			if (!result.awaitingInput || finishedResolved) {
 				finishedListener.dispose();
 				this.clearInteractiveSession(term);
 				return finishedResolved ?? result;
 			}
-			// Awaiting-input real: el finishedListener SIGUE vivo y limpia la sesión al exit.
-			// Si el comando ya terminó entre el race y acá, finishedResolved se setea y no abrimos.
+			// Real awaiting-input: the finishedListener is STILL alive and clears the session on exit.
+			// If the command already ended between the race and here, finishedResolved is set and we do not open.
 			if (finishedResolved) {
 				finishedListener.dispose();
 				return finishedResolved;
 			}
-			// Sesión interactiva: data + finish + exit + TTL proactivo.
+			// Interactive session: data + finish + exit + proactive TTL.
 			this.clearInteractiveSession();
 			const exitListener = term.onExit(() => {
-				// Proceso murió: limpiar gate y desenganchar (dispose si aún no).
+				// Process died: clear the gate and detach (dispose if not already).
 				this.clearInteractiveSession(term, { killPty: true });
 			});
 			this.interactiveSession = {
@@ -1011,22 +1032,22 @@ export class OpenideToolRegistry extends Disposable {
 				exitListener,
 			};
 			this.touchInteractiveSession(); // arma el timer TTL proactivo
-			// Evitar dispose del dataListener en el finally: ahora lo posee la sesión.
+			// Avoid disposing the dataListener in the finally: the session now owns it.
 			return result;
 		} finally {
 			cancelListener?.dispose();
 			execListener.dispose();
-			// Si la sesión se quedó con el dataListener, no lo dispose acá.
+			// If the session kept the dataListener, do not dispose it here.
 			if (this.interactiveSession?.term !== term || this.interactiveSession?.dataListener !== dataListener) {
 				dataListener.dispose();
 			}
 		}
 	}
 
-	/** Escribe una línea a la terminal del agente (input del usuario en la terminal embebida
-	 *  del chat mientras run_command corre: contestar prompts y/N, escribir a un REPL, etc.). */
+	/** Writes a line to the agent terminal (user input in the chat's embedded terminal while
+	 *  run_command runs: answering y/N prompts, typing into a REPL, etc.). */
 	writeToAgentTerminal(text: string): void {
-		// Preferir sesión interactiva VÁLIDA (TTL/ownership); si no, agent terminal en vuelo.
+		// Prefer a VALID interactive session (TTL/ownership); otherwise the in-flight agent terminal.
 		const term = this.hasInteractiveSession()
 			? this.interactiveSession!.term
 			: this.agentTerminal;
@@ -1036,16 +1057,16 @@ export class OpenideToolRegistry extends Disposable {
 	}
 
 	/**
-	 * Escribe texto al pty de la sesión interactiva y captura salida nueva.
-	 * Devuelve undefined si NO hay sesión awaiting-input (gate de seguridad).
-	 * Distingue timedOut vs awaitingInput. Rechaza payloads multi-línea.
+	 * Writes text to the interactive session's pty and captures new output.
+	 * Returns undefined when there is NO awaiting-input session (safety gate).
+	 * It distinguishes timedOut from awaitingInput. Multi-line payloads are rejected.
 	 */
 	async sendToAgentTerminalInteractive(text: string, token: CancellationToken, timeoutMs = 30000): Promise<ShellCaptureResult | undefined> {
 		if (!this.hasInteractiveSession()) {
 			return undefined;
 		}
 		const session = this.interactiveSession!;
-		// Una sola línea: newlines permitirían encolar comandos tras responder el prompt.
+		// A single line: newlines would allow queueing commands after answering the prompt.
 		if (/[\r\n\u2028\u2029\0]/.test(text)) {
 			return { output: 'Error: terminal_send acepta una sola línea (sin saltos de línea).', exitCode: undefined };
 		}
@@ -1060,18 +1081,18 @@ export class OpenideToolRegistry extends Disposable {
 			return undefined;
 		}
 		if (!cd) {
-			// Sin SI no podemos observar: no escribimos y matamos la sesión opaca (killPty).
+			// Without SI we cannot observe: we do not write, and we kill the opaque session (killPty).
 			this.clearInteractiveSession(term, { killPty: true });
 			return { output: 'Error: shell integration no disponible; no se puede confirmar el prompt.', exitCode: undefined };
 		}
 		let outputBuffer = '';
-		// 0 hasta el primer data post-send: sin eco (password) no fingimos "quiet after output".
+		// 0 until the first data after send: with no echo (password) we do not fake "quiet after output".
 		let lastDataTime = 0;
 		const dataListener = term.onData(data => {
 			const plain = stripAnsi(data);
 			if (plain) { outputBuffer += plain; lastDataTime = Date.now(); this._onDidShellData.fire(plain); }
 		});
-		// Revalidar una vez más justo antes de tocar el pty.
+		// Revalidate once more right before touching the pty.
 		if (!this.sessionStillOwns(term)) {
 			dataListener.dispose();
 			return undefined;
@@ -1118,8 +1139,8 @@ export class OpenideToolRegistry extends Disposable {
 		}
 	}
 
-	/** Muestra la terminal compartida del agente sin robar el foco del composer. Crear la misma
-	 *  instancia antes del invoke evita carreras entre el evento de ubicación y run_command. */
+	/** Shows the agent's shared terminal without stealing focus from the composer. Creating the same
+	 *  instance before the invoke avoids races between the location event and run_command. */
 	async followAgentTerminal(): Promise<void> {
 		const term = await this.getAgentTerminal();
 		await term.processReady;
@@ -1127,7 +1148,7 @@ export class OpenideToolRegistry extends Disposable {
 		this.terminalService.setActiveInstance(term);
 	}
 
-	/** "Enviar al panel": revela y enfoca la terminal del agente (o la sesión interactiva) en el dock. */
+	/** "Send to panel": reveals and focuses the agent terminal (or the interactive session) in the dock. */
 	async revealAgentTerminalToPanel(): Promise<boolean> {
 		const term = this.hasInteractiveSession()
 			? this.interactiveSession!.term
@@ -1151,14 +1172,14 @@ export class OpenideToolRegistry extends Disposable {
 		return term;
 	}
 
-	/** Lanza un comando de larga duración en una terminal oculta del panel (no bloquea).
-	 *  Antes de arrancar, MATA cualquier terminal previa del MISMO comando (re-levantar el dev
-	 *  server reemplaza al viejo, no lo apila) y purga las que ya terminaron — así no se acumulan
+	/** Launches a long-running command in a hidden panel terminal (non-blocking).
+	 *  Before starting, it KILLS any previous terminal for the SAME command (restarting the dev
+	 *  server replaces the old one instead of stacking) and purges finished ones — so they do not pile up
 	 *  10 terminales fantasma tras varios intentos. */
 	private async startBackgroundCommand(command: string, persistent = false): Promise<string> {
 		for (const [oldId, entry] of [...this.bgTerminals]) {
 			// Purgar disposed. Mismo comando no-persistent se reemplaza.
-			// Persistentes vivas del mismo comando: se reemplazan sólo si el nuevo también es
+			// Live persistent ones for the same command: replaced only if the new one is also
 			// persistent (re-levantar dev server en dock); si no, se dejan.
 			const sameCmd = entry.command === command;
 			const shouldReplace = sameCmd && (!entry.persistent || persistent);
@@ -1173,9 +1194,9 @@ export class OpenideToolRegistry extends Disposable {
 		const term = await this.terminalService.createTerminal({
 			config: {
 				name: command.slice(0, 40),
-				// persistent: visible en el dock desde el inicio. background normal: oculta hasta reveal.
+				// persistent: visible in the dock from the start. Normal background: hidden until reveal.
 				hideFromUser: !persistent,
-				// forcePersist ayuda a que la sesión del dock sobreviva recargas del layout.
+				// forcePersist helps the dock session survive layout reloads.
 				forcePersist: persistent || undefined,
 			},
 			location: TerminalLocation.Panel,
@@ -1185,14 +1206,14 @@ export class OpenideToolRegistry extends Disposable {
 		const id = this.trackBackgroundTerminal(term, command, undefined, cd, persistent);
 		term.sendText(command, true);
 		if (!cd && !persistent) {
-			// Sin shell integration no hay onCommandFinished: dejar un exit en cola para que
-			// la terminal se cierre sola cuando el comando termine y el tray no quede vivo.
-			// En persistent NO forzamos exit: el usuario la controla desde el dock.
+			// Without shell integration there is no onCommandFinished: leave an exit queued so the
+			// terminal closes by itself when the command ends and the tray does not stay alive.
+			// For persistent ones we do NOT force exit: the user controls it from the dock.
 			term.sendText('exit', true);
 		}
 		if (persistent) {
-			// Asegurar que quede visible y activa en el panel (por si hideFromUser fue false
-			// pero el grupo aún no la mostró).
+			// Make sure it ends up visible and active in the panel (in case hideFromUser was false
+			// but the group had not shown it yet).
 			await this.terminalService.showBackgroundTerminal(term);
 			this.terminalService.setActiveInstance(term);
 			return `Iniciado en terminal persistente del dock (id=${id}). La terminal queda visible y NO se cierra al terminar el comando.`;
@@ -1200,7 +1221,7 @@ export class OpenideToolRegistry extends Disposable {
 		return `Iniciado en segundo plano (id=${id}). Seguís sin esperar a que termine; el usuario puede abrir la terminal para ver la salida.`;
 	}
 
-	/** Registra una terminal ya viva como "en segundo plano" y cablea sus eventos de salida. */
+	/** Registers an already-live terminal as "background" and wires its output events. */
 	private trackBackgroundTerminal(term: ITerminalInstance, command: string, finished?: Promise<{ output: string; exitCode: number | undefined }>, commandDetection?: ICommandDetectionCapability, persistent = false): string {
 		const id = generateUuid();
 		this.bgTerminals.set(id, { term, command, persistent });
@@ -1218,7 +1239,7 @@ export class OpenideToolRegistry extends Disposable {
 			if (done) { return; }
 			done = true;
 			cleanup();
-			// persistent: la terminal queda viva en el dock y el id sigue resolviendo reveal/kill.
+			// persistent: the terminal stays alive in the dock and the id keeps resolving reveal/kill.
 			// No-persistent: dispose + sacar del mapa.
 			if (!persistent) {
 				this.bgTerminals.delete(id);
@@ -1251,7 +1272,7 @@ export class OpenideToolRegistry extends Disposable {
 			return id;
 		}
 
-	/** Revela y enfoca una terminal de fondo en el panel del IDE (click en el widget del chat). */
+	/** Reveals and focuses a background terminal in the IDE panel (click on the chat widget). */
 	async revealBackgroundTerminal(id: string): Promise<void> {
 		const entry = this.bgTerminals.get(id);
 		if (!entry) { return; }
@@ -1260,7 +1281,7 @@ export class OpenideToolRegistry extends Disposable {
 		await this.terminalService.focusInstance(entry.term);
 	}
 
-	/** Variante del seguimiento: revela la terminal exacta, pero conserva el foco del chat. */
+	/** Follow variant: reveals the exact terminal but keeps focus on the chat. */
 	async followBackgroundTerminal(id: string): Promise<void> {
 		const entry = this.bgTerminals.get(id);
 		if (!entry) { return; }
@@ -1268,8 +1289,8 @@ export class OpenideToolRegistry extends Disposable {
 		this.terminalService.setActiveInstance(entry.term);
 	}
 
-	/** Mata una terminal de fondo (botón trash del widget del chat). El onExit ya cableado
-	 *  emite 'exited', así que la UI se actualiza sola. */
+	/** Kills a background terminal (the chat widget's trash button). The already-wired onExit
+	 *  emits 'exited', so the UI updates on its own. */
 	killBackgroundTerminal(id: string): void {
 		const entry = this.bgTerminals.get(id);
 		if (entry) {
@@ -1277,7 +1298,7 @@ export class OpenideToolRegistry extends Disposable {
 		}
 	}
 
-	/** Espera (polling) a que la shell integration (command detection) esté lista, con timeout. */
+	/** Waits (by polling) for shell integration (command detection) to be ready, with a timeout. */
 	private async waitForCommandDetection(term: ITerminalInstance): Promise<ICommandDetectionCapability | undefined> {
 		for (let i = 0; i < 25; i++) {
 			const cd = term.capabilities.get(TerminalCapability.CommandDetection);

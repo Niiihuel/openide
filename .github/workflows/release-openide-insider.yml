@@ -1,0 +1,19 @@
+name: Release OpenIDE Insider
+on:
+  workflow_dispatch: {}
+  schedule: [{ cron: '17 3 * * 1-5' }]
+permissions: { contents: write }
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Require insider version and signing key
+        env: { OPENIDE_UPDATE_PRIVATE_KEY_CONTENT: '${{ secrets.OPENIDE_UPDATE_PRIVATE_KEY }}' }
+        run: |
+          . ./version.sh
+          test "$OPENIDE_CHANNEL" = insider
+          test -n "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT"
+      - name: Dispatch shared release workflow
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: gh workflow run release-openide.yml --ref "${GITHUB_REF_NAME}"

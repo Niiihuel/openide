@@ -1,0 +1,55 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — `ask_user` card. Same frame as the approval card on purpose: both block the run and
+ *  both are asking the user for something, so they should read as the same kind of interruption.
+ *--------------------------------------------------------------------------------------------*/
+
+.openide-chat-ask {
+	margin: 5px 0 7px;
+	padding: 8px 9px 9px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	background: rgba(128, 128, 128, 0.035);
+	border: 1px solid rgba(128, 128, 128, 0.26);
+	border-radius: 8px;
+}
+.openide-chat-ask-head { display: flex; align-items: center; gap: 6px; color: var(--oi-text-muted); font-size: 11px; }
+.openide-chat-ask-head > .codicon { font-size: 13px; }
+.openide-chat-ask-step { text-transform: uppercase; letter-spacing: 0.05em; font-weight: 650; font-size: 9.5px; }
+.openide-chat-ask-question { color: var(--oi-text); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.openide-chat-ask-options { display: flex; flex-direction: column; gap: 4px; }
+
+.openide-chat-ask-option {
+	width: 100%;
+	padding: 6px 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	border: 1px solid var(--oi-border-soft);
+	border-radius: 6px;
+	background: transparent;
+	color: var(--oi-text);
+	font: inherit;
+	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+	transition: background 120ms ease, border-color 120ms ease;
+}
+.openide-chat-ask-option:hover { background: var(--oi-hover); border-color: var(--oi-border); }
+.openide-chat-ask-option-label { font-weight: 500; overflow-wrap: anywhere; }
+.openide-chat-ask-option-desc { color: var(--oi-text-muted); font-size: 11.5px; line-height: 1.4; overflow-wrap: anywhere; }
+
+.openide-chat-ask-free {
+	width: 100%;
+	min-height: 26px;
+	padding: 4px 8px;
+	border: 1px solid var(--oi-border);
+	border-radius: 6px;
+	outline: none;
+	background: var(--oi-raised);
+	color: var(--oi-text);
+	font: inherit;
+	font-size: 12px;
+}
+.openide-chat-ask-free:focus { border-color: var(--oi-focus); }
+.openide-chat-ask.answered { opacity: 0.75; }

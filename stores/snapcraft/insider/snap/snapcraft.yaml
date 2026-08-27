@@ -2,7 +2,7 @@ name: codium-insiders
 adopt-info: codium-insiders
 summary: Code editing. Redefined.
 description: |
-  Binary releases of Visual Studio Code - Insiders without branding/telemetry/licensing
+  Binary releases of OpenIDE - Insiders without branding/telemetry/licensing
 
 base: core20
 grade: stable
@@ -15,7 +15,7 @@ parts:
     override-build: |
       set -eu
       # Get .deb url
-      wget --quiet https://api.github.com/repos/VSCodium/vscodium-insiders/releases -O latest.json
+      wget --quiet https://api.github.com/repos/OpenIDE/openide-insiders/releases -O latest.json
       VERSION=$( jq -r 'sort_by(.tag_name|split("-")[0]|split(".")|map(tonumber))|last.tag_name' latest.json )
       DEB_URL=$( jq -r 'map(select(.tag_name == "'"${VERSION}"'"))|first.assets[].browser_download_url|select(endswith("'"_${SNAPCRAFT_TARGET_ARCH}.deb"'"))' latest.json )
       DEB_NAME=$( basename "${DEB_URL}" )
@@ -34,8 +34,8 @@ parts:
       # Update paths
       sed -i 's|Exec=/usr/share/codium/codium-insiders|Exec=codium-insiders --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium-insiders.desktop"
       sed -i 's|Exec=/usr/share/codium/codium-insiders|Exec=codium-insiders --force-user-env|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium-insiders-url-handler.desktop"
-      sed -i 's|Icon=vscodium-insiders|Icon=${SNAP}/meta/gui/codium-insiders.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium-insiders.desktop"
-      sed -i 's|Icon=vscodium-insiders|Icon=${SNAP}/meta/gui/codium-insiders.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium-insiders-url-handler.desktop"
+      sed -i 's|Icon=openide-insiders|Icon=${SNAP}/meta/gui/codium-insiders.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium-insiders.desktop"
+      sed -i 's|Icon=openide-insiders|Icon=${SNAP}/meta/gui/codium-insiders.png|g' "${SNAPCRAFT_PART_INSTALL}/usr/share/applications/codium-insiders-url-handler.desktop"
     build-packages:
       - wget
       - jq

@@ -1,0 +1,56 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat: the canvas card.
+ *
+ *  SOURCE OF TRUTH: browser/openideChatHtml.ts:483-487 (`.canvas-card`, `.canvas-head`,
+ *  `.canvas-title`, `.canvas-path`, `.canvas-open`). Values are transcribed, not re-decided.
+ *--------------------------------------------------------------------------------------------*/
+
+/* `flow-root` replaces the webview's trailing `<div style="clear:both">`: same job — contain the
+   floated button so it does not hang out of the card — without an empty node in the DOM. */
+.openide-chat-canvas-card {
+	display: flow-root;
+	margin: 10px 0;
+	border: 1px solid rgba(128, 128, 128, 0.3);
+	border-radius: 10px;
+	padding: 12px;
+	background: rgba(128, 128, 128, 0.035);
+}
+
+.openide-chat-canvas-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+}
+
+.openide-chat-canvas-title {
+	margin: 8px 0 4px;
+	font-size: 14px;
+	font-weight: 650;
+	color: var(--vscode-foreground);
+}
+
+/* One line, ellipsised: the path is an identifier, not something to read across two rows — and a
+   wrapping path is what would make this row taller on every resize. */
+.openide-chat-canvas-path {
+	font: 11px var(--vscode-editor-font-family, monospace);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.openide-chat-canvas-open {
+	margin-top: 10px;
+	float: right;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 5px;
+	padding: 4px 10px;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	cursor: pointer;
+}
+
+.openide-chat-canvas-open:hover {
+	background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
+}

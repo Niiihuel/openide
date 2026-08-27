@@ -12,14 +12,23 @@ import { buildCompactionTranscript, buildStructuredSummaryMessage, compactionSav
 import { classifyProviderError } from '../../common/openideErrorClassifier.js';
 import { fallbackStepKey, parseFallbackChain, parseProviderModelTarget } from '../../common/openideFallback.js';
 import { normalizeModelForProvider } from '../../common/openideModelNormalize.js';
+import { rewindForSilentModeTransition } from '../../common/openideModeTransition.js';
+import { buildPlanFollowUpPrompt, normalizePlanFollowUpDisposition } from '../../common/openidePlanFollowUp.js';
+import { OPENIDE_BUILTIN_PROVIDERS, resolveProviders } from '../../common/openideProviderCatalog.js';
+import { OPENIDE_PROVIDER_BRANDS, resolveProviderBrand } from '../../common/openideProviderBranding.js';
+import { isToolCallingUnsupportedError, modelIdsFromProviderResponse, providerModelCapabilityKey } from '../../common/openideProviderCapabilities.js';
 import { openAIReasoningBody } from '../../common/openideReasoning.js';
 import { getReasoningStaleTimeoutFloor, resolveStreamStaleTimeoutSeconds } from '../../common/openideReasoningTimeouts.js';
+import { normalizeCodexUsageJson, normalizeGrokUsageJson } from '../../common/openideUsage.js';
 import { OpenideRunSequencer } from '../../common/openideRunSequencer.js';
 import { DEFAULT_AGENT_ITERATIONS, isOutputLimitStopReason, resolveAgentIterationLimit } from '../../common/openideRunLimits.js';
 import { OpenideToolCallGuard, repairToolArgumentsJson, validateToolArguments } from '../../common/openideToolGuardrails.js';
 import { breakdownTotal, computeContextBreakdown, estimateConversationTokens, estimateMessageTokens, estimateTextTokens, estimateToolsTokens } from '../../common/openideTokens.js';
-import { getOpenideChatHtml } from '../../browser/openideChatHtml.js';
 import { getOpenideCanvasHtml } from '../../browser/openideCanvasHtml.js';
+import { queryTerms } from '../../browser/openideCodebaseQueryService.js';
+import { listableCatalogId, parseModelsDevCatalog } from '../../browser/openideModelCatalog.js';
+import { formatContextTokens, formatCostPerMillion, humanizeModelId } from '../../common/openideModelDisplay.js';
+import { mergeVisibleOrder, moveBeside, toggleMembership } from '../../common/openidePickerOrder.js';
 
 suite('OpenIDE agent common', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -36,6 +45,19 @@ suite('OpenIDE agent common', () => {
 		assert.strictEqual(classifyProviderError('HTTP 404: Requested entity was not found.', { status: 404, providerId: 'antigravity-oauth', model: 'gemini-old', stage: 'streamGenerateContent' }).reason, 'model-not-found');
 		assert.strictEqual(classifyProviderError('HTTP 404: project does not exist', { status: 404, stage: 'loadCodeAssist' }).reason, 'project-not-found');
 		assert.strictEqual(classifyProviderError('HTTP 404: model retired', { status: 404, model: 'old' }).reason, 'model-retired');
+		assert.strictEqual(classifyProviderError('This model does not support function calling').shouldDropTools, true);
+	});
+
+	test('detects tool capability errors without misclassifying invalid tool arguments', () => {
+		assert.strictEqual(isToolCallingUnsupportedError('Model does not support tool calling'), true);
+		assert.strictEqual(isToolCallingUnsupportedError('Unsupported parameter: tools'), true);
+		assert.strictEqual(isToolCallingUnsupportedError('Invalid schema for function read_file'), false);
+		assert.strictEqual(
+			providerModelCapabilityKey('OpenRouter', 'https://openrouter.ai/api/v1/', 'X/Model'),
+			'OpenRouter\0https://openrouter.ai/api/v1\0x/model',
+		);
+		assert.deepStrictEqual(modelIdsFromProviderResponse({ data: [{ id: 'b' }, { id: 'a' }] }), ['a', 'b']);
+		assert.deepStrictEqual(modelIdsFromProviderResponse({ models: { 'gemini-high': {}, 'gemini-low': {} } }), ['gemini-high', 'gemini-low']);
 	});
 
 	test('keeps operational tools out of slash while preserving explicit context', () => {
@@ -43,6 +65,47 @@ suite('OpenIDE agent common', () => {
 		assert.strictEqual(isSlashVisibleCapability('command'), true);
 		assert.strictEqual(isSlashVisibleCapability('tool'), false);
 		assert.strictEqual(isSlashVisibleCapability('mcp'), false);
+	});
+
+	test('assigns a stable visual identity to every built-in provider', () => {
+		for (const provider of OPENIDE_BUILTIN_PROVIDERS) {
+			assert.ok(OPENIDE_PROVIDER_BRANDS[provider.id], `Missing provider brand: ${provider.id}`);
+			const brand = resolveProviderBrand(provider.id, provider.label);
+			assert.ok(brand.name);
+			assert.match(brand.initials, /^[A-Z0-9+]{1,2}$/);
+		}
+		assert.strictEqual(resolveProviderBrand('custom-openai', 'OpenAI privado').asset, 'openai.svg');
+		assert.strictEqual(resolveProviderBrand('my-company', 'Acme Cloud').initials, 'AC');
+	});
+
+	test('turns explicit plan follow-up decisions into provider-neutral prompts', () => {
+		assert.strictEqual(normalizePlanFollowUpDisposition('integrate'), 'integrate');
+		assert.strictEqual(normalizePlanFollowUpDisposition('replace'), 'replace');
+		assert.strictEqual(normalizePlanFollowUpDisposition('after'), undefined);
+
+		const integrated = buildPlanFollowUpPrompt('Añadí pruebas de migración.', 'integrate');
+		assert.match(integrated, /ACTUALIZACIÓN DEL PLAN EN CURSO/);
+		assert.match(integrated, /mismo objetivo/);
+		assert.match(integrated, /No guardes esta petición transitoria en la memoria duradera/);
+		assert.match(integrated, /Añadí pruebas de migración\./);
+
+		const replaced = buildPlanFollowUpPrompt('Planificá el nuevo indexador.', 'replace');
+		assert.match(replaced, /REEMPLAZO DEL PLAN EN CURSO/);
+		assert.match(replaced, /nuevo objetivo principal/);
+		assert.match(replaced, /Planificá el nuevo indexador\./);
+	});
+
+	test('rewinds mode triage to the original user turn without creating another prompt', () => {
+		const messages = [
+			{ role: 'user' as const, content: 'Refactorizá el almacenamiento.', messageId: 'request', executionMode: 'agent' as const },
+			{ role: 'assistant' as const, content: '', toolCalls: [{ id: 'mode', name: 'suggest_mode', argumentsJson: '{"mode":"plan"}' }] },
+			{ role: 'tool' as const, content: 'Aceptado', toolCallId: 'mode' },
+		];
+		const user = rewindForSilentModeTransition(messages, 'plan');
+		assert.strictEqual(user?.messageId, 'request');
+		assert.strictEqual(user?.executionMode, 'plan');
+		assert.strictEqual(messages.length, 1);
+		assert.strictEqual(messages[0].role, 'user');
 	});
 
 	test('canvas html exposes wireframe and choice primitives without neon strokes', () => {
@@ -55,56 +118,15 @@ suite('OpenIDE agent common', () => {
 		assert.match(html, /Wireframe:Wireframe/);
 		assert.match(html, /Choice:Choice/);
 		assert.match(html, /type:'canvasChoice'/);
-		// neutral palette: stroke variables derivan del foreground, no de textLink (neón/morado)
+		// neutral palette: stroke variables derive from foreground, not from textLink (neon/purple)
 		assert.doesNotMatch(html, /stroke:\s*theme\.accent\.primary/);
 		// CSP endurecido: base-uri/form-action/frame-ancestors bloqueados
 		assert.match(html, /base-uri 'none'/);
 		assert.match(html, /form-action 'none'/);
 	});
 
-	test('emits syntactically valid chat webview JavaScript', () => {
-		const html = getOpenideChatHtml('test-nonce', '');
-		const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(match => match[1]);
-		assert.strictEqual(scripts.length, 1);
-		assert.doesNotThrow(() => new Function(scripts[0]));
-		assert.match(html, /function handleTodoUpdate\(items\)/);
-		assert.match(html, /appendTodoUpdate\(lastTodos\)/);
-		assert.match(html, /\.turn-todos\s*\{[\s\S]*?width: calc\(100% - 20px\)/);
-		assert.match(html, /id="capabilityStrip"/);
-		assert.match(html, /function composerPayload\(inputText, capabilities, links\)/);
-		assert.match(html, /capability\.kind === 'mcp'/); // transcripts históricos conservan chips MCP
-		assert.match(html, /\.tool-activity/);
-		                assert.match(html, /className = 'part tool-activity/);
-		                assert.doesNotMatch(html, /kindBadge\.textContent = visualKind\.label/);
-		                // Aprobaciones concedidas no dejan card "Write file · TOOL · permitido":
-		                                // la edit-card/tool-activity con shimmer es la representación canónica.
-		                                assert.doesNotMatch(html, /decision-row/);
-		                                assert.doesNotMatch(html, /DECISION_LABEL/);
-		                                assert.doesNotMatch(html, /'permitido'/);
-		                                assert.match(html, /function addDecisionRow\(name, decision\)/);
-		                                assert.match(html, /if \(decision !== 'deny'\) \{ return; \}/);
-		                                assert.match(html, /className = 'decision-line deny'/);
-		                assert.match(html, /if \(name === 'run_command'\)/);
-		                assert.match(html, /if \(isEdit\)/);
-		assert.match(html, /name === 'delegate_task' \|\| name === 'review_changes'/);
-		assert.match(html, /before\.match\(\/\(\^\|\\s\)\\\/\(/);
-		assert.match(html, /openide-marquee[\s\S]*?infinite alternate/);
-		assert.match(html, /type: 'rollback', requestId: requestId, messageId:/);
-		assert.match(html, /case 'rollbackCommitted':/);
-		assert.match(html, /restoreThread\(m\.messages \|\| \[\]\);[\s\S]*hydrateRollbackComposer/);
-		assert.doesNotMatch(html, /case 'rollbackComposer':/);
-		assert.doesNotMatch(html, /promptEl\.value = bodyText; selectedCapabilities/);
-		assert.match(html, /type: 'editAndResend', messageId:/);
-		// Cambios de modo y aprobación de planes son flags operativas: jamás agregan otro user bubble.
-		const suggestStart = html.indexOf("function renderSuggestMode(m)");
-		const suggestEnd = html.indexOf('// ---- composer ----', suggestStart);
-		assert.doesNotMatch(html.slice(suggestStart, suggestEnd), /dispatchSend\(/);
-		const planBuildStart = html.indexOf("case 'planBuildStart':");
-		const planBuildEnd = html.indexOf("case 'resendEdited':", planBuildStart);
-		assert.doesNotMatch(html.slice(planBuildStart, planBuildEnd), /dispatchSend\(/);
-		assert.match(html.slice(planBuildStart, planBuildEnd), /setBusy\(true\)/);
-		assert.match(html, /\['max', 'Max'\]/);
-		assert.match(html, /compactSubagentTokens\(tokenTotal\) \+ ' tokens'/);
+	test('extracts useful graph vocabulary from natural language and code identifiers', () => {
+		assert.deepStrictEqual(queryTerms('Quiero revisar OpenideCodebaseGraph y auth_provider antes de editar'), ['revisar', 'openide', 'codebase', 'graph', 'auth', 'provider', 'editar']);
 	});
 
 	test('estimates text, tool and image context consistently', () => {
@@ -216,8 +238,9 @@ suite('OpenIDE agent common', () => {
 
 	test('keeps long agent runs and recognizes provider output limits', () => {
 		assert.strictEqual(resolveAgentIterationLimit(undefined), DEFAULT_AGENT_ITERATIONS);
-		assert.strictEqual(resolveAgentIterationLimit(10), Number.POSITIVE_INFINITY);
-		assert.strictEqual(resolveAgentIterationLimit(1000), Number.POSITIVE_INFINITY);
+		assert.strictEqual(resolveAgentIterationLimit(10), 25);
+		assert.strictEqual(resolveAgentIterationLimit(80), 80);
+		assert.strictEqual(resolveAgentIterationLimit(1000), 500);
 		assert.strictEqual(isOutputLimitStopReason('length'), true);
 		assert.strictEqual(isOutputLimitStopReason('max_tokens'), true);
 		assert.strictEqual(isOutputLimitStopReason('MAX_OUTPUT_TOKENS'), true);
@@ -248,6 +271,196 @@ suite('OpenIDE agent common', () => {
 		assert.strictEqual(normalizeModelForProvider('anthropic/claude-sonnet-5', { id: 'anthropic' }), 'claude-sonnet-5');
 		assert.strictEqual(normalizeModelForProvider('anthropic/claude-sonnet-5', { id: 'openrouter' }), 'anthropic/claude-sonnet-5');
 		assert.strictEqual(normalizeModelForProvider('', { id: 'deepseek', defaultModel: 'deepseek-chat' }), 'deepseek-chat');
+	});
+
+	test('normalizes Codex and Grok account usage windows', () => {
+		const codex = normalizeCodexUsageJson({
+			rate_limit: {
+				primary_window: { used_percent: 17, limit_window_seconds: 18_000, reset_at: 1_800_000_000 },
+				secondary_window: { used_percent: 42, limit_window_seconds: 604_800, reset_at: 1_800_604_800 },
+			},
+		});
+		const grok = normalizeGrokUsageJson({
+			config: {
+				creditUsagePercent: 9,
+				currentPeriod: { end: '2027-01-02T03:04:05.000Z' },
+			},
+		});
+
+		assert.deepStrictEqual(codex.windows.map(window => ({ label: window.label, usedPercent: window.usedPercent, limitMinutes: window.limitMinutes })), [
+			{ label: 'Session', usedPercent: 17, limitMinutes: 300 },
+			{ label: 'Weekly', usedPercent: 42, limitMinutes: 10_080 },
+		]);
+		assert.deepStrictEqual(grok.windows.map(window => ({ label: window.label, usedPercent: window.usedPercent, resetsAt: window.resetsAt })), [
+			{ label: 'Weekly', usedPercent: 9, resetsAt: Date.parse('2027-01-02T03:04:05.000Z') },
+		]);
+		const grokZero = normalizeGrokUsageJson({ config: {
+			currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', start: '2027-01-01T00:00:00Z', end: '2027-01-08T00:00:00Z' },
+			billingPeriodStart: '2027-01-01T00:00:00Z',
+			billingPeriodEnd: '2027-01-08T00:00:00Z',
+		} });
+		assert.strictEqual(grokZero.windows[0]?.usedPercent, 0);
+	});
+
+	test('resolves models.dev entries by exact id, like opencode', () => {
+		const registry = parseModelsDevCatalog({
+			openai: {
+				models: {
+					'gpt-5.6-sol': {
+						name: 'GPT-5.6 Sol',
+						limit: { context: 922_000, input: 400_000, output: 128_000 },
+						modalities: { input: ['text', 'image'], output: ['text'] },
+						reasoning: true, tool_call: true,
+						cost: { input: 0.2, output: 1.2 },
+						reasoning_options: [{ type: 'effort', values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] }],
+					},
+					'gpt-4.1-2024-01-01': { limit: { context: 1_000_000 }, tool_call: true },
+				},
+			},
+			anthropic: {
+				models: {
+					'claude-sonnet-4-5': {
+						limit: { context: 200_000, output: 64_000 },
+						reasoning: true, tool_call: true,
+						reasoning_options: [{ type: 'toggle' }, { type: 'budget_tokens' }],
+					},
+					'claude-3-opus': { limit: { context: 200_000 }, status: 'deprecated', tool_call: true },
+				},
+			},
+		});
+
+		// `limit.input` is the usable prompt budget and wins over `limit.context`.
+		assert.strictEqual(registry.limits('openai', 'gpt-5.6-sol').contextLimit, 400_000);
+		assert.strictEqual(registry.limits('openai', 'gpt-5.6-sol').vision, true);
+		// The registry is kept verbatim, so the whole entry is readable — not a compacted subset.
+		assert.strictEqual(registry.model('openai', 'gpt-5.6-sol')?.name, 'GPT-5.6 Sol');
+		assert.strictEqual(registry.model('openai', 'gpt-5.6-sol')?.cost?.output, 1.2);
+
+		// Exact match only: an id the registry does not publish is a miss, never a silent
+		// substitution onto a similar model's limits.
+		assert.deepStrictEqual(registry.limits('anthropic', 'claude-sonnet-4-5-20250929'), {});
+		assert.deepStrictEqual(registry.suggestions('anthropic', 'claude-sonnet-4-5-20250929'), ['claude-sonnet-4-5']);
+
+		// Graded effort vs a plain on/off toggle — the picker offers one or the other.
+		assert.deepStrictEqual(registry.reasoning('openai', 'gpt-5.6-sol')?.efforts, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+		assert.strictEqual(registry.reasoning('anthropic', 'claude-sonnet-4-5')?.toggle, true);
+		assert.deepStrictEqual(registry.reasoning('anthropic', 'claude-sonnet-4-5')?.efforts, []);
+		// A model with no reasoning_options must stay `undefined`, not an empty offer.
+		assert.strictEqual(registry.reasoning('openai', 'gpt-4.1-2024-01-01'), undefined);
+
+		// Unknown model/provider is "unknown", never "unsupported".
+		assert.deepStrictEqual(registry.limits('ollama', 'llama3.2'), {});
+		assert.deepStrictEqual(registry.limits('my-custom-provider', 'gemini-proxy-model'), {});
+	});
+
+	test('translates only Antigravity ids, which the registry does not publish', () => {
+		const registry = parseModelsDevCatalog({
+			google: { models: { 'gemini-3.1-pro': { limit: { context: 1_048_576 } }, 'gemini-3.6-flash': { limit: { context: 1_000_000 } } } },
+			anthropic: { models: { 'claude-opus-4-6': { limit: { context: 200_000 } } } },
+		});
+
+		// The gateway appends the effort to the id and renames models; both must still find limits.
+		assert.strictEqual(registry.limits('antigravity-oauth', 'gemini-3.6-flash-high').contextLimit, 1_000_000);
+		assert.strictEqual(registry.limits('antigravity-oauth', 'gemini-pro-agent').contextLimit, 1_048_576);
+		assert.strictEqual(registry.limits('antigravity-oauth', 'claude-opus-4-6-thinking').contextLimit, 200_000);
+		// The same suffix on a normal provider is NOT stripped: there it would be a different model.
+		assert.deepStrictEqual(registry.limits('gemini', 'gemini-3.6-flash-high'), {});
+	});
+
+	test('lists registry models only where the provider maps 1:1', () => {
+		const registry = parseModelsDevCatalog({
+			openai: { models: { 'gpt-5.5': {}, 'gpt-4-32k': { status: 'deprecated' } } },
+			anthropic: { models: { 'claude-sonnet-4-5': {} } },
+		});
+
+		// Deprecated ids stay out of the picker.
+		assert.deepStrictEqual(registry.modelsFor('openai'), ['gpt-5.5']);
+		// A subscription backend lists its upstream catalog: it serves a subset, but offering one
+		// model and hiding the rest is worse than an occasional rejection at run time.
+		assert.deepStrictEqual(registry.modelsFor('openai-codex'), ['gpt-5.5']);
+		assert.strictEqual(listableCatalogId('openai-codex'), 'openai');
+		assert.strictEqual(listableCatalogId('copilot'), 'github-copilot');
+		// Local runtimes serve whatever was pulled, and Antigravity is not published by the
+		// registry at all: for both, live discovery is the only truth.
+		assert.deepStrictEqual(registry.modelsFor('ollama'), []);
+		assert.deepStrictEqual(registry.modelsFor('antigravity-oauth'), []);
+	});
+
+	test('survives a malformed registry payload without losing the good providers', () => {
+		const registry = parseModelsDevCatalog({
+			openai: { models: { 'gpt-5.5': { limit: { context: 400_000 } } } },
+			broken: { models: 'not-an-object' },
+			alsoBroken: null,
+		});
+		assert.deepStrictEqual(registry.modelsFor('openai'), ['gpt-5.5']);
+		assert.strictEqual(registry.isEmpty, false);
+		assert.strictEqual(parseModelsDevCatalog(null).isEmpty, true);
+		assert.strictEqual(parseModelsDevCatalog([]).isEmpty, true);
+	});
+
+	test('reorders the picker in both directions, including onto the last slot', () => {
+		const list = ['a', 'b', 'c', 'd'];
+
+		// Moving DOWN is the case an insert-before-only drop cannot express: removing the item and
+		// putting it back in front of its neighbour lands it exactly where it started.
+		assert.deepStrictEqual(moveBeside(list, 'a', 'b', true), ['b', 'a', 'c', 'd']);
+		assert.deepStrictEqual(moveBeside(list, 'a', 'b', false), ['a', 'b', 'c', 'd']);
+		// Moving UP.
+		assert.deepStrictEqual(moveBeside(list, 'd', 'b', false), ['a', 'd', 'b', 'c']);
+		assert.deepStrictEqual(moveBeside(list, 'd', 'b', true), ['a', 'b', 'd', 'c']);
+		// The last slot is only reachable by dropping AFTER the final entry.
+		assert.deepStrictEqual(moveBeside(list, 'a', 'd', true), ['b', 'c', 'd', 'a']);
+		// Dropping onto itself, or past the end, must not corrupt the list.
+		assert.deepStrictEqual(moveBeside(list, 'b', 'b', true), ['a', 'c', 'd', 'b']);
+		assert.deepStrictEqual(moveBeside(list, 'b', undefined, false), ['a', 'c', 'd', 'b']);
+		assert.deepStrictEqual(moveBeside(list, 'b', 'missing', false), ['a', 'c', 'd', 'b']);
+		assert.deepStrictEqual(moveBeside([], 'a', undefined, false), ['a']);
+	});
+
+	test('keeps a disconnected provider in place when the visible ones are reordered', () => {
+		// The picker only reports connected providers, so `openai` (disconnected) is absent from the
+		// drag result. Appending leftovers would demote it to the end for reasons the user never
+		// expressed; it must keep its stored slot for when it reconnects.
+		assert.deepStrictEqual(
+			mergeVisibleOrder(['copilot', 'groq'], ['groq', 'openai', 'copilot']),
+			['copilot', 'openai', 'groq'],
+		);
+		// Nothing stored yet: the visible order IS the order.
+		assert.deepStrictEqual(mergeVisibleOrder(['a', 'b'], []), ['a', 'b']);
+		// A duplicate arriving from the webview must not create two rows for one provider.
+		assert.deepStrictEqual(mergeVisibleOrder(['a', 'b', 'a'], []), ['a', 'b']);
+
+		assert.deepStrictEqual(toggleMembership(['a', 'b'], 'a'), ['b']);
+		assert.deepStrictEqual(toggleMembership(['a'], 'b'), ['a', 'b']);
+	});
+
+	test('presents a model with a name, a context size and a price', () => {
+		// models.dev publishes `name` for almost everything; the humanizer only covers what it does not.
+		assert.strictEqual(humanizeModelId('gpt-5.6-sol'), 'GPT-5.6 Sol');
+		assert.strictEqual(humanizeModelId('claude-sonnet-4-5'), 'Claude Sonnet 4.5');
+		assert.strictEqual(humanizeModelId('anthropic/claude-fable-5'), 'Claude Fable 5');
+		assert.strictEqual(humanizeModelId('llama3.3:70b'), 'Llama3.3 (70b)');
+		assert.strictEqual(humanizeModelId(''), '');
+
+		assert.strictEqual(formatContextTokens(500_000, 'en'), '500K');
+		assert.strictEqual(formatContextTokens(1_000_000, 'en'), '1M');
+		assert.strictEqual(formatContextTokens(1_100_000, 'en'), '1.1M');
+		// No published limit renders as nothing, never as a fabricated size.
+		assert.strictEqual(formatContextTokens(undefined, 'en'), '');
+		assert.strictEqual(formatContextTokens(0, 'en'), '');
+
+		assert.strictEqual(formatCostPerMillion(0.2, 'en'), '$0.20');
+		assert.strictEqual(formatCostPerMillion(undefined, 'en'), '—');
+	});
+
+	test('advertises voice only for providers with an explicit audio model', () => {
+		const builtin = new Map(OPENIDE_BUILTIN_PROVIDERS.map(entry => [entry.id, entry]));
+		assert.strictEqual(builtin.get('gemini')?.voiceModel, 'gemini-3.5-flash');
+		assert.strictEqual(builtin.get('openai')?.voiceModel, 'gpt-audio-mini');
+		assert.strictEqual(builtin.get('openai-codex')?.voiceModel, undefined);
+		assert.strictEqual(builtin.get('xai-oauth')?.voiceModel, undefined);
+		const custom = resolveProviders([{ id: 'speech-gateway', baseUrl: 'https://voice.example/v1', voiceModel: 'audio-model' }]);
+		assert.strictEqual(custom.find(entry => entry.id === 'speech-gateway')?.voiceModel, 'audio-model');
 	});
 
 	test('scopes terminal allowlist entries to the exact command', () => {

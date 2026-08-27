@@ -37,13 +37,15 @@ check_programs "icns2png" "composite" "convert" "png2icns" "icotool" "rsvg-conve
 
 if ! declare -F load_linux_png &>/dev/null; then
   load_linux_png() {
-    wget "https://raw.githubusercontent.com/VSCodium/icons/main/icons/linux/circle1/${COLOR}/paulo22s.png" -O "$1"
+    mkdir -p "$(dirname "$1")"
+    convert "${VSCODE_PREFIX}icons/openide.png" -resize 1024x1024 "$1"
   }
 fi
 
 if ! declare -F load_windows_ico &>/dev/null; then
   load_windows_ico() {
-    wget "https://raw.githubusercontent.com/VSCodium/icons/main/icons/win32/nobg/${COLOR}/paulo22s.ico" -O "$1"
+    mkdir -p "$(dirname "$1")"
+    convert "${VSCODE_PREFIX}icons/openide.png" -define icon:auto-resize=256,128,96,64,48,32,24,20,16 "$1"
   }
 fi
 

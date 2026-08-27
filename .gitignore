@@ -1,4 +1,10 @@
-vscode*
+# `vscode/` es el árbol fuente canónico de OpenIDE. Sus artefactos de build se
+# excluyen mediante vscode/.gitignore; no se ignora el código fuente.
+/vscode/.git.upstream-backup/
+/vscode/*.bak
+/vscode/resources/server/*.bak
+/vscode/cli/*.tgz
+/vscode-*
 VS*/*
 VSCode*
 VSCodium*
@@ -23,3 +29,20 @@ font-size/generate-css.js
 # OpenIDE: symlinks de nix-build
 result
 result-*
+
+# ---------------------------------------------------------------------------
+# Artefactos de build y estado de ejecución.
+#
+# Nada de esto es fuente: se regenera. Sin estas reglas el primer commit del
+# árbol se llevaba 1.3 GB de `.build/` (el AppDir del AppImage, con un
+# node_modules entero adentro) y 719 MB de índices de `.openide/`, que además
+# derivan del código del usuario y no tienen por qué viajar a un remoto.
+# ---------------------------------------------------------------------------
+/.build/
+/tmp/
+/vendor/
+
+# Estado del agente en el workspace: los índices son derivados y pesados; lo
+# escrito a mano (skills, planes, MEMORY.md) sí se versiona.
+/.openide/memory-indexes/
+/.openide/codegraph/

@@ -7,13 +7,20 @@ set -ex
 
 if [[ "${SHOULD_BUILD}" == "yes" ]]; then
   echo "MS_COMMIT=\"${MS_COMMIT}\""
-
-  . prepare_vscode.sh
-
   cd vscode || { echo "'vscode' dir not found"; exit 1; }
 
   export NODE_OPTIONS="--max-old-space-size=8192"
   export VSCODE_PUBLISH_COUNTER=1
+
+  # OpenIDE mantiene un árbol fuente completo. En CI (o en un checkout nuevo)
+  # instalamos dependencias, pero nunca reseteamos ni reconstruimos el source.
+  if [[ "${CI_BUILD}" != "no" || ! -d node_modules ]]; then
+    export ELECTRON_SKIP_BINARY_DOWNLOAD=1
+    export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+    export VSCODE_SKIP_NODE_VERSION_CHECK=1
+    node build/npm/preinstall.ts
+    npm ci
+  fi
 
   npm run gulp vscode-min-prepack
 

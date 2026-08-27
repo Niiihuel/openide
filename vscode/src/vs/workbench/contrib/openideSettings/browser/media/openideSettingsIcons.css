@@ -1,0 +1,45 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Standardized Settings category chips (Bootstrap Icons glyphs — see openideBootstrapIcons.ts).
+   Loaded AFTER openideSettings.css (this file is imported by the icons module, which the editor
+   imports after its base stylesheet), so the rules below are the ones that decide the chip.
+
+   Every chip is IDENTICAL in construction: same box, same radius, same glyph size, and the six
+   tints are normalized in OKLCH to one perceived lightness and chroma — the codicon-era palette
+   read unevenly ("some had less tone") because its hex values differed in both. The sRGB hex
+   line under each oklch() is the fallback for engines without OKLCH support. */
+
+/* FLAT icons (user feedback): the tinted rounded chips read as foreign to the IDE's visual
+   language — the workbench never boxes its glyphs. The icon is now a bare monochrome Tabler glyph
+   that follows the row's own foreground: muted at rest, full on the active/hovered row, exactly
+   how Cursor's settings sidebar treats its icons. Same box metrics as before so nothing shifts. */
+.openide-settings-navicon {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	border-radius: 0;
+	background: transparent;
+}
+
+.openide-settings-navicon > svg {
+	display: block;
+	color: var(--oi-text-muted);
+	transition: color 120ms ease;
+}
+
+.openide-settings-nav-item:hover .openide-settings-navicon > svg,
+.openide-settings-nav-item.active .openide-settings-navicon > svg,
+.openide-settings-page-icon .openide-settings-navicon > svg {
+	color: var(--vscode-foreground);
+}
+
+.openide-settings-navicon.large {
+	width: 28px;
+	height: 28px;
+}

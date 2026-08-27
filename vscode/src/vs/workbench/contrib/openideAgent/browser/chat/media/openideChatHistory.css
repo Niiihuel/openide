@@ -1,0 +1,121 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — conversation history popover (the webview's `#historyMenu`).
+ *
+ *  SOURCE OF TRUTH: browser/openideChatHtml.ts (`#historyMenu`, `.menu-row.has-actions`,
+ *  `.menu-row-actions`, `.menu-row-action`). Every colour, size and gap below is transcribed from
+ *  it. What is NOT transcribed is the way the trailing action strip is put on screen: the webview
+ *  toggles it with `display`, and that is precisely what made a hovered row change size. The strip
+ *  lives in this file rather than in openideChatMenus.css because the history is its only consumer
+ *  (`menuRowAction()` is called from openideChatHistoryMenu.ts and nowhere else).
+ *
+ *  Not scoped under `.openide-chat-native`: the popover is rendered by IContextViewService into the
+ *  workbench overlay, outside the chat's own subtree.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Width of the trailing strip: three 20px buttons plus the two 2px gaps between them. Declared as
+   a variable because the title's reserve below has to be the SAME number — if the two ever drift
+   apart the icons start covering the text again. */
+.openide-chat-history-menu {
+	--openide-history-actions-width: 64px;
+	/* Air between the title's ellipsis and the first icon; the webview spends it as the strip's
+	   `padding-left`, which cannot work here because the strip is out of flow. */
+	--openide-history-actions-gap: 6px;
+}
+
+/* ---- Rows ---------------------------------------------------------------------------------
+
+   The row's height is a constant the content cannot influence, and the action strip is positioned
+   out of flow inside it. This is the shape VS Code gives a list row that carries an ActionBar —
+   see `agentsessionsviewer.css` in the upstream chat contrib, whose own comment on the session
+   toolbar reads "this is required because the overall height (including the padding needed for
+   hover feedback) would push down the title otherwise": the toolbar is `position: absolute` inside
+   a relatively positioned slot, and the row height comes from the list delegate's `getHeight()`,
+   never from what the renderer put in the row. This popover is plain DOM with no delegate, so the
+   constant is stated here instead.
+
+   The webview's version (`min-height: 24px` + `display: none` → `flex`) has the strip's own box
+   join the row's content box on hover, so anything that measures taller than the minimum — an icon
+   the workbench sizes at 16px instead of 13px, a hover-feedback padding, a zoom level that rounds
+   20px up — grows the row under the pointer and shifts every row below it. `height` + out-of-flow
+   strip removes the input to that computation altogether: entering a row now changes paint only.
+
+   24px is not a new number: it is what the webview's `min-height` already resolved to, since its
+   row content (a 14px icon, a 13px label, 20px buttons) never exceeded it. */
+.openide-chat-history-menu .openide-menu-row {
+	position: relative;
+	height: 24px;
+	/* Belt and braces for the same guarantee: even a future child that ignores the strip's rules
+	   cannot push the row's box, it gets clipped instead. */
+	overflow: hidden;
+}
+
+/* No room is reserved for the strip. The webview does not reserve any either
+   (`openideChatHtml.ts:774`), and reserving it meant every title was ellipsised ~70px early even
+   with the pointer nowhere near the list — the width was being spent on icons that were not there. */
+
+/* ---- Trailing action strip (fork / archive / delete) --------------------------------------
+
+   `right: 8px` is the row's own `padding-right`, so the strip ends exactly where the label's box
+   ends and the icons line up down the list. `top`/`bottom: 0` centre it against the row's fixed
+   height without the strip contributing a height of its own. */
+.openide-chat-history-menu .openide-menu-row-actions {
+	/* In flow and `display: none` while idle, exactly like the webview: that is what lets the title
+	   use the whole row. Taking the strip out of flow to protect the row height was solving a
+	   problem the fixed `height: 24px` above already solves — the row cannot grow whatever this
+	   contains, and the label is nowrap + ellipsis, so it shrinks instead of wrapping. */
+	display: none;
+	align-items: center;
+	gap: 2px;
+	margin-left: auto;
+	flex: 0 0 auto;
+	padding-left: 6px;
+}
+
+/* `:focus-within` matches the row itself when the row is focused, so a keyboard user reveals the
+   strip by focusing the conversation and then tabs into it. While hidden the buttons are not
+   tabbable, which is what keeps Tab from stopping three extra times per conversation. */
+.openide-chat-history-menu .openide-menu-row:hover .openide-menu-row-actions,
+.openide-chat-history-menu .openide-menu-row:focus-within .openide-menu-row-actions {
+	display: flex;
+}
+
+.openide-chat-history-menu .openide-menu-row-action {
+	width: 20px;
+	height: 20px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: none;
+	border-radius: var(--vscode-cornerRadius-small, 4px);
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+	padding: 0;
+}
+
+.openide-chat-history-menu .openide-menu-row-action:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+/* 13px is the webview's own size for these three icons (`.menu-row-action .codicon`,
+   openideChatHtml.ts:781), which there simply outranks the 14px of `.menu-row .codicon` (:760) by
+   coming later in one stylesheet.
+
+   Here the same pair cannot be settled by order. `.menu-row .codicon` had to be ported as
+   `.monaco-workbench .openide-menu .openide-menu-row .codicon[class*="codicon-"]`
+   (openideChatMenus.css) to beat the workbench's blanket 16px, and that lands at 0-5-0 — above
+   anything this file could reach with three classes, and in a DIFFERENT file, so source order is
+   not ours to rely on either. Matching the popover element itself (`.openide-menu` +
+   `.openide-chat-history-menu` are both on it) and repeating the attribute selector puts this at
+   0-6-0, which wins on specificity alone regardless of which file the bundler emits first. */
+.monaco-workbench .openide-menu.openide-chat-history-menu .openide-menu-row-action .codicon[class*="codicon-"] {
+	font-size: 13px;
+}
+
+/* Same class of override: `.monaco-workbench button:focus` (0-2-1) outranks the transcribed
+   `.openide-menu-row:focus-visible { outline: none }` (0-2-0), so a conversation that took focus
+   grew a ring the webview never draws. The selection background already marks the focused row,
+   exactly as it does in the webview. */
+.monaco-workbench .openide-chat-history-menu .openide-menu-row:focus {
+	outline: none;
+}

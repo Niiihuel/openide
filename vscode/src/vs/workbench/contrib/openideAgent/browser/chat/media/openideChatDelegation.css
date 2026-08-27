@@ -1,0 +1,61 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat: the delegation header.
+ *
+ *  SOURCE OF TRUTH: browser/openideChatHtml.ts:679-687 (`.delegation-summary`,
+ *  `.delegation-summary-main`, `-icon`, `-title`, `-space`, `-status`). The frame and the 48px row
+ *  are transcribed from there.
+ *
+ *  NOT ported: `.delegation-children` (:678), the box the subagent cards used to live in, and
+ *  `.delegation-summary-body` (:689-690), the expandable result. The native list is flat — the
+ *  cards are sibling rows, not children — and the result text is not on the content. The reason is
+ *  spelled out in openideChatDelegationPart.ts.
+ *
+ *  The hover the webview had is gone with the toggle: nothing here is clickable, and a row that
+ *  lights up under the pointer promises an interaction that does not exist.
+ *--------------------------------------------------------------------------------------------*/
+
+.openide-chat-delegation {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	min-width: 0;
+	min-height: 48px;
+	margin: 6px 0;
+	padding: 8px 12px;
+	border: 1px solid rgba(128, 128, 128, 0.28);
+	border-radius: 9px;
+	background: rgba(128, 128, 128, 0.025);
+	color: var(--vscode-descriptionForeground);
+}
+
+.openide-chat-delegation-icon {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+	font-size: 17px;
+}
+
+/* `min-width: 0` so a long count ellipsises rather than widening the row: the chat list runs with
+   horizontalScrolling: false and one wide row would push every other row out of view. */
+.openide-chat-delegation-title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+}
+
+.openide-chat-delegation-space {
+	flex: 1;
+}
+
+.openide-chat-delegation-status {
+	display: inline-flex;
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+	font-size: 14px;
+}
+
+.openide-chat-delegation.openide-chat-delegation-error .openide-chat-delegation-status {
+	color: var(--vscode-errorForeground);
+}

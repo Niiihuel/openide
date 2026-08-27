@@ -14,29 +14,21 @@ export ORG_NAME="Nihuel Prieto Rellan"
 export SHOULD_BUILD="yes"
 export SKIP_ASSETS="yes"
 export SKIP_BUILD="no"
-export SKIP_SOURCE="no"
-export VSCODE_LATEST="no"
 export VSCODE_QUALITY="stable"
 export VSCODE_SKIP_NODE_VERSION_CHECK="yes"
 
-while getopts ":ilops" opt; do
+while getopts ":iop" opt; do
   case "$opt" in
     i)
-      export ASSETS_REPOSITORY="VSCodium/vscodium-insiders"
-      export BINARY_NAME="codium-insiders"
+      export ASSETS_REPOSITORY="Niihuel/openide"
+      export BINARY_NAME="openide-insiders"
       export VSCODE_QUALITY="insider"
-      ;;
-    l)
-      export VSCODE_LATEST="yes"
       ;;
     o)
       export SKIP_BUILD="yes"
       ;;
     p)
       export SKIP_ASSETS="no"
-      ;;
-    s)
-      export SKIP_SOURCE="yes"
       ;;
     *)
       ;;
@@ -74,62 +66,28 @@ fi
 export NODE_OPTIONS="--max-old-space-size=8192"
 
 echo "OS_NAME=\"${OS_NAME}\""
-echo "SKIP_SOURCE=\"${SKIP_SOURCE}\""
 echo "SKIP_BUILD=\"${SKIP_BUILD}\""
 echo "SKIP_ASSETS=\"${SKIP_ASSETS}\""
 echo "VSCODE_ARCH=\"${VSCODE_ARCH}\""
-echo "VSCODE_LATEST=\"${VSCODE_LATEST}\""
 echo "VSCODE_QUALITY=\"${VSCODE_QUALITY}\""
 
-if [[ "${SKIP_SOURCE}" == "no" ]]; then
-  rm -rf vscode* VSCode*
+. version.sh
 
-  . get_repo.sh
-  . version.sh
-
-  # save variables for later
-  echo "MS_TAG=\"${MS_TAG}\"" > dev/build.env
-  echo "MS_COMMIT=\"${MS_COMMIT}\"" >> dev/build.env
-  echo "RELEASE_VERSION=\"${RELEASE_VERSION}\"" >> dev/build.env
-  echo "BUILD_SOURCEVERSION=\"${BUILD_SOURCEVERSION}\"" >> dev/build.env
-else
-  if [[ "${SKIP_ASSETS}" != "no" ]]; then
-    rm -rf vscode-* VSCode-*
-  fi
-
-  . dev/build.env
-
-  echo "MS_TAG=\"${MS_TAG}\""
-  echo "MS_COMMIT=\"${MS_COMMIT}\""
-  echo "RELEASE_VERSION=\"${RELEASE_VERSION}\""
-  echo "BUILD_SOURCEVERSION=\"${BUILD_SOURCEVERSION}\""
-fi
+echo "MS_TAG=\"${MS_TAG}\""
+echo "MS_COMMIT=\"${MS_COMMIT}\""
+echo "RELEASE_VERSION=\"${RELEASE_VERSION}\""
+echo "BUILD_SOURCEVERSION=\"${BUILD_SOURCEVERSION}\""
 
 if [[ "${SKIP_BUILD}" == "no" ]]; then
-  if [[ "${SKIP_SOURCE}" != "no" ]]; then
-    cd vscode || { echo "'vscode' dir not found"; exit 1; }
-
-    git add .
-    git reset -q --hard HEAD
-
-    while [[ -n "$( git log -1 | grep "VSCODIUM HELPER" )" ]]; do
-      git reset -q --hard HEAD~
-    done
-
-    rm -rf .build out*
-
-    cd ..
-  fi
-
   if [[ -f "./include_${OS_NAME}.gypi" ]]; then
     echo "Installing custom ~/.gyp/include.gypi"
 
     mkdir -p ~/.gyp
 
     if [[ -f "${HOME}/.gyp/include.gypi" ]]; then
-      mv ~/.gyp/include.gypi ~/.gyp/include.gypi.pre-vscodium
+      mv ~/.gyp/include.gypi ~/.gyp/include.gypi.pre-openide
     else
-      echo "{}" > ~/.gyp/include.gypi.pre-vscodium
+      echo "{}" > ~/.gyp/include.gypi.pre-openide
     fi
 
     cp ./build/osx/include.gypi ~/.gyp/include.gypi
@@ -138,12 +96,7 @@ if [[ "${SKIP_BUILD}" == "no" ]]; then
   . build.sh
 
   if [[ -f "./include_${OS_NAME}.gypi" ]]; then
-    mv ~/.gyp/include.gypi.pre-vscodium ~/.gyp/include.gypi
-  fi
-
-  if [[ "${VSCODE_LATEST}" == "yes" ]]; then
-    jsonTmp=$( cat "./upstream/${VSCODE_QUALITY}.json" | jq --arg 'tag' "${MS_TAG/\-insider/}" --arg 'commit' "${MS_COMMIT}" '. | .tag=$tag | .commit=$commit' )
-    echo "${jsonTmp}" > "./upstream/${VSCODE_QUALITY}.json" && unset jsonTmp
+    mv ~/.gyp/include.gypi.pre-openide ~/.gyp/include.gypi
   fi
 fi
 

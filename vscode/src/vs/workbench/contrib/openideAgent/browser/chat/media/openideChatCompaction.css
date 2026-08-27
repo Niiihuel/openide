@@ -1,0 +1,75 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat: the context-compaction card.
+ *
+ *  SOURCE OF TRUTH: browser/openideChatHtml.ts:551-570. Neutral and persistent, with the same
+ *  vocabulary as a tool card but WITHOUT the side accent: compaction is something the runtime did
+ *  to the conversation, not a step the agent took, and the accent is what marks the latter.
+ *--------------------------------------------------------------------------------------------*/
+
+.openide-chat-compaction-card {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	min-width: 0;
+	margin: 6px 0;
+	border: 1px solid rgba(128, 128, 128, 0.26);
+	border-radius: 8px;
+	background: rgba(128, 128, 128, 0.035);
+	padding: 8px 10px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.openide-chat-compaction-icon {
+	width: 18px;
+	height: 18px;
+	flex: 0 0 18px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 14px;
+}
+
+/* `min-width: 0` is what lets the detail line ellipsise instead of forcing the card wider than the
+   list, which does not scroll horizontally. */
+.openide-chat-compaction-copy {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+	flex: 1;
+}
+
+.openide-chat-compaction-title {
+	color: var(--vscode-foreground);
+	font-size: 12.5px;
+	line-height: 1.35;
+}
+
+.openide-chat-compaction-detail {
+	color: var(--vscode-descriptionForeground);
+	font-size: 11.5px;
+	line-height: 1.35;
+	overflow-wrap: anywhere;
+}
+
+.openide-chat-compaction-kind {
+	flex: 0 0 auto;
+	padding: 2px 5px;
+	border-radius: 3px;
+	font-size: 9px;
+	font-weight: 650;
+	letter-spacing: 0.035em;
+	text-transform: uppercase;
+	background: rgba(128, 128, 128, 0.14);
+	color: var(--vscode-descriptionForeground);
+}
+
+/* A failure tints the border and the icon only: the card stays a status card and does not become
+   an error banner, because the run itself carried on. */
+.openide-chat-compaction-card.openide-chat-compaction-failed {
+	border-color: color-mix(in srgb, var(--vscode-errorForeground) 28%, transparent);
+}
+
+.openide-chat-compaction-card.openide-chat-compaction-failed .openide-chat-compaction-icon {
+	color: var(--vscode-errorForeground);
+}

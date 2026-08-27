@@ -1,0 +1,203 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat: the delegated specialist card.
+ *
+ *  SOURCE OF TRUTH: browser/openideChatHtml.ts:691-722 (`.sub-card` and friends). Values are
+ *  transcribed, not re-decided.
+ *
+ *  One structural difference from the webview, and it is forced by the list: there, cards are
+ *  stacked inside a `.delegation-children` box that owns the border and the radius. Here each card
+ *  is its own content part in a virtualized list, so the frame moves onto the card itself. The
+ *  numbers (1px, rgba(128,128,128,0.24), 9px radius) are `.delegation-children`'s own.
+ *--------------------------------------------------------------------------------------------*/
+
+.openide-chat-sub-card {
+	overflow: hidden;
+	min-width: 0;
+	margin: 6px 0;
+	border: 1px solid rgba(128, 128, 128, 0.24);
+	border-radius: 9px;
+	background: rgba(128, 128, 128, 0.018);
+}
+
+.openide-chat-sub-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 40px;
+	padding: 5px 9px;
+	cursor: pointer;
+	user-select: none;
+	font-size: 12.5px;
+}
+
+.openide-chat-sub-head:hover {
+	background: rgba(128, 128, 128, 0.07);
+}
+
+.openide-chat-sub-st {
+	width: 18px;
+	height: 18px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 14px;
+	flex: 0 0 18px;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* Own keyframe rather than codicon's `codicon-modifier-spin`: that modifier is a class the codicon
+   stylesheet owns, and reusing it here would make this card break whenever it is renamed upstream. */
+.openide-chat-sub-spin {
+	animation: openide-chat-sub-spin 1.5s steps(30) infinite;
+}
+
+@keyframes openide-chat-sub-spin {
+	100% { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-sub-spin { animation: none; }
+}
+
+.openide-chat-sub-st-ok {
+	color: var(--openide-green);
+}
+
+.openide-chat-sub-st-err {
+	color: var(--vscode-errorForeground);
+}
+
+.openide-chat-sub-title {
+	flex: 1;
+	min-width: 0;
+	font-weight: 600;
+	font-size: 13px;
+	color: var(--vscode-foreground);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.openide-chat-sub-count {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11.5px;
+	font-family: var(--vscode-editor-font-family, monospace);
+	white-space: nowrap;
+}
+
+.openide-chat-sub-model {
+	flex: 0 1 140px;
+	max-width: 140px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11.5px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.openide-chat-sub-chev {
+	flex: 0 0 auto;
+	font-size: 16px;
+	color: var(--vscode-descriptionForeground);
+	transition: transform 120ms ease;
+}
+
+.openide-chat-sub-collapsed .openide-chat-sub-chev {
+	transform: rotate(180deg);
+}
+
+/* The live line: what the specialist is doing right now. The shimmer is painted here and never on
+   the title — putting it on the title left a heading animating after the run had finished. */
+.openide-chat-sub-status {
+	padding: 0 9px 7px 35px;
+	margin-top: -3px;
+	font-size: 11.5px;
+	line-height: 1.3;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--vscode-descriptionForeground);
+}
+
+.openide-chat-sub-done .openide-chat-sub-status {
+	display: none;
+}
+
+/* 240px scroll box. Same reason as every other cap in this chat: the list has no horizontal
+   scrolling, so a specialist's output has to be bounded inside its own card. */
+.openide-chat-sub-body {
+	border-top: 1px solid rgba(128, 128, 128, 0.13);
+	padding: 7px 10px 9px 35px;
+	max-height: 240px;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	background: rgba(128, 128, 128, 0.018);
+}
+
+.openide-chat-sub-collapsed .openide-chat-sub-body {
+	display: none;
+}
+
+.openide-chat-sub-text {
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	line-height: 1.45;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.openide-chat-sub-tool {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 11.5px;
+	color: var(--vscode-descriptionForeground);
+	font-family: var(--vscode-editor-font-family, monospace);
+	min-width: 0;
+}
+
+.openide-chat-sub-tool-icon {
+	display: inline-flex;
+	align-items: center;
+	flex: 0 0 auto;
+}
+
+.openide-chat-sub-tool-icon .codicon {
+	font-size: 12px;
+}
+
+.openide-chat-sub-tool-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+
+.openide-chat-sub-tool-error {
+	color: var(--vscode-errorForeground);
+}
+
+/* Head actions: Stop while running, open chat always (openideChatHtml.ts:3612-3710). */
+.openide-chat-sub-action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity 120ms ease;
+}
+.openide-chat-sub-head:hover .openide-chat-sub-action,
+.openide-chat-sub-action:focus-visible { opacity: 1; }
+.openide-chat-sub-action:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+.openide-chat-sub-stop:hover { color: var(--vscode-errorForeground); }
+.openide-chat-sub-action.hidden { display: none; }

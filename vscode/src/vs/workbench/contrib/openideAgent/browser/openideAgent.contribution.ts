@@ -1,7 +1,12 @@
 /*---------------------------------------------------------------------------------------------
- *  OpenIDE — contribución del motor agéntico: servicio, config (catálogo + custom providers),
- *  y comandos para elegir provider, configurar API key y probar el agente (Output channel).
- *  La UI del chat en el dock derecho vendrá después; esto es el backend / pilar.
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — agent engine contribution: service, config (catalog + custom providers),
+ *  and commands to pick a provider, set an API key and test the agent (Output channel).
+ *  The chat UI in the right dock comes later; this is the backend / foundation.
  *--------------------------------------------------------------------------------------------*/
 
 import './media/openideChat.css';
@@ -10,12 +15,20 @@ import { IClipboardService } from '../../../../platform/clipboard/common/clipboa
 import { localize, localize2 } from '../../../../nls.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
+import { OPENIDE_CLI_CATALOG } from '../common/openideAgentCliCatalog.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
-import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
+import { IHostService } from '../../../services/host/browser/host.js';
+import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
+import { ITerminalService } from '../../terminal/browser/terminal.js';
+import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
+import { OpenideQuickCommandsService } from './openideQuickCommandsService.js';
 import { Extensions as OutputExtensions, IOutputChannelRegistry, IOutputService } from '../../../services/output/common/output.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
@@ -27,6 +40,7 @@ import { IViewContainersRegistry, IViewDescriptor, IViewsRegistry, ViewContainer
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { EditorContextKeys } from '../../../../editor/common/editorContextKeys.js';
+import { isCodeEditor } from '../../../../editor/browser/editorBrowser.js';
 import { IOpenideAgentService } from './openideAgentService.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
@@ -35,47 +49,50 @@ import { OpenideChatViewPane } from './openideChatView.js';
 import { EditorExtensions, IEditorFactoryRegistry } from '../../../common/editor.js';
 import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/editor.js';
 import { IEditorService, MODAL_GROUP } from '../../../services/editor/common/editorService.js';
-import { OpenideDiagramEditor } from './openideDiagramEditor.js';
-import { OpenideDiagramInput } from './openideDiagramInput.js';
-import { OpenidePlanEditor } from './openidePlanEditor.js';
+import { OpenideDiagramEditor } from './diagrams/openideDiagramEditor.js';
+import { OpenideDiagramInput, toOpenideDiagramPayload } from './openideDiagramInput.js';
+import { OpenidePlanEditor } from './plan/openidePlanEditor.js';
 import { OpenidePlanInput } from './openidePlanInput.js';
 import { OpenideCanvasEditor } from './openideCanvasEditor.js';
 import { OpenideCanvasInput, OpenideCanvasInputSerializer } from './openideCanvasInput.js';
 import { IOpenideCanvasService, OpenideCanvasService } from './openideCanvasService.js';
 import { IEditorResolverService, RegisteredEditorPriority } from '../../../services/editor/common/editorResolverService.js';
 import { IPreferencesService } from '../../../services/preferences/common/preferences.js';
-import { SettingsEditor2 } from '../../preferences/browser/settingsEditor2.js';
 import { OpenideSettingsEditor } from '../../openideSettings/browser/openideSettingsEditor.js';
-import { OpenideMemoryEditor } from './openideMemoryEditor.js';
+import { OpenideProjectMapEditor } from './projectMap/openideProjectMapEditor.js';
 import { BrowserEditorInput } from '../../browserView/common/browserEditorInput.js';
 import { IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
 import { normalizeLocalUrl } from '../common/openideLocalUrl.js';
 import { OpenideMemoryInput, OpenideMemoryInputSerializer } from './openideMemoryInput.js';
-import { OpenideProvidersEditor } from './openideProvidersEditor.js';
-import { OpenideProvidersInput, OpenideProvidersInputSerializer } from './openideProvidersInput.js';
-import { OpenideAgentExtensionsEditor } from './openideAgentExtensionsEditor.js';
-import { OpenideAgentExtensionsInput, OpenideAgentExtensionsInputSerializer } from './openideAgentExtensionsInput.js';
 import { OpenideSkillInstallerEditor } from './openideSkillInstallerEditor.js';
 import { OpenideSkillInstallerInput } from './openideSkillInstallerInput.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
-import './openideMemoryService.js';
 import './openideUsageService.js';
 import { ICodebaseMemoryService, CodebaseMemoryService } from './openideCodebaseMemoryService.js';
 import { IOpenideCodebaseGraphService, OpenideCodebaseGraphService } from './openideCodebaseGraphService.js';
 import { IOpenideCodebaseQueryService, OpenideCodebaseQueryService } from './openideCodebaseQueryService.js';
 import { IOpenideCodebaseContextService, OpenideCodebaseContextService } from './openideCodebaseContextService.js';
+import { IOpenideProjectMapLearningService, OpenideProjectMapLearningService } from './openideProjectMapLearningService.js';
 import './openideCodebaseMemoryContribution.js';
 import './openideCodebaseLanguageServerBridge.js';
 import { Registry as PlatformRegistry } from '../../../../platform/registry/common/platform.js';
 import { IWorkbenchContribution, IWorkbenchContributionsRegistry, Extensions as WorkbenchExtensions } from '../../../common/contributions.js';
 import { LifecyclePhase } from '../../../services/lifecycle/common/lifecycle.js';
+import { IOpenideIdeServerService, OpenideIdeServerService, OPENIDE_IDE_SERVER_SETTING } from './openideIdeServerService.js';
+import { IOpenideCliChangesService, OpenideCliChangesService } from './openideCliChangesService.js';
+import { OpenideCliChangesView, OPENIDE_CLI_CHANGES_VIEW_ID } from './openideCliChangesView.js';
+import { OpenideStyleView, OPENIDE_STYLE_VIEW_ID } from './openideStyleView.js';
+import { IOpenideIdePlanReview, OpenideIdePlanReview, OPENIDE_IDE_PLAN_APPROVE, OPENIDE_IDE_PLAN_REJECT, planDecisionMessage, planPathFromSaveResult } from './openideIdePlanReview.js';
+import { externalToolName } from '../common/openideIdeExposure.js';
+import { CODEBASE_NOTES_ENABLED_SETTING, CODEBASE_NOTES_LINKING_SETTING, CODEBASE_NOTES_MAX_CHARS_SETTING } from '../../../../code/common/openideCodebaseNotes.js';
+import { text } from '../../../../platform/openideAgentHost/common/openideIdeServer.js';
 import { IExternalUriOpenerService, IExternalOpenerProvider, IExternalUriOpener } from '../../externalUriOpener/common/externalUriOpenerService.js';
 import { ExternalUriOpenerPriority } from '../../../../editor/common/languages.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { URI } from '../../../../base/common/uri.js';
 import { joinPath } from '../../../../base/common/resources.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
-import { IDisposable } from '../../../../base/common/lifecycle.js';
+import { IDisposable, Disposable } from '../../../../base/common/lifecycle.js';
 import { ISubagentDefinitionService, SubagentDefinitionService } from './openideSubagentDefinitionService.js';
 import { ISubagentRegistryService, SubagentRegistryService } from './openideSubagentRegistryService.js';
 import { ISubagentRunStorageService, SubagentRunStorageService } from './openideSubagentRunStorageService.js';
@@ -85,13 +102,20 @@ import { ISubagentExecutionService, SubagentExecutionService } from './openideSu
 import { ISubagentOrchestrationService, SubagentOrchestrationService } from './openideSubagentOrchestrationService.js';
 import { ISubagentWorkspaceService, SubagentWorkspaceService } from './openideSubagentWorkspaceService.js';
 import { ISubagentRoutingService, SubagentRoutingService } from './openideSubagentRoutingService.js';
-import { OpenideSubagentEditor } from './openideSubagentEditor.js';
+import { OpenideSubagentEditor } from './subagents/openideSubagentEditor.js';
 import { OpenideSubagentInput } from './openideSubagentInput.js';
+import { openideProductIconCodepoints } from '../../../common/openideProductIcons.js';
+import { language as platformLanguage } from '../../../../base/common/platform.js';
+import { OPENIDE_LANGUAGE_SETTING, resolveOpenideLanguage, t } from '../common/openideStrings.js';
+import { validateOpenideMarkdown } from '../common/openideMarkdownDiagnostics.js';
+import { ILanguagePackItem, ILanguagePackService } from '../../../../platform/languagePacks/common/languagePacks.js';
+import { ILocaleService } from '../../../services/localization/common/locale.js';
 
 const CHANNEL_ID = 'openideAgent';
+const MARKDOWN_CHANNEL_ID = 'openideMarkdown';
 const planExecutionModelIcon = registerIcon(
 	'openide-plan-execution-model',
-	{ fontCharacter: '\uf101' },
+	{ fontCharacter: String.fromCodePoint(openideProductIconCodepoints['openide-plan-execution-model']) },
 	localize('openide.plan.executionModelIcon', 'Icono del modelo que ejecutará el plan.')
 );
 
@@ -99,6 +123,7 @@ registerSingleton(IOpenideCanvasService, OpenideCanvasService, InstantiationType
 registerSingleton(ICodebaseMemoryService, CodebaseMemoryService, InstantiationType.Delayed);
 registerSingleton(IOpenideCodebaseGraphService, OpenideCodebaseGraphService, InstantiationType.Delayed);
 registerSingleton(IOpenideCodebaseQueryService, OpenideCodebaseQueryService, InstantiationType.Delayed);
+registerSingleton(IOpenideProjectMapLearningService, OpenideProjectMapLearningService, InstantiationType.Delayed);
 registerSingleton(IOpenideCodebaseContextService, OpenideCodebaseContextService, InstantiationType.Delayed);
 registerSingleton(ISubagentDefinitionService, SubagentDefinitionService, InstantiationType.Delayed);
 registerSingleton(ISubagentRegistryService, SubagentRegistryService, InstantiationType.Delayed);
@@ -109,10 +134,202 @@ registerSingleton(ISubagentExecutionService, SubagentExecutionService, Instantia
 registerSingleton(ISubagentOrchestrationService, SubagentOrchestrationService, InstantiationType.Delayed);
 registerSingleton(ISubagentWorkspaceService, SubagentWorkspaceService, InstantiationType.Delayed);
 registerSingleton(ISubagentRoutingService, SubagentRoutingService, InstantiationType.Delayed);
+registerSingleton(IOpenideIdeServerService, OpenideIdeServerService, InstantiationType.Delayed);
+registerSingleton(IOpenideIdePlanReview, OpenideIdePlanReview, InstantiationType.Delayed);
+registerSingleton(IOpenideCliChangesService, OpenideCliChangesService, InstantiationType.Delayed);
 
-/** Ctrl+click en una URL localhost del terminal (o cualquier link local) ofrece abrirla en la
- *  VISTA PREVIA del IDE, además del navegador externo. Al registrar un opener con prioridad
- *  'Option', VS Code muestra el picker nativo (IDE vs externo) cuando ambos pueden abrirla. */
+/**
+ * Opens OpenIDE's IDE server so an external CLI (Claude Code and anything speaking MCP) can
+ * reach this window's editors, selection and diagnostics.
+ *
+ * Started at `Restored` and not earlier: the lockfile advertises the workspace folders a CLI
+ * matches its cwd against, and before the workspace is restored that list is not yet true.
+ * Publishing it early would let an agent adopt a window whose folders are about to change.
+ */
+class OpenideIdeServerContribution extends Disposable implements IWorkbenchContribution {
+	constructor(
+		@IOpenideIdeServerService ideServer: OpenideIdeServerService,
+		@IOpenideAgentService agentService: IOpenideAgentService,
+		@IOpenideIdePlanReview planReview: OpenideIdePlanReview,
+	) {
+		super();
+		// What OpenIDE has and the CLIs do not — today the browser surface. Registered before the
+		// listen so the first `tools/list` already carries them; a tool that appears later still
+		// arrives, through tools/list_changed.
+
+		// One decision path, several surfaces: the review toast, the plan card in the transcript
+		// and (later) the plan editor's own chrome all dispatch THESE, so two of them can never
+		// answer the same parked call differently.
+		this._register(CommandsRegistry.registerCommand(OPENIDE_IDE_PLAN_APPROVE, (_accessor, path?: unknown) => {
+			if (typeof path === 'string') { void planReview.approve(path); }
+		}));
+		this._register(CommandsRegistry.registerCommand(OPENIDE_IDE_PLAN_REJECT, (_accessor, path?: unknown) => {
+			if (typeof path === 'string') { planReview.reject(path); }
+		}));
+		const completions = new Map<string, (output: string) => Promise<string>>([
+			[externalToolName('plan_save'), async output => {
+				const path = planPathFromSaveResult(output);
+				if (!path) {
+					return output; // plan_save failed; there is nothing to review
+				}
+				const decision = await planReview.awaitDecision(path, path.split('/').pop() ?? path);
+				return planDecisionMessage(decision);
+			}],
+		]);
+		ideServer.bridgeAgentTools(
+			agentService.externalTools(),
+			(name, args, token) => agentService.invokeExternalTool(name, args, token),
+			completions,
+		);
+		// A read of the shared memory, which has no native counterpart: OpenIDE's own loop gets it
+		// injected in the system prompt, and an external agent gets nothing. Without a cheap read
+		// it either duplicates entries or stops maintaining the file at all.
+		ideServer.registerTools([{
+			schema: {
+				name: 'openide_memory_read',
+				description: 'Devuelve la memoria compartida de este repo (.openide/MEMORY.md): convenciones, decisiones y gotchas que dejaron sesiones anteriores, tuyas o de otros agentes. Consultala al empezar, antes de reconstruir contexto leyendo archivos.',
+				inputSchema: { type: 'object', properties: {} },
+			},
+			invoke: async () => text(await agentService.externalMemoryRead()),
+		}]);
+		void ideServer.start('OpenIDE');
+	}
+}
+PlatformRegistry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench)
+	.registerWorkbenchContribution(OpenideIdeServerContribution, LifecyclePhase.Restored);
+
+/**
+ * Registers OpenIDE's tools in a CLI that has no per-session config hook — grok today.
+ *
+ * A one-time write into the CLI's own config, which only makes sense because the port and the
+ * token are derived from the workspace and survive a restart. Runs the CLI's own `mcp add`
+ * rather than editing its config file by hand: the format is theirs to change, and a file we
+ * rewrote by pattern-matching is a file we will eventually corrupt.
+ */
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'openide.ide.registerMcp',
+			title: localize2('openide.ide.registerMcp', 'OpenIDE: Registrar las herramientas de OpenIDE en un CLI'),
+			category: Categories.View,
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const ideServer = accessor.get(IOpenideIdeServerService);
+		const agentService = accessor.get(IOpenideAgentService);
+		const quickInputService = accessor.get(IQuickInputService);
+		const notificationService = accessor.get(INotificationService);
+		const endpoint = ideServer.mcpEndpoint();
+		if (!endpoint) {
+			notificationService.warn(t('ide.register.noServer'));
+			return;
+		}
+		const candidates = OPENIDE_CLI_CATALOG.filter(cli => cli.mcpRegisterArgs);
+		const picked = await quickInputService.pick(
+			candidates.map(cli => ({ label: cli.name, description: cli.binary, cli })),
+			{ placeHolder: t('ide.register.pick') },
+		);
+		if (!picked) {
+			return;
+		}
+		const executable = await agentService.resolveExecutable(picked.cli.binary);
+		if (!executable) {
+			notificationService.warn(t('ide.register.notFound', picked.cli.binary));
+			return;
+		}
+		try {
+			await ideServer.registerInCli(executable, picked.cli.mcpRegisterArgs!(endpoint));
+			notificationService.info(t('ide.register.done', picked.cli.name));
+		} catch (error) {
+			notificationService.error(t('ide.register.failed', picked.cli.name, error instanceof Error ? error.message : String(error)));
+		}
+	}
+});
+
+/** Ctrl+click on a localhost URL in the terminal (or any local link) offers to open it in the
+ *  IDE PREVIEW, in addition to the external browser. By registering an opener with 'Option'
+ *  priority, VS Code shows the native picker (IDE vs external) when both can open it. */
+/**
+ * Retires `openide.language`, the fork's second language switch.
+ *
+ * `t()` now reads the IDE locale, the same one `localize()` uses, so the whole interface moves
+ * together. A user who already set `openide.language` still expects to see that language, and the
+ * locale is what decides it now — so the setting has to be carried over to the locale rather than
+ * dropped on the floor. Offering that switch once is this contribution's only job.
+ *
+ * It does NOT rewrite the user's `settings.json`. Two reasons: `updateValue` from a startup
+ * contribution was observed to never settle, and silently editing someone's settings file to tidy
+ * up after ourselves is not our call. The setting is inert (nothing reads it) and the schema marks
+ * it deprecated, so the editor shows it struck through with a pointer to Settings › Language. What
+ * we do keep is a note that the offer was already made, in storage, so it is made exactly once.
+ *
+ * `inspect()`, NOT `getValue()`: only an EXPLICIT user value is a preference worth migrating.
+ */
+const LANGUAGE_MIGRATION_STORAGE_KEY = 'openide.language.migrationOffered';
+
+class OpenideLanguageMigrationContribution extends Disposable implements IWorkbenchContribution {
+	constructor(
+		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@ILanguagePackService private readonly languagePackService: ILanguagePackService,
+		@ILocaleService private readonly localeService: ILocaleService,
+		@INotificationService private readonly notificationService: INotificationService,
+		@IStorageService private readonly storageService: IStorageService,
+	) {
+		super();
+		void this.migrate();
+	}
+
+	private async migrate(): Promise<void> {
+		if (this.storageService.getBoolean(LANGUAGE_MIGRATION_STORAGE_KEY, StorageScope.APPLICATION, false)) {
+			return;
+		}
+		const inspected = this.configurationService.inspect(OPENIDE_LANGUAGE_SETTING);
+		const wanted = inspected.userValue ?? inspected.workspaceValue;
+		if (wanted !== 'es' && wanted !== 'en') {
+			return; // Never set by hand, or `auto` — which the locale now does by definition.
+		}
+		if (resolveOpenideLanguage(String(platformLanguage)) === wanted) {
+			// The IDE already shows that language: there is nothing to carry over.
+			this.remember();
+			return;
+		}
+		// The two disagreed, which is the mixed interface this change exists to end. Offer the move
+		// instead of performing it: switching the display language installs an extension and
+		// reloads the window, and neither belongs in a silent startup task.
+		const pack = await this.findLanguagePack(String(wanted));
+		if (!pack) {
+			// Offline, no gallery, or no pack for that language. Try again next start rather than
+			// burn the one-time offer on a transient failure.
+			return;
+		}
+		this.notificationService.prompt(
+			Severity.Info,
+			localize('openide.language.migrate', "OpenIDE now uses a single display language for the whole interface. Switch the IDE to {0}?", pack.label),
+			[{
+				label: localize('openide.language.migrate.yes', "Change display language"),
+				run: () => void this.localeService.setLocale(pack),
+			}],
+			// Sticky: a one-time offer that ends in a window reload. The default Info toast hides
+			// itself after a few seconds, and an offer the user blinks and misses never happens.
+			{ sticky: true, onCancel: () => this.remember() },
+		);
+		this.remember();
+	}
+
+	private async findLanguagePack(language: string): Promise<ILanguagePackItem | undefined> {
+		const matches = (packs: readonly ILanguagePackItem[]) => packs.find(pack => pack.id?.toLowerCase().startsWith(language));
+		const installed = await this.languagePackService.getInstalledLanguages().catch(() => []);
+		return matches(installed) ?? matches(await this.languagePackService.getAvailableLanguages().catch(() => []));
+	}
+
+	private remember(): void {
+		this.storageService.store(LANGUAGE_MIGRATION_STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
+	}
+}
+PlatformRegistry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(OpenideLanguageMigrationContribution, LifecyclePhase.Eventually);
+
 class OpenideLocalPreviewOpenerContribution implements IWorkbenchContribution {
 	constructor(
 		@IExternalUriOpenerService externalUriOpenerService: IExternalUriOpenerService,
@@ -130,7 +347,7 @@ class OpenideLocalPreviewOpenerContribution implements IWorkbenchContribution {
 					label: localize('openide.preview.opener', "Abrir en la vista previa del IDE"),
 					async canOpen(uri: URI, _token: CancellationToken): Promise<ExternalUriOpenerPriority> {
 						const isLocal = (uri.scheme === 'http' || uri.scheme === 'https') && !!normalizeLocalUrl(uri.toString(true), extraHosts());
-						// 'Option' NO pisa al navegador: agrega la opción → aparece el picker nativo.
+						// 'Option' does NOT override the browser: it adds the option → the native picker appears.
 						return isLocal ? ExternalUriOpenerPriority.Option : ExternalUriOpenerPriority.None;
 					},
 					async openExternalUri(uri: URI, _ctx: { sourceUri: URI }, _token: CancellationToken): Promise<boolean> {
@@ -157,17 +374,88 @@ Registry.as<IOutputChannelRegistry>(OutputExtensions.OutputChannels).registerCha
 	label: 'OpenIDE Agent',
 	log: false,
 });
+Registry.as<IOutputChannelRegistry>(OutputExtensions.OutputChannels).registerChannel({
+	id: MARKDOWN_CHANNEL_ID,
+	label: 'OpenIDE Markdown',
+	log: false,
+});
 
-// Vista del chat en el dock derecho (auxiliary bar). isDefault → reemplaza el toggle del secondary sidebar.
+// Markdown QA: a fast, read-only pass over the active document. It complements the native
+// preview by reporting structural mistakes that are easy to miss when a document is large, while
+// deliberately leaving rendering and filesystem validation to their existing owners.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'openide.markdown.validate',
+			title: localize2('openide.markdown.validate', 'OpenIDE: Validar Markdown activo'),
+			category: Categories.View,
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const editorService = accessor.get(IEditorService);
+		const notificationService = accessor.get(INotificationService);
+		const outputService = accessor.get(IOutputService);
+		const activeTextEditor = editorService.activeTextEditorControl;
+		const editor = isCodeEditor(activeTextEditor) ? activeTextEditor : undefined;
+		const model = editor?.getModel();
+		const resource = model?.uri ?? editorService.activeEditor?.resource;
+		const isMarkdown = model?.getLanguageId() === 'markdown' || resource?.path.toLowerCase().endsWith('.md');
+
+		if (!model || !resource || !isMarkdown) {
+			notificationService.warn(localize('openide.markdown.validate.notMarkdown', 'Abrí un archivo Markdown para ejecutar esta validación.'));
+			return;
+		}
+
+		const report = validateOpenideMarkdown(model.getValue());
+		const errors = report.diagnostics.filter(item => item.severity === 'error').length;
+		const warnings = report.diagnostics.filter(item => item.severity === 'warning').length;
+		const fileName = resource.path.split('/').pop() || resource.path;
+		const stats = report.stats;
+		const lines = [
+			`OpenIDE Markdown · ${fileName}`,
+			'─'.repeat(Math.max(32, fileName.length + 21)),
+			`Encabezados: ${stats.headings} · Enlaces: ${stats.links} · Imágenes: ${stats.images}`,
+			`Tareas: ${stats.completedTasks}/${stats.tasks} completas · Bloques de código: ${stats.codeBlocks}`,
+			'',
+		];
+		if (!report.diagnostics.length) {
+			lines.push('✓ No se encontraron problemas estructurales.');
+		} else {
+			lines.push('Diagnósticos:');
+			for (const item of report.diagnostics) {
+				const marker = item.severity === 'error' ? '✕' : item.severity === 'warning' ? '⚠' : 'ℹ';
+				lines.push(`${marker} ${item.line}:${item.column} ${item.message}`);
+			}
+		}
+
+		outputService.getChannel(MARKDOWN_CHANNEL_ID)?.replace(lines.join('\n') + '\n');
+		await outputService.showChannel(MARKDOWN_CHANNEL_ID, true);
+		const summary = errors || warnings
+			? localize('openide.markdown.validate.summary', 'Markdown: {0} errores y {1} advertencias.', errors, warnings)
+			: localize('openide.markdown.validate.clean', 'Markdown válido: no se encontraron problemas estructurales.');
+		if (errors) {
+			notificationService.error(summary);
+		} else if (warnings) {
+			notificationService.warn(summary);
+		} else {
+			notificationService.info(summary);
+		}
+	}
+});
+
+// Chat view in the right dock (auxiliary bar). isDefault → replaces the secondary sidebar toggle.
 const OPENIDE_CHAT_CONTAINER_ID = 'workbench.view.openideChat';
 const OPENIDE_CHAT_VIEW_ID = 'workbench.view.openideChat.view';
-// Iconos de producto: los glifos viven en la fuente OpenIDE (f200/f201), no como SVG
-// incrustado. Así tema, actividad y webview comparten la misma semántica y métrica.
-const openideChatIcon = registerIcon('openide-chat', { fontCharacter: '\uf200' }, localize('openide.chat.icon', "Icono del chat global de OpenIDE"));
-registerIcon('openide-agent-tree', { fontCharacter: '\uf201' }, localize('openide.agentTree.icon', "Icono del árbol de agentes de OpenIDE"));
-registerIcon('openide-mode-agent', { fontCharacter: '\uf202' }, localize('openide.mode.agent.icon', "Icono del modo Agent de OpenIDE"));
-registerIcon('openide-mode-plan', { fontCharacter: '\uf203' }, localize('openide.mode.plan.icon', "Icono del modo Plan de OpenIDE"));
-registerIcon('openide-mode-ask', { fontCharacter: '\uf204' }, localize('openide.mode.ask.icon', "Icono del modo Ask de OpenIDE"));
+// Product icons: the glyphs live in the OpenIDE font (f200/f201), not as embedded SVG.
+// This way theme, activity bar and webview share the same semantics and metrics.
+const openideChatIcon = registerIcon('openide-chat', { fontCharacter: String.fromCodePoint(openideProductIconCodepoints['openide-chat']) }, localize('openide.chat.icon', "Icono del chat global de OpenIDE"));
+const openideCliChangesIcon = registerIcon('openide-cli-changes', Codicon.gitPullRequestGoToChanges, localize('openide.cliChanges.icon', "Icono de Cambios del agente"));
+registerIcon('openide-agent-tree', { fontCharacter: String.fromCodePoint(openideProductIconCodepoints['openide-agent-tree']) }, localize('openide.agentTree.icon', "Icono del árbol de agentes de OpenIDE"));
+registerIcon('openide-mode-agent', { fontCharacter: String.fromCodePoint(openideProductIconCodepoints['openide-mode-agent']) }, localize('openide.mode.agent.icon', "Icono del modo Agent de OpenIDE"));
+registerIcon('openide-mode-plan', { fontCharacter: String.fromCodePoint(openideProductIconCodepoints['openide-mode-plan']) }, localize('openide.mode.plan.icon', "Icono del modo Plan de OpenIDE"));
+registerIcon('openide-mode-ask', { fontCharacter: String.fromCodePoint(openideProductIconCodepoints['openide-mode-ask']) }, localize('openide.mode.ask.icon', "Icono del modo Ask de OpenIDE"));
 
 const openideChatContainer: ViewContainer = Registry.as<IViewContainersRegistry>(ViewExtensions.ViewContainersRegistry).registerViewContainer({
 	id: OPENIDE_CHAT_CONTAINER_ID,
@@ -189,20 +477,89 @@ const openideChatViewDescriptor: IViewDescriptor = {
 };
 Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([openideChatViewDescriptor], openideChatContainer);
 
-// Memoria del codebase: editor Codebase Architecture 2D jerárquico. El modo 3D legacy queda
-// detrás de openide.memory.visualization.legacyGraphEnabled, pero no es la experiencia principal.
+/**
+ * Agent Changes: what each hosted CLI touched, grouped by conversation turn.
+ *
+ * In the activity bar beside Source Control rather than inside the dock, because the question it
+ * answers outlives the conversation that produced it — you come back to review a change after
+ * the transcript has scrolled, and often after the agent has moved on to something else.
+ *
+ * `hideIfEmpty` so the icon does not sit there claiming a feature nobody is using: it appears
+ * the first time a CLI session actually changes something.
+ */
+const openideCliChangesContainer: ViewContainer = Registry.as<IViewContainersRegistry>(ViewExtensions.ViewContainersRegistry).registerViewContainer({
+	id: OPENIDE_CLI_CHANGES_VIEW_ID,
+	title: { value: t('cliChanges.title'), original: 'Agent Changes' },
+	icon: openideCliChangesIcon,
+	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [OPENIDE_CLI_CHANGES_VIEW_ID, { mergeViewWithContainerWhenSingleView: true }]),
+	storageId: OPENIDE_CLI_CHANGES_VIEW_ID,
+	order: 4,
+	hideIfEmpty: false,
+}, ViewContainerLocation.Sidebar);
+
+Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([{
+	id: OPENIDE_CLI_CHANGES_VIEW_ID,
+	name: { value: t('cliChanges.title'), original: 'Agent Changes' },
+	containerIcon: openideCliChangesIcon,
+	ctorDescriptor: new SyncDescriptor(OpenideCliChangesView),
+	canToggleVisibility: false,
+	canMoveView: true,
+}], openideCliChangesContainer);
+
+/**
+ * Visual style editor. Its own container in the sidebar: it is a workspace for one element, not a
+ * strip beside the chat, and it has to stay open while the user works the preview next to it.
+ */
+const openideStylesIcon = registerIcon('openide-styles', Codicon.paintcan, localize('openide.styles.icon', "Icono del editor visual de estilos"));
+
+const openideStylesContainer: ViewContainer = Registry.as<IViewContainersRegistry>(ViewExtensions.ViewContainersRegistry).registerViewContainer({
+	id: OPENIDE_STYLE_VIEW_ID,
+	title: { value: t('style.title'), original: 'Styles' },
+	icon: openideStylesIcon,
+	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [OPENIDE_STYLE_VIEW_ID, { mergeViewWithContainerWhenSingleView: true }]),
+	storageId: OPENIDE_STYLE_VIEW_ID,
+	order: 5,
+	hideIfEmpty: false,
+}, ViewContainerLocation.Sidebar);
+
+Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([{
+	id: OPENIDE_STYLE_VIEW_ID,
+	name: { value: t('style.title'), original: 'Styles' },
+	containerIcon: openideStylesIcon,
+	ctorDescriptor: new SyncDescriptor(OpenideStyleView),
+	canToggleVisibility: false,
+	canMoveView: true,
+}], openideStylesContainer);
+
+Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViewWelcomeContent(OPENIDE_STYLE_VIEW_ID, {
+	content: `${t('style.empty')}\n${t('style.emptyHint')}\n[${t('style.emptyAction')}](command:openide.agent.pickElement)`,
+	when: 'default',
+});
+
+/**
+ * The view's empty state, which is what it shows most of the time. It is the workbench's own
+ * welcome view — the same component behind "You have not yet opened a folder" in the Explorer — so
+ * the fork does not carry a second empty-state design that has to be kept in step with the IDE's.
+ * Each line is a paragraph; a line that is only a link renders as the primary button.
+ */
+Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViewWelcomeContent(OPENIDE_CLI_CHANGES_VIEW_ID, {
+	content: `${t('cliChanges.empty')}\n${t('cliChanges.emptyHint')}\n[${t('cliChanges.emptyAction')}](command:openide.agent.newChat)`,
+	when: 'default',
+});
+
+// Project Map: native graph editor (canvas + workbench panels) over the same index the agent tools use.
 Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(OpenideMemoryInput.ID, OpenideMemoryInputSerializer);
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
-	EditorPaneDescriptor.create(OpenideMemoryEditor, OpenideMemoryEditor.ID, localize('openide.memory.editorName', "Memoria del codebase")),
+	EditorPaneDescriptor.create(OpenideProjectMapEditor, OpenideProjectMapEditor.ID, localize('openide.memory.editorName', "Project Map")),
 	[new SyncDescriptor(OpenideMemoryInput)]
 );
 
-// Comando: abrir la galaxia de memoria del codebase.
+// Comando: abrir el Project Map.
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
 			id: 'openide.memory.open',
-			title: localize2('openide.memory.open', 'OpenIDE: Open Codebase Architecture'),
+			title: localize2('openide.memory.open', 'OpenIDE: Open Project Map'),
 			category: Categories.View,
 			f1: true,
 		});
@@ -225,11 +582,11 @@ registerAction2(class extends Action2 {
 });
 registerAction2(class extends Action2 {
 	constructor() { super({ id: 'openide.memory.status', title: localize2('openide.memory.status', 'OpenIDE: Codebase Memory Status'), category: Categories.View, f1: true }); }
-	async run(accessor: ServicesAccessor): Promise<void> { const version = await accessor.get(ICodebaseMemoryService).getVersion(); accessor.get(INotificationService).info(version ? `Codebase Architecture: ${version.nodeCount} nodos, ${version.edgeCount} relaciones, versión ${version.version}.` : 'Codebase Architecture: índice aún no construido.'); }
+	async run(accessor: ServicesAccessor): Promise<void> { const version = await accessor.get(ICodebaseMemoryService).getVersion(); accessor.get(INotificationService).info(version ? `Project Map: ${version.nodeCount} nodos, ${version.edgeCount} relaciones, versión ${version.version}.` : 'Project Map: índice aún no construido.'); }
 });
 
-// Entrada OpenIDE del navegador nativo. Conserva la validación localhost para las tools y
-// delega navegación, DevTools, inspector, capturas y persistencia al BrowserView de Code OSS.
+// OpenIDE entry point for the native browser. It keeps the localhost validation for the tools and
+// delegates navigation, DevTools, inspector, captures and persistence to the Code OSS BrowserView.
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -241,19 +598,19 @@ registerAction2(class extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor, urlArg?: string): Promise<void> {
-		// el accessor solo vale sincrónicamente: resolver TODO antes del primer await
+		// the accessor is only valid synchronously: resolve EVERYTHING before the first await
 		const browserViewService = accessor.get(IBrowserViewWorkbenchService);
 		const extraHosts = accessor.get(IConfigurationService).getValue<string[]>('openide.agent.browserAllowedHosts');
 		let url = typeof urlArg === 'string' ? normalizeLocalUrl(urlArg, extraHosts) : undefined;
-		// Sin URL, enfoca la preview única del workspace. Si todavía no existe, abre su empty
-		// state nativo: la navegación llegará desde el puerto frontend levantado por el agente.
-		// Nunca vuelve a sugerir localhost:3000 ni reemplaza una preview ya navegada.
+		// Without a URL, it focuses the workspace's single preview. If it does not exist yet, it opens
+		// its native empty state: navigation will arrive from the frontend port the agent started.
+		// It never suggests localhost:3000 again, nor replaces an already-navigated preview.
 		await browserViewService.openPreview(url);
 	}
 });
 
-// Pick & Polish: picker visual sobre la app local (ventana con overlay estilo Figma/Cursor).
-// El elemento clickeado (selector + HTML + estilos + screenshot) se adjunta al composer del chat.
+// Pick & Polish: visual picker over the local app (a window with a selection overlay).
+// The clicked element (selector + HTML + styles + screenshot) is attached to the chat composer.
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -265,7 +622,7 @@ registerAction2(class extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor, urlArg?: string): Promise<void> {
-		// el accessor solo vale sincrónicamente: resolver TODO antes del primer await
+		// the accessor is only valid synchronously: resolve EVERYTHING before the first await
 		const editorService = accessor.get(IEditorService);
 		const quickInput = accessor.get(IQuickInputService);
 		const notificationService = accessor.get(INotificationService);
@@ -305,15 +662,6 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Página "Proveedores de IA" (visual con límites independientes del modelo desktop): vista Cuentas (OAuth inline,
-// nada de QuickPicks que se cierran al perder foco) + vista API keys con guardado inline.
-// Es la UI principal de conexión — el Settings queda para ajustes finos.
-Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(OpenideProvidersInput.ID, OpenideProvidersInputSerializer);
-Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
-	EditorPaneDescriptor.create(OpenideProvidersEditor, OpenideProvidersEditor.ID, localize('openide.providers.editorName', "Proveedores de IA")),
-	[new SyncDescriptor(OpenideProvidersInput)]
-);
-
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -327,19 +675,11 @@ registerAction2(class extends Action2 {
 	async run(accessor: ServicesAccessor): Promise<void> {
 		const preferencesService = accessor.get(IPreferencesService);
 		const pane = await preferencesService.openSettings({ jsonEditor: false, query: '' });
-		if (pane instanceof SettingsEditor2 || pane instanceof OpenideSettingsEditor) {
+		if (pane instanceof OpenideSettingsEditor) {
 			await pane.showSettingsCategory('openideAgent/providers');
 		}
 	}
 });
-
-// Página "Extensiones del Agente" (skills / MCP / hooks / comandos): administración visual
-// de la extensibilidad del agente en un único editor dedicado.
-Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(OpenideAgentExtensionsInput.ID, OpenideAgentExtensionsInputSerializer);
-Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
-	EditorPaneDescriptor.create(OpenideAgentExtensionsEditor, OpenideAgentExtensionsEditor.ID, localize('openide.agentExtensions.editorName', "Extensiones del Agente")),
-	[new SyncDescriptor(OpenideAgentExtensionsInput)]
-);
 
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
 	EditorPaneDescriptor.create(OpenideSkillInstallerEditor, OpenideSkillInstallerEditor.ID, localize('openide.skillInstaller.editorName', "Instalar Skill")),
@@ -359,14 +699,14 @@ registerAction2(class extends Action2 {
 	async run(accessor: ServicesAccessor): Promise<void> {
 		const preferencesService = accessor.get(IPreferencesService);
 		const pane = await preferencesService.openSettings({ jsonEditor: false, query: '' });
-		if (pane instanceof SettingsEditor2 || pane instanceof OpenideSettingsEditor) {
+		if (pane instanceof OpenideSettingsEditor) {
 			await pane.showSettingsCategory('openideAgent/skills');
 		}
 	}
 });
 
-// Visor de diagramas a pantalla completa (MODAL nativo + zoom). Lo abre el chat con el
-// SVG/HTML ya renderizado — reemplaza al modal casero del webview (confinado al panel).
+// Full-screen diagram viewer (native MODAL + zoom). The chat opens it with the SVG/HTML
+// already rendered — it replaces the webview's home-made modal (confined to the panel).
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
 	EditorPaneDescriptor.create(OpenideDiagramEditor, OpenideDiagramEditor.ID, localize('openide.diagram.editorName', "Diagrama")),
 	[new SyncDescriptor(OpenideDiagramInput)]
@@ -380,18 +720,18 @@ registerAction2(class extends Action2 {
 		});
 	}
 
-	async run(accessor: ServicesAccessor, html?: string, title?: string): Promise<void> {
-		if (typeof html !== 'string' || !html) {
+	async run(accessor: ServicesAccessor, content?: unknown, title?: string): Promise<void> {
+		const payload = toOpenideDiagramPayload(content);
+		if (!payload) {
 			return;
 		}
 		const editorService = accessor.get(IEditorService);
-		// MODAL nativo (el mismo del Settings) — el overlay editor recorta contra el modal
-		// y overlayLayoutElement eleva el z-index por encima de la capa modal.
-		await editorService.openEditor(new OpenideDiagramInput(html, typeof title === 'string' && title ? title : 'Diagrama'), undefined, MODAL_GROUP);
+		// Native MODAL (the same one Settings uses); the viewer is a plain EditorPane now.
+		await editorService.openEditor(new OpenideDiagramInput(payload, typeof title === 'string' && title ? title : 'Diagrama'), undefined, MODAL_GROUP);
 	}
 });
 
-// Comando: abrir los ajustes finos del agente en el Settings nativo (sección "Agente IA").
+// Command: open the agent's fine-grained settings in the native Settings ("AI Agent" section).
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -412,9 +752,10 @@ registerAction2(class extends Action2 {
 			window: 'window',
 			chat: 'openideAgent/chat',
 			context: 'openideAgent/context',
+			commands: 'openideAgent/commands',
 			subagents: 'openideAgent/subagents',
+			browser: 'openideAgent/browser',
 			advanced: 'openideAgent/advanced',
-			chatRoot: 'chat',
 			features: 'features',
 			application: 'application',
 			security: 'security',
@@ -423,19 +764,19 @@ registerAction2(class extends Action2 {
 		const category = typeof section === 'string' ? categoryBySection[section] : 'commonlyUsed';
 		const pane = await preferencesService.openSettings({
 			jsonEditor: false,
-			// Limpiamos búsquedas anteriores. La categoría se selecciona en el árbol real para
-			// conservar "Todos los ajustes" y el resto del rail siempre disponibles.
+			// We clear previous searches. The category is selected in the real tree so that
+			// "All settings" and the rest of the rail stay available at all times.
 			query: '',
 		});
-		if (pane instanceof SettingsEditor2 || pane instanceof OpenideSettingsEditor) {
+		if (pane instanceof OpenideSettingsEditor) {
 			await pane.showSettingsCategory(category);
 		}
 	}
 });
 
-// ---- Review inline de ediciones del agente (integrado): keybindings por bloque/archivo.
-// Solo activos con una sesión de review en el editor enfocado (CTX_OPENIDE_REVIEW_ACTIVE) —
-// fuera del review, Ctrl+N / Ctrl+Y / Ctrl+Enter conservan su significado normal (p.ej. Ctrl+Y redo).
+// ---- Inline review of agent edits (integrated): per-block/per-file keybindings.
+// Active only with a review session in the focused editor (CTX_OPENIDE_REVIEW_ACTIVE) —
+// outside the review, Ctrl+N / Ctrl+Y / Ctrl+Enter keep their normal meaning (e.g. Ctrl+Y redo).
 const REVIEW_WHEN = ContextKeyExpr.and(CTX_OPENIDE_REVIEW_ACTIVE, EditorContextKeys.editorTextFocus);
 function registerReviewAction(id: string, title: string, action: ReviewAction, primary?: number): void {
 	registerAction2(class extends Action2 {
@@ -461,14 +802,14 @@ registerReviewAction('openide.review.undoFile', localize('openide.review.undoFil
 registerReviewAction('openide.review.nextBlock', localize('openide.review.nextBlockTitle', "Agente: Siguiente bloque del review"), 'nextBlock', KeyMod.Alt | KeyCode.F5);
 registerReviewAction('openide.review.prevBlock', localize('openide.review.prevBlockTitle', "Agente: Bloque anterior del review"), 'prevBlock', KeyMod.Alt | KeyMod.Shift | KeyCode.F5);
 
-// ---- MODO PLAN: botones nativos del editor sobre los planes (.openide/plans/*.md) ----
-// Aparecen en el título del editor solo con un plan abierto (regex sobre resourcePath).
+// ---- PLAN MODE: native editor buttons over plans (.openide/plans/*.md) ----
+// They appear in the editor title only with a plan open (regex over resourcePath).
 const PLAN_GLOB = '**/.openide/plans/*.md';
 
 // Editor de plan PROPIO (webview: markdown lindo + toolbar Modelo/Build + tareas interactivas).
-// Reemplaza el preview nativo de markdown. Se registra como DEFAULT para los .openide/plans/*.md
-// vía el resolver (abrir el archivo desde el explorer también lo usa); "Abrir como texto" en la
-// toolbar del editor fuerza el editor de texto nativo (override DEFAULT_EDITOR_ASSOCIATION).
+// Replaces the native markdown preview. Registered as DEFAULT for .openide/plans/*.md
+// through the resolver (opening the file from the explorer uses it too); "Open as text" in the
+// editor toolbar forces the native text editor (override DEFAULT_EDITOR_ASSOCIATION).
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
 	EditorPaneDescriptor.create(OpenidePlanEditor, OpenidePlanEditor.ID, localize('openide.plan.editorName', "Plan")),
 	[new SyncDescriptor(OpenidePlanInput)]
@@ -552,8 +893,8 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Comando: abrir un plan en el editor propio (lo invoca plan_save y la card del chat). Fuerza
-// ESTE editor por override sobre el resolver default.
+// Command: open a plan in our own editor (invoked by plan_save and the chat card). It forces
+// THIS editor by overriding the default resolver.
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -573,8 +914,8 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Plan: elegir el modelo de EJECUCIÓN (frontmatter execModel). Acepta un URI opcional como
-// arg — el chat lo invoca vía executeCommand desde la card del plan (mismo QuickPick).
+// Plan: choose the EXECUTION model (frontmatter execModel). It accepts an optional URI as an
+// arg — the chat invokes it via executeCommand from the plan card (same QuickPick).
 registerAction2(class extends Action2 {
 	constructor() {
 			super({
@@ -586,7 +927,7 @@ registerAction2(class extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor, resourceArg?: URI): Promise<void> {
-		// el accessor solo vale sincrónicamente: resolver TODO antes del primer await
+		// the accessor is only valid synchronously: resolve EVERYTHING before the first await
 		const editorService = accessor.get(IEditorService);
 		const quickInput = accessor.get(IQuickInputService);
 		const agent = accessor.get(IOpenideAgentService);
@@ -595,7 +936,7 @@ registerAction2(class extends Action2 {
 		if (!resource) {
 			return;
 		}
-		// modelos de todos los proveedores CONECTADOS (mismo criterio que el popover del chat)
+		// models from every CONNECTED provider (same criterion as the chat popover)
 		const items: (IQuickPickItem & { model: string })[] = [];
 		for (const p of agent.listProviders()) {
 			try {
@@ -628,7 +969,7 @@ registerAction2(class extends Action2 {
 });
 
 // Plan: Build — aprueba el plan (frontmatter → aprobado, cambia el modelo si corresponde) y
-// el chat lanza el run de ejecución como turno normal (onDidRequestPlanBuild).
+// the chat launches the execution run as a normal turn (onDidRequestPlanBuild).
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -654,7 +995,7 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Comando: abrir el panel de desglose de contexto del chat. Lo dispara el indicador
+// Command: open the chat's context breakdown panel. Triggered by the indicator
 // ████░░░░░░ del status bar (footer nativo del agente).
 registerAction2(class extends Action2 {
 	constructor() {
@@ -673,7 +1014,37 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Puente interno Canvas → composer. La elección queda visible/editable y el usuario confirma Enviar.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'openide.agent.showUsage',
+			title: localize2('openide.agent.showUsage', 'OpenIDE Agent: Usage de cuentas'),
+			category: Categories.View,
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const viewsService = accessor.get(IViewsService);
+		const view = await viewsService.openView<OpenideChatViewPane>(OPENIDE_CHAT_VIEW_ID, false);
+		view?.showUsagePopover();
+	}
+});
+
+// Style editor → composer bridge. The request is filled in but NOT sent: carrying a style into the
+// source edits files, so the user reads it and presses Send.
+registerAction2(class extends Action2 {
+	constructor() { super({ id: 'openide.agent.injectPrompt', title: localize2('openide.agent.injectPrompt', 'OpenIDE Agent: Escribir un prompt en el chat'), f1: false }); }
+	async run(accessor: ServicesAccessor, text?: string): Promise<void> {
+		const prompt = typeof text === 'string' ? text.trim() : '';
+		if (!prompt) { return; }
+		const viewsService = accessor.get(IViewsService);
+		const view = await viewsService.openView<OpenideChatViewPane>(OPENIDE_CHAT_VIEW_ID, true);
+		view?.injectPrompt(prompt);
+	}
+});
+
+// Internal Canvas → composer bridge. The choice stays visible/editable and the user confirms Send.
 registerAction2(class extends Action2 {
 	constructor() { super({ id: 'openide.agent.injectCanvasChoice', title: localize2('openide.agent.injectCanvasChoice', 'OpenIDE Agent: Usar elección del Canvas'), f1: false }); }
 	async run(accessor: ServicesAccessor, choice?: { choiceId?: string; label?: string; canvas?: string }): Promise<void> {
@@ -685,7 +1056,18 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Comando: nuevo chat (limpia la conversación). Aparece como acción del título del panel del chat.
+// Command: a canvas button that runs a prompt in the chat (PromptButton).
+registerAction2(class extends Action2 {
+	constructor() { super({ id: 'openide.agent.injectCanvasPrompt', title: localize2('openide.agent.injectCanvasPrompt', 'OpenIDE Agent: Ejecutar prompt del Canvas'), f1: false }); }
+	async run(accessor: ServicesAccessor, request?: { prompt?: string; send?: boolean; canvas?: string }): Promise<void> {
+		const prompt = typeof request?.prompt === 'string' ? request.prompt.trim().slice(0, 4000) : '';
+		if (!prompt) { return; }
+		const viewsService = accessor.get(IViewsService);
+		const view = await viewsService.openView<OpenideChatViewPane>(OPENIDE_CHAT_VIEW_ID, true);
+		view?.injectCanvasPrompt({ prompt, send: request?.send !== false, canvas: typeof request?.canvas === 'string' ? request.canvas : undefined });
+	}
+});
+// Command: new chat (clears the conversation). Appears as an action in the chat panel title.
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -705,8 +1087,8 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Comando: fork de la conversación activa — rama independiente que hereda TODO el estado
-// conversacional (estilo /fork de Claude Code). Sin merge: las ramas divergen.
+// Command: fork the active conversation — an independent branch inheriting ALL the
+// conversational state (like /fork). No merge: the branches diverge.
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -725,19 +1107,36 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Configuración avanzada del agente. No modifica el TOC interno de Settings: las superficies
-// visuales propias administran proveedores/extensiones y estas claves quedan disponibles para
-// búsqueda o settings.json. Credenciales: SecretStorage, nunca settings.json.
+// Advanced agent configuration. It does not modify the internal Settings TOC: our own visual
+// surfaces manage providers/extensions and these keys remain available for search or
+// settings.json. Credentials: SecretStorage, never settings.json.
 const configurationRegistry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
-// OpenIDE usa el breadcrumb contextual para planes/modelos; el Command Center superior duplica
-// esa navegación y roba altura. Sigue siendo una preferencia sobreescribible por el usuario.
+// OpenIDE uses the contextual breadcrumb for plans/models; the top Command Center duplicates
+// that navigation and steals height. It remains a user-overridable preference.
 configurationRegistry.registerDefaultConfigurations([{ overrides: { 'window.commandCenter': false }, source: 'OpenIDE' }]);
+// One icon language across the whole IDE: the Tabler product icon theme (theme-defaults) re-skins
+// every codicon surface — activity bar, trees, toolbars and the chat's own glyphs. A user pick in
+// workbench.productIconTheme still wins: this is a DEFAULT, not a lock.
+configurationRegistry.registerDefaultConfigurations([{ overrides: { 'workbench.productIconTheme': 'openide-bootstrap' }, source: 'OpenIDE' }]);
 configurationRegistry.registerConfiguration({
 	id: 'openideAgent',
 	order: 100,
 	title: localize('openide.agent.title', "Agente IA"),
 	type: 'object',
 	properties: {
+		// Retired: the display language is now the only switch, and OpenIDE's own strings read it
+		// too. No `default` on purpose — a default of `'es'` made every fresh install Spanish
+		// regardless of the user's locale, which is the opposite of following the IDE.
+		// `OpenideLanguageMigrationContribution` carries an existing value over to the locale and
+		// then removes the setting.
+		'openide.language': {
+			type: 'string',
+			enum: ['auto', 'es', 'en'],
+			order: 0,
+			description: localize('openide.language', "Deprecated. OpenIDE now renders its own screens in the display language, so Settings › Language moves the whole interface at once."),
+			deprecationMessage: localize('openide.language.deprecated', "Use the display language instead (Settings › Language). OpenIDE follows it for its own screens."),
+		},
+		[OPENIDE_IDE_SERVER_SETTING]: { type: 'boolean', default: true, description: localize('openide.ideServer.enabled', "Permite que los CLI de agentes (Claude Code, Codex, Gemini, opencode) se conecten a este IDE y usen sus herramientas: editores abiertos, selección, diagnósticos y diff. El servidor escucha solo en 127.0.0.1 y exige un token.") },
 		'openide.subagents.enabled': { type: 'boolean', default: true, description: localize('openide.subagents.enabled', "Habilita definiciones y ejecuciones de subagentes.") },
 		'openide.subagents.routing.enabled': { type: 'boolean', default: false, description: localize('openide.subagents.routing.enabled', "Selecciona provider/model por perfil de tarea y aplica fallback seguro. Apagado conserva el comportamiento legacy.") },
 		'openide.subagents.routing.preset': { type: 'string', enum: ['manual', 'quality', 'balanced', 'savings'], default: 'balanced', description: localize('openide.subagents.routing.preset', "Preset visual para calidad, costo y latencia.") },
@@ -763,14 +1162,14 @@ configurationRegistry.registerConfiguration({
 		'openide.subagents.showDetailedToolCalls': { type: 'boolean', default: true, description: localize('openide.subagents.details', "Muestra timeline y tool calls en las cards.") },
 		'openide.subagents.preserveCompletedRuns': { type: 'boolean', default: true, description: localize('openide.subagents.preserve', "Conserva runs terminados al reiniciar.") },
 		'openide.subagents.globalDirectory': { type: 'string', default: '', description: localize('openide.subagents.globalDir', "Directorio global alternativo de agentes.") },
-		// NOTA: el proveedor/modelo ACTIVOS ya no son settings — viven en IStorageService y se
-		// configuran desde la página "Proveedores de IA" (openide.agent.openProviders) o el
-		// picker nativo de modelos del chat. Acá quedan solo los ajustes de power-user.
+		// NOTE: the ACTIVE provider/model are no longer settings — they live in IStorageService and
+		// are configured from the "AI Providers" page (openide.agent.openProviders) or the chat's
+		// native model picker. Only power-user settings remain here.
 		'openide.agent.customProviders': {
 			type: 'array',
 			default: [],
 			order: 3,
-			markdownDescription: localize('openide.agent.custom.desc', "Conectá cuentas, claves y modelos desde [Proveedores de IA](command:openide.agent.openProviders) — esta opción es solo para power-users. Proveedores custom: cualquier endpoint OpenAI-compatible (ej: un Ollama remoto, un proxy corporativo). Cada entrada: `{ id, label, protocol, baseUrl, defaultModel }`."),
+			markdownDescription: localize('openide.agent.custom.desc', "Conectá cuentas, claves y modelos desde [Proveedores de IA](command:openide.agent.openProviders) — esta opción es solo para power-users. Proveedores custom: cualquier endpoint OpenAI-compatible (ej: un Ollama remoto, un proxy corporativo). Cada entrada: `{ id, label, protocol, baseUrl, defaultModel }`; `voiceModel` anuncia un modelo compatible con `input_audio`."),
 			items: {
 				type: 'object',
 				properties: {
@@ -779,6 +1178,7 @@ configurationRegistry.registerConfiguration({
 					protocol: { type: 'string', enum: ['openai', 'anthropic'], default: 'openai' },
 					baseUrl: { type: 'string', description: 'Base URL del endpoint (ej: http://localhost:11434/v1)' },
 					defaultModel: { type: 'string' },
+					voiceModel: { type: 'string', description: 'Modelo de dictado compatible con input_audio (opcional)' },
 				},
 				required: ['id'],
 			},
@@ -807,21 +1207,30 @@ configurationRegistry.registerConfiguration({
 		'openide.memory.enabled': { type: 'boolean', default: true, order: 20, description: localize('openide.memory.enabled', 'Habilita la memoria del codebase.') },
 		'openide.memory.indexOnOpen': { type: 'boolean', default: true, order: 21, description: localize('openide.memory.indexOnOpen', 'Valida y actualiza la memoria al abrir el workspace.') },
 		'openide.memory.incrementalIndexing': { type: 'boolean', default: true, order: 22, description: localize('openide.memory.incremental', 'Actualiza sólo archivos modificados mediante watcher.') },
-		'openide.memory.persistIndex': { type: 'boolean', default: true, order: 23, description: localize('openide.memory.persist', 'Persiste el índice por workspace.') },
-		'openide.memory.maxContextTokens': { type: 'number', default: 12000, minimum: 1000, maximum: 100000, order: 24, description: localize('openide.memory.maxContext', 'Presupuesto de contexto recuperado automáticamente.') },
-		'openide.memory.maxRetrievedNodes': { type: 'number', default: 50, minimum: 5, maximum: 500, order: 25, description: localize('openide.memory.maxNodes', 'Máximo de nodos recuperados para el agente.') },
-		'openide.memory.maxTraversalDepth': { type: 'number', default: 2, minimum: 1, maximum: 8, order: 26, description: localize('openide.memory.maxDepth', 'Profundidad máxima de traversal.') },
-		'openide.memory.visualization.defaultMode': { type: 'string', enum: ['architecture', 'dependencies', 'impact', 'matrix'], default: 'architecture', order: 27, description: localize('openide.memory.defaultMode', 'Modo inicial del editor Codebase Architecture.') },
+		'openide.memory.persistIndex': { type: 'boolean', default: true, markdownDescription: localize('openide.memory.persist', 'Guarda el índice en `.openide/memory-indexes/` del workspace para reutilizarlo entre sesiones. Al apagarlo se borra lo ya escrito y el índice vive sólo en memoria: cada ventana nueva lo reconstruye desde cero.'), order: 23 },
+		'openide.memory.maxContextTokens': { type: 'number', default: 3000, minimum: 500, maximum: 12000, order: 24, description: localize('openide.memory.maxContext', 'Presupuesto máximo de Project Map recuperado automáticamente.') },
+		'openide.memory.maxRetrievedNodes': { type: 'number', default: 24, minimum: 3, maximum: 100, order: 25, description: localize('openide.memory.maxNodes', 'Máximo de nodos relevantes recuperados para el agente.') },
+		'openide.memory.maxTraversalDepth': { type: 'number', default: 3, minimum: 1, maximum: 6, order: 26, description: localize('openide.memory.maxDepth', 'Techo de profundidad para los recorridos del grafo (explore, impacto, callers). 1-2 = vecindad inmediata; 4+ sólo tiene sentido en consultas muy acotadas.') },
+		'openide.memory.visualization.defaultMode': { type: 'string', enum: ['architecture', 'graph', 'dependencies', 'impact', 'matrix'], default: 'architecture', order: 27, description: localize('openide.memory.defaultMode', 'Modo inicial del editor Project Map.') },
 		'openide.memory.visualization.maxVisibleNodes': { type: 'number', default: 300, minimum: 50, maximum: 2000, order: 28, description: localize('openide.memory.maxVisible', 'Máximo de elementos visibles en la arquitectura.') },
 		'openide.memory.visualization.maxRelationDepth': { type: 'number', default: 2, minimum: 1, maximum: 5, order: 29, description: localize('openide.memory.maxRelationDepth', 'Profundidad máxima de relaciones visibles.') },
 		'openide.memory.visualization.showHeuristicEdges': { type: 'boolean', default: true, order: 30, description: localize('openide.memory.heuristicEdges', 'Muestra relaciones heurísticas con estilo discontinuo.') },
-		'openide.memory.visualization.semanticZoom': { type: 'boolean', default: true, order: 31, description: localize('openide.memory.semanticZoom', 'Usa zoom semántico por niveles de arquitectura.') },
-		'openide.memory.visualization.legacyGraphEnabled': { type: 'boolean', default: false, order: 32, description: localize('openide.memory.legacyGraph', 'Mantiene disponible el grafo 3D legacy.') },
-		'openide.memory.exclude': { type: 'array', default: [], order: 33, items: { type: 'string' }, description: localize('openide.memory.exclude', 'Patrones adicionales excluidos del índice.') },
-		'openide.memory.include': { type: 'array', default: [], order: 34, items: { type: 'string' }, description: localize('openide.memory.include', 'Patrones adicionales incluidos en el índice.') },
-		'openide.memory.indexTests': { type: 'boolean', default: true, order: 35, description: localize('openide.memory.indexTests', 'Incluye archivos de tests.') },
-		'openide.memory.enableRegexFallback': { type: 'boolean', default: true, order: 36, description: localize('openide.memory.regex', 'Usa regex como fallback de baja confianza.') },
-		'openide.memory.showHeuristicRelations': { type: 'boolean', default: true, order: 37, description: localize('openide.memory.showHeuristic', 'Expone relaciones heurísticas en la UI.') },
+		[CODEBASE_NOTES_ENABLED_SETTING]: { type: 'boolean', default: true, order: 31, markdownDescription: localize('openide.memory.notes.enabled', 'Indexa la memoria compartida (`.openide/MEMORY.md`) dentro del grafo: cada entrada pasa a ser un nodo que Project Map devuelve junto con el código del que habla. Apagarlo NO borra el archivo — sigue estando en el repo y se sigue inyectando al prompt del agente propio; solo deja de aparecer en las consultas al grafo.') },
+		[CODEBASE_NOTES_LINKING_SETTING]: {
+			type: 'string', enum: ['explicit', 'identifiers', 'off'], default: 'explicit', order: 32,
+			enumDescriptions: [
+				localize('openide.memory.notes.linking.explicit', 'Solo lo que marcaste con `backticks` o [[corchetes]]. Es lo más seguro: nunca conecta algo que no pediste.'),
+				localize('openide.memory.notes.linking.identifiers', 'Además intenta con palabras sueltas que parezcan código (camelCase, PascalCase, snake_case). Sirve para notas viejas escritas sin marcar; a cambio, alguna relación puede salir mal.'),
+				localize('openide.memory.notes.linking.off', 'No conecta notas con entidades. Las notas siguen en el grafo como hechos sueltos y las consultas las siguen devolviendo.'),
+			],
+			markdownDescription: localize('openide.memory.notes.linking', 'Cuánto se esfuerza OpenIDE en colgar una nota de la entidad de la que habla. En cualquier modo, una mención solo genera relación si resuelve a UN único nodo: lo ambiguo nunca conecta.'),
+		},
+		[CODEBASE_NOTES_MAX_CHARS_SETTING]: { type: 'number', default: 3000, minimum: 500, maximum: 100000, order: 32.5, markdownDescription: localize('openide.memory.notes.maxChars', 'Techo en caracteres de `.openide/MEMORY.md`. Al superarlo, la herramienta de memoria pide consolidar en vez de seguir creciendo. Estaba dimensionado para inyectar el archivo entero al prompt; ahora que las consultas al grafo recortan solas se puede subir, pero cada carácter sigue costando presupuesto en el prompt del agente propio.') },
+		'openide.memory.exclude': { type: 'array', default: [], order: 33, items: { type: 'string' }, markdownDescription: localize('openide.memory.exclude', 'Patrones glob que el índice ignora, además de los excluidos por defecto (`node_modules`, `dist`, `.git`, …). Un patrón sin comodines ni extensión (`docs`) cubre también todo su subárbol. Cambiarlo dispara una reconstrucción.') },
+		'openide.memory.include': { type: 'array', default: [], order: 34, items: { type: 'string' }, markdownDescription: localize('openide.memory.include', 'Si tiene patrones, SÓLO se indexa lo que matchee (útil para acotar un monorepo a `src`). Un patrón con extensión (`**/*.vue`) además amplía los tipos de archivo indexados. Vacío = indexar todo lo no excluido.') },
+		'openide.memory.indexTests': { type: 'boolean', default: true, order: 35, markdownDescription: localize('openide.memory.indexTests', 'Indexa archivos de test (`*.test.ts`, `*_test.go`, `test_*.py`, …). Al apagarlo, la tool `memory_graph_related_tests` deja de encontrar tests y se pierde el grafo de "qué prueba a qué".') },
+		'openide.memory.enableRegexFallback': { type: 'boolean', default: true, order: 36, markdownDescription: localize('openide.memory.regex', 'Extrae símbolos e imports por regex (confianza baja) cuando no hay evidencia del language server. Al apagarlo sólo quedan los símbolos verificados: se pierden las relaciones `IMPORTS`/`DEPENDS_ON`, y con ellas la matriz de módulos y `memory_graph_path`.') },
+		'openide.memory.showHeuristicRelations': { type: 'boolean', default: true, order: 37, markdownDescription: localize('openide.memory.showHeuristic', 'Incluye las relaciones inferidas por heurística (regex/texto) en las respuestas que recibe el agente. Al apagarlo sólo viajan las verificadas por el language server: más precisas, pero muchas menos.') },
 		'openide.agent.contextTokens': {
 			type: 'number',
 			default: 0,
@@ -836,7 +1245,7 @@ configurationRegistry.registerConfiguration({
 		},
 		'openide.agent.maxAgentIterations': {
 			type: 'number',
-			default: 120,
+			default: 200,
 			minimum: 25,
 			maximum: 500,
 			order: 11.25,
@@ -846,7 +1255,18 @@ configurationRegistry.registerConfiguration({
 			type: 'string',
 			default: '',
 			order: 11.5,
-			description: localize('openide.agent.voiceModel.desc', "Modelo para el dictado por voz del chat, formato \"provider/modelo\" (ej: gemini/gemini-3.5-flash). Vacío = automático: el primer proveedor multimodal conectado (Gemini, OpenAI, Qwen)."),
+			description: localize('openide.agent.voiceModel.desc', "Modelo para el dictado por voz del chat, formato \"provider/modelo\" (ej: gemini/gemini-3.5-flash). Vacío = usa voz sólo cuando el proveedor activo declara un modelo de audio compatible."),
+		},
+		'openide.agent.voiceMode': {
+			type: 'string',
+			enum: ['toggle', 'holdToTalk'],
+			enumDescriptions: [
+				localize('openide.agent.voiceMode.toggle', "Un click arranca a grabar, otro click la corta."),
+				localize('openide.agent.voiceMode.holdToTalk', "Mantené presionado el botón de micrófono para grabar; soltalo para transcribir."),
+			],
+			default: 'toggle',
+			order: 11.51,
+			description: localize('openide.agent.voiceMode.desc', "Modo de grabación del dictado por voz del chat."),
 		},
 		'openide.agent.autoCompact': {
 			type: 'boolean',
@@ -904,15 +1324,21 @@ configurationRegistry.registerConfiguration({
 			type: 'boolean',
 			default: true,
 			order: 21.05,
-			markdownDescription: localize('openide.agent.usage.enabled', "Muestra barras de usage/rate-limit OAuth en la página de Proveedores (Anthropic OAuth). Apagalo si no querés consultar billing."),
+			markdownDescription: localize('openide.agent.usage.enabled', "Consulta el uso y los límites de las cuentas conectadas (Anthropic, ChatGPT/Codex, Antigravity, Grok, OpenRouter) y de las CLIs con sesión en esta máquina para el footer, el popover y la página de Proveedores. Apagalo si no querés que el IDE consulte billing."),
+		},
+		'openide.agent.usage.cliAccounts': {
+			type: 'boolean',
+			default: true,
+			order: 21.055,
+			markdownDescription: localize('openide.agent.usage.cliAccounts', "Suma al popover de Uso las suscripciones de las CLIs con sesión iniciada en esta máquina (Claude Code, Codex, Gemini CLI, Grok), leyendo el token de su propio almacén de credenciales (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.grok`). Nunca modifica ni renueva esas sesiones en disco."),
 		},
 		'openide.agent.usage.pollMinutes': {
 			type: 'number',
-			default: 0,
+			default: 15,
 			minimum: 0,
 			maximum: 120,
 			order: 21.06,
-			markdownDescription: localize('openide.agent.usage.pollMinutes', "Polling opcional de usage en minutos (0 = desactivado, sólo refresh manual). Desactivado por defecto por privacy/billing."),
+			markdownDescription: localize('openide.agent.usage.pollMinutes', "Cadencia de fondo del refresco de uso, en minutos (mínimo 0.5). Además se refresca al terminar cada turno, al volver el foco a la ventana y cada minuto mientras el popover está abierto."),
 		},
 		'openide.agent.web.enabled': { type: 'boolean', default: true, order: 21.1, markdownDescription: localize('openide.agent.web.enabled', "Habilita `web_search` y `web_fetch` para investigar web pública sin usar la preview localhost.") },
 		'openide.agent.web.searchEndpoint': { type: 'string', default: '', order: 21.2, markdownDescription: localize('openide.agent.web.searchEndpoint', "Endpoint HTTPS JSON de búsqueda. Recibe `q` y `limit`; debe devolver `results`/`items` con `title`, `url` y `snippet`.") },
@@ -922,6 +1348,82 @@ configurationRegistry.registerConfiguration({
 		'openide.agent.web.timeoutSeconds': { type: 'number', default: 15, minimum: 1, maximum: 60, order: 21.6, description: localize('openide.agent.web.timeout', "Timeout total por request web.") },
 		'openide.agent.web.maxResponseBytes': { type: 'number', default: 2000000, minimum: 64000, maximum: 10000000, order: 21.7, description: localize('openide.agent.web.maxBytes', "Máximo de bytes descargados por fuente web.") },
 		'openide.agent.web.maxExtractedChars': { type: 'number', default: 60000, minimum: 1000, maximum: 200000, order: 21.8, description: localize('openide.agent.web.maxChars', "Máximo de caracteres extraídos y enviados al modelo por fuente.") },
+		'openide.agent.browserTools.enabled': {
+			type: 'boolean',
+			default: true,
+			order: 21.9,
+			markdownDescription: localize('openide.agent.browserTools.enabled.desc', "Habilita las tools `browser_*` del agente (navegar, click, escribir, capturar, ejecutar Playwright) sobre la vista previa nativa. Distinto de `workbench.browser.enableChatTools`, que sólo gatea las tools nativas de Copilot Chat. Apagalo como kill-switch dedicado del agente."),
+		},
+		'openide.agent.browserTools.actionTimeoutMs': {
+			type: 'number',
+			default: 5000,
+			minimum: 500,
+			maximum: 60000,
+			order: 21.91,
+			description: localize('openide.agent.browserTools.actionTimeoutMs.desc', "Timeout en milisegundos para esperar un elemento visible antes de click/escribir/capturar/leer el DOM."),
+		},
+		'openide.agent.browserTools.navigationTimeoutMs': {
+			type: 'number',
+			default: 10000,
+			minimum: 1000,
+			maximum: 120000,
+			order: 21.92,
+			description: localize('openide.agent.browserTools.navigationTimeoutMs.desc', "Timeout en milisegundos para esperar que termine de cargar la página tras browser_navigate."),
+		},
+		'openide.agent.browserTools.maxDomReadChars': {
+			type: 'number',
+			default: 50000,
+			minimum: 1000,
+			maximum: 500000,
+			order: 21.93,
+			description: localize('openide.agent.browserTools.maxDomReadChars.desc', "Máximo de caracteres devueltos por browser_read_dom."),
+		},
+		'openide.agent.browserTools.screenshotQuality': {
+			type: 'number',
+			default: 80,
+			minimum: 1,
+			maximum: 100,
+			order: 21.94,
+			description: localize('openide.agent.browserTools.screenshotQuality.desc', "Calidad JPEG (1-100) de las capturas de browser_screenshot."),
+		},
+		'openide.agent.browserTools.showCursor': {
+			type: 'boolean',
+			default: true,
+			order: 21.95,
+			markdownDescription: localize('openide.agent.browserTools.showCursor.desc', "Dibuja un puntero del agente en la vista previa: se desliza hasta el elemento, lo recuadra y marca el click, para poder seguir lo que hace y que quede en los screenshots. Apagalo si preferís que las acciones sean instantáneas."),
+		},
+		'openide.agent.suggestMode.autoAcceptSeconds': {
+			type: 'number',
+			default: 0,
+			minimum: 0,
+			maximum: 120,
+			order: 21.85,
+			markdownDescription: localize('openide.agent.suggestMode.autoAcceptSeconds.desc', "Segundos hasta que la tarjeta de modo recomendado se acepta sola, con una cuenta atrás visible sobre el botón. **0 (default) = sólo a mano.** El temporizador se cancela apenas mostrás que estás decidiendo: al pasar el mouse por la tarjeta, al enfocarla o al escribir en el chat."),
+		},
+		'openide.agent.browserTools.keystrokeDelayMs': {
+			type: 'number',
+			default: 70,
+			minimum: 0,
+			maximum: 300,
+			order: 21.96,
+			markdownDescription: localize('openide.agent.browserTools.keystrokeDelayMs.desc', "Milisegundos entre teclas cuando `browser_type` escribe tecla por tecla. Escribir así dispara los eventos de teclado reales, así que ejercita autocompletados, máscaras y validación al tipear que un volcado de una sola vez no toca. Más alto = se ve escribir de a una tecla y no se saltean las animaciones del campo. Requiere el puntero del agente activo."),
+		},
+		'openide.agent.browserTools.maxKeystrokes': {
+			type: 'number',
+			default: 80,
+			minimum: 0,
+			maximum: 2000,
+			order: 21.97,
+			description: localize('openide.agent.browserTools.maxKeystrokes.desc', "Largo máximo de texto que se escribe tecla por tecla; por encima de eso se completa de una vez. 0 desactiva la escritura tecla por tecla."),
+		},
+		'openide.agent.browserTools.settleMs': {
+			type: 'number',
+			default: 140,
+			minimum: 0,
+			maximum: 2000,
+			order: 21.98,
+			markdownDescription: localize('openide.agent.browserTools.settleMs.desc', "Pausa (ms) después de cada click o escritura para que las animaciones de la vista previa terminen antes del paso siguiente. **0 = sin pausa.** Subilo si el agente salta animaciones de la página; bajalo si lo encontrás lento."),
+		},
 		'openide.agent.mcp.enabled': {
 			type: 'boolean',
 			default: true,
@@ -934,11 +1436,97 @@ configurationRegistry.registerConfiguration({
 			order: 23,
 			markdownDescription: localize('openide.agent.hooks.desc', "Ejecutar los hooks de shell configurados en `.openide/hooks.json` del proyecto y en el global del perfil: scripts del usuario que observan o bloquean el lifecycle del agente (`preToolUse`, `postToolUse`, `userPromptSubmit`, `sessionStart`, `stop`, `subagentStop`). Cada hook pide consentimiento la primera vez (y si el script cambió desde la aprobación). Apagalo como kill-switch global."),
 		},
+		'openide.agent.notifications.enabled': {
+			type: 'boolean',
+			default: true,
+			order: 23.1,
+			description: localize('openide.agent.notifications.enabled.desc', "Habilita las notificaciones del agente (sonido y aviso del sistema)."),
+		},
+		'openide.agent.notifications.onTaskComplete': {
+			type: 'boolean',
+			default: true,
+			order: 23.11,
+			description: localize('openide.agent.notifications.onTaskComplete.desc', "Avisar cuando el agente termina de responder un mensaje."),
+		},
+		'openide.agent.notifications.suppressWhenFocused': {
+			type: 'boolean',
+			default: true,
+			order: 23.12,
+			description: localize('openide.agent.notifications.suppressWhenFocused.desc', "No avisar si la ventana ya está enfocada."),
+		},
+		'openide.agent.notifications.sound': {
+			type: 'boolean',
+			default: true,
+			order: 23.13,
+			markdownDescription: localize('openide.agent.notifications.sound.desc', "Reproducir sonido al avisar, usando las [Señales de Accesibilidad](command:workbench.action.openSettings?%22accessibility.signals.taskCompleted%22) `Task Completed`/`Task Failed` (volumen y sonido configurables ahí)."),
+		},
 		'openide.agent.googleCloudProject': {
 			type: 'string',
 			default: '',
 			order: 23.5,
 			markdownDescription: localize('openide.agent.googleCloudProject.desc', "Proyecto GCP para Antigravity / Code Assist OAuth. Las cuentas personales suelen no necesitarlo (el proyecto administrado se resuelve solo al conectar). Cuentas Workspace o con licencia empresarial: poné acá el id de un proyecto con la API **Gemini for Google Cloud** habilitada."),
+		},
+		'openide.chat.fontSize': {
+			type: 'number',
+			default: 13,
+			minimum: 11,
+			maximum: 18,
+			order: 25.1,
+			description: localize('openide.chat.fontSize.desc', "Tamaño base (px) del texto del transcript del chat."),
+		},
+		'openide.chat.density': {
+			type: 'string',
+			enum: ['comfortable', 'compact'],
+			default: 'comfortable',
+			order: 25.11,
+			enumDescriptions: [
+				localize('openide.chat.density.comfortable', "Espaciado estándar entre mensajes y cards."),
+				localize('openide.chat.density.compact', "Menos aire vertical: más conversación por pantalla."),
+			],
+			description: localize('openide.chat.density.desc', "Densidad visual del transcript del chat."),
+		},
+		'openide.chat.thinking.defaultOpen': {
+			type: 'boolean',
+			default: false,
+			order: 25.12,
+			description: localize('openide.chat.thinking.defaultOpen.desc', "Deja el razonamiento (Thinking) expandido al terminar cada turno, en vez de colapsarlo automáticamente."),
+		},
+		'openide.chat.tools.defaultExpanded': {
+			type: 'boolean',
+			default: false,
+			order: 25.13,
+			description: localize('openide.chat.tools.defaultExpanded.desc', "Muestra las cards de herramientas (resultados y grupos de exploración) expandidas por defecto."),
+		},
+		'openide.chat.workingIndicator': {
+			type: 'boolean',
+			default: true,
+			order: 25.14,
+			description: localize('openide.chat.workingIndicator.desc', "Muestra la línea con shimmer «Pensando…» / «Planeando los próximos pasos» mientras el agente trabaja sin emitir contenido."),
+		},
+		'openide.chat.userMessage.clampLines': {
+			type: 'number',
+			default: 3,
+			minimum: 0,
+			maximum: 12,
+			order: 25.15,
+			description: localize('openide.chat.userMessage.clampLines.desc', "Líneas visibles de tus mensajes antes de recortarlos con «ver más». 0 los muestra completos siempre."),
+		},
+		'openide.chat.autoScroll': {
+			type: 'string',
+			enum: ['whenAtBottom', 'always'],
+			default: 'whenAtBottom',
+			order: 25.16,
+			enumDescriptions: [
+				localize('openide.chat.autoScroll.whenAtBottom', "Sigue el streaming sólo si ya estás al final; scrollear hacia arriba lo pausa."),
+				localize('openide.chat.autoScroll.always', "Además, al terminar cada turno vuelve a engancharse al final aunque hayas scrolleado."),
+			],
+			description: localize('openide.chat.autoScroll.desc', "Cuándo el transcript sigue automáticamente los mensajes nuevos."),
+		},
+		'openide.chat.queue.enabled': {
+			type: 'boolean',
+			default: true,
+			order: 25.17,
+			description: localize('openide.chat.queue.enabled.desc', "Encola los mensajes enviados mientras el agente trabaja y los despacha al terminar. Desactivado, el composer avisa y conserva el texto."),
 		},
 		'openide.agent.disabledSkills': {
 			type: 'array',
@@ -950,7 +1538,7 @@ configurationRegistry.registerConfiguration({
 	},
 });
 
-// Comando: recargar los servers MCP (re-lee los mcp.json, desconecta y reconecta todo).
+// Command: reload the MCP servers (re-reads the mcp.json files, disconnects and reconnects everything).
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -972,7 +1560,7 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Comando: elegir el provider activo desde el catálogo.
+// Command: choose the active provider from the catalog.
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -1000,7 +1588,7 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Comando: iniciar sesión OAuth en un proveedor del catálogo que lo soporte.
+// Command: start an OAuth login with a catalog provider that supports it.
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -1037,7 +1625,7 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Comando: configurar la API key de un provider (guardada en SecretStorage).
+// Command: configure a provider's API key (stored in SecretStorage).
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -1070,7 +1658,7 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Comando: probar el agente desde un Output channel (validación del backend).
+// Command: test the agent from an Output channel (backend validation).
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -1113,9 +1701,9 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Comando: copiar la configuración MCP del motor de diagramas al portapapeles, para pegarla
-// en el .mcp.json (u otro registro MCP) de chats de extensiones como Claude Code. El motor
-// (openideDiagramEngine) es el mismo backend que usa el chat propio — única fuente de verdad.
+// Command: copy the diagram engine's MCP configuration to the clipboard, to paste it into
+// the .mcp.json (or another MCP registry) of extension chats such as Claude Code. The engine
+// (openideDiagramEngine) is the same backend our own chat uses — a single source of truth.
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -1137,5 +1725,65 @@ registerAction2(class extends Action2 {
 		}, null, 2);
 		await clipboard.writeText(snippet);
 		notifications.info(localize('openide.agent.mcpCopied', "Configuración MCP de diagramas copiada. Pegala en el .mcp.json de tu agente (Claude Code, etc.)."));
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'openide.agent.notifications.test',
+			title: localize2('openide.agent.notifications.test', 'Agente IA: Enviar notificación de prueba'),
+			category: Categories.Preferences,
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const hostService = accessor.get(IHostService);
+		const accessibilitySignalService = accessor.get(IAccessibilitySignalService);
+		if (accessor.get(IConfigurationService).getValue('openide.agent.notifications.sound') !== false) {
+			void accessibilitySignalService.playSignal(AccessibilitySignal.taskCompleted);
+		}
+		await hostService.showToast({
+			title: 'Agente IA: notificación de prueba',
+			body: 'Así se va a ver el aviso cuando el agente termine una tarea.',
+		}, CancellationToken.None);
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'openide.agent.runQuickCommand',
+			title: localize2('openide.agent.runQuickCommand', 'Agente IA: Ejecutar comando rápido…'),
+			category: Categories.Preferences,
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const fileService = accessor.get(IFileService);
+		const contextService = accessor.get(IWorkspaceContextService);
+		const environmentService = accessor.get(IEnvironmentService);
+		const quickInput = accessor.get(IQuickInputService);
+		const terminalService = accessor.get(ITerminalService);
+		const notifications = accessor.get(INotificationService);
+		const service = new OpenideQuickCommandsService(fileService, contextService, environmentService);
+		const commands = await service.listAll();
+		if (!commands.length) {
+			notifications.info(localize('openide.agent.runQuickCommand.empty', "No hay comandos rápidos guardados todavía. Agregá uno en Ajustes › Agente IA › Comandos rápidos de terminal."));
+			return;
+		}
+		const picked = await quickInput.pick(commands.map(c => ({ label: c.label, description: c.scope === 'global' ? 'global' : 'proyecto', detail: c.command, command: c })), { placeHolder: 'Elegí un comando rápido para ejecutar' });
+		if (!picked) {
+			return;
+		}
+		let instance = terminalService.activeInstance;
+		if (!instance) {
+			instance = await terminalService.createTerminal();
+		}
+		await terminalService.setActiveInstance(instance);
+		await terminalService.revealTerminal(instance);
+		instance.sendText(picked.command.command, true);
 	}
 });

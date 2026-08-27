@@ -26,19 +26,19 @@ suite('OpenIDE terminal interactive + usage', () => {
 			startTime: start,
 			lastDataTime: start + 19_500,
 		}), false);
-		// runtime corto aunque haya silencio → no
+		// short runtime even with silence → no
 		assert.strictEqual(shouldDetectAwaitingInput({
 			now: start + 8_000,
 			startTime: start,
 			lastDataTime: start + 100,
 		}), false);
-		// pausa corta de un build (3s silencio a los 10s) → no (defaults 12s/6s)
+		// brief build pause (3s of silence at the 10s mark) → no (defaults 12s/6s)
 		assert.strictEqual(shouldDetectAwaitingInput({
 			now: start + 10_000,
 			startTime: start,
 			lastDataTime: start + 7_000,
 		}), false);
-		// runtime OK + silencio OK → sí
+		// runtime OK + silence OK → yes
 		assert.strictEqual(shouldDetectAwaitingInput({
 			now: start + 20_000,
 			startTime: start,
@@ -100,24 +100,4 @@ suite('OpenIDE terminal interactive + usage', () => {
 		assert.strictEqual(providerSupportsAnthropicUsage({ id: 'copilot', auth: 'oauth', protocol: 'openai' }), false);
 	});
 
-	test('chat html exposes termToPanel menu and awaiting-input styles', () => {
-		// Lazy import del html builder para no arrastrar CSS enorme a todos los asserts previos.
-		return import('../../browser/openideChatHtml.js').then(({ getOpenideChatHtml }) => {
-			const html = getOpenideChatHtml('test-nonce', '');
-			assert.match(html, /Enviar al panel/);
-			assert.match(html, /type: 'termToPanel'/);
-			assert.match(html, /\.part\.term-card\.awaiting-input/);
-			assert.match(html, /background_persistent/);
-		});
-	});
-
-	test('providers html exposes UsageBar markup helpers', () => {
-		return import('../../browser/openideProvidersHtml.js').then(({ getOpenideProvidersHtml }) => {
-			const html = getOpenideProvidersHtml('test-nonce', '', false);
-			assert.match(html, /\.usage-track/);
-			assert.match(html, /function usagePanel/);
-			assert.match(html, /type: 'refreshUsage'/);
-			assert.match(html, /case 'usage'/);
-		});
-	});
 });

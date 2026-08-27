@@ -1,0 +1,441 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat (transcript + composer), Stage 1.
+ *
+ *  Written against the shared `--oi-*` tokens (browser/openideSurfaceCss.ts), which the widget
+ *  installs through `applyOpenideSurfaceCss()`. Every colour here has to come from the theme:
+ *  the whole point of leaving the webview is that a theme change repaints with no CSS injection.
+ *
+ *  SOURCE OF TRUTH: browser/openideChatHtml.ts. The native chat has to be indistinguishable from
+ *  the webview it replaces, so every literal below is transcribed from that file's `<style>` and
+ *  is annotated with what it maps to. There is no single radius token: the webview uses 8px for
+ *  the bubble, 2px for fences and tables, 4px for inline code and small buttons, 50% for the round
+ *  ones — reducing that to one variable is what made the two surfaces look different.
+ *
+ *  Only the transcript's chrome lives here. The typography of a rendered answer is in
+ *  media/openideChatMarkdown.css, and the composer in media/openideChatComposer.css.
+ *--------------------------------------------------------------------------------------------*/
+
+/* No radius/gutter variable of its own: the webview has no single value to name. It uses 8px for
+   the bubble and the cards, 2px for fences and tables, 4px for inline code and the small buttons,
+   50% for the round ones, and its gutters come from `#messages`'s padding plus `.turn-body`'s
+   width — collapsing that into one token is exactly what made the two surfaces look different. */
+.openide-chat-native {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	background: var(--oi-surface);
+	color: var(--oi-text);
+	font-family: var(--oi-font);
+}
+
+.openide-chat-native .hidden {
+	display: none !important;
+}
+
+/* ---- Transcript ---- */
+
+.openide-chat-list-host {
+	position: relative;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+/* Relative because the "go to the end" button is a child of this element, not of the host. */
+.openide-chat-list {
+	position: relative;
+	width: 100%;
+	height: 100%;
+}
+
+/* The list paints focus and selection; a transcript has neither, it is a document. */
+.openide-chat-list .monaco-list-row {
+	cursor: default;
+}
+
+/* A transcript has no hierarchy, but the tree still reserves its twistie column, and that pushed
+   every row 16px to the right — the user's bubble stopped spanning the transcript's width the way
+   `#messages` does in the webview. Collapsing it by width does not work: `abstractTree.ts:483`
+   writes the indent as an INLINE `padding-left`, which no stylesheet can outrank without
+   `!important` anyway. This is the same rule (and the same reason) upstream chat.css:29 uses, and
+   the child chain is what keeps a nested tree inside a response from losing its own twisties. */
+.openide-chat-list > .monaco-list > .monaco-scrollable-element > .monaco-list-rows > .monaco-list-row > .monaco-tl-row > .monaco-tl-twistie {
+	display: none !important;
+}
+
+.openide-chat-list .monaco-list .monaco-list-row.focused,
+.openide-chat-list .monaco-list .monaco-list-row.selected {
+	outline: none;
+}
+
+/* The webview's `#jumpDown`. There it hangs off the dock at `top: -40px`; here it hangs off the
+   BOTTOM of the list host, which is the same edge — 28px of button plus 12px of gap lands the
+   circle in the same place, and it keeps floating over the transcript instead of taking a row.
+   Everything else (size, circle, inverted fill, shadow) is transcribed value for value; the
+   `.monaco-button` geometry it inherits has to be overridden because the webview had no such base. */
+.openide-chat-scroll-down.monaco-button {
+	position: absolute;
+	right: 14px;
+	bottom: 12px;
+	z-index: 10;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	color: var(--vscode-editor-background);
+	background: var(--vscode-foreground);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+	transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.openide-chat-scroll-down.monaco-button:hover {
+	color: var(--vscode-editor-background);
+	background: var(--vscode-foreground);
+	opacity: 0.85;
+}
+
+.openide-chat-scroll-down.monaco-button:active { transform: scale(0.92); }
+
+.monaco-workbench .openide-chat-native .openide-chat-list .openide-chat-scroll-down .codicon[class*="codicon-"] {
+	font-size: 14px;
+	color: inherit;
+}
+
+/* ---- Rows ---- */
+
+/* The workbench ships no global border-box reset (openideSettings.css scopes its own). Without
+   this the row's horizontal padding is ADDED to its width, so every line was clipped by exactly
+   the gutter on the right edge. */
+.openide-chat-native,
+.openide-chat-native *,
+.openide-chat-native *::before,
+.openide-chat-native *::after { box-sizing: border-box; }
+
+/* The list gives the row its width; anything inside has to be allowed to shrink below its
+   intrinsic content width or a long token pushes the whole row wider than the viewport. */
+.openide-chat-row,
+.openide-chat-row * { min-width: 0; max-width: 100%; }
+
+/* .monaco-list-row is `white-space: nowrap` (list.css:36): a list row is one line by definition.
+   A transcript is the opposite — it is prose that must wrap — and the rule is inherited all the
+   way down, so paragraphs and list items painted past the right edge and got clipped mid-word.
+   Reset it on our rows and everything under them. */
+.openide-chat-list .monaco-list-row,
+.openide-chat-row,
+.openide-chat-row * { white-space: normal; }
+/* Except where the whitespace is the content: the user's own text keeps its line breaks, and a
+   fence keeps its columns — the webview lets a long code line scroll (`pre`), never wrap, so a
+   diff or a table drawn in ASCII stays readable. */
+.openide-chat-request-text { white-space: pre-wrap; }
+.openide-chat-row pre,
+.openide-chat-row pre * { white-space: pre; }
+
+/* Padding, never margin: collapsing margins are invisible to the list's height measurement and
+   the row ends up clipped by exactly the collapsed amount.
+
+   The 6px/10px are the webview's `#messages { gap: 12px; padding: 10px 10px 40px }`: a virtualized
+   list cannot use `gap`, so half of the 12px sits on each row's top and bottom. */
+.openide-chat-row {
+	/* 18px on the right, not the webview's 10px: the list's scrollbar is an overlay drawn over the
+	   content edge, and a full-width bubble used to sit flush against it. */
+	padding: 6px 18px 6px 10px;
+	/* `openide.chat.fontSize` — the widget stamps the variable on `.openide-chat-native`. */
+	font-size: var(--openide-chat-font-size, 13px);
+	word-break: break-word;
+	overflow-wrap: anywhere;
+}
+
+/* ---- `openide.chat.density: compact` --------------------------------------------------------
+   Roughly 70% of the comfortable air: rows lose their outer cushion, responses their side gutter.
+   Only spacing changes — type sizes stay, so compact is denser, never smaller. */
+.openide-chat-native.density-compact .openide-chat-row {
+	padding: 3px 14px 3px 8px;
+}
+.openide-chat-native.density-compact .openide-chat-row-response {
+	padding: 5px 18px;
+}
+.openide-chat-native.density-compact .openide-chat-response-parts {
+	gap: 4px;
+}
+
+/* ---- Response row: the webview's `.turn-body` ---- */
+
+/* 16px of gutter per side against the user's full-width bubble (`.turn-body { width: calc(100% -
+   32px) }`), plus the 2px of `.turn-body > .msg.assistant`. Flat: no border, no background. */
+.openide-chat-row-response {
+	padding: 8px 26px;
+	line-height: 1.6;
+}
+
+.openide-chat-response-parts {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+}
+
+/* The turn's closing line: cancelled, or the reason it failed. Mapped onto the webview's flat rows
+   instead of a size of its own — `.flatrow.info` for a cancellation (muted, 12.5px, `padding: 3px
+   0`), `.flatrow.err` for a failure (the tinted card, `margin: 6px 0` from `.turn-body >
+   .flatrow.err`). */
+.openide-chat-response-footer {
+	padding: 3px 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12.5px;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+
+.openide-chat-response-footer.openide-chat-response-error {
+	margin: 6px 0;
+	padding: 9px 11px;
+	border: 1px solid color-mix(in srgb, var(--vscode-errorForeground) 28%, transparent);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--vscode-errorForeground) 6%, transparent);
+	color: var(--vscode-errorForeground);
+	white-space: pre-wrap;
+}
+
+/* ---- Generic progress line (every event without a part yet) ---- */
+
+/* The webview's `.gen-row`: the flat line it puts between turns of the model. */
+.openide-chat-progress {
+	display: flex;
+	align-items: center;
+	padding: 2px 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12.5px;
+	white-space: pre-wrap;
+}
+
+/* The shimmer recipe itself lives once, in openideChatActivity.css (`.openide-chat-shimmer`).
+   There used to be a byte-identical copy here under `.openide-chat-progress-active`, applied to
+   the flex ROW — where `background-clip: text` has no text of its own to clip against, so it never
+   swept. The row now carries an inner label and reuses the shared class. */
+.openide-chat-progress-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+@keyframes openide-chat-shimmer-sweep {
+	0% { background-position: 120% 0; }
+	100% { background-position: -120% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-shimmer { animation: none; }
+}
+
+/* ---- Notice strip ----
+   A native-only affordance: the webview answers approvals inline, so it has nowhere to say "this
+   engine cannot answer that". Rather than invent a look for it, it borrows the webview's own
+   `.flatrow` family (openideChatHtml.ts:514-539) — muted for info, the amber card for a warning,
+   the red card for an error — so nothing new enters the visual language. */
+.openide-chat-notice {
+	flex: 0 0 auto;
+	margin: 6px 10px;
+	padding: 3px 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12.5px;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+
+.openide-chat-notice.openide-chat-notice-warning {
+	padding: 9px 11px;
+	border: 1px solid color-mix(in srgb, var(--vscode-editorWarning-foreground, #d7ba7d) 30%, transparent);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #d7ba7d) 6%, transparent);
+	color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #d7ba7d));
+}
+
+.openide-chat-notice.openide-chat-notice-error {
+	padding: 9px 11px;
+	border: 1px solid color-mix(in srgb, var(--vscode-errorForeground) 28%, transparent);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--vscode-errorForeground) 6%, transparent);
+	color: var(--vscode-errorForeground);
+}
+
+/* ---- Composer ----
+   Lives in chat/media/openideChatComposer.css: the dock, the input card and the control row are
+   transcribed value by value from the webview, and keeping them here would have mixed that
+   transcription with the transcript's own rules. */
+
+/* "Still working" line under the reply's last part: Cursor's thinking shimmer, the webview's
+   "Planning next moves". The shimmer itself comes from .openide-chat-shimmer (activity css). */
+.openide-chat-response-working {
+	/* upstream .progress-container: text only, no glyph, 2px top padding, shimmer on the text */
+	display: flex;
+	align-items: center;
+	min-height: 22px;
+	padding: 2px 0 0;
+	font-size: 12.5px;
+	color: var(--vscode-descriptionForeground);
+}
+.openide-chat-response-working.hidden { display: none; }
+/* The shimmering text lives in here and not on the row above: the row is a flex container, and
+   `background-clip: text` has no text of its own to clip against on one. Same shape as the tool
+   activity verb, which is also an inner span inside its flex row. */
+.openide-chat-response-working-label {
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+/* ---- Workbench-style scrollbars ------------------------------------------------------------
+   Every overflow surface inside the chat (fences, tables, the diagram scroll area) was showing
+   Electron's NATIVE scrollbar — rounded thumb, stepper arrows — which no other workbench surface
+   has. Same treatment as the editor's webviews: 10px, no buttons, transparent track, slider
+   painted with the workbench's own scrollbarSlider tokens. `scrollbar-width` covers the
+   non-webkit fallback. */
+.openide-chat-native *::-webkit-scrollbar,
+.openide-diagram *::-webkit-scrollbar,
+.openide-diagram-scroll::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+.openide-chat-native *::-webkit-scrollbar-track,
+.openide-diagram *::-webkit-scrollbar-track,
+.openide-diagram-scroll::-webkit-scrollbar-track {
+	background: transparent;
+}
+.openide-chat-native *::-webkit-scrollbar-thumb,
+.openide-diagram *::-webkit-scrollbar-thumb,
+.openide-diagram-scroll::-webkit-scrollbar-thumb {
+	background: var(--vscode-scrollbarSlider-background);
+}
+.openide-chat-native *::-webkit-scrollbar-thumb:hover,
+.openide-diagram *::-webkit-scrollbar-thumb:hover,
+.openide-diagram-scroll::-webkit-scrollbar-thumb:hover {
+	background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+.openide-chat-native *::-webkit-scrollbar-thumb:active,
+.openide-diagram *::-webkit-scrollbar-thumb:active,
+.openide-diagram-scroll::-webkit-scrollbar-thumb:active {
+	background: var(--vscode-scrollbarSlider-activeBackground);
+}
+.openide-chat-native *::-webkit-scrollbar-button,
+.openide-diagram *::-webkit-scrollbar-button,
+.openide-diagram-scroll::-webkit-scrollbar-button {
+	display: none;
+}
+.openide-chat-native *::-webkit-scrollbar-corner,
+.openide-diagram *::-webkit-scrollbar-corner,
+.openide-diagram-scroll::-webkit-scrollbar-corner {
+	background: transparent;
+}
+
+
+/* ======================================================================================
+   Flat parts — upstream's language for widgets inside the transcript
+   (chatConfirmationWidget.css, chat-todo-list-widget, chat-terminal-content-part,
+   chatQuestionCarousel, .chat-notification-widget): the widget sits on the transcript's own
+   background, its only container is a hairline `chat.requestBorder` with `cornerRadius-medium`,
+   its title is 12px muted text, and secondary buttons align right in a `.chat-buttons-container`.
+   Written here, after every part stylesheet, with the root class for specificity so the values
+   in the per-part files (raised backgrounds, 8-12px radii, tinted heads) stop applying. */
+.openide-chat-native .openide-chat-ask,
+.openide-chat-native .openide-chat-approval,
+.openide-chat-native .openide-chat-todos-card,
+.openide-chat-native .openide-chat-term-card,
+.openide-chat-native .openide-chat-terms-tray,
+.openide-chat-native .openide-chat-suggest-card,
+.openide-chat-native .openide-chat-notice-row,
+.openide-chat-native .openide-chat-compaction-card,
+.openide-chat-native .openide-chat-delegation,
+.openide-chat-native .openide-chat-sub-card,
+.openide-chat-native .openide-chat-canvas-card,
+.openide-chat-native .openide-chat-shot-card,
+.openide-chat-native .openide-chat-plan-card,
+.openide-chat-native .openide-chat-plan-tasks {
+	background: transparent;
+	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-chat-requestBorder, rgba(128, 128, 128, 0.28));
+	border-radius: var(--vscode-cornerRadius-medium, 6px);
+	box-shadow: none;
+}
+/* Notices and compactions are lines, not boxes (upstream .chat-notification-widget is text + icon). */
+.openide-chat-native .openide-chat-notice-row,
+.openide-chat-native .openide-chat-compaction-card,
+.openide-chat-native .openide-chat-delegation {
+	border: 0;
+	padding-left: 0;
+	padding-right: 0;
+}
+/* Heads: no tinted band, 12px muted title. */
+.openide-chat-native .openide-chat-sub-head,
+.openide-chat-native .openide-chat-approval-body,
+.openide-chat-native .openide-chat-sub-body,
+.openide-chat-native .openide-chat-approval-kind,
+.openide-chat-native .openide-chat-compaction-kind,
+.openide-chat-native .openide-chat-approval-cmd,
+.openide-chat-native .openide-chat-ask-free,
+.openide-chat-native .openide-chat-shot-body {
+	background: transparent;
+}
+.openide-chat-native .openide-chat-approval-body { border-top: var(--vscode-strokeThickness, 1px) solid var(--vscode-chat-requestBorder, rgba(128, 128, 128, 0.2)); }
+.openide-chat-native .openide-chat-approval-cmd,
+.openide-chat-native .openide-chat-ask-free,
+.openide-chat-native .openide-chat-ask-option {
+	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-chat-requestBorder, rgba(128, 128, 128, 0.22));
+	border-radius: var(--vscode-cornerRadius-small, 4px);
+}
+.openide-chat-native .openide-chat-ask-head,
+.openide-chat-native .openide-chat-approval-title,
+.openide-chat-native .openide-chat-tt-title,
+.openide-chat-native .openide-chat-term-title,
+.openide-chat-native .openide-chat-suggest-title,
+.openide-chat-native .openide-chat-canvas-title,
+.openide-chat-native .openide-chat-plan-title,
+.openide-chat-native .openide-chat-sub-title,
+.openide-chat-native .openide-chat-compaction-title,
+.openide-chat-native .openide-chat-delegation-title {
+	font-size: 12px;
+	font-weight: 500;
+	text-transform: none;
+	letter-spacing: 0;
+	color: var(--vscode-descriptionForeground);
+}
+/* Buttons: the workbench's secondary button, right-aligned (upstream .chat-buttons-container). */
+.openide-chat-native .openide-chat-approval-actions,
+.openide-chat-native .openide-chat-suggest-actions,
+.openide-chat-native .openide-chat-plan-actions,
+.openide-chat-native .openide-chat-canvas-head,
+.openide-chat-native .openide-chat-decision-line {
+	justify-content: flex-end;
+}
+.openide-chat-native .openide-chat-abtn,
+.openide-chat-native .openide-chat-suggest-dismiss,
+.openide-chat-native .openide-chat-notice-action,
+.openide-chat-native .openide-chat-plan-reject,
+.openide-chat-native .openide-chat-sub-action,
+.openide-chat-native .openide-chat-terms-stop,
+.openide-chat-native .openide-chat-plan-icobtn {
+	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-button-border, transparent);
+	border-radius: var(--vscode-cornerRadius-small, 4px);
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	padding: 2px 10px;
+	font-size: 12px;
+	line-height: 18px;
+}
+.openide-chat-native .openide-chat-abtn:hover,
+.openide-chat-native .openide-chat-suggest-dismiss:hover,
+.openide-chat-native .openide-chat-notice-action:hover,
+.openide-chat-native .openide-chat-plan-reject:hover,
+.openide-chat-native .openide-chat-sub-action:hover,
+.openide-chat-native .openide-chat-terms-stop:hover,
+.openide-chat-native .openide-chat-plan-icobtn:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+	color: var(--vscode-button-secondaryForeground);
+}
+.openide-chat-native .openide-chat-suggest-accept,
+.openide-chat-native .openide-chat-canvas-open,
+.openide-chat-native .openide-chat-plan-build {
+	border-radius: var(--vscode-cornerRadius-small, 4px);
+	padding: 2px 10px;
+	font-size: 12px;
+	line-height: 18px;
+}

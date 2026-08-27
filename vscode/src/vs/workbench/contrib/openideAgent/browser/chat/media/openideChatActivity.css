@@ -1,0 +1,435 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat: thinking card, tool rows and the collapsible "Exploring" block.
+ *
+ *  SOURCE OF TRUTH: browser/openideChatHtml.ts. Every value below is transcribed from that file's
+ *  <style>, with the rule it maps to named in the comment. Nothing here is designed: the webview
+ *  already decided what this family looks like, and the native transcript has to be the same
+ *  surface rather than a second interpretation of it.
+ *
+ *  ONE DELIBERATE DEVIATION, marked in place: the webview hides `.part-icon` on every tool row
+ *  (openideChatHtml.ts:306), which is why a tool call reads as a bare verb with a bullet. The icon
+ *  is shown here. That was the reported defect, and the catalog has always carried the codicon.
+ *--------------------------------------------------------------------------------------------*/
+
+/* openideChatHtml.ts:265-272 (`.shimmer`). A gradient swept across the TEXT itself via
+   `background-clip: text` — not an opacity pulse of the row. The distinction is the whole effect:
+   a pulsing row reads as something blinking in alarm, a swept label reads as one that is alive.
+   The `openide-chat-shimmer-sweep` keyframe is declared once in openideChatNative.css. */
+.openide-chat-shimmer {
+	/* upstream chat.css `.progress-step` shimmer: 0/30/50/70/100 stops, chat.thinkingShimmer at 50%, 400% width, 2s */
+	background: linear-gradient(90deg,
+		var(--vscode-descriptionForeground) 0%,
+		var(--vscode-descriptionForeground) 30%,
+		var(--vscode-chat-thinkingShimmer, var(--vscode-foreground)) 50%,
+		var(--vscode-descriptionForeground) 70%,
+		var(--vscode-descriptionForeground) 100%);
+	background-size: 400% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+	color: transparent;
+	animation: openide-chat-shimmer-sweep 2s linear infinite;
+	will-change: background-position;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-shimmer { animation: none; }
+}
+
+/* ====================== reasoning / thinking =============================
+   openideChatHtml.ts:241-251. Flat and integrated: no card, no border, no background. */
+
+.openide-chat-reasoning {
+	display: flex;
+	flex-direction: column;
+}
+
+.openide-chat-reasoning-summary {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	cursor: pointer;
+	font-size: 12.5px;
+	color: var(--vscode-descriptionForeground);
+	list-style: none;
+	padding: 2px 0;
+}
+
+.openide-chat-reasoning-summary:hover {
+	color: var(--vscode-foreground);
+}
+
+/* The default disclosure triangle is replaced by a codicon that rotates, so it has to go. */
+.openide-chat-reasoning-summary::-webkit-details-marker {
+	display: none;
+}
+
+.openide-chat-reasoning-chevron {
+	font-size: 12px;
+	transition: transform 120ms ease;
+}
+
+.openide-chat-reasoning[open] .openide-chat-reasoning-chevron {
+	transform: rotate(90deg);
+}
+
+/* Its own scroll box, and that is load-bearing: the list runs with `horizontalScrolling: false`,
+   so a single unbroken line of reasoning that escaped this element would widen every row in the
+   transcript. `overflow-y: auto` alone already forces `overflow-x` to compute to `auto`. */
+.openide-chat-think {
+	margin: 2px 0 6px;
+	padding: 0;
+	border: none;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	line-height: 1.55;
+	max-height: 320px;
+	overflow-y: auto;
+}
+
+/* Collapsed it keeps a faded two-line peek instead of disappearing: the card then reads as folded
+   rather than as gone, which is what stops users from re-opening it to check it is still there. */
+.openide-chat-reasoning:not([open]) .openide-chat-think {
+	display: block;
+	max-height: 66px;
+	overflow: hidden;
+	opacity: 0.5;
+	pointer-events: none;
+	-webkit-mask-image: linear-gradient(#000 25%, transparent);
+	mask-image: linear-gradient(#000 25%, transparent);
+}
+
+/* ====================== "Exploring" group =================================
+   openideChatHtml.ts:253-259 (`.activity-group`). */
+
+.openide-chat-activity-group {
+	margin: 1px 0;
+	min-width: 0;
+}
+
+.openide-chat-activity-summary {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	list-style: none;
+	cursor: pointer;
+	min-height: 22px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12.5px;
+}
+
+.openide-chat-activity-summary::-webkit-details-marker {
+	display: none;
+}
+
+.openide-chat-activity-chevron {
+	font-size: 12px;
+	transition: transform 120ms ease;
+}
+
+.openide-chat-activity-group[open] .openide-chat-activity-chevron {
+	transform: rotate(90deg);
+}
+
+.openide-chat-activity-body {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding-left: 18px;
+	min-width: 0;
+}
+
+.openide-chat-activity-group:not([open]) > .openide-chat-activity-body {
+	display: flex;
+	max-height: 68px;
+	overflow: hidden;
+	opacity: 0.48;
+	pointer-events: none;
+	-webkit-mask-image: linear-gradient(#000 20%, transparent);
+	mask-image: linear-gradient(#000 20%, transparent);
+}
+
+/* ====================== tool rows =========================================
+   openideChatHtml.ts:301-336. */
+
+.openide-chat-part {
+	min-width: 0;
+}
+
+/* The generic tool row borrows the Thinking grammar wholesale: no card, no badge, no arguments. */
+.openide-chat-tool-activity {
+	margin: 2px 0;
+	color: var(--vscode-descriptionForeground);
+}
+
+.openide-chat-tool-activity .openide-chat-part-head {
+	min-height: 22px;
+	padding: 1px 0;
+	cursor: default;
+	gap: 6px;
+}
+
+/* openideChatHtml.ts:306 hides `.part-icon` here too. THE DEVIATION: the icon stays. Everything
+   else on that line keeps hiding — the chevron and the raw arguments are still noise on a row
+   whose job is to say, in one sentence, what the agent is doing. */
+.openide-chat-tool-activity .openide-chat-part-chevron,
+.openide-chat-tool-activity .openide-chat-part-detail,
+.openide-chat-tool-activity .openide-chat-part-cmd {
+	display: none !important;
+}
+
+/* `min-width: 0` and the ellipsis are additions the webview does not need and this list does: a
+   flex item defaults to `min-width: auto`, so an unknown MCP tool — whose raw name IS the verb —
+   would set the row's min-content width, and with `horizontalScrolling: false` that widens every
+   row in the transcript rather than clipping this one. */
+.openide-chat-tool-activity .openide-chat-part-verb {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 12.5px;
+}
+
+.openide-chat-tool-activity.openide-chat-part-error .openide-chat-part-verb {
+	color: var(--vscode-errorForeground);
+}
+
+/* A cancelled call is not a failure: muted, never red. */
+.openide-chat-tool-activity.openide-chat-part-cancelled .openide-chat-part-verb {
+	opacity: 0.7;
+}
+
+.openide-chat-tool-activity .openide-chat-part-body {
+	margin-left: 0;
+	padding-left: 0;
+}
+
+.openide-chat-part-head {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	min-height: 20px;
+	padding: 1px 0;
+	cursor: pointer;
+	background: transparent;
+	border: none;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12.5px;
+	/* A native <button> does not inherit the workbench font the way the webview's did; without this
+	   the row silently falls back to the platform's UI font and stops matching the prose above it. */
+	font-family: inherit;
+	width: 100%;
+	text-align: left;
+	transition: color 120ms ease;
+}
+
+.openide-chat-part-head:hover,
+.openide-chat-part-head:hover .openide-chat-part-verb {
+	color: var(--vscode-foreground);
+}
+
+/* Explore rows: flat, single line, no chevron — "Read openideChatView.ts L1-240". */
+.openide-chat-part-explore .openide-chat-part-head {
+	cursor: default;
+	flex-wrap: nowrap;
+	overflow: hidden;
+}
+
+/* The webview adds `.fade-overflow` from JS after measuring `scrollWidth > clientWidth`. Porting
+   that measurement would mean a ResizeObserver per row; an ellipsis costs nothing and never lies
+   about a line that actually fits. */
+.openide-chat-part-explore .openide-chat-part-verb {
+	display: block;
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.openide-chat-part-spacer {
+	flex: 1 1 0;
+	min-width: 0;
+}
+
+.openide-chat-part-icon {
+	display: inline-flex;
+	align-items: center;
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+}
+
+.openide-chat-part-icon .codicon {
+	font-size: 13px;
+}
+
+.openide-chat-part-verb {
+	flex: 0 0 auto;
+	color: var(--vscode-foreground);
+}
+
+/* Only the shimmering (live) verb gets the full-strength foreground; a settled one recedes. */
+.openide-chat-part-verb:not(.openide-chat-shimmer) {
+	color: var(--vscode-descriptionForeground);
+}
+
+.openide-chat-part-detail {
+	color: var(--vscode-descriptionForeground);
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 12px;
+}
+
+.openide-chat-part-detail.openide-chat-part-cmd {
+	flex: 1;
+	font-size: 11.5px;
+}
+
+.openide-chat-part-chevron {
+	color: var(--vscode-descriptionForeground);
+	flex: 0 0 auto;
+	display: inline-flex;
+}
+
+.openide-chat-part-chevron .codicon {
+	font-size: 12px;
+}
+
+/* Expanded output: flat, indented under the verb, no box of its own. */
+.openide-chat-part-body {
+	margin: 1px 0 6px;
+	border: none;
+	border-radius: 0;
+	padding: 0 0 0 19px;
+	display: none;
+}
+
+.openide-chat-part-open .openide-chat-part-body {
+	display: block;
+}
+
+.openide-chat-part-label2 {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	margin-top: 6px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	opacity: 0.8;
+}
+
+/* Second scroll container that the list depends on: tool output is arbitrary text, and one long
+   line of it would otherwise set the width of the whole transcript. */
+.openide-chat-part-pre {
+	margin: 3px 0 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 260px;
+	overflow: auto;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11.5px;
+	line-height: 1.5;
+	color: var(--vscode-descriptionForeground);
+}
+
+
+/* ====================== progress timeline (upstream chatThinkingContent.css `.chat-used-context-list
+   .chat-thinking-collapsible` + chat.css `.chat-used-context`) ================================
+   The steps of a turn hang off ONE continuous 1px `chat.requestBorder` line that runs down the
+   icon column of their container; each icon sits on top of it and cuts it with the transcript's
+   own background. No per-row segments: upstream draws the line once on the list and lets the
+   glyphs interrupt it. Values: `margin-left: 5px`, line at `left: 3px`, rows `padding: 4px 12px
+   4px 18px`, icon column 16px. */
+.openide-chat-tool-activity,
+.openide-chat-activity-group {
+	--openide-chat-gutter: 16px;
+}
+
+.openide-chat-part-icon {
+	width: var(--openide-chat-gutter);
+	justify-content: center;
+	/* the glyph interrupts the thread: same background as the transcript */
+	background: var(--vscode-openide-islandBackground, var(--vscode-editor-background));
+	z-index: 1;
+}
+
+.openide-chat-part-head { gap: 6px; }
+
+/* The explore group's body is the list: the line lives on it. */
+.openide-chat-activity-body {
+	position: relative;
+	padding-left: 0;
+	gap: 0;
+	margin-left: 0;
+}
+.openide-chat-activity-body::before {
+	content: '';
+	position: absolute;
+	left: calc(var(--openide-chat-gutter) / 2);
+	top: 0;
+	bottom: 0;
+	border-left: 1px solid var(--vscode-chat-requestBorder, color-mix(in srgb, var(--vscode-descriptionForeground) 38%, transparent));
+	pointer-events: none;
+}
+/* Consecutive standalone tool rows share a thread too: each row draws the full-height line and the
+   icon cuts it, so adjacent rows join without a gap; the first and last rows trim to their glyph. */
+.openide-chat-tool-activity { position: relative; }
+.openide-chat-tool-activity + .openide-chat-tool-activity::before,
+.openide-chat-tool-activity:has(+ .openide-chat-tool-activity)::before {
+	content: '';
+	position: absolute;
+	left: calc(var(--openide-chat-gutter) / 2);
+	top: 0;
+	bottom: 0;
+	border-left: 1px solid var(--vscode-chat-requestBorder, color-mix(in srgb, var(--vscode-descriptionForeground) 38%, transparent));
+	pointer-events: none;
+}
+.openide-chat-tool-activity:not(.openide-chat-tool-activity + .openide-chat-tool-activity)::before { top: 50%; }
+.openide-chat-tool-activity:not(:has(+ .openide-chat-tool-activity))::before { bottom: 50%; }
+.openide-chat-activity-body > .openide-chat-tool-activity::before { display: none; }
+.openide-chat-activity-body > .openide-chat-tool-activity:first-child { margin-top: 0; }
+
+/* The explore group's summary sits on the same column: the chevron takes the icon slot. */
+.openide-chat-activity-summary { gap: 6px; }
+.openide-chat-activity-summary .openide-chat-activity-chevron {
+	order: -1;
+	width: var(--openide-chat-gutter);
+	text-align: center;
+}
+
+/* File chip inside a step (chatInlineAnchorWidget): the icon theme paints the glyph on `::before`
+   of the `.file-icon` span (needs the `.show-file-icons` ancestor the transcript root has). */
+.openide-chat-activity-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	max-width: 100%;
+	vertical-align: middle;
+	padding: 0 5px 0 3px;
+	border: 1px solid var(--vscode-chat-requestBorder, rgba(128, 128, 128, 0.28));
+	border-radius: var(--vscode-cornerRadius-small, 4px);
+	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+	color: var(--vscode-foreground);
+	font-size: 12px;
+	line-height: 17px;
+	white-space: nowrap;
+}
+.openide-chat-activity-chip-icon { flex: 0 0 auto; display: inline-block; width: 14px; height: 14px; }
+.openide-chat-activity-chip-icon::before {
+	background-size: 14px;
+	background-position: left center;
+	background-repeat: no-repeat;
+	width: 14px;
+	height: 14px;
+	font-size: 14px;
+	line-height: 14px;
+	display: inline-block;
+}
+.openide-chat-activity-chip-name { overflow: hidden; text-overflow: ellipsis; }
+.openide-chat-part-verb .openide-chat-activity-chip { vertical-align: -3px; }
