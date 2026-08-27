@@ -14,7 +14,11 @@ This guide will help you get started with OpenIDE.
 
 ## <a id="installation"></a>Installation
 
-OpenIDE can be installed on Windows, macOS, and Linux. Visit the [download page](https://github.com/Niiihuel/openide#install) for installation instructions.
+OpenIDE ships builds for Windows and Linux. Visit the [download page](https://github.com/Niiihuel/openide#install) for installation instructions.
+
+macOS is not published yet: the code builds and runs there, but a signed and notarized release
+needs an Apple Developer ID, so there is no macOS download until that is in place. Building it
+yourself from source works — see [BUILD.md](../BUILD.md).
 
 ## <a id="first-steps"></a>First Steps
 

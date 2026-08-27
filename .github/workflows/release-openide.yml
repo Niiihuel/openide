@@ -21,10 +21,20 @@ jobs:
         include:
           - { os: ubuntu-22.04, platform: linux, arch: x64, target: appimage }
           - { os: ubuntu-24.04-arm, platform: linux, arch: arm64, target: appimage }
-          - { os: macos-14, platform: darwin, arch: arm64, target: archive }
-          - { os: macos-13, platform: darwin, arch: x64, target: archive }
           - { os: windows-2022, platform: win32, arch: x64, target: user }
           - { os: windows-11-arm, platform: win32, arch: arm64, target: user }
+          # macOS is commented out, not deleted: `dev/sign-macos.sh` works, but signing needs the
+          # Developer ID identity inside a keychain and a notarytool profile, and NOTHING here
+          # provisions either — the script assumes a Mac already configured by hand. Since `publish`
+          # needs every matrix job, leaving these in would fail the two mac jobs and block the
+          # Linux and Windows releases that did build.
+          #
+          # To turn macOS back on: uncomment these two rows, add the provisioning step before
+          # "Native sign and notarize" (import the .p12 with `security import`, then
+          # `xcrun notarytool store-credentials`), and raise the platform counts flagged with
+          # PLATFORM COUNT below and in promote-openide.yml.
+          # - { os: macos-14, platform: darwin, arch: arm64, target: archive }
+          # - { os: macos-13, platform: darwin, arch: x64, target: archive }
     runs-on: ${{ matrix.os }}
     env:
       APP_NAME: OpenIDE
@@ -143,8 +153,9 @@ jobs:
           # update feed points nowhere, and only a user whose IDE refuses to update would find out.
           mkdir -p feed-inputs
           jq -s '.' release-assets/manifest-input-*.json >feed-inputs/manifest-inputs.json
-          [[ $(jq 'length' feed-inputs/manifest-inputs.json) -eq 6 ]] || {
-            echo "Expected 6 platform mappings, got $(jq 'length' feed-inputs/manifest-inputs.json)." >&2
+          # PLATFORM COUNT: one per row of the build matrix above.
+          [[ $(jq 'length' feed-inputs/manifest-inputs.json) -eq 4 ]] || {
+            echo "Expected 4 platform mappings, got $(jq 'length' feed-inputs/manifest-inputs.json)." >&2
             jq -r '.[].asset' feed-inputs/manifest-inputs.json >&2; exit 1
           }
           rm -f release-assets/manifest-input-*.json
