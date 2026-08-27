@@ -19,17 +19,22 @@ import * as path from 'path';
  * went back to "Build" instantly and `finishPlanBuild` ended up a no-op (the plan never
  * llegaba a `status: completado`).
  *
- * OpenideChatView drags in half the workbench through its imports, so this is verified against
- * the source. It is exactly the same approach as openideSettingsContract: it does not test
- * runtime behaviour, it tests that the shape that broke it cannot come back without someone
- * lo note.
+ * The native migration moved the run lifecycle out of `OpenideChatView` and into
+ * `OpenideChatController`, and with it the shape of the fix: there is no `cancelCurrentRun` nor a
+ * `keepPlanBuild` flag any more. What replaced them is stronger — a build cannot start while
+ * another run is live, and settling reports to the SERVICE exactly once — so the assertions below
+ * pin THAT, which is the property the bug actually violated.
+ *
+ * The controller drags in half the workbench through its imports, so this is verified against the
+ * source. Same approach as openideSettingsContract: it does not test runtime behaviour, it tests
+ * that the shape that broke it cannot come back without someone noticing.
  */
 suite('OpenIDE plan build contract', () => {
 
 	// A static contract over the REPO: it runs from `out/` (ESM, no `__dirname`) but reads `.ts`
 	// sources, so it has to map back to `src/`. Same idiom as `openideSettingsContract.test.ts`.
 	const sourceDir = import.meta.dirname.replace(`${path.sep}out${path.sep}`, `${path.sep}src${path.sep}`);
-	const chatView = fs.readFileSync(path.join(sourceDir, '..', '..', 'browser', 'openideChatView.ts'), 'utf8');
+	const controller = fs.readFileSync(path.join(sourceDir, '..', '..', 'browser', 'chat', 'openideChatController.ts'), 'utf8');
 	const agentService = fs.readFileSync(path.join(sourceDir, '..', '..', 'browser', 'openideAgentService.ts'), 'utf8');
 
 	test('el turno TERMINA al guardar el plan: la decisión es del usuario', () => {
@@ -44,27 +49,32 @@ suite('OpenIDE plan build contract', () => {
 		assert.strictEqual(block.includes("!out.startsWith('Error')"), true, 'un plan_save fallido no puede cerrar el turno');
 	});
 
-	test('cancelCurrentRun sólo aborta el Build cuando no le piden conservarlo', () => {
-		const body = chatView.slice(chatView.indexOf('private cancelCurrentRun('), chatView.indexOf('private finishRun('));
-		assert.strictEqual(body.includes('keepPlanBuild'), true, 'cancelCurrentRun debe aceptar conservar el Build en vuelo');
-		assert.strictEqual(/if \(this\._planBuild && !options\?\.keepPlanBuild\)/.test(body), true, 'failPlanBuild tiene que quedar detrás de la guarda');
+	test('un Build no puede arrancar encima de un run vivo', () => {
+		// This is what makes the old bug structurally impossible: back then a launch cancelled the
+		// previous run and that cancellation cleared the service's build state. Now a build simply
+		// cannot begin while something else is running, so there is no cancellation to survive.
+		const body = controller.slice(controller.indexOf('private buildPlan('), controller.indexOf('private settlePlanBuild('));
+		assert.strictEqual(body.length > 0, true, 'no se encontró buildPlan en el controller');
+		assert.strictEqual(/if \(this\._busy \|\| this\._planBuild \|\| this\._barrier\.isActive\)/.test(body), true,
+			'buildPlan tiene que rechazar arrancar sobre un run vivo');
+		// And refusing has to TELL the editor, or its Build button spins forever.
+		assert.strictEqual(body.includes('this.agentService.failPlanBuild('), true,
+			'rechazar sin avisarle al editor deja el botón Build girando para siempre');
 	});
 
-	test('el save/restore de _planBuild alrededor de la cancelación no vuelve', () => {
-		// The exact signature of the fix that fixed nothing.
-		assert.strictEqual(/this\.cancelCurrentRun\(\);\s*\n\s*if \(planBuild\) \{ this\._planBuild = planBuild; \}/.test(chatView), false,
-			'restaurar el campo local no recupera el estado del servicio: pasar keepPlanBuild');
+	test('el estado del Build se resuelve en el SERVICIO, y una sola vez', () => {
+		// The heart of the original bug: restoring a local field does not recover the service's
+		// state. Settling has to go through the service, and it has to be idempotent — `launchRun`
+		// settles on both edges (the promise and the failure handler) and only the first may
+		// resolve the editor's pending Build.
+		const body = controller.slice(controller.indexOf('private settlePlanBuild('));
+		const block = body.slice(0, 520);
+		assert.strictEqual(/this\._planBuild = undefined;/.test(block), true, 'tiene que limpiar el estado antes de reportar');
+		assert.strictEqual(block.includes('this.agentService.failPlanBuild('), true, 'el fallo se reporta al servicio');
+		assert.strictEqual(block.includes('this.agentService.finishPlanBuild('), true, 'el éxito se reporta al servicio');
+		// Clearing BEFORE reporting is what makes a second call a no-op.
+		assert.strictEqual(block.indexOf('this._planBuild = undefined;') < block.indexOf('failPlanBuild('), true,
+			'si reporta antes de limpiar, dos llamadas resuelven el Build dos veces');
 	});
 
-	test('todo lanzamiento de run conserva el Build al cancelar el run anterior', () => {
-		const lines = chatView.split('\n');
-		const launches = lines.map((line, index) => ({ line, index })).filter(entry => entry.line.includes('this.agentService.runMessages('));
-		assert.strictEqual(launches.length >= 2, true, 'se esperaban los dos caminos de ejecución (handleSend y runExistingTurn)');
-		for (const launch of launches) {
-			const preceding = lines.slice(Math.max(0, launch.index - 14), launch.index).join('\n');
-			assert.strictEqual(preceding.includes('cancelCurrentRun('), true, `sin cancelación previa cerca de la línea ${launch.index + 1}`);
-			assert.strictEqual(/cancelCurrentRun\(\{ keepPlanBuild: true \}\)/.test(preceding), true,
-				`la cancelación previa a la línea ${launch.index + 1} mata el Build que se está lanzando`);
-		}
-	});
 });

@@ -61,6 +61,17 @@ jobs:
           out/vs/platform/openideAgentHost/test/common/openideAgentHost.test.js
           out/vs/workbench/contrib/openideAgent/test/common/*.test.js
 
+      # Los contratos estáticos sobre el repositorio: que cada setting declarado se lea, que el
+      # índice de búsqueda de Settings no apunte a superficies muertas, que lo que el layout
+      # reserva y lo que el CSS pinta midan lo mismo, y que un Build de plan no pueda arrancar
+      # sobre un run vivo. Se quedaron fuera del CI cuando se agregaron: los cuatro estaban rotos
+      # sin que nada lo dijera, y dos denunciaban problemas reales.
+      - name: Test OpenIDE repository contracts
+        working-directory: vscode
+        run: >-
+          ./node_modules/.bin/mocha --ui tdd --timeout 10000 --exit
+          out/vs/workbench/contrib/openideAgent/test/node/*.test.js
+
       - name: Install Chromium for browser tests
         working-directory: vscode
         run: npx playwright install --with-deps chromium

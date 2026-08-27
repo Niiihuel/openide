@@ -115,9 +115,14 @@ suite('OpenIDE agent common', () => {
 		assert.match(html, /\.oc-wireframe-line\b/);
 		assert.match(html, /\.oc-wireframe-text\b/);
 		assert.match(html, /\.oc-choice\b/);
-		assert.match(html, /Wireframe:Wireframe/);
-		assert.match(html, /Choice:Choice/);
-		assert.match(html, /type:'canvasChoice'/);
+		// The global API is checked by NAME, not by the `Key:Value` shape the source had: the
+		// transpiler collapses it to the shorthand (`{ Wireframe }`) and rewrites the quotes, so
+		// pinning the formatting was pinning a build detail. What matters is that the primitive is
+		// published on the global object the user's canvas consumes.
+		const globals = /OpenideCanvas\s*=\s*\{([\s\S]*?)\}/.exec(html)?.[1] ?? '';
+		assert.match(globals, /\bWireframe\b/);
+		assert.match(globals, /\bChoice\b/);
+		assert.match(html, /type:\s*['"]canvasChoice['"]/);
 		// neutral palette: stroke variables derive from foreground, not from textLink (neon/purple)
 		assert.doesNotMatch(html, /stroke:\s*theme\.accent\.primary/);
 		// CSP endurecido: base-uri/form-action/frame-ancestors bloqueados

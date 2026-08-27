@@ -71,13 +71,18 @@ suite('OpenIDE breadcrumb height', () => {
 		}
 	});
 
-	test('los botones del plan caben con aire dentro de la fila', () => {
+	test('los controles del plan caben con aire dentro de la fila', () => {
 		// They have to FLOAT: if they measure the same as the row, the breadcrumb reads as a button bar.
-		const breadcrumbCss = fs.readFileSync(path.join(editorRoot, 'media', 'breadcrumbscontrol.css'), 'utf8');
-		const boton = /\.openide-plan-breadcrumb-actions button\s*\{[\s\S]*?height:\s*(\d+)px/.exec(breadcrumbCss);
-		assert.notStrictEqual(boton, null, 'no se encontró la altura de los botones del plan');
-		const aire = declaredHeight() - Number(boton![1]);
-		assert.strictEqual(aire >= 6, true, `sólo ${aire}px de aire total: los botones llenan la fila`);
+		//
+		// The rule lives in OpenIDE's own stylesheet, not in upstream's `breadcrumbscontrol.css` —
+		// which is where fork-owned styles belong — and the control is a chip now, not a bare
+		// `button`. Matching the class instead of the element is also what keeps this from breaking
+		// again the next time the markup changes.
+		const openideCss = fs.readFileSync(path.join(sourceDir, '..', '..', 'browser', 'media', 'openideChat.css'), 'utf8');
+		const chip = /\.openide-plan-breadcrumb-actions\s+\.openide-plan-model-chip\s*\{[\s\S]*?height:\s*(\d+)px/.exec(openideCss);
+		assert.notStrictEqual(chip, null, 'no se encontró la altura del chip del plan');
+		const aire = declaredHeight() - Number(chip![1]);
+		assert.strictEqual(aire >= 6, true, `sólo ${aire}px de aire total: los controles llenan la fila`);
 	});
 
 	test('the breadcrumb does not draw a rule against the editor', () => {
