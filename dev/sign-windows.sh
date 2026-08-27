@@ -5,8 +5,23 @@
 # deleted on the way out, including when signing fails — a private key left behind on a runner is
 # a private key in whatever that runner does next.
 set -euo pipefail
-: "${WINDOWS_SIGNING_CERT:?Missing WINDOWS_SIGNING_CERT}"
-: "${WINDOWS_SIGNING_PASSWORD:?Missing WINDOWS_SIGNING_PASSWORD}"
+
+# Signing is OPTIONAL, because an Authenticode certificate has to be bought from a CA and this
+# project does not have one yet. Without it the installer still works and still auto-updates — the
+# updater verifies the manifest's Ed25519 signature plus the artifact's size and SHA-256, never
+# Authenticode — but Windows SmartScreen warns the person downloading it.
+#
+# Absent certificate: skip, loudly. Certificate WITHOUT its password: fail. A half-configured
+# signing setup silently producing unsigned installers is the one outcome nobody would notice.
+if [[ -z "${WINDOWS_SIGNING_CERT:-}" ]]; then
+	if [[ -n "${WINDOWS_SIGNING_PASSWORD:-}" ]]; then
+		echo 'WINDOWS_SIGNING_PASSWORD is set but WINDOWS_SIGNING_CERT is not: signing is half configured.' >&2
+		exit 1
+	fi
+	echo 'No WINDOWS_SIGNING_CERT: shipping unsigned installers. SmartScreen will warn on download.'
+	exit 0
+fi
+: "${WINDOWS_SIGNING_PASSWORD:?WINDOWS_SIGNING_CERT is set, so WINDOWS_SIGNING_PASSWORD is required}"
 
 CERT="${RUNNER_TEMP:-/tmp}/openide-signing.pfx"
 trap 'rm -f "$CERT"' EXIT

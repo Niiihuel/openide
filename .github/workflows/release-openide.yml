@@ -76,10 +76,15 @@ jobs:
               [[ -n "${!name}" ]] || missing+=("$name")
             done
           fi
-          if [[ '${{ matrix.platform }}' == win32 ]]; then
-            for name in WINDOWS_SIGNING_CERT WINDOWS_SIGNING_PASSWORD; do
-              [[ -n "${!name}" ]] || missing+=("$name")
-            done
+          # Windows signing is optional: without a certificate the installer ships unsigned and the
+          # auto-update still works (the updater checks the manifest's Ed25519 signature and the
+          # artifact's SHA-256, not Authenticode). Only a HALF-configured setup is refused, because
+          # that one produces unsigned installers while looking configured.
+          if [[ '${{ matrix.platform }}' == win32 && -n "$WINDOWS_SIGNING_PASSWORD" && -z "$WINDOWS_SIGNING_CERT" ]]; then
+            missing+=(WINDOWS_SIGNING_CERT)
+          fi
+          if [[ '${{ matrix.platform }}' == win32 && -n "$WINDOWS_SIGNING_CERT" && -z "$WINDOWS_SIGNING_PASSWORD" ]]; then
+            missing+=(WINDOWS_SIGNING_PASSWORD)
           fi
           if [[ ${#missing[@]} -gt 0 ]]; then
             echo "Missing repository secrets for ${{ matrix.platform }}: ${missing[*]}" >&2
