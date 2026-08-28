@@ -63,6 +63,34 @@ if [[ -z "${APPIMAGE_RUN}" ]]; then
 	exit 1
 fi
 
+# `@vscodium/native-keymap` ships a `.node` that links against libxkbfile.so.1, and appimage-run's
+# FHS environment carries libX11 and libstdc++ but not that one. So the binding fails to load, the
+# module falls back to a Debug build that release AppImages do not contain, and the error you see
+# names the fallback rather than the cause:
+#
+#   Error: Cannot find module './build/Debug/keymapping'
+#
+# It is not cosmetic. native-keymap is what maps the physical keyboard layout, so without it
+# keybindings are resolved as if the layout were US -- wrong characters for shortcuts on any other
+# layout.
+#
+# /nix is bind-mounted inside the sandbox, so pointing at the store directly works and the library's
+# own RPATH resolves its libX11/libxcb from there too. Resolved at install time rather than
+# hard-coded, because the store path changes with every nixpkgs bump.
+#
+# The durable fix is to carry the library in appimage-run itself:
+#   appimage-run.override { extraPkgs = pkgs: [ pkgs.xorg.libxkbfile ]; }
+# That belongs in your NixOS configuration, so this only fills the gap for the wrapper it writes.
+EXTRA_LIB_PATH=""
+XKBFILE="$(ls -d /nix/store/*-libxkbfile-*/lib/libxkbfile.so.1 2>/dev/null | head -1)"
+if [[ -n "${XKBFILE}" ]]; then
+	EXTRA_LIB_PATH="$(dirname "${XKBFILE}")"
+	echo "native-keymap: using libxkbfile from ${EXTRA_LIB_PATH}"
+else
+	echo "Warning: no libxkbfile.so.1 in the nix store; keyboard layout detection will fall back to US." >&2
+	echo "         Install it with:  nix profile install nixpkgs#xorg.libxkbfile" >&2
+fi
+
 BIN_DIR="${HOME}/.local/bin"
 APPS_DIR="${HOME}/.local/share/applications"
 ICONS_DIR="${HOME}/.local/share/icons/hicolor"
@@ -96,6 +124,9 @@ if [ -f "\${MARKER}" ] && [ -f "\${PREVIOUS}" ] && [ ! -f "\${HEALTHY}" ]; then
 fi
 rm -f "\${HEALTHY}"
 export OPENIDE_APPIMAGE_PATH="\${APPIMAGE}"
+# See dev/install-appimage.sh: appimage-run's FHS environment has no libxkbfile.so.1, which
+# native-keymap needs to read the keyboard layout.
+export LD_LIBRARY_PATH="${EXTRA_LIB_PATH}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}"
 exec ${APPIMAGE_RUN} "\${APPIMAGE}" "\$@"
 EOF
 chmod +x "${BIN_DIR}/openide"
