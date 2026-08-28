@@ -45,6 +45,9 @@ jobs:
       - name: Audit surface tokens
         run: node dev/audit-surface-tokens.mjs
 
+      - name: Audit script permissions
+        run: node dev/audit-script-permissions.mjs
+
       - name: Compile canonical source
         working-directory: vscode
         run: npm run compile

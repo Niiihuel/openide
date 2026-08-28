@@ -8,6 +8,7 @@ import gulp from 'gulp';
 import filter from 'gulp-filter';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import pump from 'pump';
 import VinylFile from 'vinyl';
 import * as bundle from './bundle.ts';
@@ -65,6 +66,53 @@ const DEFAULT_FILE_HEADER = [
 	' *--------------------------------------------------------*/'
 ].join('\n');
 
+/**
+ * OPENIDE: how many entry points may be bundled at the same time.
+ *
+ * The loop below starts an esbuild build for every entry point and only then awaits them, so all 23
+ * ran at once -- the whole workbench bundled concurrently, each holding its output and source map
+ * in memory because `write: false` keeps `res.outputFiles` there. That is the peak of the entire
+ * build, and on a 7 GB CI runner it is over the line: the four release platforms all died at this
+ * exact moment, Linux by having the runner agent killed (no error at all, just "The runner has
+ * received a shutdown signal") and Windows with esbuild's own "The service was stopped".
+ *
+ * Bounding it trades some wall-clock for a peak that fits. Unlike adding swap or resizing a
+ * pagefile, this works regardless of the machine, which matters because Windows has no reliable
+ * equivalent to the Linux swapfile.
+ *
+ * Derived from RAM rather than CPU count: the constraint being hit is memory, and CI runners pair
+ * few cores with little RAM in ways that do not track each other.
+ */
+const BUNDLE_CONCURRENCY = (() => {
+	const override = Number(process.env['VSCODE_BUNDLE_CONCURRENCY']);
+	if (Number.isInteger(override) && override > 0) {
+		return override;
+	}
+	// Roughly 1.5 GB per concurrent bundle, leaving 2 GB for everything else. Floor of 2 so a small
+	// machine still makes progress; cap of 8 because past that the disk and the GC dominate anyway.
+	const budgetGb = os.totalmem() / (1024 ** 3) - 2;
+	return Math.max(2, Math.min(8, Math.floor(budgetGb / 1.5)));
+})();
+
+/** Resolves when a slot is free; the returned function gives it back. */
+function createLimiter(limit: number): () => Promise<() => void> {
+	let active = 0;
+	const waiting: (() => void)[] = [];
+
+	const release = () => {
+		active--;
+		waiting.shift()?.();
+	};
+
+	return async () => {
+		if (active >= limit) {
+			await new Promise<void>(resolve => waiting.push(resolve));
+		}
+		active++;
+		return release;
+	};
+}
+
 function bundleESMTask(opts: IBundleESMTaskOpts): NodeJS.ReadWriteStream {
 	const resourcesStream = es.through(); // this stream will contain the resources
 	const bundlesStream = es.through(); // this stream will contain the bundled files
@@ -82,8 +130,15 @@ function bundleESMTask(opts: IBundleESMTaskOpts): NodeJS.ReadWriteStream {
 	const bundleAsync = async () => {
 		const files: VinylFile[] = [];
 		const tasks: Promise<any>[] = [];
+		const acquire = createLimiter(BUNDLE_CONCURRENCY);
+
+		fancyLog(`Bundling ${entryPoints.length} entry points, ${BUNDLE_CONCURRENCY} at a time...`);
 
 		for (const entryPoint of entryPoints) {
+			// Awaited here rather than around the build alone, so the log line marks a bundle that is
+			// actually starting. Every one printing at the same instant was the clue that they all
+			// ran at once.
+			const release = await acquire();
 			fancyLog(`Bundled entry point: ${ansiColors.yellow(entryPoint.name)}...`);
 
 			// support for 'dest' via esbuild#in/out
@@ -180,7 +235,14 @@ function bundleESMTask(opts: IBundleESMTaskOpts): NodeJS.ReadWriteStream {
 				}
 			});
 
-			tasks.push(task);
+			// The loop now awaits between iterations, so a build can reject while later entry points are
+			// still being queued -- long before `Promise.all` below is reached. Without a handler in
+			// place by then, Node treats it as an unhandled rejection and kills the process, which
+			// would turn a readable esbuild error into a crash with no useful message. This keeps it
+			// handled; `Promise.all` still reports it.
+			const settled = task.finally(release);
+			settled.catch(() => { /* reported by Promise.all */ });
+			tasks.push(settled);
 		}
 
 		await Promise.all(tasks);
