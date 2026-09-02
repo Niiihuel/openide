@@ -319,10 +319,10 @@ suite('FONT - Tabs Size', () => {
 	});
 
 	test('proportional scaling preserves tab height/width ratios at 2x', () => {
-		// assertClose y no strictEqual: los coeficientes son fracciones (120/13 y compañía), así que
-		// el producto cae a un ulp del entero — 26 * (120/13) da 239.99999999999997. La proporción es
-		// lo que importa; exigir el entero exacto es exigir que la aritmética de punto flotante sea
-		// otra de la que es.
+		// assertClose and not strictEqual: the coefficients are fractions (120/13 and friends), so the
+		// product lands one ulp off the integer -- 26 * (120/13) gives 239.99999999999997. The ratio is
+		// what matters; demanding the exact integer is demanding that floating-point arithmetic be
+		// something other than what it is.
 		updateTabsSize(26);
 		assert.strictEqual(FONT.tabsSize, 26);
 		assertClose(FONT.tabsSize22, 44);
@@ -356,7 +356,7 @@ suite('FONT - Tabs Size', () => {
 	});
 
 	test('reset to default restores all values', () => {
-		// Mismo motivo que arriba: volver al default recorre las mismas fracciones.
+		// Same reason as above: going back to the default walks the same fractions.
 		updateTabsSize(20);
 		updateTabsSize(13);
 		assert.strictEqual(FONT.tabsSize, 13);

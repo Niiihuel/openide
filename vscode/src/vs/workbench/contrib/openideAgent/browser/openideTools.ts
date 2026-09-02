@@ -111,6 +111,13 @@ export interface IAgentToolContext {
 	readonly messageId?: string;
 	readonly workspaceRoot?: URI;
 	/**
+	 * The conversation whose run made the call. It is what keeps two conversations working at the
+	 * same time from sharing a shell: the agent terminal, the interactive session waiting on a
+	 * prompt and the output that streams into the chat card all belong to ONE conversation.
+	 * Absent for work with no conversation behind it (the git helpers, an external agent).
+	 */
+	readonly conversationId?: string;
+	/**
 	 * The call came from an EXTERNAL agent (a CLI in the dock), not from OpenIDE's own loop.
 	 *
 	 * It matters for artefacts that carry an action: a plan an external agent wrote must not be
@@ -118,6 +125,25 @@ export interface IAgentToolContext {
 	 */
 	readonly external?: boolean;
 }
+
+/**
+ * The shell a conversation owns: its agent terminal and, while a command sits at a prompt, the
+ * interactive session open on it.
+ */
+interface IConversationShell {
+	terminal?: ITerminalInstance;
+	interactive?: {
+		readonly term: ITerminalInstance;
+		openedAt: number;
+		finishedListener?: { dispose(): void };
+		dataListener?: { dispose(): void };
+		exitListener?: { dispose(): void };
+		ttlTimer?: ReturnType<typeof setTimeout>;
+	};
+}
+
+/** Shell of everything that runs outside a conversation: the git helpers, an external agent. */
+const SHARED_SHELL = '';
 
 export interface IAgentTool {
 	readonly def: IToolDefinition;
@@ -131,21 +157,20 @@ export interface IAgentTool {
 export class OpenideToolRegistry extends Disposable {
 
 	private readonly tools = new Map<string, IAgentTool>();
-	private agentTerminal: ITerminalInstance | undefined;
 	/**
-	 * Open interactive session: valid only while a run_command returned awaiting-input and the
-	 * process is still alive. terminal_send requires this session (it never writes to a free shell).
-	 * Hard TTL: if shell integration does not emit finish, the session expires on its own.
+	 * Hard TTL: if shell integration does not emit finish, the interactive session expires on its
+	 * own.
 	 */
 	private static readonly INTERACTIVE_SESSION_TTL_MS = 10 * 60_000;
-	private interactiveSession: {
-		readonly term: ITerminalInstance;
-		openedAt: number;
-		finishedListener?: { dispose(): void };
-		dataListener?: { dispose(): void };
-		exitListener?: { dispose(): void };
-		ttlTimer?: ReturnType<typeof setTimeout>;
-	} | undefined;
+	/**
+	 * ONE SHELL PER CONVERSATION, keyed by conversation id (`SHARED_SHELL` for the work that has no
+	 * conversation behind it). It used to be a single `agentTerminal` plus a single
+	 * `interactiveSession`, which is only correct while one run exists at a time: with two
+	 * conversations working at once their commands would land in the SAME pty — one `cd` moving the
+	 * other's working directory, the two outputs interleaved in one card, and a `terminal_send`
+	 * answering whichever prompt happened to be open.
+	 */
+	private readonly shells = new Map<string, IConversationShell>();
 	private readonly bgTerminals = new Map<string, { term: ITerminalInstance; command: string; persistent: boolean }>();
 
 	private readonly _onDidEdit = this._register(new Emitter<IFileEditEvent>());
@@ -154,8 +179,9 @@ export class OpenideToolRegistry extends Disposable {
 	readonly onDidChangeBackgroundTerminal: Event<IBackgroundTerminalEvent> = this._onDidChangeBackgroundTerminal.event;
 	/** Incremental output (plain text, no ANSI) of the command running in the agent terminal —
 	 *  it feeds the chat's embedded terminal while run_command is in flight. */
-	private readonly _onDidShellData = this._register(new Emitter<string>());
-	readonly onDidShellData: Event<string> = this._onDidShellData.event;
+	/** Output of a command as it runs, with the conversation it belongs to: a run only forwards its own. */
+	private readonly _onDidShellData = this._register(new Emitter<{ readonly conversationId: string; readonly data: string }>());
+	readonly onDidShellData: Event<{ readonly conversationId: string; readonly data: string }> = this._onDidShellData.event;
 
 	constructor(
 		private readonly fileService: IFileService,
@@ -219,7 +245,7 @@ export class OpenideToolRegistry extends Disposable {
 			risk: 'safe',
 			def: {
 				name: 'ask_user',
-				description: 'Hacé una o varias preguntas al usuario cuando el pedido sea ambiguo o falte info importante, ANTES de adivinar. Agrupá preguntas relacionadas en una sola llamada (hasta 5); ofrecé opciones cuando tenga sentido.',
+				description: 'Hacé una o varias preguntas al usuario cuando el pedido sea ambiguo o falte info importante, ANTES de adivinar. Agrupá preguntas relacionadas en una sola llamada (hasta 5); ofrecé opciones cuando tenga sentido. Marcá allow_multiple: true en una pregunta cuando varias opciones puedan aplicar a la vez (la UI deja elegir varias y la respuesta llega como los labels elegidos separados por coma); dejalo afuera cuando las opciones sean excluyentes.',
 				parameters: {
 					type: 'object',
 					properties: {
@@ -231,12 +257,14 @@ export class OpenideToolRegistry extends Disposable {
 								properties: {
 									question: { type: 'string', description: 'La pregunta' },
 									options: { type: 'array', items: { type: 'string' }, description: 'Opciones sugeridas (opcional)' },
+									allow_multiple: { type: 'boolean', description: 'Se pueden elegir varias opciones a la vez (default false: excluyentes)' },
 								},
 								required: ['question'],
 							},
 						},
 						question: { type: 'string', description: 'Forma corta: una sola pregunta (equivale a questions con un elemento)' },
 						options: { type: 'array', items: { type: 'string' }, description: 'Opciones para la forma corta' },
+						allow_multiple: { type: 'boolean', description: 'Forma corta: se pueden elegir varias opciones a la vez' },
 						allow_free_text: { type: 'boolean', description: 'Permitir respuesta libre (default true)' },
 					},
 				},
@@ -332,8 +360,8 @@ export class OpenideToolRegistry extends Disposable {
 		return [...this.tools.values()].map(t => t.def);
 	}
 
-	async invoke(name: string, argumentsJson: string, token: CancellationToken, messageId?: string, workspaceRoot?: URI): Promise<string> {
-		return this.run(name, argumentsJson, token, { messageId, workspaceRoot });
+	async invoke(name: string, argumentsJson: string, token: CancellationToken, context: IAgentToolContext = {}): Promise<string> {
+		return this.run(name, argumentsJson, token, context);
 	}
 
 	/** Same call, marked as coming from an external agent. */
@@ -814,7 +842,7 @@ export class OpenideToolRegistry extends Disposable {
 				detail: String(args.command ?? ''),
 				command: String(args.command ?? ''),
 			}),
-			invoke: async (args, token) => {
+			invoke: async (args, token, context) => {
 				const command = String(args.command ?? '').trim();
 				if (!command) { return 'Error: empty command.'; }
 				// background_persistent always goes to the dock (visible, no auto-dispose), even when the
@@ -829,7 +857,9 @@ export class OpenideToolRegistry extends Disposable {
 					// background:true misused (a quick read) → foreground with capture
 				}
 				const timeoutSec = Math.min(600, Math.max(5, Number(args.timeoutSeconds) || 120));
-				const finished = await this.runShellCaptured(command, token, timeoutSec * 1000);
+				// The conversation's own shell: two conversations working at the same time must not send
+				// their commands to one pty.
+				const finished = await this.runShellCaptured(command, token, timeoutSec * 1000, context?.conversationId ?? SHARED_SHELL);
 				if (token.isCancellationRequested) { return '(cancelado — el proceso fue terminado)'; }
 				if (finished === 'no-shell-integration') {
 					return '(comando enviado a la terminal, pero shell integration no está disponible → no se pudo capturar la salida)';
@@ -852,8 +882,9 @@ export class OpenideToolRegistry extends Disposable {
 	 * still be alive and terminal_send/finish need it). With `killPty` it does kill and detach
 	 * agentTerminal (TTL / abandon / nuevo run_command).
 	 */
-	private clearInteractiveSession(term?: ITerminalInstance, opts?: { killPty?: boolean }): void {
-		const s = this.interactiveSession;
+	private clearInteractiveSession(shell: string, term?: ITerminalInstance, opts?: { killPty?: boolean }): void {
+		const owner = this.shell(shell);
+		const s = owner.interactive;
 		if (!s) {
 			return;
 		}
@@ -865,20 +896,20 @@ export class OpenideToolRegistry extends Disposable {
 		try { s.finishedListener?.dispose(); } catch { /* ignore */ }
 		try { s.dataListener?.dispose(); } catch { /* ignore */ }
 		try { s.exitListener?.dispose(); } catch { /* ignore */ }
-		this.interactiveSession = undefined;
+		owner.interactive = undefined;
 		if (opts?.killPty) {
 			if (!owned.isDisposed) {
 				owned.dispose();
 			}
-			if (this.agentTerminal === owned) {
-				this.agentTerminal = undefined;
+			if (owner.terminal === owned) {
+				owner.terminal = undefined;
 			}
 		}
 	}
 
 	/** Renueva el TTL (actividad de terminal_send). */
-	private touchInteractiveSession(): void {
-		const s = this.interactiveSession;
+	private touchInteractiveSession(shell: string): void {
+		const s = this.shell(shell).interactive;
 		if (!s) {
 			return;
 		}
@@ -887,42 +918,74 @@ export class OpenideToolRegistry extends Disposable {
 		const term = s.term;
 		s.ttlTimer = setTimeout(() => {
 			// Only kill if it is still the same session.
-			if (this.interactiveSession?.term === term) {
-				this.clearInteractiveSession(term, { killPty: true });
+			if (this.shell(shell).interactive?.term === term) {
+				this.clearInteractiveSession(shell, term, { killPty: true });
 			}
 		}, OpenideToolRegistry.INTERACTIVE_SESSION_TTL_MS);
 	}
 
 	/** True when the session points exactly at this term and is still alive (and within the TTL). */
-	private sessionStillOwns(term: ITerminalInstance): boolean {
-		if (!this.hasInteractiveSession()) {
+	private sessionStillOwns(shell: string, term: ITerminalInstance): boolean {
+		if (!this.hasInteractiveSession(shell)) {
 			return false;
 		}
-		const s = this.interactiveSession;
+		const s = this.shell(shell).interactive;
 		return !!s && s.term === term && !term.isDisposed;
 	}
 
 	/** True si hay un proceso interactivo vivo esperando terminal_send. */
-	hasInteractiveSession(): boolean {
-		const s = this.interactiveSession;
+	hasInteractiveSession(shell: string = SHARED_SHELL): boolean {
+		const owner = this.shell(shell);
+		const s = owner.interactive;
 		if (!s) {
 			return false;
 		}
 		if (s.term.isDisposed) {
 			// Orphaned metadata: the pty is already dead.
-			this.clearInteractiveSession();
-			if (this.agentTerminal === s.term) {
-				this.agentTerminal = undefined;
+			this.clearInteractiveSession(shell);
+			if (owner.terminal === s.term) {
+				owner.terminal = undefined;
 			}
 			return false;
 		}
 		// TTL: if SI never emitted finish, we close the gate AND kill the orphaned pty so the
 		// next run_command does not reuse a hung process (console freeze).
 		if (Date.now() - s.openedAt > OpenideToolRegistry.INTERACTIVE_SESSION_TTL_MS) {
-			this.clearInteractiveSession(undefined, { killPty: true });
+			this.clearInteractiveSession(shell, undefined, { killPty: true });
 			return false;
 		}
 		return true;
+	}
+
+	/** The conversation's shell record, created on first use. */
+	private shell(key: string = SHARED_SHELL): IConversationShell {
+		let shell = this.shells.get(key);
+		if (!shell) {
+			shell = {};
+			this.shells.set(key, shell);
+		}
+		return shell;
+	}
+
+	/**
+	 * Which shell a UI action means. The chat's terminal card and its "send to panel" both act on
+	 * the terminal the user is LOOKING at, and neither carries a conversation: the card only exists
+	 * while a command runs, and the input line only while it waits for an answer. So the shell that
+	 * is waiting is the answer, the most recently opened one when several are, and any live agent
+	 * terminal when none is waiting.
+	 */
+	private resolveUiShell(): string | undefined {
+		let waiting: { key: string; openedAt: number } | undefined;
+		let live: string | undefined;
+		for (const [key, shell] of this.shells) {
+			if (this.hasInteractiveSession(key)) {
+				const openedAt = shell.interactive?.openedAt ?? 0;
+				if (!waiting || openedAt > waiting.openedAt) { waiting = { key, openedAt }; }
+			} else if (shell.terminal && !shell.terminal.isDisposed) {
+				live = key;
+			}
+		}
+		return waiting?.key ?? live;
 	}
 
 	/** Runs a command in the agent's hidden terminal, capturing output + exit code
@@ -931,12 +994,13 @@ export class OpenideToolRegistry extends Disposable {
 	 *  KILLED — the hung process dies with it and the next call creates a fresh one. Otherwise
 	 *  every following command queues behind the hung one and "the console freezes"
 	 *  (y el pty host termina unresponsive). */
-	async runShellCaptured(command: string, token: CancellationToken, timeoutMs = 120000): Promise<ShellCaptureResult | 'no-shell-integration' | undefined> {
+	async runShellCaptured(command: string, token: CancellationToken, timeoutMs = 120000, shell: string = SHARED_SHELL): Promise<ShellCaptureResult | 'no-shell-integration' | undefined> {
+		const owner = this.shell(shell);
 		// Previous interactive session (or a TTL that just killed it): do not reuse that pty.
-		if (this.hasInteractiveSession()) {
-			this.clearInteractiveSession(this.interactiveSession!.term, { killPty: true });
+		if (this.hasInteractiveSession(shell)) {
+			this.clearInteractiveSession(shell, owner.interactive!.term, { killPty: true });
 		}
-		const term = await this.getAgentTerminal();
+		const term = await this.getAgentTerminal(shell);
 		await term.processReady;
 		const cd = await this.waitForCommandDetection(term);
 		if (!cd) {
@@ -944,8 +1008,8 @@ export class OpenideToolRegistry extends Disposable {
 			// terminal (the next getAgentTerminal creates a fresh one) so nothing queues behind it.
 			// No dispose: that would kill the process instantly.
 			term.sendText(command, true);
-			if (this.agentTerminal === term) {
-				this.agentTerminal = undefined;
+			if (owner.terminal === term) {
+				owner.terminal = undefined;
 			}
 			return 'no-shell-integration';
 		}
@@ -957,7 +1021,7 @@ export class OpenideToolRegistry extends Disposable {
 		const finishedListener = cd.onCommandFinished(cmd => {
 			const r: ShellCaptureResult = { output: cmd.getOutput() ?? '', exitCode: cmd.exitCode };
 			finishedResolved = r;
-			this.clearInteractiveSession(term);
+			this.clearInteractiveSession(shell, term);
 			finishResolve?.(r);
 		});
 		let cancelListener: { dispose(): void } | undefined;
@@ -974,7 +1038,7 @@ export class OpenideToolRegistry extends Disposable {
 		const dataListener = term.onData(data => {
 			if (!streaming) { return; }
 			const plain = stripAnsi(data);
-			if (plain) { lastDataTime = Date.now(); accumulatedOutput += plain; this._onDidShellData.fire(plain); }
+			if (plain) { lastDataTime = Date.now(); accumulatedOutput += plain; this._onDidShellData.fire({ conversationId: shell, data: plain }); }
 		});
 		try {
 			term.sendText(command, true);
@@ -999,17 +1063,17 @@ export class OpenideToolRegistry extends Disposable {
 			// Timeout / cancel: matar la terminal colgada.
 			if (result === undefined) {
 				finishedListener.dispose();
-				this.clearInteractiveSession(term);
+				this.clearInteractiveSession(shell, term);
 				term.dispose();
-				if (this.agentTerminal === term) {
-					this.agentTerminal = undefined;
+				if (owner.terminal === term) {
+					owner.terminal = undefined;
 				}
 				return undefined;
 			}
 			// Normal finish (finishedP won, or the command ended during the race): no session.
 			if (!result.awaitingInput || finishedResolved) {
 				finishedListener.dispose();
-				this.clearInteractiveSession(term);
+				this.clearInteractiveSession(shell, term);
 				return finishedResolved ?? result;
 			}
 			// Real awaiting-input: the finishedListener is STILL alive and clears the session on exit.
@@ -1019,26 +1083,26 @@ export class OpenideToolRegistry extends Disposable {
 				return finishedResolved;
 			}
 			// Interactive session: data + finish + exit + proactive TTL.
-			this.clearInteractiveSession();
+			this.clearInteractiveSession(shell);
 			const exitListener = term.onExit(() => {
 				// Process died: clear the gate and detach (dispose if not already).
-				this.clearInteractiveSession(term, { killPty: true });
+				this.clearInteractiveSession(shell, term, { killPty: true });
 			});
-			this.interactiveSession = {
+			owner.interactive = {
 				term,
 				openedAt: Date.now(),
 				finishedListener,
 				dataListener,
 				exitListener,
 			};
-			this.touchInteractiveSession(); // arma el timer TTL proactivo
+			this.touchInteractiveSession(shell); // arma el timer TTL proactivo
 			// Avoid disposing the dataListener in the finally: the session now owns it.
 			return result;
 		} finally {
 			cancelListener?.dispose();
 			execListener.dispose();
 			// If the session kept the dataListener, do not dispose it here.
-			if (this.interactiveSession?.term !== term || this.interactiveSession?.dataListener !== dataListener) {
+			if (owner.interactive?.term !== term || owner.interactive?.dataListener !== dataListener) {
 				dataListener.dispose();
 			}
 		}
@@ -1047,10 +1111,13 @@ export class OpenideToolRegistry extends Disposable {
 	/** Writes a line to the agent terminal (user input in the chat's embedded terminal while
 	 *  run_command runs: answering y/N prompts, typing into a REPL, etc.). */
 	writeToAgentTerminal(text: string): void {
+		const key = this.resolveUiShell();
+		if (key === undefined) {
+			return;
+		}
+		const shell = this.shell(key);
 		// Prefer a VALID interactive session (TTL/ownership); otherwise the in-flight agent terminal.
-		const term = this.hasInteractiveSession()
-			? this.interactiveSession!.term
-			: this.agentTerminal;
+		const term = this.hasInteractiveSession(key) ? shell.interactive!.term : shell.terminal;
 		if (term && !term.isDisposed) {
 			term.sendText(text, true);
 		}
@@ -1061,11 +1128,11 @@ export class OpenideToolRegistry extends Disposable {
 	 * Returns undefined when there is NO awaiting-input session (safety gate).
 	 * It distinguishes timedOut from awaitingInput. Multi-line payloads are rejected.
 	 */
-	async sendToAgentTerminalInteractive(text: string, token: CancellationToken, timeoutMs = 30000): Promise<ShellCaptureResult | undefined> {
-		if (!this.hasInteractiveSession()) {
+	async sendToAgentTerminalInteractive(text: string, token: CancellationToken, timeoutMs = 30000, shell: string = SHARED_SHELL): Promise<ShellCaptureResult | undefined> {
+		if (!this.hasInteractiveSession(shell)) {
 			return undefined;
 		}
-		const session = this.interactiveSession!;
+		const session = this.shell(shell).interactive!;
 		// A single line: newlines would allow queueing commands after answering the prompt.
 		if (/[\r\n\u2028\u2029\0]/.test(text)) {
 			return { output: 'Error: terminal_send acepta una sola línea (sin saltos de línea).', exitCode: undefined };
@@ -1077,12 +1144,12 @@ export class OpenideToolRegistry extends Disposable {
 		const term = session.term;
 		const cd = await this.waitForCommandDetection(term);
 		// TOCTOU: el comando pudo terminar durante el await → no escribir a shell libre.
-		if (!this.sessionStillOwns(term)) {
+		if (!this.sessionStillOwns(shell, term)) {
 			return undefined;
 		}
 		if (!cd) {
 			// Without SI we cannot observe: we do not write, and we kill the opaque session (killPty).
-			this.clearInteractiveSession(term, { killPty: true });
+			this.clearInteractiveSession(shell, term, { killPty: true });
 			return { output: 'Error: shell integration no disponible; no se puede confirmar el prompt.', exitCode: undefined };
 		}
 		let outputBuffer = '';
@@ -1090,14 +1157,14 @@ export class OpenideToolRegistry extends Disposable {
 		let lastDataTime = 0;
 		const dataListener = term.onData(data => {
 			const plain = stripAnsi(data);
-			if (plain) { outputBuffer += plain; lastDataTime = Date.now(); this._onDidShellData.fire(plain); }
+			if (plain) { outputBuffer += plain; lastDataTime = Date.now(); this._onDidShellData.fire({ conversationId: shell, data: plain }); }
 		});
 		// Revalidate once more right before touching the pty.
-		if (!this.sessionStillOwns(term)) {
+		if (!this.sessionStillOwns(shell, term)) {
 			dataListener.dispose();
 			return undefined;
 		}
-		this.touchInteractiveSession(); // actividad renueva TTL
+		this.touchInteractiveSession(shell); // actividad renueva TTL
 		term.sendText(payload, true);
 		const startTime = Date.now();
 		try {
@@ -1113,7 +1180,7 @@ export class OpenideToolRegistry extends Disposable {
 					resolve(val);
 				};
 				const cmdListener = cd.onCommandFinished(cmd => {
-					this.clearInteractiveSession(term);
+					this.clearInteractiveSession(shell, term);
 					finish({ output: outputBuffer.slice(-4000), exitCode: cmd.exitCode });
 				});
 				const tokenListener = token.onCancellationRequested(() => finish(undefined));
@@ -1141,8 +1208,9 @@ export class OpenideToolRegistry extends Disposable {
 
 	/** Shows the agent's shared terminal without stealing focus from the composer. Creating the same
 	 *  instance before the invoke avoids races between the location event and run_command. */
-	async followAgentTerminal(): Promise<void> {
-		const term = await this.getAgentTerminal();
+	async followAgentTerminal(shell?: string): Promise<void> {
+		// "Follow the agent" is a UI action like the other two: it means the terminal being watched.
+		const term = await this.getAgentTerminal(shell ?? this.resolveUiShell() ?? SHARED_SHELL);
 		await term.processReady;
 		await this.terminalService.showBackgroundTerminal(term);
 		this.terminalService.setActiveInstance(term);
@@ -1150,9 +1218,9 @@ export class OpenideToolRegistry extends Disposable {
 
 	/** "Send to panel": reveals and focuses the agent terminal (or the interactive session) in the dock. */
 	async revealAgentTerminalToPanel(): Promise<boolean> {
-		const term = this.hasInteractiveSession()
-			? this.interactiveSession!.term
-			: this.agentTerminal;
+		const key = this.resolveUiShell();
+		const shell = key === undefined ? undefined : this.shell(key);
+		const term = key !== undefined && this.hasInteractiveSession(key) ? shell!.interactive!.term : shell?.terminal;
 		if (!term || term.isDisposed) {
 			return false;
 		}
@@ -1163,12 +1231,13 @@ export class OpenideToolRegistry extends Disposable {
 		return true;
 	}
 
-	private async getAgentTerminal(): Promise<ITerminalInstance> {
-		if (this.agentTerminal && !this.agentTerminal.isDisposed) {
-			return this.agentTerminal;
+	private async getAgentTerminal(shell: string = SHARED_SHELL): Promise<ITerminalInstance> {
+		const owner = this.shell(shell);
+		if (owner.terminal && !owner.terminal.isDisposed) {
+			return owner.terminal;
 		}
 		const term = await this.terminalService.createTerminal({ config: { name: 'OpenIDE Agent' } });
-		this.agentTerminal = term;
+		owner.terminal = term;
 		return term;
 	}
 

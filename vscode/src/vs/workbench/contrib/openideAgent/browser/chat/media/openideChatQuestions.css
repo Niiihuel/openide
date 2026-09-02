@@ -1,0 +1,284 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — the ask_user questions card, docked onto the composer.
+ *
+ *  The frame is the transcript card recipe (--oi-chat-card-*) warmed with the primary accent on
+ *  the border, which is what marks it as the one card the run is waiting on. Collapse animates
+ *  through grid-template-rows so no height is ever measured.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Lives INSIDE `.openide-chat-block`, above the trays: the block draws the outline, the surface
+   and the working beam for the whole group, so the card paints no frame of its own — only the
+   interior hairline that separates it from what stacks under it. Top corners clip to the block's
+   own radius, same trick as the tray host. */
+.openide-chat-questions-host {
+	width: 100%;
+	box-sizing: border-box;
+	border-radius: var(--oi-chat-card-radius) var(--oi-chat-card-radius) 0 0;
+	overflow: hidden;
+}
+
+.openide-chat-questions {
+	display: flex;
+	flex-direction: column;
+	box-sizing: border-box;
+	width: 100%;
+	border-bottom: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
+	background: transparent;
+}
+
+.openide-chat-questions.hidden { display: none; }
+
+/* ---- Header ------------------------------------------------------------------------------- */
+
+.openide-chat-questions-head {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-width: 0;
+	padding: 7px 8px 7px 11px;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+}
+
+.openide-chat-questions.collapsed .openide-chat-questions-head { cursor: pointer; }
+
+.monaco-workbench .openide-chat-questions-head > .codicon[class*='codicon-'] {
+	font-size: 14px;
+	color: inherit;
+}
+
+.openide-chat-questions-title {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--vscode-foreground);
+}
+
+.openide-chat-questions-nav {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	margin-left: auto;
+}
+
+.openide-chat-questions-answered {
+	margin-left: auto;
+	font-size: 11.5px;
+	white-space: nowrap;
+}
+
+/* Both hang off `margin-left: auto`; when the nav renders, the answered label (empty then) must
+   not claim a second auto gap. */
+.openide-chat-questions-nav:not(:empty) + .openide-chat-questions-answered { margin-left: 0; }
+
+.openide-chat-questions-step {
+	padding: 0 2px;
+	font-size: 11.5px;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.openide-chat-questions-navbtn,
+.openide-chat-questions-collapse {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: none;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+}
+
+.openide-chat-questions-navbtn:hover,
+.openide-chat-questions-collapse:hover {
+	background: var(--oi-hover, var(--oi-border-soft));
+	color: var(--vscode-foreground);
+}
+
+.openide-chat-questions-navbtn:disabled { opacity: 0.4; cursor: default; background: transparent; }
+
+.monaco-workbench .openide-chat-questions-navbtn .codicon[class*='codicon-'],
+.monaco-workbench .openide-chat-questions-collapse .codicon[class*='codicon-'] {
+	font-size: 13px;
+	color: inherit;
+	transition: transform 180ms ease;
+}
+
+.openide-chat-questions.collapsed .openide-chat-questions-collapse .codicon { transform: rotate(180deg); }
+
+/* ---- Body (grid-rows collapse) ------------------------------------------------------------ */
+
+.openide-chat-questions-reveal {
+	display: grid;
+	grid-template-rows: 1fr;
+	transition: grid-template-rows 180ms ease;
+}
+
+.openide-chat-questions.collapsed .openide-chat-questions-reveal { grid-template-rows: 0fr; }
+
+.openide-chat-questions-body {
+	min-height: 0;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	padding: 0 11px;
+}
+
+/* The bottom padding lives on a pseudo-element: real padding on the clipped box would survive the
+   0fr row and hold the collapsed card 10px open. */
+.openide-chat-questions-body::after { content: ''; height: 10px; flex: 0 0 auto; }
+
+.openide-chat-questions-q {
+	display: flex;
+	gap: 6px;
+	font-size: 12.5px;
+	line-height: 1.45;
+	font-weight: 600;
+	color: var(--vscode-foreground);
+}
+
+.openide-chat-questions-qnum { flex: 0 0 auto; }
+.openide-chat-questions-qtext { min-width: 0; overflow-wrap: anywhere; }
+
+.openide-chat-questions-multihint {
+	font-weight: 400;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+}
+
+/* ---- Options ------------------------------------------------------------------------------ */
+
+.openide-chat-questions-options {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin: 8px 0 2px;
+}
+
+.openide-chat-questions-option {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	width: 100%;
+	min-height: 26px;
+	padding: 2px 5px;
+	border: none;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: var(--vscode-foreground);
+	font: inherit;
+	font-size: 12.5px;
+	text-align: left;
+	cursor: pointer;
+}
+
+button.openide-chat-questions-option:hover { background: var(--oi-hover, var(--oi-tint-3)); }
+
+.openide-chat-questions-chip {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 19px;
+	height: 19px;
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-border-soft, var(--oi-border));
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	font-size: 10.5px;
+	font-weight: 600;
+	transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+/* The pick is the amber chip, exactly the primary button's pair. */
+.openide-chat-questions-option.chosen .openide-chat-questions-chip {
+	border-color: transparent;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+}
+
+.openide-chat-questions-option-label { min-width: 0; overflow-wrap: anywhere; }
+
+.openide-chat-questions-other { cursor: text; }
+
+.openide-chat-questions-other-input {
+	flex: 1;
+	min-width: 0;
+	padding: 0;
+	border: none;
+	outline: none;
+	background: transparent;
+	color: var(--vscode-foreground);
+	font: inherit;
+	font-size: 12.5px;
+}
+
+.openide-chat-questions-other-input::placeholder { color: var(--oi-text-muted, var(--vscode-descriptionForeground)); opacity: 0.8; }
+
+.openide-chat-questions-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-top: 6px;
+}
+
+/* ---- Actions ------------------------------------------------------------------------------ */
+
+.openide-chat-questions-actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 12px;
+	margin-top: 8px;
+}
+
+.openide-chat-questions-skip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 3px 4px;
+	border: none;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: var(--vscode-foreground);
+	font: inherit;
+	font-size: 12px;
+	font-weight: 500;
+	cursor: pointer;
+}
+
+.openide-chat-questions-skip:hover { background: var(--oi-hover, var(--oi-tint-3)); }
+.openide-chat-questions-skip .openide-chat-questions-kbd { color: var(--oi-text-muted, var(--vscode-descriptionForeground)); }
+
+.openide-chat-questions-continue {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 10px;
+	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-button-border, transparent);
+	border-radius: var(--oi-radius-md);
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	font: inherit;
+	font-size: 12px;
+	font-weight: 600;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.openide-chat-questions-continue:hover { background: var(--vscode-button-hoverBackground); }
+.openide-chat-questions-continue .openide-chat-questions-kbd { opacity: 0.72; font-weight: 400; }
+
+.openide-chat-questions-kbd {
+	font-size: 10.5px;
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-questions-reveal { transition: none; }
+	.monaco-workbench .openide-chat-questions-collapse .codicon[class*='codicon-'] { transition: none; }
+}

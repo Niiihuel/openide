@@ -4,10 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 /*
- *  OpenIDE — browser automation for the agent (common layer). The REAL service lives in the
- *  el main process (electron-main/openideBrowserAutomationMain.ts) sobre BrowserWindows
- *  restricted to LOCAL URLs; the workbench talks to it over IPC (ProxyChannel) using this
- *  contract. The local-URL validation the main process ENFORCES server-side also lives here
+ *  OpenIDE — browser automation for the agent (common layer). The REAL service lives in the main
+ *  process (electron-main/openideBrowserAutomationMainService.ts) over BrowserWindows restricted
+ *  to LOCAL URLs; the workbench talks to it over IPC (ProxyChannel) through this contract. The local-URL validation the main process ENFORCES server-side also lives here
  *  (defense in depth: the workbench normalizes, the main process rejects non-local anyway).
  *--------------------------------------------------------------------------------------------*/
 
@@ -41,11 +40,15 @@ export interface IBrowserConsoleEntry {
 /**
  * The properties the picker reads off the chosen element.
  *
- * It lives HERE and not next to the style editor's catalog because the script that reads them is
- * injected from electron-main, which cannot import a workbench module. Longhands, not shorthands:
- * a `padding` shorthand collapses four independently editable numbers into one string, and the
- * editor's whole point is that each side has its own control. `openideStyleModel.ts` is what turns
- * these into labelled controls, and a test there asserts it covers exactly this list.
+ * It lives HERE and not in the workbench because the script that reads them is injected from
+ * electron-main, which cannot import a workbench module. Longhands, not shorthands: a `padding`
+ * shorthand collapses four independently editable numbers into one string, and each side being
+ * separately editable is the whole point.
+ *
+ * They travel with the element the picker attaches to the CHAT. Editing them by hand is the CSS
+ * inspector's job now (`contrib/browserView/.../browserInspectorFeature.ts` plus
+ * `openideInspectorControls.ts`), which reads the live computed style from the page it is attached
+ * to and needs nothing from this list.
  */
 export const OPENIDE_PICK_STYLE_PROPS: readonly string[] = [
 	'display', 'flex-direction', 'justify-content', 'align-items', 'gap', 'position', 'width', 'height',

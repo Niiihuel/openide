@@ -1,7 +1,7 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — markdown typography of an assistant turn.
  *
- *  SOURCE OF TRUTH: browser/openideChatHtml.ts (`.body p` … `.body hr`). Split out of
+ *  TRANSCRIBED from the removed chat webview (`.body p` … `.body hr`). Split out of
  *  media/openideChatNative.css, which owns the transcript's chrome: this file is only what a
  *  rendered answer looks like, and keeping both in one sheet pushed it past the 400-line ceiling.
  *
@@ -62,8 +62,8 @@
    workbench markdown renderer does not, so the fence's own `code` is excluded structurally. */
 .openide-chat-markdown :not(pre) > code {
 	padding: 1px 4px;
-	border-radius: 4px;
-	background: rgba(128, 128, 128, 0.14);
+	border-radius: var(--oi-radius-sm);
+	background: var(--oi-border-soft);
 	font-family: var(--vscode-editor-font-family, monospace);
 	font-size: 0.92em;
 }
@@ -72,9 +72,9 @@
 .openide-chat-markdown pre {
 	margin: 6px 0;
 	padding: 8px 10px;
-	border: 1px solid rgba(128, 128, 128, 0.22);
+	border: 1px solid var(--oi-border);
 	border-radius: 2px;
-	background: rgba(128, 128, 128, 0.1);
+	background: var(--oi-tint-2);
 	overflow-x: auto;
 }
 
@@ -93,9 +93,9 @@
 .openide-chat-markdown div[data-code] {
 	margin: 6px 0;
 	padding: 8px 10px;
-	border: 1px solid rgba(128, 128, 128, 0.22);
+	border: 1px solid var(--oi-border);
 	border-radius: 2px;
-	background: rgba(128, 128, 128, 0.1);
+	background: var(--oi-tint-2);
 	overflow-x: auto;
 }
 
@@ -114,7 +114,7 @@
 .openide-chat-markdown blockquote {
 	margin: 0 0 12px;
 	padding-left: 10px;
-	border-left: 2px solid rgba(128, 128, 128, 0.25);
+	border-left: 2px solid var(--oi-border);
 	color: var(--vscode-descriptionForeground);
 }
 
@@ -127,7 +127,7 @@
 	width: max-content;
 	max-width: 100%;
 	margin: 8px 0;
-	border: 1px solid rgba(128, 128, 128, 0.22);
+	border: 1px solid var(--oi-border);
 	border-radius: 2px;
 	border-collapse: separate;
 	border-spacing: 0;
@@ -139,8 +139,8 @@
 .openide-chat-markdown th,
 .openide-chat-markdown td {
 	padding: 6px 12px;
-	border-right: 1px solid rgba(128, 128, 128, 0.14);
-	border-bottom: 1px solid rgba(128, 128, 128, 0.14);
+	border-right: 1px solid var(--oi-border-soft);
+	border-bottom: 1px solid var(--oi-border-soft);
 	text-align: left;
 	vertical-align: top;
 }
@@ -152,7 +152,7 @@
 
 .openide-chat-markdown th {
 	font-weight: 600;
-	border-bottom-color: rgba(128, 128, 128, 0.22);
+	border-bottom-color: var(--oi-border);
 }
 
 .openide-chat-markdown img {
@@ -162,11 +162,11 @@
 .openide-chat-markdown hr {
 	margin: 14px 0;
 	border: none;
-	border-top: 1px solid rgba(128, 128, 128, 0.22);
+	border-top: 1px solid var(--oi-border);
 }
 
 /* Fenced code: the copy button floats over the top-right corner and only shows on hover, the way
-   the webview's `.code-copy` did (openideChatHtml.ts). */
+   the webview's `.code-copy` did. */
 .openide-chat-codeblock {
 	position: relative;
 }
@@ -181,7 +181,7 @@
 	height: 22px;
 	padding: 0;
 	border: 1px solid var(--vscode-widget-border, transparent);
-	border-radius: 4px;
+	border-radius: var(--oi-radius-sm);
 	background: var(--vscode-editorWidget-background);
 	color: var(--vscode-foreground);
 	opacity: 0;

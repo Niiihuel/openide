@@ -4,19 +4,19 @@
  *--------------------------------------------------------------------------------------------*/
 
 /*
- *  OpenIDE — resolución determinista de specifiers de import a archivos reales del índice.
- *  Reemplaza el matching difuso por nombre: un import es una referencia con respuesta exacta,
+ *  OpenIDE — deterministic resolution of import specifiers to real files of the index. It replaces
+ *  fuzzy matching by name: an import is a reference with an exact answer,
  *  no una entidad parecida a otra.
  *--------------------------------------------------------------------------------------------*/
 
-/** Prefijo sintético para paquetes externos: mantiene `uri` con forma de URI sin fingir un path
- *  del workspace (los consumidores calculan paths relativos sobre `uri`). */
+/** Synthetic prefix for external packages: it keeps `uri` shaped like a URI without pretending to
+ *  be a workspace path (consumers compute relative paths off `uri`). */
 export const PACKAGE_URI_PREFIX = 'openide-package:';
 
-/** Prefijo sintético del import por alias TODAVÍA no resuelto a un archivo real del índice. */
+/** Synthetic prefix of an aliased import NOT YET resolved to a real file of the index. */
 export const ALIAS_URI_PREFIX = 'openide-alias:';
 
-/** Extensiones candidatas al resolver un import sin extensión, en orden de preferencia. */
+/** Candidate extensions when resolving an extensionless import, in order of preference. */
 const CANDIDATE_EXTENSIONS = ['.ts', '.tsx', '.d.ts', '.js', '.jsx', '.mjs', '.cjs'];
 
 export function isRelativeSpecifier(specifier: string): boolean {
@@ -24,8 +24,8 @@ export function isRelativeSpecifier(specifier: string): boolean {
 }
 
 /**
- * Prefijos de alias que apuntan SIEMPRE dentro del workspace. `@/` no puede ser un paquete npm
- * (un scope exige `@nombre/…`), y `~/` y `#/` tampoco son specifiers de paquete válidos, así que
+ * Alias prefixes that ALWAYS point inside the workspace. `@/` cannot be an npm package (a scope
+ * requires `@name/…`), and `~/` and `#/` are not valid package specifiers either, so
  * reconocerlos no puede pisar una dependencia real.
  */
 const ALIAS_PREFIXES = ['@/', '~/', '#/'];
@@ -34,12 +34,12 @@ export function isWorkspaceAliasSpecifier(specifier: string): boolean {
 	return ALIAS_PREFIXES.some(prefix => specifier.startsWith(prefix));
 }
 
-/** Un import interno es el que referencia un archivo del proyecto: relativo o por alias. */
+/** An internal import is one that references a file of the project: relative or aliased. */
 export function isInternalSpecifier(specifier: string): boolean {
 	return isRelativeSpecifier(specifier) || isWorkspaceAliasSpecifier(specifier);
 }
 
-/** Formas candidatas de un specifier sin extensión, en el orden que probaría un bundler. */
+/** Candidate forms of an extensionless specifier, in the order a bundler would try them. */
 function candidateSuffixes(tail: string): string[] {
 	const suffixes = ['/' + tail];
 	for (const extension of CANDIDATE_EXTENSIONS) { suffixes.push('/' + tail + extension); }
@@ -48,10 +48,10 @@ function candidateSuffixes(tail: string): string[] {
 }
 
 /**
- * Resuelve un import por alias (`@/x/y`) al archivo real. El alias es absoluto pero su raíz vive
- * en la config del bundler, que este proceso no lee: se busca el archivo indexado cuyo path
- * TERMINA en el specifier. Si dos archivos empatan, no se resuelve — una arista inventada
- * distorsiona las comunidades más que una arista faltante.
+ * Resolves an aliased import (`@/x/y`) to the real file. The alias is absolute but its root lives
+ * in the bundler's config, which this process does not read: it looks for the indexed file whose
+ * path ENDS in the specifier. On a tie it does not resolve — an invented edge distorts the
+ * communities more than a missing one.
  */
 export function resolveAliasImport(specifier: string, knownUris: ReadonlySet<string>): string | undefined {
 	if (!isWorkspaceAliasSpecifier(specifier)) { return undefined; }
@@ -69,14 +69,14 @@ export function resolveAliasImport(specifier: string, knownUris: ReadonlySet<str
 	return undefined;
 }
 
-/** Resolución unificada: relativa o por alias, según el specifier. */
+/** One entry point: relative or aliased, depending on the specifier. */
 export function resolveInternalImport(importerUri: string, specifier: string, knownUris: ReadonlySet<string>): string | undefined {
 	return isRelativeSpecifier(specifier)
 		? resolveRelativeImport(importerUri, specifier, knownUris)
 		: resolveAliasImport(specifier, knownUris);
 }
 
-/** Nombre de paquete de un specifier bare, conservando el scope: `@scope/pkg/sub` → `@scope/pkg`. */
+/** Package name of a bare specifier, scope included: `@scope/pkg/sub` → `@scope/pkg`. */
 export function packageNameOf(specifier: string): string {
 	const parts = specifier.split('/');
 	if (specifier.startsWith('@') && parts.length >= 2) { return `${parts[0]}/${parts[1]}`; }
@@ -88,7 +88,7 @@ function dirnameOf(uri: string): string {
 	return slash >= 0 ? uri.slice(0, slash) : uri;
 }
 
-/** Normaliza `a/b/../c` → `a/c` sin depender de path de node (esto corre en common). */
+/** Normalizes `a/b/../c` → `a/c` without node's path module (this runs in common). */
 function normalizeUriPath(uri: string): string {
 	const schemeEnd = uri.indexOf('://');
 	const prefix = schemeEnd >= 0 ? uri.slice(0, schemeEnd + 3) : '';
@@ -103,9 +103,9 @@ function normalizeUriPath(uri: string): string {
 }
 
 /**
- * Resuelve un import relativo al URI del archivo real que referencia, probando extensiones e
- * `index.*` — el mismo orden que usa un bundler. Devuelve undefined si no cae en el índice
- * (archivo no indexado o excluido), y en ese caso el nodo sintético sobrevive.
+ * Resolves a relative import to the URI of the real file it references, trying extensions and
+ * `index.*` — the order a bundler uses. It returns undefined when the target is not in the index
+ * (not indexed, or excluded), and then the synthetic node survives.
  */
 export function resolveRelativeImport(importerUri: string, specifier: string, knownUris: ReadonlySet<string>): string | undefined {
 	if (!isRelativeSpecifier(specifier)) { return undefined; }
@@ -119,7 +119,7 @@ export function resolveRelativeImport(importerUri: string, specifier: string, kn
 		const candidate = `${base}/index${extension}`;
 		if (knownUris.has(candidate)) { return candidate; }
 	}
-	// El specifier ya traía extensión pero apunta al archivo fuente (import './x.js' → x.ts).
+	// The specifier already had an extension but points at the source file (import './x.js' → x.ts).
 	const withoutJs = base.replace(/\.(js|jsx|mjs|cjs)$/, '');
 	if (withoutJs !== base) {
 		for (const extension of CANDIDATE_EXTENSIONS) {

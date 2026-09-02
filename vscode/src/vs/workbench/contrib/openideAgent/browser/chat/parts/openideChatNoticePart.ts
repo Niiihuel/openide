@@ -5,39 +5,69 @@
 
 import { $, addDisposableListener, append } from '../../../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
-import { toDisposable } from '../../../../../../base/common/lifecycle.js';
+import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
+import { IRenderedMarkdown } from '../../../../../../base/browser/markdownRenderer.js';
+import { MutableDisposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IOpenideChatContent, IOpenideChatDecisionContent, IOpenideChatNoticeContent } from '../../../common/chat/openideChatContent.js';
+import { t } from '../../../common/openideStrings.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
+import { setupChatTooltip } from '../openideChatHover.js';
+import { OpenideChatMarkdownRenderer } from '../openideChatMarkdown.js';
 import '../media/openideChatNotice.css';
 
 /**
  * Advisories, provider retries and failures: the webview's `.flatrow.notice` / `.flatrow.err`
- * (openideChatHtml.ts:528-550, `renderNotice`/`renderRetry`/`addErrorMsg`).
+ * (the removed chat webview, `renderNotice`/`renderRetry`/`addErrorMsg`).
  *
  * Without this part the reducer's `notice` content rendered nothing at all, which is strictly worse
  * than the generic line it replaced: a rate limit or an `info` from the engine simply vanished and
  * the turn looked like it had stalled for no reason.
  */
 
-/** Title strip of the box. Uppercased by CSS; transcribed from the webview's three renderers. */
-function noticeTitle(content: IOpenideChatNoticeContent): string {
-	if (content.retry) { return 'Advertencia del proveedor'; }
-	if (content.action === 'continue') { return 'Turno incompleto'; }
-	return content.severity === 'error' ? 'Error' : 'Advertencia';
+/**
+ * Title, ONLY when it says something the icon cannot.
+ *
+ * It used to always be there, in uppercase, so a provider failure was announced by the word ERROR
+ * over a message that already read as one. Upstream's error widget
+ * (`chat/browser/widget/chatContentParts/chatErrorContentPart.ts`) has no title at all: an icon and
+ * the text. What survives here are the two cases that carry real information — a retry in flight,
+ * and a turn that ran out of cycles rather than failing.
+ */
+function noticeTitle(content: IOpenideChatNoticeContent): string | undefined {
+	if (content.retry) { return t('chat.notice.retryTitle'); }
+	if (content.action === 'continue') { return t('chat.notice.incompleteTitle'); }
+	return undefined;
 }
 
 function noticeIcon(content: IOpenideChatNoticeContent): string {
 	if (content.action === 'continue') { return 'debug-continue'; }
-	return content.severity === 'error' ? 'error' : 'warning';
+	if (content.severity === 'error') { return 'error'; }
+	return content.severity === 'info' ? 'info' : 'warning';
+}
+
+/**
+ * The message as markdown, so a URL in it is a link the user can click.
+ *
+ * Two adjustments before handing it over. A notice is written as PLAIN text, where a single newline
+ * is a line break — markdown eats those, which glued "what failed" and "what to do about it" into
+ * one paragraph — so newlines become markdown's own hard break. And bare URLs are wrapped as
+ * explicit links rather than trusting the renderer's linkifier to be on: the whole point of the
+ * rate-limit hint is that the reader can reach the page it names.
+ */
+export function noticeMarkdown(message: string): string {
+	return message
+		.replace(/(^|[\s(])(https?:\/\/[^\s<>()\[\]"']+)/g, (_all, prefix: string, url: string) => `${prefix}[${url}](${url})`)
+		.replace(/\n/g, '  \n');
 }
 
 const _onDidRequestContinue = new Emitter<void>();
 /**
  * "Continuar" on a `continue` notice: the turn ran out of cycles and the user wants it to go on.
  * Same seam as the mode suggestion's acceptance — the part cannot reach the composer, so the widget
- * listens here and sends the same continue prompt the webview typed (openideChatHtml.ts:3489).
+ * listens here and sends the same continue prompt the webview typed.
  */
 export const onDidRequestOpenideChatContinue: Event<void> = _onDidRequestContinue.event;
 
@@ -53,11 +83,13 @@ export class OpenideChatNoticePart extends OpenideChatContentPart {
 	private readonly _message: HTMLElement;
 	private readonly _count: HTMLElement;
 	private readonly _action: HTMLButtonElement;
+	private readonly _rendered = this._register(new MutableDisposable<IRenderedMarkdown>());
 	private _content: IOpenideChatNoticeContent;
 
 	constructor(
 		content: IOpenideChatNoticeContent,
 		_context: IOpenideChatContentPartContext,
+		private readonly _renderer: OpenideChatMarkdownRenderer,
 		@ICommandService private readonly _commandService: ICommandService,
 	) {
 		super();
@@ -76,6 +108,10 @@ export class OpenideChatNoticePart extends OpenideChatContentPart {
 				void this._commandService.executeCommand('openide.agent.openProviders');
 			} else if (this._content.action === 'continue') {
 				_onDidRequestContinue.fire();
+			} else if (this._content.action === 'account-back') {
+				void this._commandService.executeCommand('openide.agent.undoAccountFailover');
+				// One use only: the account is back, and offering it again would switch away from it.
+				this._action.classList.add('hidden');
 			}
 		}));
 		this._render();
@@ -84,25 +120,40 @@ export class OpenideChatNoticePart extends OpenideChatContentPart {
 	private _render(): void {
 		const content = this._content;
 		this._icon.className = `codicon codicon-${noticeIcon(content)}`;
-		this._title.textContent = noticeTitle(content);
-		this._message.textContent = content.message;
-		// An error is a bordered red box, everything else a bordered yellow one. `continue` is
-		// deliberately NOT red: the turn ran out of cycles, the task is still alive.
+		const title = noticeTitle(content);
+		this._title.textContent = title ?? '';
+		this._title.classList.toggle('hidden', !title);
+		// Disposed before rendering, not after: the previous result's link listeners hang off this
+		// very node (same reason as the markdown part).
+		this._rendered.clear();
+		this._rendered.value = this._renderer.render(
+			new MarkdownString(noticeMarkdown(content.message)),
+			{ asyncRenderCallback: () => this._onDidChangeHeight.fire() },
+			this._message,
+		);
+		// The card itself stays neutral in every severity; only the icon is coloured. A red plate
+		// behind a red border behind red text made a busy provider look like a broken IDE, and it
+		// is not how upstream draws the same thing.
 		this.domNode.classList.toggle('openide-chat-notice-error', content.severity === 'error');
+		this.domNode.classList.toggle('openide-chat-notice-info', content.severity === 'info' || content.action === 'continue');
 		this._renderAction();
 		this._renderCountdown();
 	}
 
-	/** The one-click fix: connect a provider, or keep the interrupted turn going. */
+	/** The one-click fix: connect a provider, keep the turn going, or undo an account switch. */
 	private _renderAction(): void {
 		const action = this._content.action;
 		this._action.classList.toggle('hidden', !action);
 		if (!action) {
 			return;
 		}
+		const glyph = action === 'connect' ? 'plug' : action === 'account-back' ? 'discard' : 'debug-continue';
+		const label = action === 'connect' ? t('chat.notice.connect')
+			: action === 'account-back' ? t('chat.part.accountBack')
+				: t('chat.notice.continue');
 		this._action.replaceChildren();
-		append(this._action, $(`span.codicon.codicon-${action === 'connect' ? 'plug' : 'debug-continue'}`));
-		append(this._action, $('span', undefined, action === 'connect' ? 'Conectar proveedor…' : 'Continuar'));
+		append(this._action, $(`span.codicon.codicon-${glyph}`));
+		append(this._action, $('span', undefined, label));
 	}
 
 	/**
@@ -123,11 +174,11 @@ export class OpenideChatNoticePart extends OpenideChatContentPart {
 		let left = Math.max(1, Math.round((retry.delayMs || 1000) / 1000));
 		const tick = (): void => {
 			if (left > 0) {
-				this._count.textContent = `en ${left}s…`;
+				this._count.textContent = t('chat.notice.retryIn', left);
 				left--;
 				return;
 			}
-			this._count.textContent = 'reintentando…';
+			this._count.textContent = t('chat.notice.retrying');
 		};
 		tick();
 		const handle = setInterval(tick, 1000);
@@ -156,7 +207,7 @@ export class OpenideChatNoticePart extends OpenideChatContentPart {
 	}
 }
 
-/** Same wording as the webview's `permissionToolLabel` (openideChatHtml.ts:4603-4606). */
+/** Same wording as the webview's `permissionToolLabel`. */
 const PERMISSION_TOOL_LABELS: Readonly<Record<string, string>> = {
 	run_command: 'Run command',
 	edit_file: 'Edit file',
@@ -182,17 +233,22 @@ export class OpenideChatDecisionPart extends OpenideChatContentPart {
 	private readonly _label: HTMLElement;
 	private _content: IOpenideChatDecisionContent;
 
-	constructor(content: IOpenideChatDecisionContent, _context: IOpenideChatContentPartContext) {
+	constructor(
+		content: IOpenideChatDecisionContent,
+		_context: IOpenideChatContentPartContext,
+		hoverService: IHoverService,
+	) {
 		super();
 		this._content = content;
 		this.domNode = $('.openide-chat-decision-line');
 		this._label = append(this.domNode, $('span.openide-chat-decision-label'));
+		// One elided line: the hover repeats it in full, so it is not a second accessible name.
+		this._register(setupChatTooltip(hoverService, this._label, () => this._label.textContent ?? '', { aria: false }));
 		this._render();
 	}
 
 	private _render(): void {
 		this._label.textContent = `Rechazado · ${permissionToolLabel(this._content.tool)}`;
-		this._label.title = this._label.textContent;
 	}
 
 	hasSameContent(other: IOpenideChatContent, _followingContent: readonly IOpenideChatContent[], _element: IOpenideChatItem): boolean {

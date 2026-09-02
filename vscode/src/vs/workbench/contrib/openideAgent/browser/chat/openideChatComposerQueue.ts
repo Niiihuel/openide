@@ -8,12 +8,15 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { basename } from '../../../../../base/common/path.js';
 import { localize } from '../../../../../nls.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { AgentMode, IChatCapabilityMention, IChatImage } from '../../common/openideAgentTypes.js';
 import { IComposerReference, linkLabel } from './openideChatComposerChips.js';
+import { IComposerSnippet } from '../../common/chat/openideChatSnippet.js';
+import { setupChatTooltip } from './openideChatHover.js';
 import { t } from '../../common/openideStrings.js';
 
-/** The webview's ceiling per conversation (openideChatHtml.ts:4113). */
+/** The webview's ceiling per conversation. */
 export const QUEUE_LIMIT = 20;
 export const QUEUE_FULL_MESSAGE = 'La cola de esta conversación llegó a 20 mensajes. Enviá, editá o quitá uno antes de agregar otro.';
 /** Messages typed before a conversation exists are keyed the way the webview keyed them. */
@@ -28,6 +31,8 @@ export interface IComposerQueueEntry {
 	readonly references: readonly IComposerReference[];
 	readonly capabilities: readonly IChatCapabilityMention[];
 	readonly links: readonly string[];
+	/** Optional: queues persisted before snippets existed come back without the field. */
+	readonly snippets?: readonly IComposerSnippet[];
 	readonly mode: AgentMode;
 	readonly providerId: string;
 	readonly modelId: string;
@@ -49,7 +54,7 @@ function entryLabel(entry: IComposerQueueEntry): string {
 /**
  * The message queue of the composer: what the user typed while a run was in flight.
  *
- * Transcribed from the webview's queue (openideChatHtml.ts:4073-4207, 6337): per conversation,
+ * Transcribed from the webview's queue (the removed chat webview, 6337): per conversation,
  * persisted so a reload does not lose what was never sent, drained one entry at a time when the
  * run ends. It owns the tray under the input card; the composer owns the drain, because the drain
  * is a submit.
@@ -79,6 +84,7 @@ export class OpenideChatComposerQueue extends Disposable {
 	constructor(
 		host: HTMLElement,
 		private readonly storageService: IStorageService,
+		private readonly hoverService: IHoverService,
 	) {
 		super();
 		this._queues = this._load();
@@ -102,7 +108,7 @@ export class OpenideChatComposerQueue extends Disposable {
 	/**
 	 * Switches the visible queue. A queue typed before the conversation existed (the pending key)
 	 * is adopted by the first conversation that shows up, which is what the webview did on `tabs`
-	 * (openideChatHtml.ts:6337-6348).
+	 *.
 	 */
 	setConversation(id: string | undefined): void {
 		if (id && this._queues[PENDING_KEY]?.length && !this._queues[id]?.length) {
@@ -194,23 +200,25 @@ export class OpenideChatComposerQueue extends Disposable {
 				append(row, $('span.codicon.codicon-circle-large-outline'));
 				const main = append(row, $('span.openide-chat-queue-main'));
 				const text = append(main, $('span.openide-chat-queue-text'));
-				text.textContent = entryLabel(entry);
-				text.title = text.textContent;
+				const label = entryLabel(entry);
+				text.textContent = label;
+				// The row ellipsises, so the tip is the message the user queued, in full.
+				this._rowStore.add(setupChatTooltip(this.hoverService, text, () => label, { aria: false }));
 				if (entry.mode === 'plan') {
 					append(main, $('span.openide-chat-queue-intent')).textContent = t('chat.queue.afterPlan');
 				}
 				const actions = append(row, $('span.openide-chat-queue-actions'));
-				this._action(actions, 'edit', localize('openide.chat.queue.edit', "Editar"), () => {
+				this._action(actions, 'edit', () => t('chat.queue.edit'), () => {
 					const removed = this._removeAt(index);
 					if (removed) { this._onDidRequestEdit.fire({ entry: removed }); }
 				});
 				this._action(actions, entry.mode === 'plan' ? 'replace-all' : 'arrow-up',
-					entry.mode === 'plan' ? localize('openide.chat.queue.nowPlan', "Reemplazar el plan actual y enviar ahora") : localize('openide.chat.queue.now', "Enviar ahora"),
+					() => t(entry.mode === 'plan' ? 'chat.queue.nowPlan' : 'chat.queue.now'),
 					() => {
 						const removed = this._removeAt(index);
 						if (removed) { this._onDidRequestSendNow.fire({ entry: removed }); }
 					});
-				this._action(actions, 'trash', localize('openide.chat.queue.remove', "Quitar"), () => this._removeAt(index));
+				this._action(actions, 'trash', () => t('chat.queue.remove'), () => this._removeAt(index));
 			});
 		}
 		if (wasHidden !== hidden || !hidden) {
@@ -218,9 +226,9 @@ export class OpenideChatComposerQueue extends Disposable {
 		}
 	}
 
-	private _action(parent: HTMLElement, icon: string, title: string, run: () => void): void {
-		const button = append(parent, $<HTMLButtonElement>('button.openide-chat-queue-btn', { type: 'button', title }));
-		button.setAttribute('aria-label', title);
+	private _action(parent: HTMLElement, icon: string, title: () => string, run: () => void): void {
+		const button = append(parent, $<HTMLButtonElement>('button.openide-chat-queue-btn', { type: 'button' }));
+		this._rowStore.add(setupChatTooltip(this.hoverService, button, title));
 		append(button, $(`span.codicon.codicon-${icon}`));
 		this._rowStore.add(addDisposableListener(button, 'click', event => {
 			event.stopPropagation();

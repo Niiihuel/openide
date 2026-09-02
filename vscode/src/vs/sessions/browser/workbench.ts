@@ -1456,6 +1456,10 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		return part;
 	}
 
+	isFloatingPanelsEnabled(): boolean {
+		return false; // the agents window has its own floating card design
+	}
+
 	hasFocus(part: Parts): boolean {
 		const container = this.getContainer(mainWindow, part);
 		if (!container) {

@@ -13,7 +13,7 @@ import './media/openideChatHistory.css';
 
 /**
  * Conversation history popover. Same content and same wording as the webview's `#historyMenu`
- * (openideChatHtml.ts: `buildHistoryMenu` / `renderHistoryList` / `historyRow`): a search field,
+ * (the removed webview's `buildHistoryMenu` / `renderHistoryList` / `historyRow`): a search field,
  * the non-archived sessions grouped by recency, and the archived ones behind a collapsed toggle.
  */
 

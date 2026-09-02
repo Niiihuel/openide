@@ -52,6 +52,7 @@ const ICONS: ReadonlyMap<string, IOpenideSettingsIcon> = new Map<string, IOpenid
 	['openideAgent/notifications', { icon: 'bell', tint: 'orange' }],
 	['openideAgent/browser', { icon: 'globe', tint: 'blue' }],
 	['openideAgent/advanced', { icon: 'sliders', tint: 'gray' }],
+	['openideAgent/import', { icon: 'box-seam', tint: 'blue' }],
 
 	// Core workbench areas (upstream TOC ids)
 	['editor', { icon: 'pencil', tint: 'blue' }],

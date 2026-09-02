@@ -103,9 +103,9 @@ export class OpenideChatEffortPicker extends Disposable {
 				content.appendChild(createMenuSection(document, localize('openide.chat.effort.section', "Razonamiento")));
 				const current = this.agentService.getReasoningEffort() || '';
 				for (const [value, label] of this.options) {
-					// No fallback glyph on the inactive rows: the webview leaves the slot empty so the
-					// checked one is the only mark the eye has to find.
-					const row = createMenuRow(document, { icon: value === current ? 'check' : undefined, label });
+					// No glyphs at all: the persistent tint on the active row is the only mark,
+					// and the hover reads above it.
+					const row = createMenuRow(document, { label, active: value === current });
 					store.add(addDisposableListener(row, 'click', () => {
 						this._popover.close();
 						void this.agentService.setReasoningEffort(value);

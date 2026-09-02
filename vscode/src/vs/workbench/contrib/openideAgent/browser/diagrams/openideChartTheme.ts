@@ -6,12 +6,12 @@
 /**
  * The palette and the two bits of geometry every chart shares.
  *
- * Since 2026-08 the palette is the EDITORIAL token system ported from the diagram-design skill
- * (refs/diagram-design, `references/style-guide.md`): semantic roles — paper / ink / muted / soft /
+ * Since 2026-08 the palette is the EDITORIAL token system ported from the diagram-design skill's
+ * style guide: semantic roles — paper / ink / muted / soft /
  * rule / accent / link — expressed as `--oid-*` CSS custom properties so the same SVG sits in a
  * light theme, a dark theme and a high-contrast theme without a per-theme palette. The properties
- * are DEFINED in two synchronized places (media/openideDiagrams.css for the workbench, and
- * OPENIDE_DIAGRAM_SVG_CSS for the webview surfaces); this module only references them.
+ * are DEFINED once, in media/openideDiagrams.css on `.openide-diagram` (OPENIDE_DIAGRAM_SVG_CSS
+ * reads them, it no longer carries a copy); this module only references them.
  *
  * The one-accent rule is the load-bearing design decision: `accent` marks the focal element —
  * the first series, the critical hatch, the entry node — and everything else is ink at an opacity.

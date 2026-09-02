@@ -8,7 +8,7 @@ import { nextDiagramId, SVG_NAMESPACE, svgForeign, svgNode } from './openideDiag
 
 /**
  * The `graph` family (flowchart · state · mindmap): editorial rendering — orthogonal rounded
- * connectors, card nodes, one focal accent, in-figure legend (refs/diagram-design).
+ * connectors, card nodes, one focal accent, in-figure legend (the diagram-design skill).
  *
  * Parsing and layout are NOT here: they live in common/diagrams/openideDiagramEngine.ts, which
  * both the chat and the diagrams MCP server already call. This file only turns a finished layout

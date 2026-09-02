@@ -80,9 +80,9 @@ export class OpenideProjectMapSettingsSection extends Disposable implements IOpe
 		warnBox.classList.toggle('visible', !!this.warning);
 
 		const actions = append(status, $('.openide-settings-section-actions'));
-		const rebuild = append(actions, $('button.openide-settings-section-button.primary', { type: 'button' }, t('settings.projectMap.rebuild'))) as HTMLButtonElement;
-		const clear = append(actions, $('button.openide-settings-section-button.danger', { type: 'button' }, t('settings.projectMap.clear'))) as HTMLButtonElement;
-		const open = append(actions, $('button.openide-settings-section-button', { type: 'button' }, t('settings.projectMap.open'))) as HTMLButtonElement;
+		const rebuild = append(actions, $('button.oi-btn.openide-settings-section-button.primary', { type: 'button' }, t('settings.projectMap.rebuild'))) as HTMLButtonElement;
+		const clear = append(actions, $('button.oi-btn.openide-settings-section-button.danger', { type: 'button' }, t('settings.projectMap.clear'))) as HTMLButtonElement;
+		const open = append(actions, $('button.oi-btn.openide-settings-section-button', { type: 'button' }, t('settings.projectMap.open'))) as HTMLButtonElement;
 		rebuild.disabled = this.busy;
 
 		this.renderStore.add(addDisposableListener(rebuild, 'click', () => void this.rebuild()));
@@ -197,7 +197,7 @@ export class OpenideProjectMapSettingsSection extends Disposable implements IOpe
 		metric(stats.contested, t('settings.projectMap.disputed'));
 
 		const actions = append(section, $('.openide-settings-section-actions'));
-		const forget = append(actions, $('button.openide-settings-section-button', { type: 'button' }, t('settings.projectMap.forget'))) as HTMLButtonElement;
+		const forget = append(actions, $('button.oi-btn.openide-settings-section-button', { type: 'button' }, t('settings.projectMap.forget'))) as HTMLButtonElement;
 		forget.disabled = !(stats.tracked > 0);
 		this.renderStore.add(addDisposableListener(forget, 'click', () => {
 			this.learning.clear();

@@ -13,7 +13,7 @@
 	margin: 3px 0;
 	padding: 4px 8px;
 	border: 1px dashed var(--oi-warn, var(--vscode-editorWarning-foreground));
-	border-radius: var(--oi-radius-sm, 6px);
+	border-radius: var(--oi-radius-md);
 	background: color-mix(in srgb, var(--oi-warn, var(--vscode-editorWarning-foreground)) 8%, transparent);
 	color: var(--oi-warn, var(--vscode-editorWarning-foreground));
 	font-size: 11px;

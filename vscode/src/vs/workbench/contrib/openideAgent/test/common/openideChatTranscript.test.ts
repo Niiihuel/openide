@@ -15,6 +15,7 @@ import {
 import { IOpenideChatItem, IOpenideChatRequestItem, isOpenideChatRequestItem, isOpenideChatResponseItem } from '../../common/chat/openideChatItem.js';
 import { buildOpenideChatTranscript } from '../../common/chat/openideChatTranscript.js';
 import { IChatMessage } from '../../common/openideAgentTypes.js';
+import { ISubagentRun } from '../../common/openideSubagentTypes.js';
 
 /**
  * The persisted thread was written by every previous build of OpenIDE and read back by none of the
@@ -25,9 +26,18 @@ suite('OpenIDE chat transcript restore', () => {
 
 	const NOW = 2_000_000;
 
-	function build(messages: readonly IChatMessage[]): readonly IOpenideChatItem[] {
-		return buildOpenideChatTranscript(messages, { now: NOW });
+	function build(messages: readonly IChatMessage[], runs?: ReadonlyMap<string, ISubagentRun>): readonly IOpenideChatItem[] {
+		return buildOpenideChatTranscript(messages, { now: NOW, runs });
 	}
+
+	const storedRun: ISubagentRun = {
+		runId: 'run_9', definitionId: 'explore', definitionVersion: 1, definitionName: 'explore',
+		parentConversationId: 'conv', parentMessageId: 'm1', depth: 1, task: 'buscar',
+		status: 'completed', createdAt: NOW, model: 'grok-4.6', readonly: true, background: true,
+		metrics: { inputTokens: 0, outputTokens: 0, toolCalls: 0, filesRead: 0, filesModified: 0, searches: 0, errors: 0, cancellations: 0, routingAttempts: 0, fallbacks: 0 },
+		timeline: [{ sequence: 0, timestamp: NOW, type: 'toolStart', toolName: 'read_file' }],
+		childRunIds: [], deliveryState: 'delivered', generation: 1, attemptCount: 1,
+	};
 
 	function contentOf(items: readonly IOpenideChatItem[], index: number): readonly IOpenideChatContent[] {
 		const item = items[index];
@@ -218,6 +228,49 @@ suite('OpenIDE chat transcript restore', () => {
 		assert.deepStrictEqual(children.map(child => child.title), ['A', 'B']);
 		// The per-task outcome was never persisted; claiming a failure we cannot prove would be worse.
 		assert.deepStrictEqual(children.map(child => child.status), ['completed', 'completed']);
+	});
+
+	/**
+	 * A durable specialist used to come back as a bare `delegate_to_subagent` tool row: the call was
+	 * not in the restore switch, so a reload turned the card into a line of plumbing.
+	 */
+	test('a durable specialist restores as its row, rebuilt from the stored run', () => {
+		const items = build([
+			{ role: 'user', content: 'delegá', messageId: 'm1' },
+			{ role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'delegate_to_subagent', argumentsJson: '{"agent":"explore","task":"buscar"}' }] },
+			{ role: 'tool', toolCallId: 'c1', content: 'Subagente iniciado en background. runId=run_9' },
+		], new Map([['run_9', storedRun]]));
+		assert.deepStrictEqual(kindsOf(items, 1), ['subagent']);
+		const card = contentOf(items, 1)[0] as IOpenideChatSubagentContent;
+		// The transcript persists a sentence, not a run: everything below came from the store.
+		assert.strictEqual(card.runId, 'run_9');
+		assert.strictEqual(card.model, 'grok-4.6');
+		assert.strictEqual(card.status, 'completed');
+		assert.strictEqual(card.timeline.length, 1);
+	});
+
+	test('a specialist whose run the store no longer has still restores as a row', () => {
+		// The run store keeps 300 runs, so a purge is normal on an old conversation. Dropping the row
+		// would rewrite history; the arguments still say which specialist was asked for.
+		const items = build([
+			{ role: 'user', content: 'delegá', messageId: 'm1' },
+			{ role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'delegate_to_subagent', argumentsJson: '{"agent":"explore","task":"buscar"}' }] },
+			{ role: 'tool', toolCallId: 'c1', content: '{"runId":"run_gone","summary":"listo"}' },
+		]);
+		const card = contentOf(items, 1)[0] as IOpenideChatSubagentContent;
+		assert.strictEqual(card.title, 'explore');
+		assert.strictEqual(card.model, undefined);
+		assert.strictEqual(card.run, undefined);
+		assert.strictEqual(card.status, 'completed');
+	});
+
+	test('an interrupted run restores as cancelled, the same word the live row uses', () => {
+		const items = build([
+			{ role: 'user', content: 'delegá', messageId: 'm1' },
+			{ role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'delegate_to_subagent', argumentsJson: '{"agent":"explore"}' }] },
+			{ role: 'tool', toolCallId: 'c1', content: 'Subagente iniciado en background. runId=run_9' },
+		], new Map([['run_9', { ...storedRun, status: 'interrupted' as const }]]));
+		assert.strictEqual((contentOf(items, 1)[0] as IOpenideChatSubagentContent).status, 'cancelled');
 	});
 
 	test('compaction restores as a settled card, including threads saved before it had metadata', () => {

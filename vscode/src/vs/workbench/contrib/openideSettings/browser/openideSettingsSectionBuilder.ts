@@ -19,11 +19,9 @@
 import { $, addDisposableListener, append } from '../../../../base/browser/dom.js';
 import { Button } from '../../../../base/browser/ui/button/button.js';
 import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
-import { SelectBox } from '../../../../base/browser/ui/selectBox/selectBox.js';
-import { Checkbox } from '../../../../base/browser/ui/toggle/toggle.js';
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { defaultButtonStyles } from '../../../../platform/theme/browser/defaultStyles.js';
-import { openideCheckboxStyles, openideInputBoxStyles, openideSelectBoxStyles } from '../../openideAgent/browser/openideControlStyles.js';
+import { openideInputBoxStyles } from '../../openideAgent/browser/openideControlStyles.js';
 import { DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
 import { plainSettingsQuery } from './openideSettingsSearch.js';
@@ -32,8 +30,61 @@ import { plainSettingsQuery } from './openideSettingsSearch.js';
  *  the search filter is ONE, not seven different copies inside each page. */
 const SEARCH_ATTR = 'data-openide-search';
 
+/** Marks a heading + its items as one unit, so filtering can retire the heading with the last
+ *  item under it. A heading has nothing searchable of its own, which is exactly why it survived
+ *  every query before this existed. */
+const GROUP_ATTR = 'data-openide-group';
+
 function searchText(parts: readonly (string | undefined)[]): string {
 	return parts.filter(part => !!part).join(' ').toLowerCase();
+}
+
+/** Declares `element` a heading + items unit, so both the page's own filter and the Settings-wide
+ *  search retire the heading together with its last item. */
+import { OpenideSettingsDropdown } from './openideSettingsDropdown.js';
+import { OpenideSettingsToggle } from './openideSettingsToggle.js';
+export function markSectionGroup(element: HTMLElement): HTMLElement {
+	element.setAttribute(GROUP_ATTR, '');
+	return element;
+}
+
+export interface ISectionGroupRow {
+	readonly label: string;
+	readonly description?: string;
+	/** Codicon shown at the row's trailing edge. Only meaningful together with `run`. */
+	readonly icon?: string;
+	readonly danger?: boolean;
+	/** Second-click confirmation text, for a row with no way back. */
+	readonly confirm?: string;
+	run?(): void;
+}
+
+/** One row of a `card()`: the native setting-row anatomy with an optional mark in front of it. */
+export interface ISectionCardRow extends ISectionGroupRow {
+	/** A logo, an avatar, a glyph: sits in its own column before the copy. */
+	readonly leading?: HTMLElement;
+	/** The description is a technical id (a model name) and reads in the editor font. */
+	readonly mono?: boolean;
+	/** Extra words the row can be found by, beyond its label and description. */
+	readonly keywords?: readonly string[];
+	/** A row whose trailing control is not yet known (a spinner, a field) still needs to
+	 *  declare itself as a state row: the glyph slot gets the spinner. */
+	readonly busy?: boolean;
+}
+
+export interface ISectionFilterSpec {
+	readonly placeholder: string;
+	readonly ariaLabel?: string;
+	readonly clearLabel?: string;
+	/** Fires on every keystroke with the query, trimmed and lowercased. Empty means "show all". */
+	change(query: string): void;
+}
+
+export interface ISectionFilter {
+	readonly element: HTMLElement;
+	focus(): void;
+	/** Optional "3 of 31" beside the field. Pass undefined to hide it. */
+	setCount(text: string | undefined): void;
 }
 
 export interface ISectionAction {
@@ -42,6 +93,9 @@ export interface ISectionAction {
 	readonly icon?: string;
 	readonly primary?: boolean;
 	readonly danger?: boolean;
+	/** No fill until hovered. For the quiet actions that sit inside a row ("Connect", "Back")
+	 *  where a filled button per row would turn a list into a wall of buttons. */
+	readonly ghost?: boolean;
 	readonly enabled?: boolean;
 	/** Text for the second click on things with no way back. A modal dialog for "delete the index"
 	 *  interrupts more than it protects; arming the button protects just as well and does not cover
@@ -120,7 +174,7 @@ export class OpenideSectionRenderer {
 
 	constructor(
 		private readonly store: DisposableStore,
-		/** `SelectBox` renders its list through the context view, so the renderer needs it. */
+		/** The dropdowns render their list through the context view, so the renderer needs it. */
 		private readonly contextViewService: IContextViewService,
 	) { }
 
@@ -137,6 +191,216 @@ export class OpenideSectionRenderer {
 			for (const action of opts.actions) { this.button(actions, action); }
 		}
 		return append(section, $('.openide-settings-section-body'));
+	}
+
+	/**
+	 * A searchable block with NO heading.
+	 *
+	 * For content whose heading would only repeat something already on screen. The provider detail
+	 * page is the case that asked for it: the page is titled "ChatGPT (Codex subscription)" and a
+	 * "Status" section underneath printed the same name, the same logo and the same blurb again.
+	 * The block still declares its keywords, so Settings-wide search reaches it exactly as before.
+	 */
+	block(parent: HTMLElement, keywords: readonly string[]): HTMLElement {
+		const block = append(parent, $('.openide-settings-section'));
+		block.setAttribute(SEARCH_ATTR, searchText(keywords));
+		return append(block, $('.openide-settings-section-body'));
+	}
+
+	/**
+	 * A grouped-inset section, the anatomy Apple's Settings is built from: a small muted caption
+	 * ABOVE a single rounded container, rows inside it divided by hairlines, and an optional line of
+	 * explanation underneath. Apple's own description of the style is a background that runs "from
+	 * the section header around both sides of list items and down to the section footer" -- the
+	 * container is what groups the rows, so the rows themselves need no borders, no cards and no
+	 * headings of their own.
+	 *
+	 * Returns the container. Rows go in through `groupRow`.
+	 */
+	group(parent: HTMLElement, opts: { title: string; footer?: string; keywords?: readonly string[] }): HTMLElement {
+		const block = append(parent, $('.openide-settings-inset-block'));
+		block.setAttribute(SEARCH_ATTR, searchText([opts.title, opts.footer, ...(opts.keywords ?? [])]));
+		append(block, $('.openide-settings-inset-title', undefined, opts.title));
+		const box = append(block, $('.openide-settings-inset'));
+		if (opts.footer) { append(block, $('.openide-settings-inset-footer', undefined, opts.footer)); }
+		return box;
+	}
+
+	/**
+	 * One row of a group: label on the left, whatever the caller puts in the returned slot on the
+	 * right. Give it `run` and the whole row becomes the target -- which is how Settings spells an
+	 * action, rather than parking a button inside a row that then does nothing when clicked.
+	 */
+	groupRow(box: HTMLElement, spec: ISectionGroupRow): HTMLElement {
+		const row = append(box, $('.openide-settings-insetrow'));
+		const copy = append(row, $('.openide-settings-insetrow-copy'));
+		const label = append(copy, $('.openide-settings-insetrow-label', undefined, spec.label));
+		if (spec.description) { append(copy, $('.openide-settings-insetrow-desc', undefined, spec.description)); }
+		const trail = append(row, $('.openide-settings-insetrow-trail'));
+		if (spec.danger) { row.classList.add('danger'); }
+		// Before the early return: a row can carry a glyph without being clickable -- the spinner on
+		// "Loading…" is exactly that, and hiding it left the row looking merely disabled.
+		if (spec.icon) { append(trail, $(`span.codicon.codicon-${spec.icon}`)); }
+		if (!spec.run) {
+			row.classList.toggle('disabled', !!spec.icon);
+			return trail;
+		}
+
+		row.classList.add('action');
+		row.setAttribute('role', 'button');
+		row.tabIndex = 0;
+		const fire = spec.confirm
+			? (() => {
+				// Same arming as a destructive button: a second click inside the timeout commits.
+				// A modal for "sign out" interrupts more than it protects.
+				let armed: ReturnType<typeof setTimeout> | undefined;
+				const disarm = () => { clearTimeout(armed); armed = undefined; label.textContent = spec.label; row.classList.remove('armed'); };
+				this.store.add(toDisposable(() => clearTimeout(armed)));
+				return () => {
+					if (armed) { disarm(); spec.run!(); return; }
+					label.textContent = spec.confirm!;
+					row.classList.add('armed');
+					armed = setTimeout(disarm, CONFIRM_TIMEOUT);
+				};
+			})()
+			: () => spec.run!();
+		this.store.add(addDisposableListener(row, 'click', fire));
+		this.store.add(addDisposableListener(row, 'keydown', event => {
+			const key = (event as KeyboardEvent).key;
+			if (key === 'Enter' || key === ' ') { event.preventDefault(); fire(); }
+		}));
+		return trail;
+	}
+
+	/**
+	 * The settings editor's own card: a muted 13px caption above ONE rounded container, and the
+	 * rows inside divided by the container's hairlines. This is the anatomy every native settings
+	 * page is drawn with (`openideSettingsEditor.ts`, `renderItems`), emitted here so a DOM section
+	 * that groups things -- providers, accounts, models -- looks like the page next to it and not
+	 * like a second design. Rows go in through `cardRow`, or through anything that emits a
+	 * `.openide-settings-row`.
+	 *
+	 * The wrapper is a searchable section, so the Settings-wide search keeps the whole card when the
+	 * caption matches and otherwise filters its rows; the group mark retires the caption together
+	 * with the last row under it.
+	 */
+	card(parent: HTMLElement, opts: { caption?: string; footer?: string; keywords?: readonly string[]; className?: string }): HTMLElement {
+		const section = append(parent, $('.openide-settings-section.openide-settings-cardsection'));
+		section.setAttribute(SEARCH_ATTR, searchText([opts.caption, opts.footer, ...(opts.keywords ?? [])]));
+		const block = markSectionGroup(append(section, $('.openide-settings-group')));
+		if (opts.className) { block.classList.add(opts.className); }
+		if (opts.caption) { append(block, $('.openide-settings-group-caption', undefined, opts.caption)); }
+		const card = append(block, $('.openide-settings-card'));
+		if (opts.footer) { append(block, $('.openide-settings-group-footer', undefined, opts.footer)); }
+		return card;
+	}
+
+	/**
+	 * One row of a card, with the native setting row's anatomy: copy on the left, whatever the
+	 * caller puts in the returned slot on the right. Given `run`, the whole row is the target, the
+	 * way Settings spells an action -- a control inside the slot still takes its own click.
+	 */
+	cardRow(card: HTMLElement, spec: ISectionCardRow): HTMLElement {
+		const row = append(card, $('.openide-settings-row'));
+		row.setAttribute(SEARCH_ATTR, searchText([spec.label, spec.description, ...(spec.keywords ?? [])]));
+		if (spec.leading) {
+			row.classList.add('has-leading');
+			row.appendChild(spec.leading);
+		}
+		const copy = append(row, $('.openide-settings-copy'));
+		const title = append(copy, $('.openide-settings-setting-title'));
+		const label = append(title, $('span.openide-settings-setting-name', undefined, spec.label));
+		if (spec.description) {
+			append(copy, $(spec.mono ? '.openide-settings-description.openide-settings-mono' : '.openide-settings-description', undefined, spec.description));
+		}
+		const value = append(row, $('.openide-settings-value'));
+		if (spec.danger) { row.classList.add('danger'); }
+		if (spec.busy) {
+			append(value, $('span.codicon.codicon-loading.codicon-modifier-spin.openide-settings-row-glyph'));
+		} else if (spec.icon) {
+			append(value, $(`span.codicon.codicon-${spec.icon}.openide-settings-row-glyph`));
+		}
+		if (!spec.run) { return value; }
+
+		row.classList.add('openide-settings-row-link');
+		row.setAttribute('role', 'button');
+		row.tabIndex = 0;
+		const fire = spec.confirm
+			? (() => {
+				let armed: ReturnType<typeof setTimeout> | undefined;
+				const disarm = () => { clearTimeout(armed); armed = undefined; label.textContent = spec.label; row.classList.remove('armed'); };
+				this.store.add(toDisposable(() => clearTimeout(armed)));
+				return () => {
+					if (armed) { disarm(); spec.run!(); return; }
+					label.textContent = spec.confirm!;
+					row.classList.add('armed');
+					armed = setTimeout(disarm, CONFIRM_TIMEOUT);
+				};
+			})()
+			: () => spec.run!();
+		this.store.add(addDisposableListener(row, 'click', event => {
+			// A control parked in the slot answers its own click; the row only answers the rest.
+			if ((event.target as HTMLElement).closest('.openide-settings-value button, .openide-settings-value .monaco-inputbox, .openide-settings-value .monaco-button')) { return; }
+			fire();
+		}));
+		this.store.add(addDisposableListener(row, 'keydown', event => {
+			const key = (event as KeyboardEvent).key;
+			if (event.target !== row) { return; }
+			if (key === 'Enter' || key === ' ') { event.preventDefault(); fire(); }
+		}));
+		return value;
+	}
+
+	/**
+	 * Search field that filters WITHIN one page.
+	 *
+	 * It is the very same markup as the sidebar's box -- native `InputBox`, magnifier laid over it,
+	 * inline clear -- because a second search on screen that looked even slightly different would
+	 * read as a different kind of control. The sidebar's searches ACROSS Settings; this one narrows
+	 * the page you are already on, and only the placement tells them apart.
+	 *
+	 * The page owns what a match means: this reports the query, lowercased and trimmed, and never
+	 * touches the DOM around it.
+	 */
+	filter(parent: HTMLElement, spec: ISectionFilterSpec): ISectionFilter {
+		const wrap = append(parent, $('.openide-settings-search-wrap.openide-settings-filter'));
+		const box = this.store.add(new InputBox(wrap, undefined, {
+			inputBoxStyles: openideInputBoxStyles,
+			placeholder: spec.placeholder,
+			ariaLabel: spec.ariaLabel ?? spec.placeholder,
+			// `InputBox` defaults its hover to the placeholder text. In the sidebar that hover has
+			// empty space above it; here the field sits under the section's description, and a
+			// tooltip that only repeats the words already inside the box was covering the sentence
+			// explaining the page. Nothing is lost: the placeholder stays, and so does the aria label.
+			tooltip: '',
+		}));
+		append(wrap, $('span.codicon.codicon-search.openide-settings-search-icon'));
+		const clear = append(wrap, $('button.openide-settings-search-clear.hidden', {
+			type: 'button',
+			title: spec.clearLabel ?? localize('openide.settings.filter.clear', "Clear the search"),
+		})) as HTMLButtonElement;
+		append(clear, $('span.codicon.codicon-close'));
+		const count = append(wrap, $('span.openide-settings-filter-count.hidden'));
+
+		const apply = () => {
+			const query = box.value.trim().toLowerCase();
+			clear.classList.toggle('hidden', !query);
+			spec.change(query);
+		};
+		this.store.add(addDisposableListener(box.inputElement, 'input', apply));
+		this.store.add(addDisposableListener(clear, 'click', () => {
+			box.value = '';
+			apply();
+			box.focus();
+		}));
+		return {
+			element: wrap,
+			focus: () => box.focus(),
+			setCount: text => {
+				count.textContent = text ?? '';
+				count.classList.toggle('hidden', !text);
+			},
+		};
 	}
 
 	/** Row with the same anatomy as a native setting. */
@@ -169,7 +433,7 @@ export class OpenideSectionRenderer {
 			// Click on the row, but NOT on its controls: touching a toggle or an icon button must
 			// not also fold/unfold the row.
 			this.store.add(addDisposableListener(row, 'click', event => {
-				if ((event.target as HTMLElement).closest('.openide-settings-iconbtn, .monaco-custom-toggle, .monaco-button, .openide-settings-row-body')) { return; }
+				if ((event.target as HTMLElement).closest('.openide-settings-iconbtn, .openide-settings-toggle, .monaco-button, .openide-settings-row-body')) { return; }
 				const open = !row.classList.contains('open');
 				paint(open);
 				spec.onToggle?.(open);
@@ -221,14 +485,23 @@ export class OpenideSectionRenderer {
 	 * the button's own layout instead of a `<span>` glued in front of it.
 	 */
 	button(parent: HTMLElement, action: ISectionAction): Button {
+		// The widget paints its colours INLINE from this object, so a class alone cannot make it
+		// transparent: the ghost variant hands it the product's hover token as its only fill.
+		const ghost = action.ghost && !action.primary
+			? { buttonSecondaryBackground: 'transparent', buttonSecondaryHoverBackground: 'var(--oi-hover)', buttonSecondaryForeground: 'var(--oi-text)', buttonSecondaryBorder: undefined }
+			: undefined;
 		const button = this.store.add(new Button(parent, {
 			...defaultButtonStyles,
+			...ghost,
 			secondary: !action.primary,
 			supportIcons: true,
 			title: action.label,
 		}));
-		button.element.classList.add('openide-settings-section-button');
+		// The canonical primitive (openideSurfaceCss.ts) paints it; the Settings class only lays it out.
+		button.element.classList.add('oi-btn', 'openide-settings-section-button');
+		if (action.primary) { button.element.classList.add('primary'); }
 		if (action.danger) { button.element.classList.add('danger'); }
+		if (ghost) { button.element.classList.add('ghost'); }
 		const text = (label: string) => action.icon ? `$(${action.icon}) ${label}` : label;
 		button.label = text(action.label);
 		button.enabled = action.enabled !== false;
@@ -309,9 +582,9 @@ export class OpenideSectionRenderer {
 	segmented(parent: HTMLElement, spec: { label: string; options: readonly { id: string; label: string }[]; value: string; change(id: string): void }): HTMLElement {
 		const row = append(parent, $('.openide-settings-fieldrow'));
 		append(row, $('label.openide-settings-field-label', undefined, spec.label));
-		const group = append(row, $('.openide-settings-segmented', { role: 'tablist' }));
+		const group = append(row, $('.oi-segmented.openide-settings-segmented', { role: 'tablist' }));
 		for (const option of spec.options) {
-			const button = append(group, $('button.openide-settings-segment', { type: 'button', role: 'tab' }, option.label)) as HTMLButtonElement;
+			const button = append(group, $('button.oi-segment.openide-settings-segment', { type: 'button', role: 'tab' }, option.label)) as HTMLButtonElement;
 			const active = option.id === spec.value;
 			button.classList.toggle('active', active);
 			button.setAttribute('aria-selected', String(active));
@@ -353,19 +626,18 @@ export class OpenideSectionRenderer {
 		return box;
 	}
 
-	/** Options dropdown — native `SelectBox`, the same widget an enum setting uses. */
+	/** Options dropdown — the product's popover, the same one an enum setting row opens. */
 	select(parent: HTMLElement, spec: { label: string; options: readonly { value: string; label: string }[]; value: string; change(value: string): void }): HTMLElement {
 		const row = append(parent, $('.openide-settings-fieldrow'));
 		append(row, $('label.openide-settings-field-label', undefined, spec.label));
 		const host = append(row, $('.openide-settings-selecthost'));
 		const values = spec.options.map(option => option.value);
 		const selected = Math.max(0, values.indexOf(spec.value));
-		const select = this.store.add(new SelectBox(
-			spec.options.map(option => ({ text: option.label })),
+		const select = this.store.add(new OpenideSettingsDropdown(
+			spec.options.map(option => ({ label: option.label })),
 			selected,
 			this.contextViewService,
-			openideSelectBoxStyles,
-			{ ariaLabel: spec.label },
+			spec.label,
 		));
 		select.render(host);
 		this.store.add(select.onDidSelect(event => spec.change(values[event.index])));
@@ -436,12 +708,15 @@ export class OpenideSectionRenderer {
 	 * Leaves visible only what matches the search. Called ONCE, from the editor, over what the
 	 * section already drew: the pages never learn that a search box exists.
 	 *
-	 * Reglas, en orden:
+	 * The rules, in order:
 	 *  - If it matches a block's header, the whole block stays (searching "Skills" must show the
 	 *      skills, not filter its rows by the word "skills").
 	 *  - Otherwise the matching rows survive; a block left with none goes away.
 	 *  - Anything that declared no searchable text is NOT touched: we prefer showing too much over
 	 *      blanking a page because it was not annotated.
+	 *  - A group heading whose every item was removed goes with them. Headings carry no searchable
+	 *      text of their own, so without this last pass a query left "CONNECTED" standing over
+	 *      nothing at all.
 	 */
 	static prune(container: HTMLElement, query: string): void {
 		const plain = plainSettingsQuery(query);
@@ -449,23 +724,27 @@ export class OpenideSectionRenderer {
 		for (const section of Array.from(container.querySelectorAll<HTMLElement>('.openide-settings-section'))) {
 			if ((section.getAttribute(SEARCH_ATTR) ?? '').includes(plain)) { continue; }
 			const rows = Array.from(section.querySelectorAll<HTMLElement>(`[${SEARCH_ATTR}]`));
-			let sobrevive = 0;
+			let survivors = 0;
 			for (const row of rows) {
-				if ((row.getAttribute(SEARCH_ATTR) ?? '').includes(plain)) { sobrevive++; } else { row.remove(); }
+				if ((row.getAttribute(SEARCH_ATTR) ?? '').includes(plain)) { survivors++; } else { row.remove(); }
 			}
-			if (rows.length && !sobrevive) { section.remove(); }
+			if (rows.length && !survivors) { section.remove(); }
 		}
 		// Loose rows, outside any block: same criterion.
 		for (const row of Array.from(container.querySelectorAll<HTMLElement>(`:scope > [${SEARCH_ATTR}]`))) {
 			if (!row.classList.contains('openide-settings-section') && !(row.getAttribute(SEARCH_ATTR) ?? '').includes(plain)) { row.remove(); }
 		}
+		for (const group of Array.from(container.querySelectorAll<HTMLElement>(`[${GROUP_ATTR}]`))) {
+			if (!group.querySelector(`[${SEARCH_ATTR}]`)) { group.remove(); }
+		}
 	}
 
-	/** Native `Checkbox` — the same widget upstream's own boolean settings use. */
+	/** The same switch the native boolean rows use (openideSettingsToggle.ts), so a section's
+	 *  on/off and a setting's on/off are one control. */
 	toggle(parent: HTMLElement, spec: ISectionToggle): HTMLElement {
-		const checkbox = this.store.add(new Checkbox(spec.title ?? '', spec.checked, openideCheckboxStyles));
-		append(parent, checkbox.domNode);
-		this.store.add(checkbox.onChange(() => spec.change(checkbox.checked)));
-		return checkbox.domNode;
+		const toggle = this.store.add(new OpenideSettingsToggle(spec.title ?? '', spec.checked));
+		append(parent, toggle.domNode);
+		this.store.add(toggle.onChange(on => spec.change(on)));
+		return toggle.domNode;
 	}
 }

@@ -107,11 +107,11 @@ export class OpenideProviderAccountsService {
 	/** If there is already an active credential (legacy or from a previous session) but no account
 	 *  tracked yet, it registers it as the first account — a transparent migration, without
 	 *  touching the active key. ALWAYS call it before connecting/adding/re-authenticating. */
-	async ensureActiveTracked(providerId: string, baseKey: string): Promise<void> {
+	async ensureActiveTracked(providerId: string, baseKey: string): Promise<boolean> {
 		if (await this.getActiveId(providerId)) {
-			return;
+			return false;
 		}
-		await this.snapshot(providerId, baseKey, {});
+		return await this.snapshot(providerId, baseKey, {}) !== undefined;
 	}
 
 	/** Copies the saved account `accountId` into the active key and marks it active. */
@@ -120,7 +120,20 @@ export class OpenideProviderAccountsService {
 		if (value === undefined) {
 			return false;
 		}
-		await this.ensureActiveTracked(providerId, baseKey);
+		// Save what is in the ACTIVE key back into the account that owns it, before overwriting it.
+		//
+		// `ensureActiveTracked` cannot do this: it returns early the moment an active id exists, and
+		// one always does by the time you are switching. Meanwhile `getValidToken`/`forceRefresh`
+		// write refreshed credentials to the base key and never to the per-account copy — so the
+		// stored copy drifts behind from the first refresh onwards. Leaving it stale meant switching
+		// away and back restored a token that could already be dead, which is exactly the promise
+		// "go back to the previous account" has to keep.
+		const current = await this.getActiveId(providerId);
+		if (current && current !== accountId) {
+			await this.snapshot(providerId, baseKey, { id: current });
+		} else {
+			await this.ensureActiveTracked(providerId, baseKey);
+		}
 		await this.secretStorage.set(baseKey, value);
 		await this.setActiveId(providerId, accountId);
 		return true;

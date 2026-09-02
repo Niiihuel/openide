@@ -178,9 +178,9 @@ export const tocData: ITOCEntry<string> = {
 				}
 			]
 		},
-		// OpenIDE es una aplicación propia y el agente forma parte del producto base. Las
-		// superficies visuales se declaran como comandos del TOC; los settings técnicos
-		// quedan agrupados en Avanzado, sin duplicar editores ni renderizadores.
+		// OpenIDE is a product of its own and the agent is part of the base product. The visual
+		// surfaces are declared as TOC commands; the technical settings are grouped under
+		// Advanced, without duplicating editors or renderers.
 		{
 			id: 'openideAgent',
 			label: localize('openideAgent', "Agente IA"),
@@ -263,12 +263,18 @@ export const tocData: ITOCEntry<string> = {
 					settings: ['workbench.browser.*', 'openide.agent.browserAllowedHosts', 'openide.agent.browserTools.*']
 				},
 				{
+					id: 'openideAgent/import',
+					label: localize('openideAgentImport', "Importar configuración"),
+					settings: [],
+				},
+				{
 					id: 'openideAgent/advanced',
 					label: localize('openideAgentAdvanced', "Modelos y avanzado"),
 					settings: [
 						'openide.agent.customProviders',
 						'openide.agent.fallbackProviders',
 						'openide.agent.fallbackChain',
+						'openide.agent.accountFailover',
 						'openide.agent.toolAllowlist',
 						'openide.agent.web.enabled',
 						'openide.agent.web.searchEndpoint',

@@ -12,7 +12,9 @@ import { OpenideStringKey, t } from '../../common/openideStrings.js';
 
 /**
  * The header's "more actions" popover, item for item the webview's `KEBAB_ITEMS`
- * (openideChatHtml.ts): fork, copy transcript, separator, Project Map.
+ * (as the removed chat webview had it): fork, copy transcript, separator, and the project's two
+ * views — the Project Map's nodes and the architecture map's diagram, which are one index read two
+ * ways and therefore belong in the same block.
  */
 
 interface IKebabItem {
@@ -30,6 +32,7 @@ export interface IOpenideChatKebabActions {
 	remove(): void;
 	removeAll(): void;
 	openProjectMap(): void;
+	openArchMap(): void;
 }
 
 /**
@@ -47,6 +50,7 @@ const ITEMS: readonly IKebabItem[] = [
 	{ icon: 'clear-all', label: 'chat.menu.deleteAll', run: actions => actions.removeAll() },
 	{ separator: true },
 	{ icon: 'type-hierarchy', label: 'chat.menu.projectMap', run: actions => actions.openProjectMap() },
+	{ icon: 'circuit-board', label: 'chat.menu.archMap', run: actions => actions.openArchMap() },
 ];
 
 export class OpenideChatKebabMenu extends OpenideChatMenuPopover {

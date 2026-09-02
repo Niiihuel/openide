@@ -1,0 +1,137 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* The two widgets the fork mounts INSIDE a code editor: the hint over a selection
+   (openideSelectionHint.ts) and the quick edit input (openideQuickEdit.ts). Both are content
+   widgets, so they scroll with the text; both sit on the editor widget surface — the hover,
+   the suggest widget — because that is what "a small panel over code" looks like in this IDE. */
+
+/* ---- The hint: "Agregar al chat Ctrl+L | Edición rápida Ctrl+K" ------------------------- */
+
+.monaco-editor .openide-selection-hint {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	/* A content widget takes the width the editor gives it, which wrapped the two buttons onto
+	   two rows; the bar is as wide as its buttons, never narrower. */
+	width: max-content;
+	white-space: nowrap;
+	margin-bottom: 4px;
+	padding: 2px;
+	border: 1px solid var(--vscode-editorWidget-border, var(--oi-border));
+	border-radius: var(--oi-radius-md);
+	background: var(--vscode-editorWidget-background);
+	color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+	box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	line-height: 18px;
+	user-select: none;
+	z-index: 40;
+}
+
+.monaco-editor .openide-selection-hint-action {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 22px;
+	padding: 0 8px;
+	border: none;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.monaco-editor .openide-selection-hint-action:hover { background: var(--vscode-toolbar-hoverBackground); }
+.monaco-editor .openide-selection-hint-action:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+
+/* The shortcut, drawn like the workbench's own keybinding labels. */
+.monaco-editor .openide-selection-hint-kbd {
+	padding: 0 4px;
+	border: 1px solid var(--vscode-keybindingLabel-border, var(--oi-border));
+	border-bottom-color: var(--vscode-keybindingLabel-bottomBorder, var(--oi-border-strong));
+	border-radius: var(--oi-radius-sm);
+	background: var(--vscode-keybindingLabel-background, var(--oi-tint-2));
+	color: var(--vscode-keybindingLabel-foreground, var(--vscode-descriptionForeground));
+	font-family: var(--vscode-font-family);
+	font-size: 11px;
+	line-height: 16px;
+}
+
+/* ---- The quick edit input ----------------------------------------------------------------- */
+
+.monaco-editor .openide-quick-edit {
+	width: 520px;
+	box-sizing: border-box;
+	margin-bottom: 4px;
+	padding: 6px 8px;
+	border: 1px solid var(--vscode-editorWidget-border, var(--oi-border));
+	border-radius: var(--oi-radius-md);
+	background: var(--vscode-editorWidget-background);
+	color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+	box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	z-index: 41;
+}
+
+.monaco-editor .openide-quick-edit-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.monaco-editor .openide-quick-edit-icon {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+}
+.monaco-editor .openide-quick-edit.running .openide-quick-edit-icon { color: var(--vscode-progressBar-background, var(--vscode-focusBorder)); }
+
+.monaco-editor .openide-quick-edit-input {
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 24px;
+	padding: 0 6px;
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: var(--oi-radius-sm);
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	font: inherit;
+	outline: none;
+}
+.monaco-editor .openide-quick-edit-input::placeholder { color: var(--vscode-input-placeholderForeground); }
+.monaco-editor .openide-quick-edit-input:focus { border-color: var(--vscode-focusBorder); }
+.monaco-editor .openide-quick-edit-input:disabled { opacity: 0.6; }
+
+/* The model chip: the composer's trigger, one size down. */
+.monaco-editor .openide-quick-edit-model {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: 24px;
+	max-width: 220px;
+	padding: 0 6px;
+	border: 1px solid var(--vscode-input-border, var(--oi-border-soft));
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: inherit;
+	font-size: 11px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.monaco-editor .openide-quick-edit-model:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+.monaco-editor .openide-quick-edit-model-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.monaco-editor .openide-quick-edit-model > .codicon { font-size: 12px; }
+
+.monaco-editor .openide-quick-edit-note {
+	margin-top: 4px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+}
+.monaco-editor .openide-quick-edit-note:empty { display: none; }

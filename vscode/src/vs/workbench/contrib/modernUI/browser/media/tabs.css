@@ -165,15 +165,28 @@
 	padding: 0 var(--vscode-spacing-size80) 0 var(--vscode-spacing-size60) !important;
 }
 
-/* Persistent dirty/pin indicators always reserve their overlay column. Clean tabs reserve
- * the transient close/unpin action only when requested (https://github.com/microsoft/vscode/issues/329605). */
-.modern-ui-tabs .part.editor .tab-actions-reserve-space .tabs-container > .tab:not(.sticky-compact):not(.tab-actions-left):not(.close-action-off),
+/* EVERY tab reserves its action column, dirty and clean alike.
+ *
+ * Upstream reserves it only when `tabActionReserveSpace` is on and, with it off, lets the close
+ * button OVERLAY the tail of the label behind a gradient (microsoft/vscode#329605). This fork is
+ * older than that option: `tab-actions-reserve-space` is never written onto `.title` by any code
+ * here, so the "on" branch was unreachable and every clean tab took the overlay. On a `sizing-fit`
+ * strip that means hovering `index.ts` shows `inde` plus a plate — the name of the file you are
+ * pointing at is the one thing the tab exists to say, and it was the part being covered. A dirty
+ * tab never had the problem, because the two rules below already reserved the column for it: the
+ * strip was showing two different behaviours depending on whether the file had unsaved changes.
+ *
+ * Reserving is the branch to keep rather than the overlay, because the column costs 20px of a tab
+ * that sizes itself to its label anyway, and it buys a title that never moves and is never covered.
+ * The gradient that used to fade the label under the plate is gone with it (see `.tab-actions`
+ * below): there is nothing left to fade. */
+.modern-ui-tabs .part.editor .tabs-container > .tab:not(.sticky-compact):not(.tab-actions-left):not(.close-action-off),
 .modern-ui-tabs .part.editor .tabs-container > .tab.dirty:not(.sticky-compact):not(.tab-actions-left):not(.dirty-border-top),
 .modern-ui-tabs .part.editor .tabs-container > .tab.sticky:not(.sticky-compact):not(.pinned-action-off):not(.tab-actions-left) {
 	padding-right: var(--vscode-spacing-size280) !important;
 }
 
-.modern-ui-tabs .part.editor .tab-actions-reserve-space .tabs-container > .tab.tab-actions-left:not(.sticky-compact):not(.close-action-off),
+.modern-ui-tabs .part.editor .tabs-container > .tab.tab-actions-left:not(.sticky-compact):not(.close-action-off),
 .modern-ui-tabs .part.editor .tabs-container > .tab.dirty.tab-actions-left:not(.sticky-compact):not(.dirty-border-top),
 .modern-ui-tabs .part.editor .tabs-container > .tab.sticky.tab-actions-left:not(.sticky-compact):not(.pinned-action-off) {
 	padding-left: var(--vscode-spacing-size280) !important;
@@ -378,37 +391,9 @@
 	top: var(--vscode-spacing-size20);
 }
 
-.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor > .content .editor-group-container > .title:not(.tab-actions-reserve-space) .tabs-container > .tab:not(.dirty):not(.sticky):not(.close-action-off):hover > .tab-actions::before,
-.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor > .content .editor-group-container > .title:not(.tab-actions-reserve-space) .tabs-container > .tab:not(.dirty):not(.sticky):not(.close-action-off) > .tab-actions:focus-within::before {
-	content: '';
-	position: absolute;
-	top: 0;
-	right: 100%;
-	bottom: 0;
-	width: var(--vscode-spacing-size160);
-	border-block: var(--vscode-strokeThickness) solid transparent;
-	background-image: linear-gradient(to right, transparent, var(--modern-ui-editor-tab-action-hover-background));
-	background-clip: padding-box;
-	box-sizing: border-box;
-	pointer-events: none;
-}
-
-.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor > .content .editor-group-container > .title .tabs-container > .tab.tab-actions-left:not(.close-action-off):hover > .tab-actions::before,
-.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor > .content .editor-group-container > .title .tabs-container > .tab.tab-actions-left:not(.close-action-off) > .tab-actions:focus-within::before {
-	right: auto;
-	left: 100%;
-	background-image: linear-gradient(to left, transparent, var(--modern-ui-editor-tab-action-hover-background));
-}
-
-.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor > .content .editor-group-container:not(.active) > .title .tabs-container > .tab:not(.tab-actions-left):not(.close-action-off):hover > .tab-actions::before,
-.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor > .content .editor-group-container:not(.active) > .title .tabs-container > .tab:not(.tab-actions-left):not(.close-action-off) > .tab-actions:focus-within::before {
-	background-image: linear-gradient(to right, transparent, var(--modern-ui-editor-tab-action-unfocused-hover-background));
-}
-
-.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor > .content .editor-group-container:not(.active) > .title .tabs-container > .tab.tab-actions-left:not(.close-action-off):hover > .tab-actions::before,
-.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor > .content .editor-group-container:not(.active) > .title .tabs-container > .tab.tab-actions-left:not(.close-action-off) > .tab-actions:focus-within::before {
-	background-image: linear-gradient(to left, transparent, var(--modern-ui-editor-tab-action-unfocused-hover-background));
-}
+/* The gradient that used to fade a label out under the action plate lived here. It only ever ran
+ * on tabs whose column was NOT reserved, and now every tab reserves one: there is no label under
+ * the plate left to fade. */
 
 :is(.hc-black, .hc-light).modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.dirty-border-top > .tab-actions {
 	top: 0;
@@ -529,19 +514,11 @@
 	opacity: 1;
 }
 
-/* When the reserved action column is always present, keep the action visible and clickable so
- * the column never reads as a blank gap (https://github.com/microsoft/vscode/issues/329605). */
-.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title.tab-actions-reserve-space .tabs-container > .tab:not(.sticky-compact):not(.close-action-off) > .tab-actions {
-	pointer-events: auto;
-}
-
-.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container.active > .title.tab-actions-reserve-space .tabs-container > .tab:not(.sticky-compact):not(.close-action-off) > .tab-actions .action-label {
-	opacity: 1;
-}
-
-.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container:not(.active) > .title.tab-actions-reserve-space .tabs-container > .tab:not(.sticky-compact):not(.close-action-off):not(:hover) > .tab-actions .action-label:not(:focus) {
-	opacity: 0.5;
-}
+/* Upstream's reserve mode also PINS the close button on (visible and clickable at rest) so the
+ * reserved column never reads as a blank gap. That half is deliberately not adopted: the rules
+ * above key off `.title.tab-actions-reserve-space`, a class no code in this fork writes, and the
+ * column here is 20px at the end of a left-aligned label — it reads as padding, not as a hole.
+ * The button stays a hover/focus affordance, which is what this strip already was. */
 
 .modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.dirty:not(.close-action-off):hover > .tab-actions .action-label.codicon-close::before,
 .modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.dirty > .tab-actions .action-label.codicon-close:focus::before {
@@ -1044,7 +1021,13 @@
 .modern-ui-tabs.monaco-workbench .part.editor .tabs-container > .tab::before {
 	content: '';
 	position: absolute;
-	inset: 0 var(--vscode-spacing-size20);
+	/* Inset on ALL FOUR sides, not just left and right. With `0` on top and bottom the pill filled
+	   the whole 32px row and sat flush against the island's rounded top edge, while the dock's tab
+	   — same design, 28px inside the same 32px row — kept 2px of air above it. Two tab strips in
+	   two islands, a gap apart, with different vertical rhythms. Upstream gets those 2px from the
+	   container's padding plus a 24px tab; this fork's tab element is the full row, so the pill is
+	   where the inset has to live. */
+	inset: var(--vscode-spacing-size20);
 	z-index: 0;
 	border-radius: var(--vscode-cornerRadius-small);
 	background-color: var(--modern-ui-editor-tab-inactive-background);
@@ -1066,4 +1049,109 @@
 
 .modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor .tabs-container > .tab.active:hover::before {
 	background-color: var(--modern-ui-editor-tab-active-hover-background);
+}
+
+/* ==== DIVERGENCIA DEL FORK (no borrar en el próximo rebase) ================================
+ * The active tab shows its close action at all times, as the chat dock's tab does: the two strips
+ * sit an island apart and are meant to read as one system, and a pill whose close only appears on
+ * hover made the editor's look like a different control. Inactive tabs keep the hover reveal. */
+.modern-ui-tabs.monaco-workbench .part.editor .tabs-container > .tab.active:not(.close-action-off) > .tab-actions .action-label {
+	opacity: 1 !important;
+	visibility: visible !important;
+}
+
+/* ==== DIVERGENCIA DEL FORK (no borrar en el próximo rebase) ================================
+ * The close action inside the pill. Upstream's `.tab-fill` pill and its 24px action column leave
+ * the button's hover box flush with the pill's right edge, and at 28px tall it read as a second
+ * pill glued to the first. Here the box is the same 20px square the chat's tab close uses
+ * (`openideChatHeader.css`), centred in the column and 4px in from the pill's edge, so the two tab
+ * strips read as one control. The reserved padding of the label (spacing-size280) still holds it. */
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:not(.tab-actions-left) > .tab-actions {
+	margin: 0 var(--vscode-spacing-size40) 0 var(--vscode-spacing-size20);
+}
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab > .tab-actions .actions-container {
+	height: 100%;
+	align-items: center;
+}
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab > .tab-actions .action-label {
+	width: 18px;
+	height: 18px;
+	line-height: 18px;
+	padding: 0;
+	margin: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	font-size: 13px;
+}
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab > .tab-actions .action-label.codicon {
+	font-size: 13px;
+}
+
+/* ==== DIVERGENCIA DEL FORK (no borrar en el próximo rebase) ================================
+ * One tab language with the chat dock (`openideChatHeader.css`): 28px pill in a 32px strip, 2px
+ * horizontal inset, `cornerRadius-small`, icon 6px from the title, body1 regular, `tab.inactive
+ * Foreground` at rest and the `modernEditorTab-*` fills for hover and active. Only what still
+ * differed is written here; sizing (`workbench.editor.tabSizing`) is behaviour and stays. */
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab > .monaco-icon-label {
+	gap: var(--vscode-spacing-size60);
+}
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab > .monaco-icon-label > .monaco-icon-label-container {
+	font-size: var(--vscode-fontSize-body1);
+	font-weight: var(--vscode-fontWeight-regular);
+}
+/* The git decoration letter ("U", "M") in the caption tone and one step smaller: the chat's tabs
+   carry a 7px status dot in that place, and a bold letter beside the title read as part of the name. */
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab > .monaco-icon-label::after {
+	font-size: 11px;
+	font-weight: var(--vscode-fontWeight-regular);
+	opacity: 1;
+	padding-left: var(--vscode-spacing-size40);
+	margin-right: 0;
+}
+/* The decoration hugs the title (4px), as the chat's status dot hugs its title: the label box no
+   longer stretches to the reserved action column, which was what parked the letter mid-air. */
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab > .monaco-icon-label {
+	flex: 0 1 auto;
+	min-width: 0;
+}
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab > .monaco-icon-label > .monaco-icon-label-container {
+	flex: 0 1 auto;
+}
+
+/* ---- OpenIDE: the close box is the chat's close box ------------------------------------------
+ * Upstream lights the whole action plate on hover — a 24px column the full height of the tab,
+ * with a gradient fading the label under it — while the dock's tabs (openideChatHeader.css,
+ * `.openide-chat-tab-close`) hover an 18px box around a 13px glyph. Two close buttons a few
+ * hundred pixels apart with two different hit shapes read as two products. The plate keeps its
+ * column and its pointer handling; it just stops painting, and the glyph's own box takes the
+ * chat's metrics and the chat's hover colour. */
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:not(.close-action-off):hover > .tab-actions,
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:not(.close-action-off) > .tab-actions:focus-within,
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container:not(.active) > .title .tabs-container > .tab:not(.close-action-off):hover > .tab-actions,
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container:not(.active) > .title .tabs-container > .tab:not(.close-action-off) > .tab-actions:focus-within,
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.active:not(.close-action-off):hover > .tab-actions,
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.active:not(.close-action-off) > .tab-actions:focus-within,
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container:not(.active) > .title .tabs-container > .tab.active:not(.close-action-off):hover > .tab-actions,
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container:not(.active) > .title .tabs-container > .tab.active:not(.close-action-off) > .tab-actions:focus-within {
+	background-color: transparent;
+}
+.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor > .content .editor-group-container > .title .tabs-container > .tab.active:not(.close-action-off):hover > .tab-actions::before,
+.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor > .content .editor-group-container > .title .tabs-container > .tab.active:not(.close-action-off) > .tab-actions:focus-within::before {
+	background-image: none;
+}
+
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab > .tab-actions .action-label.codicon,
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab > .tab-actions .action-label.codicon {
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	font-size: 13px;
+	line-height: 18px;
+	border-radius: var(--vscode-cornerRadius-small);
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+.modern-ui-tabs.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab > .tab-actions .action-label.codicon:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
 }

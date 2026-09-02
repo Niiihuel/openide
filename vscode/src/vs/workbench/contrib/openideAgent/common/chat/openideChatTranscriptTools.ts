@@ -4,19 +4,20 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { IChatMessage, IPersistedFileDiff, ITodoItem, IToolCall, TodoStatus } from '../openideAgentTypes.js';
-import { IOpenideChatDelegationContent, IOpenideChatSubagentContent } from './openideChatContent.js';
+import { IOpenideChatDelegationContent, IOpenideChatSubagentContent, OpenideChatSubagentStatus } from './openideChatContent.js';
+import { ISubagentRun } from '../openideSubagentTypes.js';
 import {
 	getOpenideChatContentAt, IOpenideChatDraft, pushOpenideChatContent, setOpenideChatContentAt,
 } from './openideChatReducerState.js';
 import {
-	applyOpenideChatFileDiff, applyOpenideChatToolResult, applyOpenideChatToolStart, ensureOpenideChatDelegation,
+	applyOpenideChatFileDiff, applyOpenideChatToolResult, applyOpenideChatToolStart, ensureOpenideChatDelegation, parseOpenideChatAskAnswers,
 } from './openideChatReducerTools.js';
 import { parseToolArguments } from './openideChatToolMeta.js';
 
 /**
  * Rebuilds the content of ONE persisted tool call.
  *
- * Ported from the five special cases inside `restoreThread` (browser/openideChatHtml.ts:5594-5617)
+ * Ported from the five special cases inside `restoreThread` (the removed chat webview)
  * plus its generic `addTool`/`upgradeEditCard`/`finishTool` tail. Those five tools are not restored
  * through the normal tool row because their live card is drawn by a message the HOST sends
  * (`planCard`, `canvasCard`, the todos snapshot, the ask stepper, the delegation envelope) and none
@@ -36,7 +37,7 @@ export interface IOpenideChatRestoredToolResult {
 /**
  * A tool message whose text starts with `Error` failed.
  *
- * This is the webview's own test (`res.indexOf('Error') === 0`, openideChatHtml.ts:5623) and not a
+ * This is the webview's own test (`res.indexOf('Error') === 0`, the removed chat webview) and not a
  * guess: the persisted thread stores no success flag at all, so the prefix the tools themselves
  * write is the only evidence left after a reload.
  */
@@ -74,7 +75,7 @@ function restoredTodos(argumentsJson: string | undefined): readonly ITodoItem[] 
 /**
  * The to-do list is a SNAPSHOT: the last call wins and replaces the previous row.
  *
- * The webview appends one card per `update_todos` instead (openideChatHtml.ts:4360-4361 live,
+ * The webview appends one card per `update_todos` instead (the removed chat webview live,
  * 5594-5598 on restore). Reproducing that here would make a reloaded turn show N cards where the
  * live reducer shows one, and a transcript that changes shape on reload is worse than either
  * choice. Replacement is deliberately implemented through the SAME `todosIndex` cursor the reducer
@@ -89,16 +90,9 @@ function restoreTodos(draft: IOpenideChatDraft, call: IToolCall): void {
 	draft.todosIndex = pushOpenideChatContent(draft, { kind: 'todos', items });
 }
 
-const ANSWER_PREFIX = /R:\s*([\s\S]*)$/;
-/** What the webview writes for a question the user skipped (openideChatHtml.ts:5643). */
-const SKIPPED_ANSWER = '(omitida)';
-
 /**
  * Rebuilds the ask stepper from the call's questions and the single blob the tool returned.
- *
- * With one question the whole result IS the answer; with several the tool joins them as
- * `P: …\nR: …` blocks separated by a blank line, and that shape is the only separator left — the
- * answers were never persisted individually.
+ * The blob is split by `parseOpenideChatAskAnswers`, the same function the live settle uses.
  */
 function restoreAsk(draft: IOpenideChatDraft, call: IToolCall, result: string): void {
 	const args = parseToolArguments(call.argumentsJson);
@@ -107,12 +101,7 @@ function restoreAsk(draft: IOpenideChatDraft, call: IToolCall, result: string): 
 		? raw.map(entry => ({ question: String((entry as { question?: unknown } ?? {}).question ?? '') }))
 		: args['question'] !== undefined ? [{ question: String(args['question']) }] : [];
 	if (!questions.length) { return; }
-	const answers = questions.length <= 1
-		? [result || SKIPPED_ANSWER]
-		: (() => {
-			const blocks = String(result ?? '').split('\n\n');
-			return questions.map((_question, index) => ANSWER_PREFIX.exec(blocks[index] ?? '')?.[1].trim() || SKIPPED_ANSWER);
-		})();
+	const answers = parseOpenideChatAskAnswers(questions.length, result);
 	pushOpenideChatContent(draft, { kind: 'ask', requestId: call.id, questions, answers, isComplete: true });
 }
 
@@ -142,7 +131,7 @@ function restoreCanvas(draft: IOpenideChatDraft, call: IToolCall, result: string
 	pushOpenideChatContent(draft, { kind: 'canvas', canvasId: call.id, title: name, resource });
 }
 
-/** The webview shows at most four children per delegation (openideChatHtml.ts:5528). */
+/** The webview shows at most four children per delegation. */
 const MAX_RESTORED_SUBAGENTS = 4;
 
 /**
@@ -150,9 +139,66 @@ const MAX_RESTORED_SUBAGENTS = 4;
  *
  * Every child comes back as `completed` because the per-task outcome was never persisted — only the
  * delegation's own tool result was. The webview makes exactly the same admission
- * (openideChatHtml.ts:5530-5534); inventing a failed child from a non-existent record would be worse
+ *; inventing a failed child from a non-existent record would be worse
  * than a uniformly optimistic one.
  */
+/**
+ * A durable specialist, rebuilt after a reload.
+ *
+ * The transcript keeps only what the tool ANSWERED, which is a sentence for the model, so the row
+ * is reassembled from two sources: the call's arguments say which specialist was asked for, and the
+ * run store — looked up by the runId in that sentence — supplies everything the row actually shows.
+ * When the run is gone (the store keeps 300, and a purge is normal on an old conversation) the card
+ * degrades to the arguments instead of disappearing: "this happened, and the trace is gone" is true
+ * and useful, while dropping the row rewrites history.
+ */
+function restoreSubagentRun(draft: IOpenideChatDraft, call: IToolCall, result: string, runs?: ReadonlyMap<string, ISubagentRun>): void {
+	const args = parseToolArguments(call.argumentsJson);
+	const runId = subagentRunIdFrom(result);
+	const run = runId ? runs?.get(runId) : undefined;
+	const content: IOpenideChatSubagentContent = {
+		kind: 'subagent',
+		// Falling back to the call id keeps the row identifiable within the turn; it will not match
+		// a stored run, which is exactly right — there is none to open.
+		runId: runId ?? call.id,
+		parentId: call.id,
+		index: 0,
+		total: 1,
+		title: run?.definitionName || String(args['agent'] ?? '') || 'Especialista',
+		model: run?.model,
+		// The same mapping the live path uses, or a reloaded row would disagree with the one that
+		// was on screen a second ago: a run interrupted by the window closing reads as cancelled.
+		status: run ? restoredSubagentStatus(run.status) : (result.startsWith('Error') ? 'failed' : 'completed'),
+		run,
+		timeline: run?.timeline ?? [],
+	};
+	draft.subagents.set(content.runId, pushOpenideChatContent(draft, content));
+}
+
+function restoredSubagentStatus(status: ISubagentRun['status']): OpenideChatSubagentStatus {
+	if (status === 'completed' || status === 'failed' || status === 'cancelled') { return status; }
+	return status === 'interrupted' ? 'cancelled' : 'running';
+}
+
+/**
+ * The runId out of what `delegate_to_subagent` reported.
+ *
+ * Two shapes, because the tool answers differently for a background run ("…runId=abc") and a
+ * foreground one (JSON). Conversations saved before the runId was added to the foreground answer
+ * carry neither, and those simply have no run to find — hence the undefined.
+ */
+function subagentRunIdFrom(result: string): string | undefined {
+	const inline = /runId=(\S+)/.exec(result);
+	if (inline) { return inline[1]; }
+	try {
+		const parsed = JSON.parse(result);
+		const runId = parsed && typeof parsed === 'object' ? parsed['runId'] : undefined;
+		return typeof runId === 'string' && runId ? runId : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 function restoreDelegation(draft: IOpenideChatDraft, call: IToolCall): void {
 	const raw = parseToolArguments(call.argumentsJson)['tasks'];
 	const tasks = (Array.isArray(raw) ? raw : []).slice(0, MAX_RESTORED_SUBAGENTS);
@@ -174,7 +220,7 @@ function restoreDelegation(draft: IOpenideChatDraft, call: IToolCall): void {
  * Replays one persisted call onto the draft.
  *
  * The default branch is intentionally the live path — `toolStart` → `fileDiff` → `toolResult`, in
- * that order, exactly as the webview does it (openideChatHtml.ts:5619-5624). Restore therefore
+ * that order, exactly as the webview does it. Restore therefore
  * inherits the explore folding, the line-span rewriting, the terminal card and the plan-update line
  * for free, and cannot drift away from what the stream produces.
  */
@@ -182,6 +228,7 @@ export function applyOpenideChatRestoredToolCall(
 	draft: IOpenideChatDraft,
 	call: IToolCall,
 	results: ReadonlyMap<string, IOpenideChatRestoredToolResult>,
+	runs?: ReadonlyMap<string, ISubagentRun>,
 ): void {
 	const settled = results.get(call.id);
 	const result = settled?.content ?? '';
@@ -191,6 +238,7 @@ export function applyOpenideChatRestoredToolCall(
 		case 'plan_save': restorePlan(draft, call, result); return;
 		case 'canvas_write': restoreCanvas(draft, call, result); return;
 		case 'delegate_task': restoreDelegation(draft, call); return;
+		case 'delegate_to_subagent': restoreSubagentRun(draft, call, result, runs); return;
 		default: break;
 	}
 	applyOpenideChatToolStart(draft, call.id, call.name, call.argumentsJson ?? '');

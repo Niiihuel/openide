@@ -24,6 +24,7 @@ import { ICodeEditorService } from '../../../../editor/browser/services/codeEdit
 import { Range } from '../../../../editor/common/core/range.js';
 import { linesDiffComputers } from '../../../../editor/common/diff/linesDiffComputers.js';
 import { DetailedLineRangeMapping } from '../../../../editor/common/diff/rangeMapping.js';
+import { LineRange } from '../../../../editor/common/core/ranges/lineRange.js';
 import { EditorOption } from '../../../../editor/common/config/editorOptions.js';
 import { IModelDeltaDecoration, ITextModel, OverviewRulerLane } from '../../../../editor/common/model.js';
 import { localize } from '../../../../nls.js';
@@ -182,8 +183,14 @@ class ReviewSession extends Disposable {
 		return this.editor.getModel();
 	}
 
+	/**
+	 * The baseline as lines. A file the agent CREATED has none: `''.split(/\n/)` is `['']`, one
+	 * empty line, and the diff computer's own empty-side branch turns that into a real original
+	 * range — which is the red deleted-line band that appeared above line 1 of every brand new
+	 * file, in a review whose whole content is additions.
+	 */
 	private baselineLines(): string[] {
-		return this.baseline.split(/\r\n|\r|\n/);
+		return this.baseline ? this.baseline.split(/\r\n|\r|\n/) : [];
 	}
 
 	// ---- render ----
@@ -197,8 +204,22 @@ class ReviewSession extends Disposable {
 		if (!model) {
 			return;
 		}
-		const result = linesDiffComputers.getDefault().computeDiff(this.baselineLines(), model.getLinesContent(), DIFF_OPTIONS);
-		this.changes = result.changes;
+		const original = this.baselineLines();
+		const modified = model.getLinesContent();
+		// A CREATED file has no baseline, and "no lines" is not a document: every text has at least
+		// one line. Handing Monaco's differ a zero-line side made it ask `toRangeMapping2` for a
+		// mapping it cannot build — original range empty, starting at line 1, touching the last line
+		// — and that path ends in `throw new BugIndicatingError()`. That is the "An unexpected bug
+		// occurred" the console reported on files the agent created.
+		//
+		// It never needed computing: a creation is every line added, which is exactly the mapping
+		// below (empty on the original side, the whole file on the modified one). Passing `['']`
+		// instead would compute a MODIFICATION of an empty line, and the review would paint a
+		// phantom deleted line above a file that never had one.
+		const emptyModified = modified.length === 1 && modified[0].length === 0;
+		this.changes = original.length === 0
+			? (emptyModified ? [] : [new DetailedLineRangeMapping(new LineRange(1, 1), new LineRange(1, modified.length + 1), undefined)])
+			: linesDiffComputers.getDefault().computeDiff(original, modified, DIFF_OPTIONS).changes;
 
 		// The left margin marks the active hunk in yellow. The right overview ruler is exclusively a
 		// map of the diff: green added, red removed, grey context.
@@ -808,6 +829,10 @@ class ReviewBlockWidget extends Disposable implements IContentWidget {
 		this.layout();
 	}
 
+	/** Cache for `width()`, keyed by the label it was measured against. */
+	private measuredFor: string | undefined;
+	private measuredWidth = 0;
+
 	layout(): void { this.editor.layoutContentWidget(this); }
 
 	afterRender(_position: ContentWidgetPositionPreference | null, coordinate: IContentWidgetRenderedCoordinate | null): void {
@@ -819,8 +844,24 @@ class ReviewBlockWidget extends Disposable implements IContentWidget {
 		const rightInset = layout.verticalScrollbarWidth + layout.minimap.minimapWidth + 14;
 		// coordinate.left is relative to `.lines-content`, whose origin already starts at
 		// contentLeft. Adding the gutter again displaced the pill and cut off Keep.
-		const desiredLeft = Math.max(8, layout.contentWidth - rightInset - this.dom.offsetWidth);
+		const desiredLeft = Math.max(8, layout.contentWidth - rightInset - this.width());
 		this.dom.style.transform = `translateX(${Math.round(desiredLeft - coordinate.left)}px)`;
+	}
+
+	/**
+	 * The pill's own width, measured once per label.
+	 *
+	 * Monaco calls `afterRender` on every editor render, and reading `offsetWidth` there forces a
+	 * synchronous layout each time — during a streamed edit that is once a frame, for a number that
+	 * only changes when the text inside the pill does.
+	 */
+	private width(): number {
+		const key = this.label.textContent ?? '';
+		if (key !== this.measuredFor) {
+			this.measuredFor = key;
+			this.measuredWidth = this.dom.offsetWidth;
+		}
+		return this.measuredWidth;
 	}
 }
 
@@ -834,6 +875,16 @@ class ReviewHeaderWidget extends Disposable implements IOverlayWidget {
 	private readonly mountScheduler: RunOnceScheduler;
 	private readonly observer: MutationObserver;
 	private observedGroup: HTMLElement | undefined;
+	/**
+	 * Set while `mountNow` writes to the DOM it is also watching.
+	 *
+	 * Without it this widget feeds itself: mounting sets `class` and two custom properties on the
+	 * breadcrumbs, the observer sees its own writes, and schedules another mount 40 ms later,
+	 * forever. Each pass measures (`getComputedStyle`, `offsetWidth`, `clientWidth`), and a forced
+	 * layout of the whole workbench 25 times a second is what made the entire IDE feel like a
+	 * slideshow while an edit was on screen.
+	 */
+	private writing = false;
 	private breadcrumbs: HTMLElement | undefined;
 	private mounted: 'breadcrumbs' | 'overlay' | undefined;
 
@@ -902,7 +953,7 @@ class ReviewHeaderWidget extends Disposable implements IOverlayWidget {
 			this.dom.appendChild(n);
 		}
 		this.mountScheduler = this._register(new RunOnceScheduler(() => this.mountNow(), 40));
-		this.observer = new MutationObserver(() => this.remount());
+		this.observer = new MutationObserver(() => { if (!this.writing) { this.remount(); } });
 		this._register({ dispose: () => { this.observer.disconnect(); this.unmount(); } });
 		this._register(this.editor.onDidChangeModel(() => this.remount()));
 		this._register(this.editor.onDidChangeConfiguration(() => this.remount()));
@@ -912,11 +963,21 @@ class ReviewHeaderWidget extends Disposable implements IOverlayWidget {
 	/** Retries because breadcrumbs is created/hidden independently of the Monaco editor. */
 	remount(): void { this.mountScheduler.schedule(); }
 
+	/**
+	 * Watches the TITLE bar, not the whole editor group.
+	 *
+	 * The question this observer exists to answer is "did the breadcrumbs appear, move or hide",
+	 * and breadcrumbs live in the title. The group also contains the Monaco editor, which rewrites
+	 * inline styles on its view lines on every render — so a subtree watch for `style` there fires
+	 * continuously while the agent streams an edit, which is exactly when the editor can least
+	 * afford a forced layout. Falls back to the group when there is no title yet.
+	 */
 	private observeGroup(group: HTMLElement | undefined): void {
-		if (group === this.observedGroup) { return; }
+		const target = group?.querySelector<HTMLElement>('.title') ?? group;
+		if (target === this.observedGroup) { return; }
 		this.observer.disconnect();
-		this.observedGroup = group;
-		if (group) { this.observer.observe(group, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] }); }
+		this.observedGroup = target;
+		if (target) { this.observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] }); }
 	}
 
 	private visibleBreadcrumbs(group: HTMLElement | undefined): HTMLElement | undefined {
@@ -926,6 +987,19 @@ class ReviewHeaderWidget extends Disposable implements IOverlayWidget {
 	}
 
 	private mountNow(): void {
+		if (this.writing) { return; }
+		this.writing = true;
+		try {
+			this.mountNowCore();
+		} finally {
+			// Drops the records this pass just generated, so reconnecting does not immediately
+			// deliver our own writes back to us.
+			this.observer.takeRecords();
+			this.writing = false;
+		}
+	}
+
+	private mountNowCore(): void {
 		const group = this.editor.getContainerDomNode()?.closest<HTMLElement>('.editor-group-container') ?? undefined;
 		this.observeGroup(group);
 		const breadcrumbs = this.visibleBreadcrumbs(group);
@@ -1256,6 +1330,16 @@ export class OpenideEditReview extends Disposable {
 				return false;
 			}
 			editor = live;
+			// ONE review per editor, always. The map is keyed by the path the agent REPORTED, and the
+			// same file reaches here under more than one spelling (relative from a tool event,
+			// absolute from a card, a path that is no longer pending after an Undo): each spelling is
+			// its own key, both resolve to the same editor, and the second session then mounted a
+			// SECOND header into the same breadcrumbs — the duplicated Undo/Keep toolbar, one copy of
+			// it with empty counters because only the live session ever repaints. The header is an
+			// overlay widget with a FIXED id too, so two of them on one editor collide in Monaco.
+			for (const [other, entry] of [...this.sessions]) {
+				if (other !== path && entry.session.codeEditor === editor) { this.detach(other); }
+			}
 			const store = new DisposableStore();
 			const session = new ReviewSession(path, editor, this.snapshot, baseline, this.host, this.textFileService, () => this.detach(path), () => this.refreshSessionChrome());
 			session.hopRequest = p => this.openReview(p);

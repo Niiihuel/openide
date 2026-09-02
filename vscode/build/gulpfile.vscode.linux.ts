@@ -115,11 +115,10 @@ function prepareDebPackage(arch: string) {
 			.pipe(replace('@@ARCHITECTURE@@', debArch))
 			.pipe(rename('DEBIAN/postinst'));
 
-		const templates = gulp.src('resources/linux/debian/templates.template', { base: '.' })
-			.pipe(replace('@@NAME@@', product.applicationName))
-			.pipe(rename('DEBIAN/templates'));
-
-		const all = es.merge(control, templates, postinst, postrm, prerm, desktops, appdata, workspaceMime, icon, bash_completion, zsh_completion, code);
+		// No DEBIAN/templates: upstream's only debconf question asks whether to add Microsoft's apt
+		// repository, and OpenIDE never adds it. Shipping the template registered a question in
+		// every user's debconf database that nothing would ever ask.
+		const all = es.merge(control, postinst, postrm, prerm, desktops, appdata, workspaceMime, icon, bash_completion, zsh_completion, code);
 
 		return all.pipe(vfs.dest(destination));
 	};

@@ -218,9 +218,9 @@ const separatorIcon = registerIcon('breadcrumb-separator', Codicon.chevronRight,
 
 export class BreadcrumbsControl {
 
-	// 22px era la altura de VS Code y dejaba la fila apretada: los botones del plan tocaban el
-	// borde de arriba y el de abajo, y el path quedaba pegado al código. Es la única fuente de
-	// verdad de la altura (editorTitleControl la usa para el layout), así que se cambia acá y
+	// 22px was upstream's height and left the row cramped: the plan buttons touched both the top
+	// and the bottom edge, and the path sat flush against the code. This is the single source of
+	// truth for the height (editorTitleControl uses it to lay out), so it changes here and
 	// el CSS la sigue con height:100%.
 	static readonly HEIGHT = 28;
 
@@ -306,8 +306,8 @@ export class BreadcrumbsControl {
 			separatorIcon,
 			styles
 		);
-		// BreadcrumbsWidget crea primero su MonacoScrollableElement; las acciones del plan deben
-		// quedar después para ocupar realmente el extremo derecho de la fila.
+		// BreadcrumbsWidget creates its MonacoScrollableElement first; the plan actions have to come
+		// after it to actually occupy the far right of the row.
 		this.domNode.appendChild(this._planActions.domNode);
 		this._widget.onDidSelectItem(this._onSelectEvent, this, this._disposables);
 		this._widget.onDidFocusItem(this._onFocusEvent, this, this._disposables);

@@ -819,6 +819,7 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 				return color.isOpaque() ? color : color.makeOpaque(WORKBENCH_BACKGROUND(theme));
 			}) || '';
 			this.element.style.backgroundColor = titleBackground;
+			this.layoutService.getContainer(getWindow(this.element)).style.setProperty('--modern-ui-shell-background', titleBackground);
 
 			if (this.appIconBadge) {
 				this.appIconBadge.style.backgroundColor = titleBackground;
@@ -833,7 +834,10 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 			const titleForeground = this.getColor(this.isInactive ? TITLE_BAR_INACTIVE_FOREGROUND : TITLE_BAR_ACTIVE_FOREGROUND);
 			this.element.style.color = titleForeground || '';
 
-			const titleBorder = this.getColor(TITLE_BAR_BORDER);
+			// Floating panels: the title bar is the shell backdrop, so it carries no bottom border.
+			// Upstream gates this on the `workbench.experimental.modernUI` setting; OpenIDE has no such
+			// setting and asks the layout service instead (always floating).
+			const titleBorder = !this.isAuxiliary && this.layoutService.isFloatingPanelsEnabled() ? undefined : this.getColor(TITLE_BAR_BORDER);
 			this.element.style.borderBottom = titleBorder ? `1px solid ${titleBorder}` : '';
 		}
 	}

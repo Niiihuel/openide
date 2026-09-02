@@ -16,7 +16,7 @@ import { menuEmpty, menuRow, menuSection, menuSeparator, OpenideChatMenuPopover 
 /**
  * "New session with…": the local harness plus every external agent the catalog knows, the
  * ones not on PATH greyed out with "not installed" — VS Code's session-type picker
- * (`sessionTargetPickerActionItem.ts` + `sessionTypeAvailability.ts`) in the dock's own menu
+ * (upstream's `sessionTargetPickerActionItem.ts` + `sessionTypeAvailability.ts`) in the dock's own menu
  * language. Availability is resolved once per picker life and refreshed on each open, so an
  * agent installed while the IDE runs shows up without a restart.
  */

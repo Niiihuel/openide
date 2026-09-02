@@ -11,7 +11,7 @@ import {
 import { chartDiv, chartSpan, nextDiagramId, SVG_NAMESPACE, svgNode, svgText, svgTooltip } from './openideDiagramDom.js';
 
 /**
- * pie · gantt · timeline · journey, ported from the webview (openideChatHtml.ts:1855-2061).
+ * pie · gantt · timeline · journey, ported from the webview.
  *
  * These four share nothing but the palette; they are in one file because they are the SMALL half
  * of the chart family and the module has a 280-line ceiling. The rest live next door: the sequence

@@ -1,0 +1,6 @@
+/*
+ * Cascade layer order. Must be declared before any other stylesheet so the
+ * Astryx reset/base/theme layers keep their precedence and the small `app`
+ * layer at the end can override deliberately.
+ */
+@layer reset, astryx-base, astryx-theme, app;

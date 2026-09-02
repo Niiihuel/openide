@@ -45,7 +45,9 @@ export namespace ThemeSettingDefaults {
 	export const COLOR_THEME_HC_LIGHT = 'Default High Contrast Light';
 
 	export const FILE_ICON_THEME = 'vs-seti';
-	export const PRODUCT_ICON_THEME = 'Default';
+	/* The product's own icon language (Bootstrap Icons, theme-defaults/producticons). 'Default'
+	 * left every glyph on the stock codicon font unless the user picked the theme by hand. */
+	export const PRODUCT_ICON_THEME = 'openide-bootstrap';
 }
 
 /**

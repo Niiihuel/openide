@@ -350,8 +350,8 @@ function configureCommandlineSwitchesSync(cliArgs: NativeParsedArgs) {
 
 	// Following features are disabled from the runtime:
 	// `CalculateNativeWinOcclusion` - Disable native window occlusion tracker (https://groups.google.com/a/chromium.org/g/embedder-dev/c/ZF3uHHyWLKw/m/VDN2hDXMAAAJ)
-	// `WaylandFractionalScaleV1` (solo Linux) - OpenIDE: en Wayland con escala entera (ej. Hyprland
-	// scale 2) Chromium deriva un device scale fraccional espurio (~3.19 en vez de 2) y toda la UI
+	// `WaylandFractionalScaleV1` (Linux only) - OpenIDE: on Wayland at an integer scale (Hyprland
+	// scale 2, say) Chromium derives a spurious fractional device scale (~3.19 instead of 2) and the
 	// aparece "zoomeada"; deshabilitarlo cae al escalado entero correcto del compositor.
 	const featuresToDisable =
 		`CalculateNativeWinOcclusion,${process.platform === 'linux' ? 'WaylandFractionalScaleV1,' : ''}${app.commandLine.getSwitchValue('disable-features')}`;

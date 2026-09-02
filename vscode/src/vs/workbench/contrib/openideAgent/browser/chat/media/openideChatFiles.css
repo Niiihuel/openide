@@ -1,12 +1,12 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — native chat: file rows, edit cards and the changed-files tray.
  *
- *  SOURCE OF TRUTH: browser/openideChatHtml.ts. Every literal below is transcribed from that
- *  file's <style>, with the line it comes from, because the native chat has to be
- *  indistinguishable from the webview it replaces.
+ *  TRANSCRIBED from the chat webview this replaced (removed when the chat became native): every
+ *  literal below comes from its `<style>`, because the native chat had to be indistinguishable
+ *  from it.
  *
- *  What is NOT transcribed: `.ediff`, `.ediff-line`, `.ediff-sign`, `.ediff-add`, `.ediff-del`,
- *  `.edit-fade` and `.edit-expand` (openideChatHtml.ts:355-387). The inline diff viewer is dropped
+ *  Not in this file: the `.ediff` family, now the shared `openide-diff-*` block (openideDiff.css). Old note:
+ *  `.edit-fade` and `.edit-expand`. The inline diff viewer is dropped
  *  by decision — plan section 6.2: the diff is reviewed in the editor, the card is a remote
  *  control. Nothing here should grow back into a diff viewer.
  *
@@ -18,7 +18,7 @@
 
 /* ---- The shared row: icon + name + ±N + trailing actions ---- */
 
-/* openideChatHtml.ts:945-949 (.dock-file-row) merged with :341-347 (.part.edit-card .part-head).
+/* the removed chat webview (.dock-file-row) merged with :341-347 (.part.edit-card .part-head).
    Gap 6px and min-height come from the dock row; the card only differed by its 8px padding. */
 .openide-chat-file-row {
 	--oi-file-row-size: 11.5px;
@@ -29,7 +29,7 @@
 	min-height: 20px;
 	padding: 1px 2px;
 	margin: 0 -1px;
-	border-radius: 3px;
+	border-radius: var(--oi-radius-sm);
 	cursor: pointer;
 	font-size: var(--oi-file-row-size);
 	color: var(--vscode-foreground);
@@ -61,7 +61,15 @@
 	-webkit-font-smoothing: antialiased;
 }
 
-/* openideChatHtml.ts:950 */
+/* While it shimmers the name stops stretching, so the gradient is sized to the FILENAME and not
+   to the whole row: the sweep is clipped to the text but measured against the box, and on a
+   stretched box the bright band is off the letters for most of the cycle — which is what made this
+   one look static next to the status line. The numbers stay right either way, on their own
+   `margin-left: auto`. */
+.openide-chat-file-name.openide-chat-shimmer {
+	flex: 0 1 auto;
+}
+
 .openide-chat-file-name {
 	flex: 1 1 auto;
 	min-width: 0;
@@ -70,7 +78,7 @@
 	text-overflow: ellipsis;
 }
 
-/* openideChatHtml.ts:392 (.edit-stats) — `margin-left: auto` is redundant next to a flexible name
+/* the removed chat webview (.edit-stats) — `margin-left: auto` is redundant next to a flexible name
    and kept anyway: it is what holds the numbers right when the name is short. */
 .openide-chat-file-stats {
 	display: inline-flex;
@@ -80,21 +88,38 @@
 	margin-left: auto;
 }
 
-/* openideChatHtml.ts:393 (.edit-badge) */
+/* the removed chat webview (.edit-badge) */
 .openide-chat-file-badge {
 	font-size: 10px;
 	line-height: 1;
 	padding: 2px 6px;
-	border-radius: 8px;
-	background: rgba(128, 128, 128, 0.18);
+	border-radius: var(--oi-radius-lg);
+	background: var(--oi-border-soft);
 	color: var(--vscode-descriptionForeground);
 }
 
-/* openideChatHtml.ts:394-395 (.diff-added/.diff-removed) and :951-952 (.dock-diff-add/-del),
+/* the removed chat webview (.diff-added/.diff-removed) and :951-952 (.dock-diff-add/-del),
    which were the same two colours at two sizes. tabular-nums came only from the dock copy and is
    the reason +12 and −8 line up in a column of rows. */
 .openide-chat-diff-added,
 .openide-chat-diff-removed {
+/* The git status letter, where a row describes a file by its state rather than by ±N: Source
+   Control's vocabulary (A/M/D/R/U) in Source Control's colours, so the Agent Changes rows read
+   like the neighbouring view's. Lives in the primitive, not in the view, so a card that ever
+   needs the letter gets the same one. */
+.openide-chat-file-status {
+	flex: 0 0 auto;
+	width: 14px;
+	text-align: center;
+	font-size: 11px;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+}
+.openide-chat-file-status.added,
+.openide-chat-file-status.untracked { color: var(--vscode-gitDecoration-untrackedResourceForeground); }
+.openide-chat-file-status.modified { color: var(--vscode-gitDecoration-modifiedResourceForeground); }
+.openide-chat-file-status.deleted { color: var(--vscode-gitDecoration-deletedResourceForeground); }
+.openide-chat-file-status.renamed { color: var(--vscode-gitDecoration-renamedResourceForeground); }
 	flex: 0 0 auto;
 	font-family: var(--vscode-editor-font-family, monospace);
 	font-size: var(--oi-file-row-size);
@@ -110,7 +135,7 @@
 	margin-left: 2px;
 }
 
-/* openideChatHtml.ts:953-957 — hidden at rest, revealed on hover AND on focus-within, so the
+/* the removed chat webview — hidden at rest, revealed on hover AND on focus-within, so the
    buttons are reachable by keyboard without making every row permanently busy. */
 .openide-chat-file-actions {
 	display: none;
@@ -125,7 +150,6 @@
 	display: inline-flex;
 }
 
-/* openideChatHtml.ts:958-963 */
 .openide-chat-file-action {
 	width: 18px;
 	height: 18px;
@@ -133,7 +157,7 @@
 	align-items: center;
 	justify-content: center;
 	border: none;
-	border-radius: 3px;
+	border-radius: var(--oi-radius-sm);
 	padding: 0;
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
@@ -145,7 +169,7 @@
 }
 
 .openide-chat-file-action:hover {
-	background: rgba(128, 128, 128, 0.18);
+	background: var(--oi-border-soft);
 	color: var(--vscode-foreground);
 }
 
@@ -159,17 +183,17 @@
 
 /* ---- The edit card in the transcript ---- */
 
-/* openideChatHtml.ts:340. `overflow: hidden` is kept even though the diff body is gone: the row's
+/* the removed chat webview. `overflow: hidden` is kept even though the diff body is gone: the row's
    focus ring would otherwise escape the 8px corner. */
 .openide-chat-edit-card {
-	border: 1px solid rgba(128, 128, 128, 0.28);
-	border-radius: 8px;
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
+	border-radius: var(--oi-chat-card-radius);
 	margin: 6px 0;
 	overflow: hidden;
-	background: rgba(128, 128, 128, 0.04);
+	background: var(--oi-chat-card-bg, var(--oi-tint-1));
 }
 
-/* openideChatHtml.ts:341-345: the card's header is roomier than a dock row and its filename is
+/* the removed chat webview: the card's header is roomier than a dock row and its filename is
    UI type, not the transcript's monospace-ish 11.5px. */
 .openide-chat-edit-card .openide-chat-file-row {
 	--oi-file-row-size: 12px;
@@ -190,146 +214,86 @@
    the only thing that says "this is a control" is that it reacts. Same tint family as the dock
    row's hover, one step lighter so a 28px card does not flash. */
 .openide-chat-edit-card .openide-chat-file-row:hover {
-	background: rgba(128, 128, 128, 0.06);
+	background: var(--oi-tint-1);
 }
 
-/* openideChatHtml.ts:384-387: a created file is not a wall of green. The webview neutralises the
+/* the removed chat webview: a created file is not a wall of green. The webview neutralises the
    `.ediff-add` background and only keeps the green sign; with no diff body left, what survives is
    that the badge — not the line count — is what says "new". */
-.openide-chat-edit-card.openide-chat-edit-created .openide-chat-file-badge {
+/* `:not(.openide-chat-file-waiting)`: the green here belongs to the `nuevo` badge, not to every
+   badge in the lane — the waiting one is amber whatever the file's state, and this rule is more
+   specific than its own. */
+.openide-chat-edit-card.openide-chat-edit-created .openide-chat-file-badge:not(.openide-chat-file-waiting) {
 	color: var(--openide-green);
 }
 
-/* ---- The diff body (openideChatHtml.ts:381-412, .ediff family) ---- */
+/* Queued behind another conversation: amber, the colour this IDE already uses for work that has
+   not settled (the review's gutter). `.hidden` keeps the node in place so the lane does not jump
+   when the file is finally handed over. */
+.openide-chat-file-waiting {
+	color: var(--openide-amber);
+	background: color-mix(in srgb, var(--openide-amber) 16%, transparent);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	flex: 0 1 auto;
+}
+/* Truncated rather than wrapped: a badge that grows to two lines pushes the filename around, and
+   the row's grammar is one line. It has to out-specify `.openide-chat-row * { white-space: normal }`
+   (openideChatNative.css), the same way the diff lines above do. The hover carries the full name. */
+.openide-chat-row .openide-chat-file-waiting,
+.openide-chat-file-waiting {
+	white-space: nowrap;
+	max-width: 130px;
+}
+.openide-chat-file-waiting.hidden { display: none; }
 
+/* ---- The diff body ---- */
+
+/* The diff itself is `OpenideDiffBlock` (openideDiff.css): the one inline diff the product has,
+   shared with the Agent Changes view. The card only owns the strip it sits in and the skeleton
+   shown while the write is still in flight. */
 .openide-chat-edit-card .openide-chat-edit-body {
 	position: relative;
 	display: none;
 }
-.openide-chat-edit-card.has-diff .openide-chat-edit-body {
+.openide-chat-edit-card.has-diff .openide-chat-edit-body,
+.openide-chat-edit-card.pending .openide-chat-edit-body {
 	display: block;
-	border-top: 1px solid rgba(128, 128, 128, 0.18);
+	border-top: 1px solid var(--oi-border-soft);
 }
 
-.openide-chat-ediff {
-	--oi-edit-surface: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-foreground));
-	background: var(--oi-edit-surface);
-	/* inline-block + min-width: the block grows to its widest line so every row's tint runs the
-	   full scrollable width, not just behind its own text. */
-	display: inline-block;
-	min-width: 100%;
-	font-family: var(--vscode-editor-font-family, monospace);
-	font-size: 11.5px;
-	line-height: 1.55;
-	max-height: 108px;
-	overflow-x: auto;
-	overflow-y: hidden;
-	tab-size: 4;
+.openide-chat-edit-sk {
+	padding: 10px 12px;
 }
-.openide-chat-edit-card.open .openide-chat-ediff {
-	max-height: 320px;
-	overflow: auto;
-}
-
-/* Beats `.openide-chat-row * { white-space: normal }` (openideChatNative.css): a diff keeps its
-   indentation and never wraps — it scrolls, like the editor it previews. */
-.openide-chat-row .openide-chat-ediff-line,
-.openide-chat-row .openide-chat-ediff-line * {
-	white-space: pre;
-}
-.openide-chat-ediff-line {
-	display: flex;
-	white-space: pre;
-	padding-right: 10px;
-	color: var(--vscode-editor-foreground, var(--vscode-foreground));
-}
-.openide-chat-ediff-sign {
-	width: 22px;
-	flex: 0 0 auto;
-	text-align: center;
-	opacity: 0.7;
-	user-select: none;
-}
-.openide-chat-ediff-add { background: color-mix(in srgb, var(--openide-green) 18%, transparent); }
-.openide-chat-ediff-add .openide-chat-ediff-sign { color: var(--openide-green); opacity: 1; }
-.openide-chat-ediff-del { background: color-mix(in srgb, var(--openide-red) 16%, transparent); }
-.openide-chat-ediff-del .openide-chat-ediff-sign { color: var(--openide-red); opacity: 1; }
-.openide-chat-ediff-del .openide-chat-ediff-code { opacity: 0.75; }
-.openide-chat-ediff-gap { color: var(--vscode-descriptionForeground); opacity: 0.7; }
-
-/* The fade and the chevron only exist while the collapsed preview hides more lines. */
-.openide-chat-edit-fade {
-	position: absolute;
-	z-index: 3;
-	left: 0;
-	right: 0;
-	bottom: 0;
-	height: 40px;
-	pointer-events: none;
-	background: linear-gradient(to bottom, transparent 0%,
-		color-mix(in srgb, var(--vscode-editor-background) 72%, transparent) 48%,
-		var(--vscode-editor-background) 100%);
-}
-.openide-chat-edit-card:not(.needs-expand) .openide-chat-edit-fade,
-.openide-chat-edit-card.open .openide-chat-edit-fade { display: none; }
-
-.openide-chat-edit-expand {
-	position: absolute;
-	left: 50%;
-	bottom: 1px;
-	transform: translateX(-50%);
-	z-index: 4;
-	width: 28px;
-	height: 18px;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	/* Bare glyph, as in Cursor: the fade underneath is what separates it from the code. */
-	border: none;
-	border-radius: 0;
-	background: transparent;
-	box-shadow: none;
-	outline: none;
-	color: var(--vscode-descriptionForeground);
-	cursor: pointer;
-	padding: 0;
-	opacity: 0;
-	pointer-events: none;
-	transition: opacity 100ms ease, color 100ms ease;
-}
-.openide-chat-edit-expand .codicon { font-size: 14px; }
-.openide-chat-edit-card:not(.needs-expand) .openide-chat-edit-expand { display: none; }
-.openide-chat-edit-card.needs-expand .openide-chat-edit-body:hover .openide-chat-edit-expand,
-.openide-chat-edit-expand:focus-visible {
-	opacity: 1;
-	pointer-events: auto;
-}
-.openide-chat-edit-expand:hover { color: var(--vscode-foreground); background: transparent; }
 
 /* ---- The changed-files tray ---- */
 
-/* openideChatHtml.ts:900-914 (.files-tray) */
+/* Cursor's tray over the composer: a 28px head ("⌄ 2 archivos" left, Undo/Keep/Revisar right) and
+   one 24px row per file. Compact, no interior hairlines — what separates head from rows is the
+   type, not a border. */
 /* Tucked UNDER the composer card and narrower than it, like the webview's #filesStack. The width
    itself is NOT set here: it belongs to `.openide-chat-tray-host` (openideChatComposer.css), which
    owns the 740-against-760 relationship for every tray that ever stacks under the card. This one
    fills its host — it used to carry a hardcoded `margin: 0 16px` instead, which is what left it
    both narrower than the card and off its centre once the host shrink-wrapped.
    Only `-10px` survives, so the card overlaps the tray's lower edge and the two read as one
-   stacked unit; the card already wins the paint order (composer z-index 2, this 0). */
+   stacked unit; the card already wins the paint order (composer z-index 2, this 0). Inside a
+   `.openide-chat-block` the host strips this border, shadow and background and clamps the bottom
+   padding to 4px (openideChatComposer.css) — the tray is then a band of the block, not a card. */
 .openide-chat-files-tray {
 	position: relative;
 	z-index: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 1px;
+	gap: 0;
 	width: 100%;
 	box-sizing: border-box;
 	margin: 0 0 -10px;
-	padding: 3px 7px 14px;
-	border: 1px solid rgba(128, 128, 128, 0.26);
-	border-radius: 6px;
+	padding: 2px 8px 14px;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-md);
 	background: var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
-	box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+	box-shadow: var(--oi-shadow-sm);
 }
 
 .openide-chat-files-tray.hidden,
@@ -337,23 +301,23 @@
 	display: none !important;
 }
 
-/* openideChatHtml.ts:871 + :917 */
 .openide-chat-files-head {
 	display: flex;
 	align-items: center;
 	gap: 4px;
-	min-height: 20px;
+	min-height: 28px;
+	padding: 0 2px;
 }
 
-/* openideChatHtml.ts:872 + :922 — the tray's own toggle is `foreground`/500, not the dimmer
-   `descriptionForeground` of the generic dock toggle: it is a heading, not a hint. */
-/* `nowrap` + `flex: 0 0 auto`: without it the count broke across two lines ("3" over "Files") as
+/* The tray's own toggle is `foreground`/500, not the dimmer `descriptionForeground` of the generic
+   dock toggle: it is a heading, not a hint. */
+/* `nowrap` + `flex: 0 0 auto`: without it the count broke across two lines ("3" over "archivos") as
    soon as the row got tight, which doubled the head's height and shoved the actions off centre.
-   The label is three glyphs — it is never the right thing to sacrifice for space. */
+   The label is a handful of glyphs — it is never the right thing to sacrifice for space. */
 .openide-chat-files-toggle {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	gap: 5px;
 	flex: 0 0 auto;
 	min-width: 0;
 	white-space: nowrap;
@@ -362,65 +326,67 @@
 	background: transparent;
 	color: var(--vscode-foreground);
 	font-family: inherit;
-	font-size: 11.5px;
+	font-size: 12.5px;
 	font-weight: 500;
 	cursor: pointer;
 }
 
 .openide-chat-files-toggle .codicon {
 	flex: 0 0 auto;
-	font-size: 11px;
+	font-size: 13px;
 	color: var(--vscode-descriptionForeground);
 }
 
-/* openideChatHtml.ts:927 */
 .openide-chat-files-count {
 	font-variant-numeric: tabular-nums;
 }
 
-/* openideChatHtml.ts:875 */
 .openide-chat-files-spacer {
 	flex: 1;
 	min-width: 4px;
 }
 
-/* openideChatHtml.ts:932 */
 .openide-chat-files-actions {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
+	gap: 4px;
 	flex: 0 0 auto;
 }
 
-/* openideChatHtml.ts:933-935 */
+/* Ghost: text only at rest, a tint on hover. Same 22px box as Revisar beside it, because two
+   differently sized boxes in one row is what "descentrado" actually looks like. */
 .openide-chat-files-bulk {
 	display: inline-flex;
 	align-items: center;
-	gap: 3px;
+	box-sizing: border-box;
+	height: 22px;
+	padding: 0 8px;
 	border: none;
+	border-radius: var(--oi-radius-sm);
 	background: transparent;
-	color: var(--vscode-foreground);
+	color: var(--vscode-descriptionForeground);
 	font: inherit;
-	font-size: 11px;
+	font-size: 12px;
+	line-height: 1;
 	cursor: pointer;
-	padding: 1px 2px;
 	white-space: nowrap;
 }
 
 .openide-chat-files-bulk:hover {
-	color: var(--vscode-textLink-activeForeground, var(--vscode-foreground));
+	background: var(--oi-tint-2);
+	color: var(--vscode-foreground);
 }
 
 /* ---- Stop, as a labelled shortcut ---- */
 
-/* No webview counterpart: the dock's `.dock-stop-action` (openideChatHtml.ts:4428) lives in a bar
-   of its own, this one has to share a row with "3 Files" and "Review". So it is built from the
+/* No webview counterpart: the dock's `.dock-stop-action` lives in a bar
+   of its own, this one has to share a row with "3 archivos" and "Revisar". So it is built from the
    `--oi-*` tokens for everything that carries meaning (tone, surface, mono face) and takes its
-   GEOMETRY from the Review button beside it — 20px tall, 11px/500, 4px radius — because two
-   differently sized boxes in one 20px row is what "descentrado" actually looks like.
+   GEOMETRY from the Revisar button beside it — 22px tall, 12px/500, small radius — because two
+   differently sized boxes in one row is what "descentrado" actually looks like.
 
-   The second cause of that was vertical, and is why `line-height: 1` is stated twice below: an
-   11px label at the inherited ~1.4 line-height owns a 15px box, the 9.5px hint owns a 13px one,
+   The second cause of that was vertical, and is why `line-height: 1` is stated twice below: a
+   12px label at the inherited ~1.4 line-height owns a 17px box, the 9.5px hint owns a 13px one,
    and flex centring centres BOXES. Each glyph run then sat at its own half-leading and the two
    never shared a baseline. Collapsing both to their glyph height removes the half-leading, so
    centring the boxes now centres the text.
@@ -433,14 +399,14 @@
 	align-items: center;
 	gap: 5px;
 	box-sizing: border-box;
-	min-height: 20px;
-	padding: 0 4px 0 7px;
+	height: 22px;
+	padding: 0 4px 0 8px;
 	border: 1px solid transparent;
-	border-radius: 4px;
+	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: var(--oi-text, var(--vscode-foreground));
 	font-family: inherit;
-	font-size: 11px;
+	font-size: 12px;
 	font-weight: 500;
 	line-height: 1;
 	cursor: pointer;
@@ -458,22 +424,12 @@
 	outline-offset: 1px;
 }
 
-/* openideChatHtml.ts:937 — drawn as a key cap rather than as dim text: the surface plus the mono
-   face is what makes it read as "press this", which is the whole difference between a shortcut
-   hint and a second word in the button's label. */
-.openide-chat-files-kbd {
-	display: inline-flex;
-	align-items: center;
-	height: 14px;
-	padding: 0 4px;
-	border: 1px solid var(--oi-border-soft, rgba(128, 128, 128, 0.14));
-	border-radius: 3px;
-	background: var(--oi-hover, rgba(128, 128, 128, 0.08));
-	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
-	font-family: var(--oi-font-mono, var(--vscode-editor-font-family, monospace));
-	font-size: 9.5px;
-	line-height: 1;
-}
+/* Drawn as a key cap rather than as dim text: the surface plus the mono face is what makes it read
+   as "press this", which is the whole difference between a shortcut hint and a second word in the
+   button's label. */
+/* Text only: the boxed key cap is gone, the shared `.oi-kbd` carries the hint's look. The class
+   stays for the width query below. */
+.openide-chat-files-kbd { margin-left: 4px; }
 
 /* The cap follows the button's tone instead of staying grey, so hover reads as one object. */
 .openide-chat-files-stop:hover .openide-chat-files-kbd {
@@ -481,40 +437,56 @@
 	color: inherit;
 }
 
-/* openideChatHtml.ts:876 + :928-931 (.files-tray .dock-btn overrides the generic dock button) */
+/* The one filled control in the head: a quiet tint, not the button colour — it opens a review, it
+   does not commit anything. */
 .openide-chat-files-review {
+	display: inline-flex;
+	align-items: center;
+	box-sizing: border-box;
+	height: 22px;
+	padding: 0 8px;
 	border: none;
-	border-radius: 4px;
-	background: rgba(128, 128, 128, 0.26);
+	border-radius: var(--oi-radius-sm);
+	background: var(--oi-tint-2);
 	color: var(--vscode-foreground);
 	font-family: inherit;
-	font-size: 11px;
+	font-size: 12px;
 	font-weight: 500;
-	padding: 1px 8px;
-	min-height: 20px;
+	line-height: 1;
 	cursor: pointer;
 	white-space: nowrap;
 }
 
 .openide-chat-files-review:hover {
-	background: rgba(128, 128, 128, 0.34);
+	background: var(--oi-tint-3);
 }
 
-/* openideChatHtml.ts:878 + :941-944 */
 .openide-chat-files-body {
 	display: flex;
 	flex-direction: column;
 	gap: 0;
-	padding-top: 1px;
 }
 
-/* openideChatHtml.ts:946 */
+/* 24px rows, the name in UI type at 12px and the ±N one step smaller in the mono face — the shared
+   row (top of this file) sizes both from --oi-file-row-size, so the numbers are restated here.
+   Margin 0 (the shared row bleeds 1px) so the hover tint stays inside the tray's padding. */
+.openide-chat-files-tray .openide-chat-files-row {
+	--oi-file-row-size: 12px;
+	min-height: 24px;
+	padding: 0 6px;
+	margin: 0;
+}
+
+.openide-chat-files-tray .openide-chat-diff-added,
+.openide-chat-files-tray .openide-chat-diff-removed {
+	font-size: 11.5px;
+}
+
 .openide-chat-files-row:hover {
-	background: rgba(128, 128, 128, 0.1);
+	background: var(--oi-tint-1);
 }
 
-/* openideChatHtml.ts:975 — the keybinding hint is the first thing to go in a narrow dock; the
-   button itself must stay.
+/* The keybinding hint is the first thing to go in a narrow dock; the button itself must stay.
 
    A CONTAINER query, not the `@media (max-width: 440px)` this replaces. That rule measured the
    WINDOW, which for a chat docked in the auxiliary bar is the wrong axis entirely: at a 359px

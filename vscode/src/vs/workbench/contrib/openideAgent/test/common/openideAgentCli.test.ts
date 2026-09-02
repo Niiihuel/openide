@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { buildClaudeMcpConfig, buildExecutableProbe, buildOpencodeMcpConfig, buildOpenideCliLaunch, parseExecutableProbe, getOpenideCli, IOpenideMcpEndpoint, OPENIDE_MCP_TOOL_TIMEOUT_MS, groupOpenideSessions, isSafeProviderSessionId, OPENIDE_CLI_CATALOG, openideSessionGroupOf, reduceOpenideCliStatus, stripClaudeResumeArgs } from '../../common/openideAgentCliCatalog.js';
+import { OPENIDE_HOSTED_CLI_ENV_RESET, buildClaudeMcpConfig, buildExecutableProbe, buildOpencodeMcpConfig, buildOpenideCliLaunch, parseExecutableProbe, getOpenideCli, IOpenideMcpEndpoint, OPENIDE_MCP_TOOL_TIMEOUT_MS, groupOpenideSessions, isSafeProviderSessionId, OPENIDE_CLI_CATALOG, openideSessionGroupOf, reduceOpenideCliStatus, stripClaudeResumeArgs } from '../../common/openideAgentCliCatalog.js';
 import { OPENIDE_PROVIDER_BRANDS } from '../../common/openideProviderBranding.js';
 
 suite('OpenIDE CLI sessions — catálogo, resume, estado y agrupación', () => {
@@ -259,6 +259,27 @@ suite('OpenIDE CLI sessions — catálogo, resume, estado y agrupación', () => 
 			// Measured against Claude Code 2.1.245: a parked call was still alive at 269s with the
 			// default values. This stops depending on that luck.
 			assert.ok(OPENIDE_MCP_TOOL_TIMEOUT_MS >= 10 * 60_000);
+		});
+	});
+
+	suite('entorno de un CLI hospedado', () => {
+		test('borra las marcas de sesión anidada de Claude Code, y sólo esas', () => {
+			for (const [key, value] of Object.entries(OPENIDE_HOSTED_CLI_ENV_RESET)) {
+				assert.strictEqual(value, null, key);
+				assert.match(key, /^CLAUDE/, key);
+			}
+			assert.ok('CLAUDE_CODE_CHILD_SESSION' in OPENIDE_HOSTED_CLI_ENV_RESET);
+			assert.ok('CLAUDECODE' in OPENIDE_HOSTED_CLI_ENV_RESET);
+			// What the user configures, and what the IDE sets to adopt the window, must survive.
+			for (const kept of ['CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_SSE_PORT', 'ANTHROPIC_API_KEY']) {
+				assert.ok(!(kept in OPENIDE_HOSTED_CLI_ENV_RESET), kept);
+			}
+		});
+
+		test('lo que OpenIDE pone a propósito pisa el reset', () => {
+			const env: Record<string, string | null> = { ...OPENIDE_HOSTED_CLI_ENV_RESET, OPENIDE_SESSION_ID: 's1', CLAUDE_CODE_SSE_PORT: '4321' };
+			assert.strictEqual(env.CLAUDE_CODE_SSE_PORT, '4321');
+			assert.strictEqual(env.CLAUDE_CODE_CHILD_SESSION, null);
 		});
 	});
 });

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { AgentLoopEvent, IChatMessage } from '../openideAgentTypes.js';
+import { AgentLoopEvent, IAgentLocation, IChatMessage } from '../openideAgentTypes.js';
 import { ISubagentTimelineEvent } from '../openideSubagentTypes.js';
 import {
 	IOpenideChatAskContent, IOpenideChatCompactionContent, IOpenideChatDelegationContent, IOpenideChatMarkdownContent,
@@ -19,14 +19,14 @@ import {
 } from './openideChatReducerState.js';
 import {
 	applyOpenideChatFileDiff, applyOpenideChatScreenshot, applyOpenideChatTerminalData, applyOpenideChatToolResult,
-	applyOpenideChatToolStart, ensureOpenideChatDelegation,
+	applyOpenideChatToolStart, applyOpenideChatToolWaiting, ensureOpenideChatDelegation,
 } from './openideChatReducerTools.js';
 
 /**
  * The pure translation of `AgentLoopEvent` into renderable content.
  *
  * Today this logic is split across a ~60-case `switch` living inside the webview's JavaScript
- * STRING (browser/openideChatHtml.ts:6220-6390) and three filters buried in a run callback
+ * STRING and three filters buried in a run callback
  * (browser/openideChatView.ts:1436-1478). Neither is reachable from a test, and the native
  * transcript — which only understood `text` — degraded every other event to a generic line. That
  * is the bullet and the "reasoning" label the user sees instead of cards.
@@ -80,17 +80,40 @@ function reduceEnvelope(draft: IOpenideChatDraft, envelope: IOpenideChatEventEnv
 	reduceRootEvent(draft, envelope.event);
 }
 
+/**
+ * Whether a location is worth MOVING THE USER for.
+ *
+ * Reading is not. An agent reads ten to thirty files to answer one question — grep hits, imports,
+ * a type two directories away — and following each one turns the editor into a slideshow of files
+ * nobody asked to see, scrolling away from whatever the user was looking at, and leaves the tab
+ * strip full of files the run merely glanced at. What deserves the jump is a CHANGE: an edit, a
+ * new file, a deletion are the moments where seeing it happen is the point, and where the user has
+ * something to decide (keep or undo) once it lands.
+ *
+ * Terminal and browser locations are not files and keep their own behaviour: those reveal a panel
+ * the agent is driving rather than navigating the user's editor away from their work.
+ */
+export function shouldFollowOpenideChatLocation(location: IAgentLocation): boolean {
+	return location.kind !== 'file' || location.activity !== 'read';
+}
+
 function reduceRootEvent(draft: IOpenideChatDraft, ev: AgentLoopEvent): void {
 	switch (ev.type) {
+		// Host metadata: the composer reads it, the transcript does not. The `info` line the run
+		// already emitted is what the reader sees.
+		case 'modelRoute': return;
 		case 'text': applyText(draft, ev.delta); return;
 		case 'reasoning': applyReasoning(draft, ev.delta); return;
 		case 'agentLocation':
 			// Only the root conversation drives the editor. Specialists keep reporting their
 			// activity in the chat, but they never make the user's workspace jump.
-			addOpenideChatEffect(draft, { type: 'followLocation', location: ev.location });
+			if (shouldFollowOpenideChatLocation(ev.location)) {
+				addOpenideChatEffect(draft, { type: 'followLocation', location: ev.location });
+			}
 			return;
 		case 'toolStart': applyOpenideChatToolStart(draft, ev.id, ev.name, ev.argumentsJson); return;
 		case 'toolResult': applyOpenideChatToolResult(draft, ev.id, ev.name, ev.result, ev.isError); return;
+		case 'toolWaiting': applyOpenideChatToolWaiting(draft, ev.id, ev.holder); return;
 		case 'terminalData': applyOpenideChatTerminalData(draft, ev.id, ev.data); return;
 		case 'screenshot': applyOpenideChatScreenshot(draft, ev.id, ev.mimeType, ev.data); return;
 		case 'fileDiff': applyOpenideChatFileDiff(draft, ev); return;
@@ -110,6 +133,12 @@ function reduceRootEvent(draft: IOpenideChatDraft, ev: AgentLoopEvent): void {
 			pushOpenideChatContent(draft, {
 				kind: 'confirmation', requestId: ev.id, tool: ev.tool, title: ev.title,
 				detail: ev.detail, command: ev.command, risk: ev.risk, sensitive: ev.sensitive,
+			});
+			return;
+		case 'accountChoiceRequest':
+			interrupt(draft);
+			pushOpenideChatContent(draft, {
+				kind: 'accountChoice', requestId: ev.id, spentLabel: ev.spentLabel, candidates: ev.candidates,
 			});
 			return;
 		case 'info':
@@ -142,7 +171,7 @@ function reduceRootEvent(draft: IOpenideChatDraft, ev: AgentLoopEvent): void {
 		case 'subagentRun': applySubagentRun(draft, ev.run); return;
 		case 'subagentTimeline': appendSubagentTimeline(draft, ev.runId, ev.event); return;
 		case 'done': applyDone(draft, ev.reason); return;
-		case 'error': applyError(draft, ev.message, ev.action); return;
+		case 'error': applyError(draft, ev.message, ev.action, ev.severity); return;
 		case 'fileCheckpoint':
 		case 'messageChangeSet':
 			// Unreachable: `filterAgentEvent` drops both. Listed so adding a host-only event without
@@ -262,7 +291,7 @@ function applySubagentStart(draft: IOpenideChatDraft, ev: Extract<AgentLoopEvent
 	ensureOpenideChatDelegation(draft, ev.parentId, ev.total);
 	const index = pushOpenideChatContent(draft, {
 		kind: 'subagent', runId: ev.id, parentId: ev.parentId, index: ev.index, total: ev.total,
-		title: ev.title, model: ev.model, status: 'running', timeline: [],
+		title: ev.title, model: ev.model, parentModel: draft.parentModel, status: 'running', timeline: [],
 	});
 	draft.subagents.set(ev.id, index);
 	// R7: the mirror session is created by the controller. The reducer only says it must exist.
@@ -293,7 +322,7 @@ function applySubagentRun(draft: IOpenideChatDraft, run: Extract<AgentLoopEvent,
 			: run.status === 'interrupted' ? 'cancelled' : 'running';
 	const content: IOpenideChatSubagentContent = {
 		kind: 'subagent', runId: run.runId, parentId: run.parentRunId, index: 0, total: 1,
-		title: run.definitionName, model: run.model, status, run, timeline: run.timeline,
+		title: run.definitionName, model: run.model, parentModel: draft.parentModel, status, run, timeline: run.timeline,
 	};
 	const known = draft.subagents.get(run.runId);
 	if (known !== undefined && getOpenideChatContentAt(draft, known, 'subagent')) {
@@ -302,6 +331,10 @@ function applySubagentRun(draft: IOpenideChatDraft, run: Extract<AgentLoopEvent,
 	}
 	interrupt(draft);
 	draft.subagents.set(run.runId, pushOpenideChatContent(draft, content));
+	// The legacy path emits this from `applySubagentStart`; without it here a durable specialist had
+	// no mirror session at all, so the row that offers to open its chat had nothing to open.
+	// `startMirror` is idempotent per runId, so re-reporting a run never forks a second session.
+	addOpenideChatEffect(draft, { type: 'subagentSessionStart', runId: run.runId, title: run.definitionName, prompt: run.task });
 }
 
 function appendSubagentTimeline(draft: IOpenideChatDraft, runId: string, event: ISubagentTimelineEvent): void {
@@ -368,7 +401,7 @@ function applyDone(draft: IOpenideChatDraft, reason: string | undefined): void {
 	addOpenideChatEffect(draft, { type: 'runComplete', reason });
 }
 
-function applyError(draft: IOpenideChatDraft, message: string, action: 'connect' | 'continue' | undefined): void {
+function applyError(draft: IOpenideChatDraft, message: string, action: 'connect' | 'continue' | 'account-back' | undefined, severity?: 'warning' | 'error'): void {
 	removeOpenideChatRetry(draft);
 	interrupt(draft);
 	finalizeOpenideChatExplore(draft);
@@ -376,7 +409,7 @@ function applyError(draft: IOpenideChatDraft, message: string, action: 'connect'
 	// it red made users believe something broke and guess that typing "continue" resumed it.
 	pushOpenideChatContent(draft, {
 		kind: 'notice',
-		severity: action === 'continue' ? 'info' : 'error',
+		severity: action === 'continue' ? 'info' : (severity ?? 'error'),
 		message,
 		action,
 	});

@@ -5,9 +5,12 @@
 
 import { $, addDisposableListener, append } from '../../../../../../base/browser/dom.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IOpenideChatContent, IOpenideChatScreenshotContent, isOpenideChatContentOfKind } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
+import { t } from '../../../common/openideStrings.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
+import { setupChatTooltip } from '../openideChatHover.js';
 import '../media/openideChatScreenshot.css';
 
 export const OPENIDE_CHAT_SHOT_CLASS = 'openide-chat-shot-card';
@@ -15,7 +18,7 @@ export const OPENIDE_CHAT_SHOT_CLASS = 'openide-chat-shot-card';
 /**
  * A browser screenshot, inline.
  *
- * Ported from the webview's `renderScreenshot` (openideChatHtml.ts:3081-3095) and its `.shot-*`
+ * Ported from the webview's `renderScreenshot` and its `.shot-*`
  * styles (:1239-1244): a header row and a clickable thumbnail capped at 260px, because a full page
  * capture at natural size would be several screens of chat on its own.
  *
@@ -23,7 +26,7 @@ export const OPENIDE_CHAT_SHOT_CLASS = 'openide-chat-shot-card';
  * lightbox: it already has zoom, pan and fit, its CSP allows `img-src data:`, and it is the only
  * viewer the native chat has. The webview needed its own because it could not open an editor.
  *
- * The base64 is NOT persisted (openideChatHtml.ts:3079-3080), so this row only ever appears in a
+ * The base64 is NOT persisted, so this row only ever appears in a
  * live turn — a restored conversation has no screenshot content to render.
  */
 export class OpenideChatScreenshotPart extends OpenideChatContentPart {
@@ -38,6 +41,7 @@ export class OpenideChatScreenshotPart extends OpenideChatContentPart {
 		content: IOpenideChatScreenshotContent,
 		_context: IOpenideChatContentPartContext,
 		@ICommandService private readonly _commandService: ICommandService,
+		@IHoverService hoverService: IHoverService,
 	) {
 		super();
 
@@ -51,7 +55,7 @@ export class OpenideChatScreenshotPart extends OpenideChatContentPart {
 
 		const body = append(this.domNode, $('button.openide-chat-shot-body')) as HTMLButtonElement;
 		body.type = 'button';
-		body.title = 'Ampliar';
+		this._register(setupChatTooltip(hoverService, body, () => t('chat.part.enlarge')));
 		this._image = append(body, $('img')) as HTMLImageElement;
 		this._image.alt = 'Captura de pantalla';
 		// The thumbnail is decorative until it loads, and the list measured the row before that

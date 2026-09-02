@@ -55,7 +55,11 @@ suite('OpenIDE plan build contract', () => {
 		// cannot begin while something else is running, so there is no cancellation to survive.
 		const body = controller.slice(controller.indexOf('private buildPlan('), controller.indexOf('private settlePlanBuild('));
 		assert.strictEqual(body.length > 0, true, 'no se encontró buildPlan en el controller');
-		assert.strictEqual(/if \(this\._busy \|\| this\._planBuild \|\| this\._barrier\.isActive\)/.test(body), true,
+		// Spelled per CONVERSATION since runs stopped belonging to whichever tab was on screen: the
+		// busy flag and the pending build moved onto the conversation record. The invariant is the
+		// same one, and this assert kept naming fields that no longer exist — so it failed on every
+		// run and stopped saying anything about the contract it guards.
+		assert.strictEqual(/if \(conversation\.busy \|\| conversation\.planBuild \|\| this\._barrier\.isActive\)/.test(body), true,
 			'buildPlan tiene que rechazar arrancar sobre un run vivo');
 		// And refusing has to TELL the editor, or its Build button spins forever.
 		assert.strictEqual(body.includes('this.agentService.failPlanBuild('), true,
@@ -69,11 +73,11 @@ suite('OpenIDE plan build contract', () => {
 		// resolve the editor's pending Build.
 		const body = controller.slice(controller.indexOf('private settlePlanBuild('));
 		const block = body.slice(0, 520);
-		assert.strictEqual(/this\._planBuild = undefined;/.test(block), true, 'tiene que limpiar el estado antes de reportar');
+		assert.strictEqual(/conversation\.planBuild = undefined;/.test(block), true, 'tiene que limpiar el estado antes de reportar');
 		assert.strictEqual(block.includes('this.agentService.failPlanBuild('), true, 'el fallo se reporta al servicio');
 		assert.strictEqual(block.includes('this.agentService.finishPlanBuild('), true, 'el éxito se reporta al servicio');
 		// Clearing BEFORE reporting is what makes a second call a no-op.
-		assert.strictEqual(block.indexOf('this._planBuild = undefined;') < block.indexOf('failPlanBuild('), true,
+		assert.strictEqual(block.indexOf('conversation.planBuild = undefined;') < block.indexOf('failPlanBuild('), true,
 			'si reporta antes de limpiar, dos llamadas resuelven el Build dos veces');
 	});
 

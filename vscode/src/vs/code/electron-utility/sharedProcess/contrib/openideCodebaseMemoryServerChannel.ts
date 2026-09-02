@@ -4,9 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 /*
- *  OpenIDE — adaptador IPC autenticado por conexión para memoria del codebase. La sesión de
- *  shared process (ctx) es la autoridad: el workspaceKey enviado por el renderer sólo se acepta
- *  si coincide con la sesión inicializada por ese mismo caller.
+ *  OpenIDE — the per-connection authenticated IPC adapter for codebase memory. The shared process
+ *  session (ctx) is the authority: the workspaceKey the renderer sends is accepted only when it
+ *  matches the session that same caller initialized.
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationToken } from '../../../../base/common/cancellation.js';

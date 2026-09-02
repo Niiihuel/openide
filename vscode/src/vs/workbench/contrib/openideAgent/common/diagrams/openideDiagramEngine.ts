@@ -14,6 +14,9 @@
  *  (Claude, etc.). Visual rendering lives in the client and is replaceable.
  *--------------------------------------------------------------------------------------------*/
 
+import { INodeMapLayout, INodeMapSpec, layoutNodeMap, looksLikeNodeMap, NodeMapType, parseNodeMap } from './openideNodeMaps.js';
+import { ISeqMapLayout, ISeqMapSpec, layoutSeqMap, looksLikeSeqMap, parseSeqMap } from './openideSeqMap.js';
+
 // ---------------------------------- tipos: familia GRAPH ----------------------------------
 
 export type DiagramDirection = 'TD' | 'LR' | 'RL' | 'BT';
@@ -80,12 +83,14 @@ export interface IGitSpec { kind: 'git'; branches: string[]; commits: IGitCommit
 
 export type ChartSpec = IPieSpec | IGanttSpec | ISequenceSpec | ITimelineSpec | IJourneySpec | IQuadrantSpec | IGitSpec;
 
-/** Resultado del motor: familia graph (spec + layout listo) o chart (spec tipado). */
+/** Resultado del motor: familia graph (spec + layout listo), chart (spec tipado), o los mapas tipados (JSON IR + layout). */
 export type DiagramResult =
 	| { family: 'graph'; kind: 'flowchart' | 'state' | 'mindmap'; spec: IGraphSpec; layout: IGraphLayout }
-	| { family: 'chart'; kind: ChartSpec['kind']; spec: ChartSpec };
+	| { family: 'chart'; kind: ChartSpec['kind']; spec: ChartSpec }
+	| { family: 'nodemap'; kind: NodeMapType; spec: INodeMapSpec; layout: INodeMapLayout }
+	| { family: 'seqmap'; kind: 'seqmap'; spec: ISeqMapSpec; layout: ISeqMapLayout };
 
-export const DIAGRAM_KINDS = ['flowchart', 'state', 'mindmap', 'pie', 'gantt', 'sequence', 'timeline', 'journey', 'quadrant', 'git'] as const;
+export const DIAGRAM_KINDS = ['flowchart', 'state', 'mindmap', 'pie', 'gantt', 'sequence', 'timeline', 'journey', 'quadrant', 'git', 'archmap', 'flowmap', 'lifemap', 'seqmap'] as const;
 
 // ---------------------------------- helpers ----------------------------------
 
@@ -626,6 +631,17 @@ export function parseGitGraph(text: string): IGitSpec | undefined {
  * Returns undefined when the text is not a supported diagram (the caller picks the fallback).
  */
 export function parseDiagramSource(raw: string): DiagramResult | undefined {
+	// Typed maps first and on the RAW source: they are JSON, where the mermaid comment-stripping
+	// would corrupt any "%%" inside a string, and where the flowchart fallback would scrape bogus
+	// nodes out of the braces. Invalid map JSON falls back to the code block, never to mermaid.
+	if (looksLikeSeqMap(raw)) {
+		const parsed = parseSeqMap(raw);
+		return parsed.spec ? { family: 'seqmap', kind: 'seqmap', spec: parsed.spec, layout: layoutSeqMap(parsed.spec) } : undefined;
+	}
+	if (looksLikeNodeMap(raw)) {
+		const parsed = parseNodeMap(raw);
+		return parsed.spec ? { family: 'nodemap', kind: parsed.spec.type, spec: parsed.spec, layout: layoutNodeMap(parsed.spec) } : undefined;
+	}
 	const text = stripNoise(raw);
 	const hm = /^\s*([A-Za-z][\w-]*)/.exec(text);
 	const header = hm ? hm[1].toLowerCase() : '';

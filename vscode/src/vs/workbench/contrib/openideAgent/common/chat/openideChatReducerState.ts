@@ -6,7 +6,7 @@
 import { IAgentLocation, IChatMessage, IContextBreakdown, IMessageChangeSet } from '../openideAgentTypes.js';
 import { IOpenideChatContent, IOpenideChatExploreContent, IOpenideChatThinkingContent } from './openideChatContent.js';
 import { finalizeOpenideChatExploreContent } from './openideChatExploreGroup.js';
-import { advanceOpenideChatResponseItem, createOpenideChatResponseItem, IOpenideChatItem, IOpenideChatRequestItem, IOpenideChatResponseItem, isOpenideChatResponseItem } from './openideChatItem.js';
+import { advanceOpenideChatResponseItem, createOpenideChatResponseItem, IOpenideChatItem, IOpenideChatRequestItem, IOpenideChatResponseItem, isOpenideChatRequestItem, isOpenideChatResponseItem } from './openideChatItem.js';
 import { OpenideChatToolRoute } from './openideChatToolMeta.js';
 
 /**
@@ -45,7 +45,7 @@ export type IOpenideChatSessionEffect =
 	/** `done { reason: 'mode-switch' }`: the same turn resumes under another mode, no row, no reset. */
 	| { readonly type: 'modeHandoff' }
 	| { readonly type: 'runComplete'; readonly reason?: string }
-	| { readonly type: 'runFailed'; readonly message: string; readonly action?: 'connect' | 'continue' };
+	| { readonly type: 'runFailed'; readonly message: string; readonly action?: 'connect' | 'continue' | 'account-back' };
 
 export interface IOpenideChatUsageEffect {
 	readonly inputTokens?: number;
@@ -250,6 +250,12 @@ export interface IOpenideChatDraft {
 	effects: IOpenideChatSessionEffect[];
 	/** Injected instead of read from `Date.now()`: durations must be assertable in a test. */
 	readonly now: number;
+	/**
+	 * Model the current turn runs on, read off the request item this reply answers. Undefined on a
+	 * hidden turn (which has a `requestId` but no request row) and on restored conversations older
+	 * than the field.
+	 */
+	readonly parentModel?: string;
 	changed: boolean;
 	complete?: boolean;
 	canceled?: boolean;
@@ -274,8 +280,25 @@ export function createOpenideChatDraft(state: IOpenideChatReducerState, now: num
 		seq: state.seq,
 		effects: [],
 		now,
+		parentModel: turnModel(state),
 		changed: false,
 	};
+}
+
+/**
+ * Model of the turn the reply belongs to.
+ *
+ * Read off the REQUEST row rather than the response: `IOpenideChatRequestItem.modelId` is the
+ * snapshot the composer took when Send was pressed, it is what actually ran, and it survives a
+ * restore. Scanned backwards because the matching request is almost always the last row.
+ */
+function turnModel(state: IOpenideChatReducerState): string | undefined {
+	if (!state.requestId) { return undefined; }
+	for (let index = state.items.length - 1; index >= 0; index--) {
+		const item = state.items[index];
+		if (isOpenideChatRequestItem(item) && item.id === state.requestId) { return item.modelId; }
+	}
+	return undefined;
 }
 
 /** Appends and returns the index, so the caller can park it in a cursor in one statement. */

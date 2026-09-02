@@ -5,15 +5,15 @@
  *  (browser/diagrams/media/openideDiagrams.css) because the plan viewer draws the same pictures.
  *  What is left here is the row's own concern: the fallback for a fence the engine does not
  *  understand, transcribed from the webview's `.codewrap` / `pre.code`
- *  (browser/openideChatHtml.ts:173-180) minus the copy button, which belongs to the markdown code
+ * minus the copy button, which belongs to the markdown code
  *  block and not to a diagram that failed to parse.
  *--------------------------------------------------------------------------------------------*/
 
 .openide-chat-diagram-code {
 	position: relative;
 	margin: 6px 0;
-	background: rgba(128, 128, 128, 0.1);
-	border: 1px solid rgba(128, 128, 128, 0.22);
+	background: var(--oi-tint-2);
+	border: 1px solid var(--oi-border);
 	border-radius: 2px;
 	overflow: hidden;
 }

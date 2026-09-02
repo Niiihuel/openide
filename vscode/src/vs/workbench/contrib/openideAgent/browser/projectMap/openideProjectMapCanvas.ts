@@ -58,6 +58,8 @@ export class OpenideProjectMapCanvas extends Disposable {
 	private _neighbors = new Map<string, Set<string>>();
 	private _world = { width: 1000, height: 700 };
 	private _view: IViewport = { x: 0, y: 0, scale: 1 };
+	/** A graph has been framed at least once, so `_view` is a view somebody could be reading. */
+	private _framed = false;
 	private _size = { width: 0, height: 0 };
 	private _hover: IProjectMapNode | undefined;
 	private _selected: IProjectMapNode | undefined;
@@ -99,7 +101,17 @@ export class OpenideProjectMapCanvas extends Disposable {
 		this.invalidate();
 	}
 
-	setGraph(view: IGraphView, layout: readonly ILayoutNode[], world: { width: number; height: number }): void {
+	/**
+	 * Replaces the graph.
+	 *
+	 * `preserveView` keeps the current pan and zoom instead of framing the whole map. It is what
+	 * a RELOAD of the same scope wants: the indexer republishes the graph while the user is
+	 * reading it, and re-framing on every republish threw away the zoom they had just set — the
+	 * map jumped back to the overview several times a minute while the workspace was indexing.
+	 * A first load, or a move to another scope, still frames the map: there is no view worth
+	 * keeping.
+	 */
+	setGraph(view: IGraphView, layout: readonly ILayoutNode[], world: { width: number; height: number }, preserveView = false): void {
 		const moduleIndex = new Map<string, number>();
 		view.modules.forEach((module, index) => moduleIndex.set(module.label, index));
 		const position = new Map(layout.map(node => [node.id, node] as const));
@@ -129,6 +141,13 @@ export class OpenideProjectMapCanvas extends Disposable {
 		this._world = world;
 		this._hover = undefined;
 		this._selected = this._selected ? this._byId.get(this._selected.id) : undefined;
+		// Nothing to preserve before the first graph: `_view` is still the identity transform, and
+		// keeping it would leave the map parked in a corner at scale 1.
+		if (preserveView && this._framed) {
+			this.invalidate();
+			return;
+		}
+		this._framed = true;
 		this.fit();
 	}
 
@@ -176,7 +195,7 @@ export class OpenideProjectMapCanvas extends Disposable {
 		this.minimap.height = Math.round(mmHeight * dpr);
 		this.minimap.style.width = `${mmWidth}px`;
 		this.minimap.style.height = `${mmHeight}px`;
-		if (first) { this.fit(); } else { this.invalidate(); }
+		if (first) { this._framed = true; this.fit(); } else { this.invalidate(); }
 	}
 
 	zoomBy(factor: number): void {

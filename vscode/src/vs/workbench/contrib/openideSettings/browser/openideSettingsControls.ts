@@ -11,13 +11,11 @@ import { $, append } from '../../../../base/browser/dom.js';
 import { getDefaultHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { Button } from '../../../../base/browser/ui/button/button.js';
 import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
-import { SelectBox } from '../../../../base/browser/ui/selectBox/selectBox.js';
-import { Checkbox } from '../../../../base/browser/ui/toggle/toggle.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { defaultButtonStyles } from '../../../../platform/theme/browser/defaultStyles.js';
-import { openideCheckboxStyles, openideInputBoxStyles, openideSelectBoxStyles } from '../../openideAgent/browser/openideControlStyles.js';
+import { openideInputBoxStyles } from '../../openideAgent/browser/openideControlStyles.js';
 import { IOpenideSettingItem } from '../common/openideSettingsTypes.js';
 import { SettingValueType } from '../../../services/preferences/common/preferences.js';
 import { t } from '../../openideAgent/common/openideStrings.js';
@@ -39,39 +37,49 @@ export function appendSettingsInfoHint(hoverService: IHoverService, store: Dispo
 	return hint;
 }
 
+import { OpenideSettingsDropdown } from './openideSettingsDropdown.js';
+import { OpenideSettingsToggle } from './openideSettingsToggle.js';
 export interface IOpenideSettingControl {
 	readonly element: HTMLElement;
 	readonly onChange?: (listener: (value: unknown) => void) => void;
 	/** A setting editable only in another scope is shown read-only. Each widget disables itself its
-	 *  own way — `<input>.disabled`, `SelectBox.setEnabled`, `Button.enabled` — so the row asks the
+	 *  own way — `<input>.disabled`, `OpenideSettingsDropdown.setEnabled`, `Button.enabled` — so the row asks the
 	 *  control instead of guessing from the DOM. */
 	readonly setEnabled?: (enabled: boolean) => void;
 }
 
 /**
- * The control for one setting row, built from upstream's widgets.
+ * The control for one setting row.
  *
- * Every one of these used to be hand-rolled: a `<button role="switch">`, a listbox assembled out
- * of divs with its own open/close/focusout/Escape handling, and a bare `<input>`. That is a
- * reimplementation of `Checkbox`, `SelectBox` and `InputBox` — including their theming, focus
- * rings, high-contrast handling and keyboard behaviour — which then drifts from them. The widgets
- * are disposables, so the caller passes the store that owns the row.
+ * Text and numbers are upstream's `InputBox`, the JSON fallback upstream's `Button`: hand-rolled
+ * copies of those drifted from their theming, focus rings and high-contrast handling. The two
+ * controls that are the product's own — the dropdown and the switch — each keep the shape rule 4
+ * of docs/theming-surfaces.md protects (one element, one border, one focus ring) and say in their
+ * own file why the native widget was not the right one. The widgets are disposables, so the
+ * caller passes the store that owns the row.
  */
 export function createSettingControl(item: IOpenideSettingItem, openJson: () => void, store: DisposableStore, contextViewService: IContextViewService): IOpenideSettingControl {
 	const value = item.value.targetValue !== undefined ? item.value.targetValue : item.value.effective;
 	if (item.type === SettingValueType.Boolean) {
-		const checkbox = store.add(new Checkbox(item.label, !!value, openideCheckboxStyles));
+		// A switch, not upstream's `Checkbox`: see openideSettingsToggle.ts for why that departs
+		// from the native-widget rule and what it keeps of it.
+		const toggle = store.add(new OpenideSettingsToggle(item.label, !!value));
 		return {
-			element: checkbox.domNode,
-			onChange: listener => store.add(checkbox.onChange(() => listener(checkbox.checked))),
-			setEnabled: enabled => enabled ? checkbox.enable() : checkbox.disable(),
+			element: toggle.domNode,
+			onChange: listener => store.add(toggle.onChange(checked => listener(checked))),
+			setEnabled: enabled => toggle.setEnabled(enabled),
 		};
 	}
 	if (item.type === SettingValueType.Enum) {
 		const candidates = (item.setting.enum || []).map(String);
-		const options = candidates.map((candidate, index) => ({ text: item.setting.enumItemLabels?.[index] || candidate }));
+		// Labels only, as Cursor: the enum descriptions made every row a sentence and the menu as
+		// wide as the page. They stay reachable through the row's hint.
+		const options = candidates.map((candidate, index) => ({
+			label: item.setting.enumItemLabels?.[index] || candidate,
+		}));
 		const selected = Math.max(0, candidates.indexOf(String(value)));
-		const select = store.add(new SelectBox(options, selected, contextViewService, openideSelectBoxStyles, { ariaLabel: item.label }));
+		// The product's popover, not `SelectBox`: see openideSettingsDropdown.ts for why.
+		const select = store.add(new OpenideSettingsDropdown(options, selected, contextViewService, item.label));
 		const host = $('.openide-settings-selecthost');
 		select.render(host);
 		return {
@@ -100,6 +108,9 @@ export function createSettingControl(item: IOpenideSettingItem, openJson: () => 
 	// Schemas with no honest widget (objects, arrays of objects) keep sending the user to the JSON.
 	const host = $('.openide-settings-jsonhost');
 	const button = store.add(new Button(host, { ...defaultButtonStyles, secondary: true, title: t('settings.item.editJson') }));
+	// Same primitive as every section button (openideSettingsSectionBuilder.ts): the widget paints
+	// its colours inline, `.oi-btn` gives it the product's height, padding and radius.
+	button.element.classList.add('oi-btn');
 	button.label = t('settings.item.editJson');
 	store.add(button.onDidClick(openJson));
 	return { element: host, setEnabled: enabled => button.enabled = enabled };

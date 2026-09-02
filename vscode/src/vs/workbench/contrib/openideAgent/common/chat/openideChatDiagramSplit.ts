@@ -17,12 +17,12 @@ import {
  * where the workbench's markdown renderer draws it as a code block. The picture was unreachable —
  * not missing, unreachable — and this module is the missing half.
  *
- * The languages are the webview's (`buildDiagramOrCodeHtml`, openideChatHtml.ts:2296). Every other
+ * The languages are the webview's (`buildDiagramOrCodeHtml`, the removed chat webview). Every other
  * info string stays inside the markdown and keeps being a code block, which is why this splits the
  * text rather than replacing the renderer: `edit_file` snippets, shell transcripts and JSON are the
  * overwhelming majority of fences and none of them want a frame around them.
  */
-const DIAGRAM_LANGUAGES = new Set(['mermaid', 'flowchart', 'diagram']);
+const DIAGRAM_LANGUAGES = new Set(['mermaid', 'flowchart', 'diagram', 'archmap', 'flowmap', 'lifemap', 'seqmap']);
 
 /**
  * A CLOSED fence. Streaming is exactly why the closing ``` is required: half a graph parses to a
@@ -30,10 +30,26 @@ const DIAGRAM_LANGUAGES = new Set(['mermaid', 'flowchart', 'diagram']);
  * thing any content part does.
  *
  * The webview held a "Generando diagrama…" shimmer over the open fence for that same reason. Here
- * the unclosed fence stays in the markdown and renders as a code block until it closes — the source
- * the model is typing, which is honest, costs nothing and is what the block was already showing.
+ * the open fence is held out of the prose by `splitOpenOpenideChatDiagram` and the turn's live line
+ * says what is being drawn, so the reader never watches raw graph JSON scroll past.
  */
 const FENCE = /```([^\n]*)\n([\s\S]*?)```/g;
+
+/**
+ * A fence that has been OPENED but whose info line has not finished arriving: the text ends in
+ * ```` ```flowm ```` with no newline yet.
+ *
+ * This is the one-delta window that painted an EMPTY grey box under the answer. `marked` runs with
+ * `fillInIncompleteTokens` while a turn streams, so it closes that dangling fence for us and hands
+ * back a code block with nothing in it — and a provider that pauses on the chunk boundary before
+ * the body (which is where they naturally pause, right before a long JSON) leaves that box on
+ * screen for seconds. It reads as a broken widget, which is exactly what it was reported as.
+ *
+ * Holding the line back instead loses nothing: an unterminated fence opener HAS no content, so
+ * there is nothing to show either way. Any language, not only the diagrams — the info string is
+ * precisely what has not arrived yet, so there is nothing to branch on.
+ */
+const OPENING_FENCE = /```[^\n]*$/;
 
 function isDiagramLanguage(info: string): boolean {
 	return DIAGRAM_LANGUAGES.has(info.trim().toLowerCase());
@@ -71,6 +87,38 @@ export function splitOpenideChatDiagrams(text: string): readonly OpenideChatMark
 		segments.push({ kind: 'markdown', value: rest });
 	}
 	return segments;
+}
+
+/**
+ * The trailing UNCLOSED diagram fence of a streaming message, if there is one.
+ *
+ * The closed-fence rule above still stands: nothing is extracted until the fence closes. This is
+ * for the markdown part's PRESENTATION only — while the source streams the reader gets the prose
+ * and the turn's live line, instead of watching raw JSON scroll by. The source keeps accumulating
+ * in the markdown content untouched, which is why this returns the split point rather than
+ * mutating anything.
+ *
+ * `syntax` is `''` when the fence's info line has not finished arriving: hold the text, claim
+ * nothing. Any other value is a diagram language.
+ */
+export function splitOpenOpenideChatDiagram(text: string): { readonly prose: string; readonly syntax: string } | undefined {
+	FENCE.lastIndex = 0;
+	let tail = 0;
+	for (let match = FENCE.exec(text); match; match = FENCE.exec(text)) {
+		tail = match.index + match[0].length;
+	}
+	const rest = text.slice(tail);
+	const open = /```([^\n]*)\n/.exec(rest);
+	if (open) {
+		return isDiagramLanguage(open[1])
+			? { prose: text.slice(0, tail + open.index), syntax: open[1].trim().toLowerCase() }
+			: undefined;
+	}
+	// The info line is still arriving. `syntax` is empty because the language is not knowable yet,
+	// and callers must treat that as "hold the text back, claim nothing": the live line has no
+	// business announcing a diagram over a fence that may turn out to be shell.
+	const opening = OPENING_FENCE.exec(rest);
+	return opening ? { prose: text.slice(0, tail + opening.index), syntax: '' } : undefined;
 }
 
 function toContent(segment: OpenideChatMarkdownSegment): IOpenideChatContent {

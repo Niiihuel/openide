@@ -8,7 +8,7 @@
 // The strict variants are spelled out below instead.
 import assert from 'assert';
 import { IOpenideChatContent, IOpenideChatDiagramContent } from '../../common/chat/openideChatContent.js';
-import { splitOpenideChatDiagrams } from '../../common/chat/openideChatDiagramSplit.js';
+import { splitOpenideChatDiagrams, splitOpenOpenideChatDiagram } from '../../common/chat/openideChatDiagramSplit.js';
 import { isOpenideChatResponseItem } from '../../common/chat/openideChatItem.js';
 import { applyAgentEvents } from '../../common/chat/openideChatReducer.js';
 import { createOpenideChatReducerState } from '../../common/chat/openideChatReducerState.js';
@@ -96,6 +96,47 @@ suite('OpenIDE chat diagram fences', () => {
 		const segments = splitOpenideChatDiagrams('```ts\nconst a = 1;\n```\n\n```mermaid\ngraph TD\nA-->B\n```');
 		assert.deepStrictEqual(segments.map(segment => segment.kind), ['markdown', 'diagram']);
 		assert.ok((segments[0] as { value: string }).value.includes('const a = 1;'));
+	});
+
+	test('a streaming fence is detected for the skeleton, with the prose split off', () => {
+		// The presentation-only counterpart of "a fence still being typed is not drawn": the
+		// markdown part swaps the raw streaming source for a skeleton, and needs to know where
+		// the prose ends and which language opened.
+		const open = splitOpenOpenideChatDiagram('Mirá:\n\n```archmap\n{"type":"archmap"');
+		assert.deepStrictEqual(open, { prose: 'Mirá:\n\n', syntax: 'archmap' });
+	});
+
+	test('the skeleton split ignores closed fences and ordinary code blocks', () => {
+		assert.strictEqual(splitOpenOpenideChatDiagram(`Listo:\n\n\`\`\`mermaid\n${GRAPH}\n\`\`\`\n`), undefined, 'closed fence: the real row takes over');
+		assert.strictEqual(splitOpenOpenideChatDiagram('```ts\nconst a = 1;'), undefined, 'an open code block is not a diagram');
+		const after = splitOpenOpenideChatDiagram(`\`\`\`ts\nconst a = 1;\n\`\`\`\n\n\`\`\`mermaid\n${GRAPH}`);
+		assert.strictEqual(after?.syntax, 'mermaid');
+		assert.ok(after?.prose.includes('const a = 1;'), 'the closed code block stays in the prose');
+	});
+
+	test('a fence whose info line is still arriving is held back, and claims nothing', () => {
+		// The reported bug: `marked` runs with `fillInIncompleteTokens` while a turn streams, so a
+		// dangling ```` ```flowm ```` was closed for us and rendered as an EMPTY grey box under the
+		// answer — and providers pause exactly there, right before a long JSON body, so it sat on
+		// screen for seconds looking like a broken widget.
+		for (const partial of ['```', '```f', '```flowma']) {
+			const open = splitOpenOpenideChatDiagram(`El flujo principal sería:\n\n${partial}`);
+			assert.deepStrictEqual(open, { prose: 'El flujo principal sería:\n\n', syntax: '' }, `"${partial}" was not held back`);
+		}
+		// Held for ANY language, because which one it is is precisely what has not arrived yet.
+		assert.deepStrictEqual(splitOpenOpenideChatDiagram('Corré:\n\n```bas'), { prose: 'Corré:\n\n', syntax: '' });
+	});
+
+	test('the newline resolves it: a diagram opens, anything else goes back to the prose', () => {
+		assert.strictEqual(splitOpenOpenideChatDiagram('Mirá:\n\n```flowmap\n')?.syntax, 'flowmap');
+		assert.strictEqual(splitOpenOpenideChatDiagram('Corré:\n\n```bash\n'), undefined, 'a shell fence is a code block again');
+	});
+
+	test('a closing fence arriving backtick by backtick is not mistaken for a new opener', () => {
+		// `\`\`\`` at the end of a text is ambiguous, and reading it as an opener would blank the
+		// diagram that just finished streaming. The closed fence is matched first, so it is not.
+		const open = splitOpenOpenideChatDiagram(`Listo:\n\n\`\`\`mermaid\n${GRAPH}\n\`\`\``);
+		assert.strictEqual(open, undefined);
 	});
 
 	test('a reloaded conversation shows the picture, not the source', () => {

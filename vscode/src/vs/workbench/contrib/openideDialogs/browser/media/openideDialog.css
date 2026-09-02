@@ -1,0 +1,163 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*
+ *  OpenIDE — the product's modal.
+ *
+ *  Until this module the fork had no modal of its own: `window.dialogStyle` defaulted to `native`,
+ *  so every confirmation was drawn by the OS. On Linux that is a GTK window with GTK's type, GTK's
+ *  buttons and GTK's corners, floating over an IDE that had spent a lot of effort on islands, one
+ *  radius scale and one set of surface tokens — and it is invisible to the workbench, so it could
+ *  not even be captured or tested from inside. The contribution flips the default to `custom`;
+ *  what follows is the design for the widget that then renders.
+ *
+ *  Every rule is gated behind `.openide-dialogs`, the way the Modern UI modules gate theirs: the
+ *  base widget (`base/browser/ui/dialog/dialog.css`) stays upstream's, byte for byte, so the next
+ *  rebase is a copy and not a merge.
+ *
+ *  Colours come from the `--oi-*` tokens (browser/openideSurfaceCss.ts) that Settings, the chat
+ *  dock and every native popover already read. The contribution installs them, because a dialog
+ *  can be the FIRST thing on screen — a "restore this workspace?" before any of those mount.
+ */
+
+/* The scrim. Darker than upstream's 0.3: the dialog now shares the workbench's own tones instead
+   of bringing the OS's, so it needs the backdrop to recede for the modal to read as modal. */
+.openide-dialogs.monaco-workbench .monaco-dialog-modal-block.dimmed {
+	background: rgba(0, 0, 0, 0.45);
+}
+
+/* Specificity note: every selector here is `.openide-dialogs.monaco-workbench …` (0,3,0) on
+   purpose. `modernUI/media/notificationsDialogs.css` restyles the same widget at (0,2,0), so at
+   equal weight the winner would be whichever module happened to be imported last — and it was
+   modernUI, which is how the first version of this file ended up with its background applied and
+   its padding ignored. */
+.openide-dialogs.monaco-workbench .monaco-dialog-box {
+	padding: 0;
+	min-width: 460px;
+	max-width: min(560px, 90vw);
+	/* The same curve as the tabs and the islands (cornerRadius.small). One radius language across
+	   the product was an explicit decision; a modal is not the place to open a second one. */
+	border-radius: var(--oi-radius-sm);
+	border: 1px solid var(--oi-border);
+	background: var(--oi-overlay, var(--vscode-editorWidget-background));
+	box-shadow: var(--oi-shadow-lg);
+}
+
+/* ---- message ------------------------------------------------------------------------------ */
+
+/* `align-items: flex-start`, not `center`: with a long detail the icon was floating in the middle
+   of the paragraph instead of sitting on the title it belongs to. */
+.openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-message-row {
+	align-items: flex-start;
+	padding: 20px 22px 0;
+}
+
+.openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-icon.codicon {
+	flex: 0 0 auto;
+	margin: 1px 0 0;
+	font-size: 20px;
+	line-height: 20px;
+}
+.openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-icon.codicon-dialog-warning { color: var(--oi-warn, var(--vscode-editorWarning-foreground)); }
+.openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-icon.codicon-dialog-error { color: var(--oi-danger, var(--vscode-errorForeground)); }
+.openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-icon.codicon-dialog-info,
+.openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-icon.codicon-dialog-question { color: var(--vscode-textLink-foreground); }
+
+.openide-dialogs.monaco-workbench .monaco-dialog-box:not(.align-vertical) .dialog-message-row .dialog-message-container {
+	padding-left: 14px;
+	padding-right: 0;
+}
+
+.openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-message-row .dialog-message-container .dialog-message {
+	margin: 0 0 6px;
+	font-size: 14px;
+	line-height: 20px;
+	font-weight: 600;
+	letter-spacing: -0.005em;
+	color: var(--oi-text, var(--vscode-foreground));
+}
+
+.openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-message-row .dialog-message-container .dialog-message-detail {
+	margin: 0;
+	font-size: 12.5px;
+	line-height: 18px;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	opacity: 1;
+}
+
+.openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-checkbox-row {
+	margin-top: 14px;
+	gap: 8px;
+}
+
+.openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-checkbox-row .dialog-checkbox-message {
+	font-size: 12.5px;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+}
+
+.openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-message-input .monaco-inputbox {
+	margin-top: 12px;
+	border-radius: var(--oi-radius-sm);
+}
+
+/* ---- buttons ------------------------------------------------------------------------------ */
+
+/* A separated footer band, the shape every confirmation in this IDE already has (the chat's own
+   cards, Settings): the decision sits on its own surface at the bottom right, so the eye lands on
+   the primary action after reading, not before. Upstream floats the buttons on the dialog's own
+   background with a 67px left margin to fake the alignment. */
+.openide-dialogs.monaco-workbench .monaco-dialog-box > .dialog-buttons-row {
+	margin-top: 20px;
+	/* The band spans the whole box (the box carries no padding), so its own padding is the gutter.
+	   `overflow: hidden` on the box would clip the focus ring of the primary button, hence the
+	   explicit bottom radii below instead. */
+	padding: 12px 22px;
+	border-top: 1px solid var(--oi-border-soft);
+	background: var(--oi-raised, transparent);
+	border-radius: 0 0 var(--oi-radius-sm) var(--oi-radius-sm);
+}
+
+.openide-dialogs.monaco-workbench .monaco-dialog-box:not(.align-vertical) > .dialog-buttons-row > .dialog-buttons {
+	gap: 8px;
+	margin-left: 0;
+	justify-content: flex-end;
+}
+
+.openide-dialogs.monaco-workbench .monaco-dialog-box > .dialog-buttons-row > .dialog-buttons > .monaco-button {
+	margin: 0;
+	min-width: 88px;
+	min-height: 28px;
+	padding: 4px 14px;
+	border-radius: var(--oi-radius-sm);
+	font-size: 12.5px;
+	justify-content: center;
+}
+
+/* The secondary buttons read as surface, not as a second call to action. `secondary` is the class
+   the button widget puts on everything that is not the default action. */
+.openide-dialogs.monaco-workbench .monaco-dialog-box > .dialog-buttons-row > .dialog-buttons > .monaco-button.monaco-text-button.secondary {
+	border: 1px solid var(--oi-border);
+}
+
+/* Stacked variant (many buttons, or long labels): the band and the radius stay, the column does
+   not need the minimum width. */
+.openide-dialogs.monaco-workbench .monaco-dialog-box.align-vertical > .dialog-buttons-row > .dialog-buttons {
+	gap: 6px;
+	margin: 0;
+}
+.openide-dialogs.monaco-workbench .monaco-dialog-box.align-vertical > .dialog-buttons-row > .dialog-buttons > .monaco-button {
+	min-width: 0;
+	width: 100%;
+}
+
+/* ---- toolbar (the close X) ---------------------------------------------------------------- */
+
+.openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-toolbar-row {
+	position: absolute;
+	top: 10px;
+	right: 12px;
+	padding: 0;
+	height: auto;
+}

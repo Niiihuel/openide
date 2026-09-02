@@ -1,0 +1,129 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* The inline diff block (openideDiffBlock.ts + openideDiffLines.ts) — the harness's one way of
+   drawing a change, transcribed from the removed chat webview's `.ediff` family and Cursor's
+   edit block. It is mounted by the transcript's edit card AND by the Agent Changes view, so
+   nothing in here may key on either host: the block's own classes carry every state
+   (`has-diff`, `open`, `needs-expand`) and the hosts only decide where it sits. */
+
+.openide-diff-block {
+	position: relative;
+	display: none;
+}
+.openide-diff-block.has-diff {
+	display: block;
+}
+
+.openide-diff {
+	--oi-edit-surface: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-foreground));
+	background: var(--oi-edit-surface);
+	/* inline-block + min-width: the block grows to its widest line so every row's tint runs the
+	   full scrollable width, not just behind its own text. */
+	display: inline-block;
+	min-width: 100%;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11.5px;
+	line-height: 1.55;
+	max-height: 108px;
+	overflow-x: auto;
+	overflow-y: hidden;
+	tab-size: 4;
+}
+.openide-diff-block.open .openide-diff {
+	max-height: 320px;
+	overflow: auto;
+}
+
+/* Beats `.openide-chat-row * { white-space: normal }` (openideChatNative.css): a diff keeps its
+   indentation and never wraps — it scrolls, like the editor it previews. The selector names the
+   transcript row because that is where the wrapping rule lives; in the sidebar the plain rule
+   below already wins. */
+.openide-chat-row .openide-diff-line,
+.openide-chat-row .openide-diff-line * {
+	white-space: pre;
+}
+.openide-diff-line {
+	display: flex;
+	white-space: pre;
+	padding-right: 10px;
+	color: var(--vscode-editor-foreground, var(--vscode-foreground));
+}
+.openide-diff-sign {
+	width: 22px;
+	flex: 0 0 auto;
+	text-align: center;
+	opacity: 0.7;
+	user-select: none;
+}
+.openide-diff-add { background: color-mix(in srgb, var(--openide-green) 18%, transparent); }
+.openide-diff-add .openide-diff-sign { color: var(--openide-green); opacity: 1; }
+.openide-diff-del { background: color-mix(in srgb, var(--openide-red) 16%, transparent); }
+.openide-diff-del .openide-diff-sign { color: var(--openide-red); opacity: 1; }
+.openide-diff-del .openide-diff-code { opacity: 0.75; }
+.openide-diff-gap { color: var(--vscode-descriptionForeground); opacity: 0.7; }
+
+/* ---- The fold (openideFold.ts): fade + chevron, shared by every folded card ---------------- */
+
+.openide-fold { position: relative; }
+
+/* The fade and the chevron only exist while the collapsed content hides more lines. */
+.openide-fold-fade {
+	position: absolute;
+	z-index: 3;
+	left: 0;
+	right: 0;
+	height: 40px;
+	pointer-events: none;
+}
+.openide-fold-bottom > .openide-fold-fade {
+	bottom: 0;
+	background: linear-gradient(to bottom, transparent 0%,
+		color-mix(in srgb, var(--vscode-editor-background) 72%, transparent) 48%,
+		var(--vscode-editor-background) 100%);
+}
+/* A card pinned to its tail (a terminal) fades the OLDER lines at the top instead: the newest
+   line is the one being read and stays whole. */
+.openide-fold-top > .openide-fold-fade {
+	top: 0;
+	background: linear-gradient(to top, transparent 0%,
+		color-mix(in srgb, var(--vscode-editor-background) 72%, transparent) 48%,
+		var(--vscode-editor-background) 100%);
+}
+.openide-fold:not(.needs-expand) > .openide-fold-fade,
+.openide-fold.open > .openide-fold-fade { display: none; }
+
+.openide-fold-expand {
+	position: absolute;
+	left: 50%;
+	bottom: 1px;
+	transform: translateX(-50%);
+	z-index: 4;
+	width: 28px;
+	height: 18px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	/* Bare glyph, as in Cursor: the fade underneath is what separates it from the code. */
+	border: none;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	outline: none;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	padding: 0;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 100ms ease, color 100ms ease;
+}
+.openide-fold-expand .codicon { font-size: 16px; }
+.openide-fold:not(.needs-expand) > .openide-fold-expand { display: none; }
+.openide-fold.needs-expand:hover > .openide-fold-expand,
+.openide-fold-expand:focus-visible {
+	opacity: 1;
+	pointer-events: auto;
+}
+.openide-fold-expand:hover { color: var(--vscode-foreground); background: transparent; }

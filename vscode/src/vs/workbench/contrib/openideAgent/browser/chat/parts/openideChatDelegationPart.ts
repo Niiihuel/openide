@@ -16,7 +16,7 @@ type DelegationStatus = IOpenideChatDelegationContent['status'];
 /**
  * The header of a delegation: "Delegation · 3 agents", with the group's status.
  *
- * Ported from the webview's delegation summary (openideChatHtml.ts:3718-3739) and its
+ * Ported from the webview's delegation summary and its
  * `.delegation-summary*` styles (:679-690), but reduced to the head — and that reduction is the
  * whole design decision here, so it is worth writing down.
  *
@@ -88,7 +88,7 @@ export class OpenideChatDelegationPart extends OpenideChatContentPart {
 	}
 }
 
-/** openideChatHtml.ts:3725. English, like the webview's summary line. */
+/** the removed chat webview. English, like the webview's summary line. */
 function delegationTitle(total: number): string {
 	const count = Math.max(0, Math.round(total) || 0);
 	return `Delegation · ${count} ${count === 1 ? 'agent' : 'agents'}`;

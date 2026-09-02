@@ -277,8 +277,8 @@ class QuickInputItemDelegate implements IListVirtualDelegate<IQuickPickElement> 
 		if (element instanceof QuickPickSeparatorElement) {
 			return 34;
 		}
-		// Cuatro píxeles pertenecen al espacio entre filas. El contenido conserva sus
-		// 22/44 px originales, por lo que el resaltado no se comprime.
+		// Four pixels belong to the gap between rows. The content keeps its original
+		// 22/44 px, so the highlight is not squeezed.
 		return element.saneDetail ? 48 : 26;
 	}
 

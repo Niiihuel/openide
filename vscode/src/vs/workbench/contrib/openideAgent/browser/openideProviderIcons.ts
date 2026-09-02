@@ -10,7 +10,7 @@
 import { encodeBase64 } from '../../../../base/common/buffer.js';
 import { FileAccess } from '../../../../base/common/network.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
-import { IProviderBrand, OPENIDE_PROVIDER_BRANDS, ProviderBrandAsset, resolveProviderBrand } from '../common/openideProviderBranding.js';
+import { IProviderBrand, OPENIDE_PROVIDER_BRANDS, ProviderBrandAsset, ProviderBrandPaint, resolveProviderBrand } from '../common/openideProviderBranding.js';
 import './media/openideProviderIcon.css';
 
 const ICON_ROOT = 'vs/workbench/contrib/openideAgent/browser/media/providerIcons/';
@@ -19,38 +19,63 @@ export interface ISerializedProviderIcon {
 	readonly name: string;
 	readonly initials: string;
 	readonly uri?: string;
+	readonly paint?: ProviderBrandPaint;
 }
 
 let cachedWebviewIcons: Promise<Readonly<Record<string, ISerializedProviderIcon>>> | undefined;
-const nativeIconLoads = new Map<string, { state: 'loading' | 'ready' | 'failed'; targets: Set<HTMLElement> }>();
+const nativeIconLoads = new Map<string, { state: 'loading' | 'ready' | 'failed'; targets: Map<HTMLElement, IProviderBrand> }>();
 
 function assetBrowserUri(asset: ProviderBrandAsset): string {
 	return FileAccess.asBrowserUri(`${ICON_ROOT}${asset}` as Parameters<typeof FileAccess.asBrowserUri>[0]).toString(true);
 }
 
 function showProviderMonogram(element: HTMLElement, brand: IProviderBrand): void {
-	element.classList.remove('logo-ready');
+	element.classList.remove('logo-ready', 'logo-image');
 	element.classList.add('monogram');
 	element.removeAttribute('data-provider-icon-uri');
 	element.style.webkitMaskImage = '';
 	element.style.maskImage = '';
+	element.style.backgroundImage = '';
+	element.style.removeProperty('--oi-brand-tint');
 	element.textContent = brand.initials;
 }
 
-function showProviderMask(element: HTMLElement, uri: string): void {
+/**
+ * Paints the mark the way its brand asks (`IProviderBrand.paint`): a self-coloured SVG as the
+ * element's background image, a tinted or plain silhouette through a mask. The mask is the
+ * default because it is what makes a third-party logo read as part of the IDE — it takes the
+ * surface's ink — and the tint only replaces that ink where the brand's colour is the mark.
+ */
+function showProviderMark(element: HTMLElement, brand: IProviderBrand, uri: string): void {
 	const value = `url("${uri}")`;
 	element.classList.remove('monogram');
-	element.classList.add('logo-ready');
 	element.textContent = '';
+	if (brand.paint === 'full') {
+		element.classList.remove('logo-ready');
+		element.classList.add('logo-image');
+		element.style.webkitMaskImage = '';
+		element.style.maskImage = '';
+		element.style.removeProperty('--oi-brand-tint');
+		element.style.backgroundImage = value;
+		return;
+	}
+	element.classList.remove('logo-image');
+	element.classList.add('logo-ready');
+	element.style.backgroundImage = '';
 	element.style.webkitMaskImage = value;
 	element.style.maskImage = value;
+	if (brand.paint?.tint) {
+		element.style.setProperty('--oi-brand-tint', brand.paint.tint);
+	} else {
+		element.style.removeProperty('--oi-brand-tint');
+	}
 }
 
 function loadProviderMask(element: HTMLElement, brand: IProviderBrand, uri: string): void {
 	element.setAttribute('data-provider-icon-uri', uri);
 	const existing = nativeIconLoads.get(uri);
 	if (existing?.state === 'ready') {
-		showProviderMask(element, uri);
+		showProviderMark(element, brand, uri);
 		return;
 	}
 	showProviderMonogram(element, brand);
@@ -59,23 +84,23 @@ function loadProviderMask(element: HTMLElement, brand: IProviderBrand, uri: stri
 		return;
 	}
 	if (existing) {
-		existing.targets.add(element);
+		existing.targets.set(element, brand);
 		return;
 	}
-	const load = { state: 'loading' as const, targets: new Set<HTMLElement>([element]) };
+	const load = { state: 'loading' as const, targets: new Map<HTMLElement, IProviderBrand>([[element, brand]]) };
 	nativeIconLoads.set(uri, load);
 	const image = element.ownerDocument.createElement('img');
 	image.addEventListener('load', () => {
-		nativeIconLoads.set(uri, { state: 'ready', targets: new Set() });
-		for (const target of load.targets) {
+		nativeIconLoads.set(uri, { state: 'ready', targets: new Map() });
+		for (const [target, targetBrand] of load.targets) {
 			if (target.getAttribute('data-provider-icon-uri') === uri) {
-				showProviderMask(target, uri);
+				showProviderMark(target, targetBrand, uri);
 			}
 		}
 		load.targets.clear();
 	}, { once: true });
 	image.addEventListener('error', () => {
-		nativeIconLoads.set(uri, { state: 'failed', targets: new Set() });
+		nativeIconLoads.set(uri, { state: 'failed', targets: new Map() });
 		load.targets.clear();
 	}, { once: true });
 	image.src = uri;
@@ -119,7 +144,7 @@ export function buildProviderIconData(fileService: IFileService): Promise<Readon
 			const data = new Map<ProviderBrandAsset, string | undefined>(await Promise.all(assets.map(async asset => [asset, await readAssetDataUri(fileService, asset)] as const)));
 			const result: Record<string, ISerializedProviderIcon> = Object.create(null);
 			for (const [providerId, brand] of Object.entries(OPENIDE_PROVIDER_BRANDS)) {
-				result[providerId] = { name: brand.name, initials: brand.initials, uri: brand.asset ? data.get(brand.asset) : undefined };
+				result[providerId] = { name: brand.name, initials: brand.initials, uri: brand.asset ? data.get(brand.asset) : undefined, paint: brand.paint };
 			}
 			return result;
 		})();

@@ -17,31 +17,33 @@ import path from 'node:path';
 const root = process.cwd();
 const allowlistPath = 'dev/comment-language-allowlist.json';
 
-/** Source OpenIDE owns. Upstream VS Code code is out of scope by design. */
+/**
+ * Everything the product is built from.
+ *
+ * This used to be a hand-kept list of OpenIDE-owned directories, and files were only read when the
+ * BASENAME carried an `openide` prefix. That rule has an obvious hole, and the tree fell into it:
+ * a fork's changes mostly land inside upstream-named files -- gettingStarted.contribution.ts,
+ * browserInspectorFeature.ts, layout.ts -- and 121 Spanish comment lines across 20 such files sat
+ * outside the audit while it reported OK. CONTRIBUTING promises English everywhere; a scope
+ * narrower than the promise is a fence with a gap next to it.
+ *
+ * Scanning upstream's own sources costs nothing: they are already English, and the detector needs
+ * three Spanish function words on one line before it says anything. Whole-tree sweeps confirm it --
+ * 6511 files under vscode/src, zero flagged.
+ */
 const scanRoots = [
-	'vscode/src/vs/workbench/contrib/openideAgent',
-	'vscode/src/vs/workbench/contrib/openideSettings',
-	'vscode/src/vs/workbench/contrib/openideUpdate',
-	'vscode/src/vs/platform/openideAgentHost',
-	'vscode/src/vs/platform/openideBrowser',
-	// The codebase-memory engine: OpenIDE's, and the largest block that used to sit outside this
-	// audit. CONTRIBUTING promises English everywhere; a scope narrower than the promise turns the
-	// ratchet into a fence with a gap next to it.
-	'vscode/src/vs/code/common',
-	'vscode/src/vs/code/electron-utility/sharedProcess/contrib',
+	'vscode/src',
+	'vscode/build',
+	'vscode/extensions',
 	// The repository's own tooling and pipelines. They are read by anyone who wants to contribute,
 	// which makes them the FIRST thing a newcomer meets.
 	'dev',
 	'.github',
-	'vscode/resources/openide-icons',
+	'vscode/resources',
 ];
-/** Individual OpenIDE files living inside otherwise-upstream directories. */
-const scanFiles = [
-	'vscode/src/vs/platform/request/common/openideRequestIpc.ts',
-	'vscode/src/vs/platform/update/common/openideUpdateManifest.ts',
-	'vscode/src/vs/platform/update/node/openideUpdateVerifier.ts',
-	'vscode/src/vs/platform/update/electron-main/openideAppImageUpdater.ts',
-];
+const scanFiles = [];
+/** Vendored code and build output: neither is written here, and both are enormous. */
+const SKIP_DIRECTORIES = new Set(['node_modules', 'out', 'dist', '.git']);
 
 const ACCENTED = /[áéíóúñÁÉÍÓÚÑ¿¡]/;
 /**
@@ -91,16 +93,13 @@ function walk(relative, out) {
 	if (!fs.existsSync(absolute)) { return; }
 	const stat = fs.statSync(absolute);
 	if (stat.isDirectory()) {
+		if (SKIP_DIRECTORIES.has(path.basename(relative))) { return; }
 		for (const name of fs.readdirSync(absolute).sort()) { walk(path.join(relative, name), out); }
 		return;
 	}
-	// Not just `.ts`: the build scripts and the workflows are OpenIDE's too, and they are what a
-	// contributor reads before touching any source. Upstream files that happen to live under a
-	// scanned directory are skipped by name — everything of ours carries the `openide` prefix,
-	// except the repository tooling in `dev/` and `.github/`, which is entirely ours.
-	const scannable = /\.(ts|mjs|js|sh|yml|yaml)$/.test(relative);
-	const ours = relative.startsWith('dev/') || relative.startsWith('.github/') || /openide/i.test(path.basename(relative));
-	if (!scannable || !ours) { return; }
+	// Not just `.ts`: the build scripts and the workflows are read by anyone who wants to
+	// contribute, which makes them the FIRST thing a newcomer meets.
+	if (!/\.(ts|mjs|js|sh|yml|yaml)$/.test(relative)) { return; }
 	const normalized = relative.replaceAll('\\', '/');
 	const lines = fs.readFileSync(absolute, 'utf8').split('\n');
 	const hits = [];

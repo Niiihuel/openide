@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 /*
- *  OpenIDE — canal IPC de memoria del codebase en shared process. Cada ventana inicializa un
- *  runtime aislado por workspaceKey; el índice y el storage nunca se comparten accidentalmente.
+ *  OpenIDE — the codebase-memory IPC channel in the shared process. Each window initializes an
+ *  isolated runtime per workspaceKey; the index and the storage are never shared by accident.
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
@@ -33,11 +33,11 @@ interface IRuntime {
 	/** Kept on the runtime because getSnapshot links notes on READ, outside the indexer. */
 	noteLinking: NoteLinkingMode;
 	mutationQueue: Promise<void>;
-	/** Flush del manifiesto agendado (coalesce ráfagas del bridge del language server). */
+	/** Scheduled manifest flush (it coalesces bursts from the language server bridge). */
 	flushTimer?: ReturnType<typeof setTimeout>;
 }
 
-/** Ventana para agrupar extracciones antes de reescribir el manifiesto y avisar a la UI. */
+/** Window for batching extractions before rewriting the manifest and telling the UI. */
 const MANIFEST_FLUSH_DEBOUNCE_MS = 400;
 
 function workspaceKey(folders: readonly URI[]): string {
@@ -45,10 +45,10 @@ function workspaceKey(folders: readonly URI[]): string {
 }
 
 /**
- * Nombra cada módulo por su carpeta PREDOMINANTE, no por la carpeta común: los módulos cruzan
- * directorios, así que el prefijo común colapsaba a la raíz del proyecto y la leyenda mostraba
- * "src" repetido una docena de veces. Los empates se resuelven alfabéticamente (determinismo) y
- * las etiquetas repetidas se profundizan hasta ser únicas.
+ * Names each module after its PREDOMINANT folder, not the common one: modules cross directories,
+ * so the common prefix collapsed to the project root and the legend showed "src" a dozen times
+ * over. Ties are broken alphabetically (determinism) and repeated labels are deepened until they
+ * are unique.
  */
 function labelCommunities<T extends { readonly label: string; readonly members: readonly string[] }>(communities: readonly T[]): T[] {
 	const directoryOf = (uri: string): string[] => uri.split('/').slice(0, -1).filter(segment => segment && !segment.includes(':'));
@@ -64,14 +64,14 @@ function labelCommunities<T extends { readonly label: string; readonly members: 
 	const used = new Set<string>();
 	return communities.map((community, index) => {
 		const segments = dominant[index];
-		// Techo de DOS segmentos: sin él, desambiguar un módulo de un solo archivo escalaba hasta
-		// la raíz del disco y la leyenda mostraba "home/nihuel/projects/…" en vez de un módulo.
+		// A ceiling of TWO segments: without it, disambiguating a single-file module climbed to the
+		// root of the disk and the legend read "home/nihuel/projects/…" instead of a module.
 		let label = '';
 		for (let depth = 1; depth <= Math.min(2, segments.length); depth++) {
 			label = segments.slice(-depth).join('/');
 			if (!used.has(label)) { break; }
 		}
-		// Si dos módulos comparten carpeta, los distingue su archivo central, no un path más largo.
+		// When two modules share a folder, their central file tells them apart, not a longer path.
 		if (!label) { label = community.label; }
 		if (used.has(label)) { label = `${label} · ${community.label}`; }
 		let unique = label;
@@ -93,6 +93,32 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 		super();
 	}
 
+	/**
+	 * An index written into the workspace by an older build moves to the IDE's storage, whole,
+	 * so nothing is re-indexed; if it cannot move, it is deleted, so the repo is clean either
+	 * way. The empty `.openide/memory-indexes/` left behind goes too.
+	 */
+	private async migrateLegacyIndex(legacyRoot: URI, indexRoot: URI): Promise<void> {
+		try {
+			if (!(await this.fileService.exists(legacyRoot))) {
+				return;
+			}
+			if (await this.fileService.exists(indexRoot)) {
+				await this.fileService.del(legacyRoot, { recursive: true });
+			} else {
+				await this.fileService.createFolder(URI.joinPath(indexRoot, '..'));
+				await this.fileService.move(legacyRoot, indexRoot);
+			}
+			const legacyParent = URI.joinPath(legacyRoot, '..');
+			const left = await this.fileService.resolve(legacyParent).catch(() => undefined);
+			if (left && !left.children?.length) {
+				await this.fileService.del(legacyParent, { recursive: true });
+			}
+		} catch {
+			// Best effort: a leftover folder is a nuisance, a failed initialize would be a broken feature.
+		}
+	}
+
 	async initialize(workspaceFolders: string[], trusted: boolean, options?: ICodebaseMemoryIndexOptions): Promise<string> {
 		if (!trusted) { throw new Error('La memoria está deshabilitada en un workspace no confiable.'); }
 		const folders = workspaceFolders.map(value => URI.parse(value)).filter(uri => uri.scheme === 'file');
@@ -101,14 +127,18 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 		if (!this.runtimes.has(key)) {
 			const storageFolder = folders[0] ?? URI.file('/tmp/openide-memory-index');
 			const workspaceHash = Array.from(key).reduce((hash, char) => Math.imul(hash ^ char.charCodeAt(0), 16777619), 2166136261) >>> 0;
-			const indexRoot = URI.joinPath(storageFolder, '.openide', 'memory-indexes', workspaceHash.toString(16));
+			const legacyRoot = URI.joinPath(storageFolder, '.openide', 'memory-indexes', workspaceHash.toString(16));
+			const indexRoot = options?.storageRoot ? URI.joinPath(URI.parse(options.storageRoot), workspaceHash.toString(16)) : legacyRoot;
+			if (options?.storageRoot) {
+				await this.migrateLegacyIndex(legacyRoot, indexRoot);
+			}
 			const storage = new CodebaseMemoryStorage(this.fileService, indexRoot);
 			const indexer = new CodebaseMemoryIndexer(this.fileService, folders, storage);
 			const runtime: IRuntime = { folders, storage, indexer, trusted, noteLinking: DEFAULT_NOTE_LINKING, mutationQueue: Promise.resolve() };
 			indexer.onProgress(progress => this._onProgress.fire({ workspaceKey: key, progress: this.toProtocolProgress(progress) }));
 			this.runtimes.set(key, runtime);
-			// Las opciones se aplican ANTES de load(): persistIndex=false debe impedir la
-			// lectura del índice viejo de disco, no descubrirlo después.
+			// The options are applied BEFORE load(): persistIndex=false has to prevent reading the
+			// stale index off disk, not discover it afterwards.
 			await this.applyOptions(runtime, options ?? DEFAULT_CODEBASE_MEMORY_INDEX_OPTIONS);
 			await storage.load(key);
 			storage.markAllStale();
@@ -186,13 +216,13 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 		const merged = mergeExtractions([existingWithoutLs, extraction]);
 		const meta = runtime.storage.getFileMeta(uriString);
 		await runtime.storage.writeFile(uriString, meta?.hash ?? 'language-server', meta?.language ?? 'unknown', { uri: uriString, nodes: [...merged.nodes], edges: [...merged.edges] });
-		// El flush serializa el manifiesto ENTERO: hacerlo por archivo durante el barrido del
-		// bridge era O(N²) de CPU y de bytes, y la tormenta de onDidChange que le seguía dejaba
-		// sin responder al resto del canal. Se agenda uno solo por ráfaga.
+		// The flush serializes the WHOLE manifest: doing it per file during the bridge's sweep was
+		// O(N²) in CPU and in bytes, and the onDidChange storm that followed left the rest of the
+		// channel unresponsive. One flush is scheduled per burst.
 		this.scheduleManifestFlush(key, runtime);
 	}
 
-	/** Coalesce el flush del manifiesto + el evento de cambio de una ráfaga de extracciones. */
+	/** Coalesces the manifest flush and the change event of a burst of extractions. */
 	private scheduleManifestFlush(key: string, runtime: IRuntime): void {
 		if (runtime.flushTimer) { return; }
 		runtime.flushTimer = setTimeout(() => {
@@ -222,14 +252,14 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 	}
 
 	/**
-	 * Fase global post-indexado, en UNA sola pasada sobre los payloads:
-	 *  1. resuelve los imports sintéticos contra los archivos reales → tabla de alias,
-	 *  2. proyecta las aristas a nivel archivo (ya con los alias aplicados),
+	 * The global post-indexing phase, in ONE pass over the payloads:
+	 *  1. resolves the synthetic imports against the real files → alias table,
+	 *  2. projects the edges to file level (with the aliases already applied),
 	 *  3. corre Louvain sobre el grafo limpio.
 	 *
-	 * Los payloads por archivo NO se reescriben: la tabla de alias vive en el manifiesto y la
-	 * aplica `getSnapshot` al concatenar. Así el camino incremental (que no pasa por acá) sigue
-	 * sirviendo snapshots coherentes con los alias ya conocidos.
+	 * The per-file payloads are NOT rewritten: the alias table lives in the manifest and `getSnapshot`
+	 * applies it while concatenating. That way the incremental path — which never comes through here —
+	 * keeps serving snapshots consistent with the aliases already known.
 	 */
 	private async finalizeGraph(runtime: IRuntime, previous: ReturnType<CodebaseMemoryStorage['getCommunities']>): Promise<void> {
 		const manifest = runtime.storage.getManifest();
@@ -239,7 +269,7 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 		const payloads = new Map<string, { nodes: readonly ICodebaseMemoryNode[]; edges: readonly ICodebaseMemoryEdge[] }>();
 		const uriByNodeId = new Map<string, string>();
 		const fileNodeIdByUri = new Map<string, string>();
-		// Nodos de import sin resolver: id sintético → { importador, specifier }.
+		// Unresolved import nodes: synthetic id → { importer, specifier }.
 		const pendingImports = new Map<string, { importer: string; specifier: string }>();
 
 		for (const uri of fileUris) {
@@ -247,12 +277,12 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 			if (!payload) { continue; }
 			payloads.set(uri, payload);
 			for (const node of payload.nodes) {
-				// Los nodos sintéticos (import por alias, paquete externo) tienen un id GLOBAL: el
-				// mismo `@/lib/db` aparece en el payload de cada importador. Mapearlos al uri del
-				// payload los ataba al último archivo leído, así que si el alias no se resolvía la
-				// arista no moría — se proyectaba contra un importador cualquiera e inventaba una
-				// relación. Se los mapea a su propio uri sintético, que no está en knownUris: sin
-				// resolver, sin arista.
+				// A synthetic node (an aliased import, an external package) has a GLOBAL id: the same
+				// `@/lib/db` shows up in the payload of every importer. Mapping them to the payload's uri
+				// tied them to the last file read, so an unresolved alias did not kill its edge — it was
+				// projected against an arbitrary importer and invented a relationship. They are mapped to
+				// their own synthetic uri, which is not in knownUris: with no alias the edge dies, which is
+				// the honest answer: nothing to resolve, no edge.
 				uriByNodeId.set(node.id, node.uri.startsWith(ALIAS_URI_PREFIX) || node.uri.startsWith(PACKAGE_URI_PREFIX) ? node.uri : uri);
 				if (node.kind === 'file' && node.uri === uri) { fileNodeIdByUri.set(uri, node.id); }
 				if (node.kind === 'module' && node.qualifiedName && isInternalSpecifier(node.qualifiedName)) {
@@ -261,7 +291,7 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 			}
 		}
 
-		// Alias: nodo de import sintético → nodo `file` real del archivo que referencia.
+		// Alias: a synthetic import node → the real `file` node it refers to.
 		const aliasByNodeId: Record<string, string> = {};
 		for (const [nodeId, { importer, specifier }] of pendingImports) {
 			const resolved = resolveInternalImport(importer, specifier, knownUris);
@@ -288,30 +318,30 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 			degreeByUri.set(edge.target, (degreeByUri.get(edge.target) ?? 0) + 1);
 		}
 		const detected = detectCommunities(fileUris, fileEdges, degreeByUri, uri => uri.split('/').pop() ?? uri, previous);
-		// La etiqueta del hub ("utils.ts") no nombra un módulo; la carpeta común de sus miembros
-		// sí ("src/components/ui"), que es como se llama a un módulo al hablar del proyecto.
+		// The hub's label ("utils.ts") does not name a module; the common folder of its members does
+		// ("src/components/ui"), which is what a module is called when talking about the project.
 		const communities = labelCommunities(detected);
 		runtime.storage.setCommunities(communities);
 		runtime.storage.markGraphFinalized();
 	}
 
 	/**
-	 * Corre finalizeGraph si el grafo derivado quedó atrás del índice, y lo persiste.
+	 * Runs finalizeGraph when the derived graph fell behind the index, and persists it.
 	 *
-	 * Existe porque finalizeGraph colgaba de UN solo camino (`rebuildFull`), y ese camino corre
-	 * como mucho una vez: `rebuildIfNeeded` sólo dispara con `version === 0`. Si se lo salteaba
-	 * —cancelación, cierre de ventana, o un índice construido incrementalmente— el manifiesto
-	 * quedaba completo pero sin tabla de alias. Y sin alias TODA arista de import muere: la
-	 * relativa apunta al uri del propio importador (se descarta como self-edge) y la de alias a un
-	 * `openide-alias:` que no es un archivo del scope. De ahí el "0 relaciones · 1 módulos".
+	 * It exists because finalizeGraph hung off ONE path (`rebuildFull`), and that path runs at most
+	 * once: `rebuildIfNeeded` only fires with `version === 0`. Skipping it — a cancellation, a window
+	 * closing, or an index built incrementally — left the manifest complete but with no alias table.
+	 * And with no aliases EVERY import edge dies: the relative one points at the importer's own uri
+	 * (dropped as a self-edge) and the aliased one at an `openide-alias:` that is not a file in the
+	 * scope. Hence the "0 relations · 1 module".
 	 *
-	 * Al colgarlo de la lectura, un índice ya roto en disco se repara solo al abrirlo, sin
-	 * reindexar; y el camino incremental —que nunca finalizó— queda cubierto por el mismo chequeo.
+	 * Hanging it off the READ means an index already broken on disk repairs itself when opened,
+	 * without reindexing; and the incremental path — which never finalized — is covered by the same check.
 	 */
 	private async ensureGraphFinalized(runtime: IRuntime): Promise<boolean> {
 		if (!runtime.storage.getManifest() || runtime.storage.isGraphFinalized()) { return false; }
 		const mutation = runtime.mutationQueue.then(async () => {
-			// Revalidar dentro de la cola: otra llamada en vuelo puede haberlo finalizado ya.
+			// Revalidate inside the queue: another call in flight may have finalized it already.
 			if (runtime.storage.isGraphFinalized()) { return; }
 			await this.finalizeGraph(runtime, runtime.storage.getCommunities());
 			await runtime.storage.flush();
@@ -355,9 +385,9 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 			rawEdges.push(...payload.edges);
 			if (manifest.files[uri].status === 'stale') { dirtyUris.push(uri); }
 		}
-		// El índice se guarda por archivo, así que un mismo nodo aparece en varios payloads:
-		// hay que resolver alias de imports y deduplicar ACÁ, o el consumidor recibe duplicados
-		// (y `nodeCount` queda inflado). La dedup es exacta por id, con union de campos.
+		// The index is stored per file, so one node appears in several payloads: import aliases have
+		// to be resolved and the nodes deduplicated HERE, or the consumer gets duplicates (and
+		// `nodeCount` comes out inflated). The dedup is exact by id, with a union of the fields.
 		const aliases = storage.getNodeAliases();
 		const canonical = (id: string): string => aliases[id] ?? id;
 		const aliasedNodes = rawNodes.filter(node => !aliases[node.id]);

@@ -1,7 +1,7 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — native chat: the delegation header.
  *
- *  SOURCE OF TRUTH: browser/openideChatHtml.ts:679-687 (`.delegation-summary`,
+ *  SOURCE OF TRUTH: the removed chat webview (`.delegation-summary`,
  *  `.delegation-summary-main`, `-icon`, `-title`, `-space`, `-status`). The frame and the 48px row
  *  are transcribed from there.
  *
@@ -22,9 +22,9 @@
 	min-height: 48px;
 	margin: 6px 0;
 	padding: 8px 12px;
-	border: 1px solid rgba(128, 128, 128, 0.28);
-	border-radius: 9px;
-	background: rgba(128, 128, 128, 0.025);
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
+	border-radius: var(--oi-chat-card-radius);
+	background: var(--oi-chat-card-bg, var(--oi-tint-1));
 	color: var(--vscode-descriptionForeground);
 }
 

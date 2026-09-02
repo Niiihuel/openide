@@ -30,8 +30,8 @@ fi
 PATCH_FILE=$(mktemp)
 trap 'rm -f "${PATCH_FILE}"' EXIT
 
-# Se integra el delta real de Code OSS sobre nuestra fuente versionada. --3way
-# conserva las customizaciones de OpenIDE y deja conflictos explícitos para revisión.
+# The real Code OSS delta is merged onto our versioned source. --3way keeps OpenIDE's
+# customizations and leaves explicit conflicts to review.
 git diff --binary "${CURRENT_COMMIT}" "${TARGET_COMMIT}" -- . >"${PATCH_FILE}"
 if ! git apply --3way --index --directory=vscode "${PATCH_FILE}"; then
   echo "La actualización de Code OSS produjo conflictos. Resolvelos en vscode/ y continuá la integración." >&2

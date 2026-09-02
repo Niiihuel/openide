@@ -5,7 +5,7 @@
 
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — usage for the agent CLIs signed in on this machine, following Orca's roster
- *  (refs/orca/src/main/rate-limits/service.ts): Claude Code, Codex, Gemini CLI and Grok keep
+ *  (its main-process rate-limit service): Claude Code, Codex, Gemini CLI and Grok keep
  *  their OAuth session in a file under the home directory; whoever is signed into a CLI has a
  *  subscription worth showing next to the accounts connected inside OpenIDE. This service reads
  *  those files (parsing lives in `openideCliUsageAuth.ts`, tested) and reuses the SAME usage

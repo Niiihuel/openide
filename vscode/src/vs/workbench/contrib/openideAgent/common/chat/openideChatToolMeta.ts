@@ -7,7 +7,7 @@
  * Catalog of the built-in tools: codicon, verb, past-tense wording and which argument names the
  * target of the call.
  *
- * Lifted from `TOOL_META` in browser/openideChatHtml.ts:1621-1659. There it lives inside the
+ * Lifted from `TOOL_META` in the removed chat webview. There it lives inside the
  * webview's JavaScript **string**, so no module could import it and no test could reach it. That
  * unreachability is precisely why the native transcript paints a bullet and the word "reasoning"
  * where the user expects an icon and a verb: the icons were never missing, they were unimportable.
@@ -43,6 +43,11 @@ export interface IOpenideToolMeta {
 	readonly lineSpan?: boolean;
 	/** Renders its detail as a command (monospace), not as a path. */
 	readonly cmd?: boolean;
+	/**
+	 * Unit for a `key` that names an ARRAY of objects, where the count is the only readable target
+	 * ("Read 3 files"). A list of strings needs none: the names themselves are the target.
+	 */
+	readonly countUnit?: string;
 }
 
 export type OpenideChatExploreKind = 'file' | 'search' | 'other';
@@ -93,6 +98,40 @@ export const OPENIDE_TOOL_META: Readonly<Record<string, IOpenideToolMeta>> = {
 	browser_set_style: { icon: 'paintcan', verb: 'Applying styles', done: 'Applied styles', key: 'selector' },
 	browser_playwright: { icon: 'run', verb: 'Running Playwright', done: 'Ran Playwright', key: 'code' },
 	browser_dialog: { icon: 'comment-discussion', verb: 'Handling dialog', done: 'Handled dialog', key: '' },
+
+	// ---- The tools the registry adds at runtime (browser/openideAgentService.ts). They were all
+	// missing, so each one rendered as its raw snake_case name next to the generic wrench — a row
+	// reading `batch_read` where the rest of the transcript reads like sentences. The read-only
+	// ones are `explore`, which is what folds them into the phase and lets the turn's live line
+	// speak for them instead of stacking one row per lookup.
+	batch_read: { icon: 'files', verb: 'Reading', done: 'Read', key: 'operations', countUnit: 'files', explore: true, exploreKind: 'file' },
+	project_map_query: { icon: 'type-hierarchy', verb: 'Consulting the map', done: 'Consulted the map', key: 'question', explore: true, exploreKind: 'search' },
+	memory_graph_status: { icon: 'database', verb: 'Checking the memory graph', done: 'Checked the memory graph', key: '', explore: true, exploreKind: 'other' },
+	memory_graph_impact: { icon: 'git-compare', verb: 'Checking impact', done: 'Checked impact', key: 'targets', explore: true, exploreKind: 'search' },
+	memory_graph_path: { icon: 'arrow-both', verb: 'Tracing path', done: 'Traced path', key: 'from', explore: true, exploreKind: 'search' },
+	memory_graph_related_tests: { icon: 'beaker', verb: 'Looking for tests', done: 'Found tests', key: 'targets', explore: true, exploreKind: 'search' },
+	canvas_read: { icon: 'preview', verb: 'Reading canvas', done: 'Read canvas', key: 'path', explore: true, exploreKind: 'file' },
+	canvas_list: { icon: 'preview', verb: 'Listing canvases', done: 'Listed canvases', key: '', explore: true, exploreKind: 'search' },
+	list_conversations: { icon: 'comment-discussion', verb: 'Checking the other conversations', done: 'Checked the other conversations', key: '', explore: true, exploreKind: 'other' },
+
+	// Everything below CHANGES something or is a moment the user wants a record of, so it keeps its
+	// own row: a settled step of the transcript, never folded away.
+	canvas_write: { icon: 'preview', verb: 'Writing canvas', done: 'Wrote canvas', key: 'name', base: true },
+	canvas_open: { icon: 'preview', verb: 'Opening canvas', done: 'Opened canvas', key: 'path' },
+	codebase_save_priority: { icon: 'star', verb: 'Saving a rule', done: 'Saved a rule', key: 'text' },
+	rule_manage: { icon: 'law', verb: 'Updating rules', done: 'Updated rules', key: 'name' },
+	subagent_save: { icon: 'organization', verb: 'Saving subagent', done: 'Saved subagent', key: 'name' },
+	workflow_configure: { icon: 'settings-gear', verb: 'Configuring the workflow', done: 'Configured the workflow', key: '' },
+	// Alias of `workflow_configure` with the same arguments, kept apart so the row says which name
+	// the model actually called.
+	git_configure: { icon: 'settings-gear', verb: 'Configuring git', done: 'Configured git', key: '' },
+	// The bridge to the user's MCP servers: the target is the tool being called THROUGH it, which
+	// is the only part of `mcp_call` that says anything.
+	mcp_call: { icon: 'plug', verb: 'Calling', done: 'Called', key: 'tool' },
+	message_conversation: { icon: 'comment-discussion', verb: 'Messaging', done: 'Messaged', key: 'to' },
+	await_subagent: { icon: 'watch', verb: 'Waiting for the subagent', done: 'Subagent finished', key: '' },
+	cancel_subagent: { icon: 'stop-circle', verb: 'Cancelling the subagent', done: 'Cancelled the subagent', key: '' },
+	suggest_mode: { icon: 'lightbulb', verb: 'Suggesting a mode', done: 'Suggested a mode', key: 'mode' },
 };
 
 /**
@@ -164,6 +203,14 @@ export function toolDetailFor(meta: IOpenideToolMeta, argumentsJson: string | un
 		value = match ? match[1].replace(/\\"/g, '"') : undefined;
 	}
 	if (value === undefined || value === null) { return ''; }
+	if (Array.isArray(value)) {
+		// `String([{...}])` is `[object Object]`, which is how a real call ends up labelled with a
+		// piece of JavaScript trivia. A list of names IS the target; a list of objects only has a
+		// count worth showing (`batch_read`'s operations).
+		const names = value.filter(item => typeof item === 'string' || typeof item === 'number').map(String);
+		if (names.length === value.length) { return names.join(', '); }
+		return value.length ? `${value.length} ${meta.countUnit ?? 'items'}` : '';
+	}
 	const text = String(value);
 	if (meta.key === 'path' && parsed) {
 		// The FULL workspace-relative path is returned on purpose: openDiff and resolveUri need it.
@@ -246,7 +293,10 @@ export function isOpenidePlanPath(path: string): boolean {
 export type OpenideChatToolRoute = 'silent' | 'delegation' | 'terminal' | 'edit' | 'planUpdate' | 'explore' | 'tool';
 
 export function routeToolCall(name: string, argumentsJson: string | undefined): OpenideChatToolRoute {
-	if (name === 'update_todos' || name === 'ask_user') { return 'silent'; }
+	// `delegate_to_subagent` is silent and not 'delegation': the specialist's own row already stands
+	// for the call, and the delegation route would add an envelope over a single child. Leaving it on
+	// the default route is what printed a bare `delegate_to_subagent` line under every card.
+	if (name === 'update_todos' || name === 'ask_user' || name === 'delegate_to_subagent') { return 'silent'; }
 	if (name === 'delegate_task' || name === 'review_changes') { return 'delegation'; }
 	if (name === 'run_command') {
 		const args = tryParseToolArguments(argumentsJson);

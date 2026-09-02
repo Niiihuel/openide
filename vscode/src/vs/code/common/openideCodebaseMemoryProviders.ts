@@ -4,19 +4,19 @@
  *--------------------------------------------------------------------------------------------*/
 
 /*
- *  OpenIDE — providers jerárquicos de extracción para la memoria del codebase. Cada provider
- *  produce nodos y aristas con su Evidence (provider + confianza). El indexer del shared process
- *  los orquesta en cascada y deduplica por (source, type, target) y por nodeId.
+ *  OpenIDE — the layered extraction providers of the codebase memory. Each provider produces
+ *  nodes and edges with their Evidence (provider + confidence). The shared process indexer runs
+ *  them in cascade and deduplicates by (source, type, target) and by nodeId.
  *
- *  Providers de baja confianza (regex, text) NUNCA sobrescriben aristas verificadas por language
- *  server. Los providers de language server/document symbols se invocan desde el renderer y la
- *  evidencia viaja al shared process por IPC para integrarse al grafo.
+ *  A low-confidence provider (regex, text) NEVER overwrites an edge verified by a language
+ *  server. The language-server / document-symbol providers are invoked from the renderer and the
+ *  evidence travels to the shared process over IPC to be merged into the graph.
  *--------------------------------------------------------------------------------------------*/
 
 import { makeEdgeId, makeEvidence, makeNodeId, ICodebaseMemoryEdge, ICodebaseMemoryNode, CodebaseMemoryNodeKind } from './openideCodebaseMemoryTypes.js';
 import { isRelativeSpecifier, isWorkspaceAliasSpecifier, packageNameOf, ALIAS_URI_PREFIX, PACKAGE_URI_PREFIX } from './openideCodebaseImports.js';
 
-/** Archivo de entrada (texto + lenguaje + uri). Lo produce el indexer antes de parsear. */
+/** An input file (text + language + uri). The indexer produces it before parsing. */
 export interface IProviderSourceFile {
 	readonly uri: string;
 	readonly content: string;
@@ -24,19 +24,19 @@ export interface IProviderSourceFile {
 	readonly workspaceKey: string;
 }
 
-/** Resultado de un provider para un archivo: nodos y aristas con evidencia. */
+/** A provider's result for one file: nodes and edges with their evidence. */
 export interface IProviderExtraction {
 	readonly nodes: readonly ICodebaseMemoryNode[];
 	readonly edges: readonly ICodebaseMemoryEdge[];
 }
 
-/** Contrato de un provider de extracción. Los providers del renderer (LS) implementan otra
- *  interfaz asíncrona y mandan resultados por IPC; este es el contrato puro del indexer. */
+/** The contract of an extraction provider. The renderer's providers (LS) implement a different
+ *  asynchronous interface and send results over IPC; this is the indexer's pure contract. */
 export interface ICodebaseMemoryProvider {
 	readonly id: 'regex' | 'text' | 'ast';
 	/** True si el provider puede manejar el lenguaje/archivo dado. */
 	supports(file: IProviderSourceFile): boolean;
-	/** Extrae nodos y aristas del archivo. Puro: no hace IO. */
+	/** Extracts nodes and edges from the file. Pure: it does no IO. */
 	extract(file: IProviderSourceFile): IProviderExtraction;
 }
 
@@ -66,8 +66,8 @@ function kindFromMatch(prefix: string, keyword: string): CodebaseMemoryNodeKind 
 	return 'function';
 }
 
-/** Extrae definiciones de símbolos de lenguajes con sintaxis C-like (TS/JS/Java/C#/Go-ish).
- *  Heurístico y de baja confianza: las aristas que produce no son definitivas. */
+/** Extracts symbol definitions from languages with C-like syntax (TS/JS/Java/C#/Go-ish).
+ *  Heuristic and low confidence: the edges it produces are not final. */
 function extractClikeSymbols(file: IProviderSourceFile): IProviderExtraction {
 	const { content, uri, workspaceKey } = file;
 	const evidence = makeEvidence('regex');
@@ -93,8 +93,8 @@ function extractClikeSymbols(file: IProviderSourceFile): IProviderExtraction {
 	return { nodes, edges };
 }
 
-/** Extrae imports nombrados y crea aristas DEPENDS_ON/IMPORTS tentativas. Como el resolver real
- *  vive en el renderer (language server), acá solo dejamos una pista de baja confianza. */
+/** Extracts named imports and creates tentative DEPENDS_ON/IMPORTS edges. The real resolver
+ *  lives in the renderer (language server), so this only leaves a low-confidence hint. */
 function extractClikeImports(file: IProviderSourceFile): IProviderExtraction {
 	const { content, uri, workspaceKey } = file;
 	const evidence = makeEvidence('regex');
@@ -106,20 +106,20 @@ function extractClikeImports(file: IProviderSourceFile): IProviderExtraction {
 	while ((match = importRe.exec(content)) !== null) {
 		const target = match[1];
 		if (!target) { continue; }
-		// El módulo importado puede no estar indexado todavía; se materializa como nodo
-		// sintético para que la arista no quede huérfana. La fase global (finalizeGraph) los
-		// resuelve después contra los archivos reales.
+		// The imported module may not be indexed yet; it is materialized as a synthetic node so the
+		// edge is not orphaned. The global phase (finalizeGraph) resolves them later against the
+		// real files.
 		//
 		// La identidad depende del tipo de specifier:
-		//  - RELATIVO: se namespacea por el archivo IMPORTADOR, porque './app' desde dos
-		//    carpetas distintas son archivos distintos. Sin esto colapsaban en un nodo y se
-		//    inventaban aristas archivo↔archivo que distorsionaban las comunidades.
-		//  - BARE (paquete externo): id global por nombre de paquete — ahí el colapso SÍ es
-		//    correcto: 'react' es el mismo 'react' en todo el repo.
-		//  - ALIAS (`@/x`): es interno y ABSOLUTO, así que su id es global por specifier — el
-		//    mismo `@/lib/db` es el mismo archivo desde cualquier carpeta. Tratarlo como paquete
-		//    externo (lo que se hacía antes) borraba TODAS las aristas archivo↔archivo en los
-		//    proyectos que usan alias, y sin aristas el grafo se queda sin comunidades.
+		//  - RELATIVE: namespaced by the IMPORTING file, because './app' from two different folders
+		//    are two different files. Without this they collapsed into one node and invented
+		//    file↔file edges that distorted the communities.
+		//  - BARE (an external package): a global id by package name — there the collapse IS the
+		//    right answer: 'react' is the same 'react' across the repo.
+		//  - ALIAS (`@/x`): internal and ABSOLUTE, so its id is global by specifier — the same
+		//    `@/lib/db` is the same file from any folder. Treating it as an external package (which
+		//    is what happened before) erased EVERY file↔file edge in projects that use aliases, and
+		//    with no edges the graph has no communities left.
 		const relative = isRelativeSpecifier(target);
 		const alias = isWorkspaceAliasSpecifier(target);
 		const internal = relative || alias;
@@ -133,8 +133,8 @@ function extractClikeImports(file: IProviderSourceFile): IProviderExtraction {
 			kind: internal ? 'module' : 'dependency',
 			name: internal ? (target.split('/').pop() || target) : packageNameOf(target),
 			qualifiedName: target,
-			// `uri` debe ser resoluble: un specifier crudo rompe el cálculo de path relativo,
-			// el lookup de root del workspace y el mapa de comunidades (keyeado por URI real).
+			// `uri` has to be resolvable: a raw specifier breaks the relative-path computation, the
+			// workspace-root lookup and the community map (keyed by real URI).
 			uri: relative ? uri : alias ? ALIAS_URI_PREFIX + target : PACKAGE_URI_PREFIX + packageNameOf(target),
 			evidence,
 			degree: 0,
@@ -144,13 +144,13 @@ function extractClikeImports(file: IProviderSourceFile): IProviderExtraction {
 	return { nodes, edges };
 }
 
-/** Predicado compartido de archivo de test (por nombre; conservador para no matchear
- *  "latest.py"/"contest.cs"). Lo usan el marker de tests y el filtro openide.memory.indexTests. */
+/** The shared "is a test file" predicate (by name; conservative so it does not match
+ *  "latest.py"/"contest.cs"). Used by the test marker and by openide.memory.indexTests. */
 export function isTestFilePath(uri: string): boolean {
 	return /(\.|_)(test|spec)\.[jt]sx?$|_test\.(go|py|rs)$|test_[^/]+\.py$|Tests?\.(cs|java|kt)$/.test(uri);
 }
 
-/** Detecta archivos de test por nombre para aristas TESTS_FILE. */
+/** Detects test files by name, for TESTS_FILE edges. */
 function extractTestMarker(file: IProviderSourceFile): IProviderExtraction {
 	const evidence = makeEvidence('text');
 	if (!isTestFilePath(file.uri)) { return { nodes: [], edges: [] }; }
@@ -175,7 +175,7 @@ export const regexCodebaseMemoryProvider: ICodebaseMemoryProvider = {
 	},
 };
 
-/** Provider text: siempre soporta; produce un nodo archivo y marca tests por nombre. */
+/** The text provider: it supports everything; it produces a file node and marks tests by name. */
 export const textCodebaseMemoryProvider: ICodebaseMemoryProvider = {
 	id: 'text',
 	supports() { return true; },
@@ -189,8 +189,8 @@ export const textCodebaseMemoryProvider: ICodebaseMemoryProvider = {
 	},
 };
 
-/** Lista ordenada de providers puros del indexer (regex primero, text fallback). Los providers
- *  de language server se integran desde el renderer por IPC y tienen prioridad sobre estos. */
+/** The indexer's pure providers, in order (regex first, text as the fallback). The language
+ *  server providers come in from the renderer over IPC and take precedence over these. */
 export const INDEXER_PROVIDERS: readonly ICodebaseMemoryProvider[] = Object.freeze([regexCodebaseMemoryProvider, textCodebaseMemoryProvider]);
 
 /** Deduplica aristas por (source, type, target) conservando la evidencia de mayor confianza. */
@@ -204,9 +204,9 @@ export function deduplicateEdges(edges: readonly ICodebaseMemoryEdge[]): ICodeba
 	return [...map.values()];
 }
 
-/** Fusiona dos vistas del MISMO nodo: gana el de mayor confianza como base, pero los campos que
- *  sólo trae el otro se conservan. Sin esto, cuando el language server (0.9) le gana al regex
- *  (0.45) se perdían `exported`/`language`/`signature`, que el LS no emite. */
+/** Merges two views of the SAME node: the more confident one is the base, but the fields only
+ *  the other one carries are kept. Without this, when the language server (0.9) beat the regex
+ *  (0.45), `exported`/`language`/`signature` were lost — the LS does not emit them. */
 function mergeNodePair(a: ICodebaseMemoryNode, b: ICodebaseMemoryNode): ICodebaseMemoryNode {
 	const [winner, loser] = a.evidence.confidence >= b.evidence.confidence ? [a, b] : [b, a];
 	const merged: Record<string, unknown> = { ...winner };
@@ -226,7 +226,7 @@ export function deduplicateNodes(nodes: readonly ICodebaseMemoryNode[]): ICodeba
 	return [...map.values()];
 }
 
-/** Combina resultados de varios providers aplicando deduplicación. */
+/** Combines the results of several providers, deduplicating them. */
 export function mergeExtractions(extractions: readonly IProviderExtraction[]): IProviderExtraction {
 	const nodes = deduplicateNodes(extractions.flatMap(e => e.nodes));
 	const edges = deduplicateEdges(extractions.flatMap(e => e.edges));

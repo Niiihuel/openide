@@ -7,12 +7,12 @@
 	<url type="homepage">https://www.openide.com</url>
 	<summary>OpenIDE. Code editing. Redefined.</summary>
 	<description>
-		<p>OpenIDE is a community-driven, freely-licensed binary distribution of Microsoft's editor VS Code.</p>
+		<p>OpenIDE is a free, open-source code editor with a built-in AI agent, a native chat dock and no telemetry.</p>
 	</description>
 	<screenshots>
 		<screenshot type="default">
 			<image>https://www.openide.com/img/openide.png</image>
-			<caption>Editing C</caption>
+			<caption>Editing code in OpenIDE</caption>
 		</screenshot>
 	</screenshots>
 </component>

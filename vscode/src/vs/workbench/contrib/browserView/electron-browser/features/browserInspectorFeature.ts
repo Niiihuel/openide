@@ -9,7 +9,8 @@ import { Codicon } from '../../../../../base/common/codicons.js';
 import { Color, HSLA, RGBA } from '../../../../../base/common/color.js';
 import { DomScrollableElement } from '../../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { Orientation, Sash, SashState } from '../../../../../base/browser/ui/sash/sash.js';
-import { SelectBox } from '../../../../../base/browser/ui/selectBox/selectBox.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { createOpenideBoxModel, createOpenideStyleControl, OPENIDE_BOX_MODEL_PROPERTIES } from './openideInspectorControls.js';
 import { DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { localize, localize2 } from '../../../../../nls.js';
@@ -21,7 +22,9 @@ import { ServicesAccessor } from '../../../../../platform/instantiation/common/i
 import { IElementData } from '../../../../../platform/browserView/common/browserView.js';
 import { registerIcon } from '../../../../../platform/theme/common/iconRegistry.js';
 import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
-import { defaultSelectBoxStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
+// OpenIDE: the panel's selects are the product's own dropdown — the Settings trigger over the
+// shared popover — so the list a property opens is the list every other menu in the IDE opens.
+import { OpenideSettingsDropdown } from '../../../openideSettings/browser/openideSettingsDropdown.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IColorPresentation } from '../../../../../editor/common/languages.js';
 import { ColorPickerModel } from '../../../../../editor/contrib/colorPicker/browser/colorPickerModel.js';
@@ -201,6 +204,10 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 	private readonly emptyContent = $('.browser-inspector-empty');
 	private readonly status = $('.browser-inspector-status');
 	private readonly selectButton: HTMLButtonElement;
+	/** OpenIDE: hands what was changed here to the agent. Disabled until something IS changed. */
+	private readonly toCodeButton: HTMLButtonElement;
+	/** OpenIDE: the declarations applied to the current element, in the order they were made. */
+	private readonly appliedEdits = new Map<string, string>();
 	private selectedTab: 'design' | 'css' = 'design';
 	private data: IElementData | undefined;
 	private model: IBrowserViewModel | undefined;
@@ -209,8 +216,8 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 	private suppressColorPickerResync = false;
 	private liveStyleQueue: Promise<void> = Promise.resolve();
 	private pendingLiveStyle: { property: string; value: string } | undefined;
-	/** Design tokens de color del proyecto (custom properties --* que resuelven a color),
-	 *  cacheados por página. Alimentan los swatches del picker y se invalidan al navegar. */
+	/** The project's colour design tokens (custom properties --* that resolve to a colour),
+	 *  cached per page. They feed the picker's swatches and are invalidated on navigation. */
 	private colorTokens: { name: string; value: string }[] | undefined;
 	private colorTokensUrl: string | undefined;
 
@@ -220,6 +227,7 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		@IContextViewService private readonly contextViewService: IContextViewService,
 		@IThemeService private readonly themeService: IThemeService,
 		@IClipboardService private readonly clipboardService: IClipboardService,
+		@ICommandService private readonly commandService: ICommandService,
 		@IStorageService storageService: IStorageService,
 	) {
 		super(editor);
@@ -233,8 +241,15 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		heading.textContent = localize('browser.cssInspector.title', "CSS Inspector");
 		const headerActions = $('.browser-inspector-header-actions');
 		this.selectButton = iconButton(browserCssLayoutPickerIcon, localize('browser.cssInspector.select', "Select element to edit CSS"));
+		// OpenIDE: the edits made here live in the page, not in the repository. This is the bridge —
+		// it hands the agent the element and the exact declarations that were changed, and the agent
+		// is the one that finds where they belong in the source.
+		this.toCodeButton = iconButton(Codicon.arrowRight, localize('openide.inspector.toCode', "Take these changes to the code"));
+		this.toCodeButton.classList.add('openide-inspector-to-code');
+		this.toCodeButton.disabled = true;
 		const closeButton = iconButton(Codicon.close, localize('browser.cssInspector.close', "Close CSS inspector"));
-		headerActions.append(this.selectButton, closeButton);
+		headerActions.append(this.selectButton, this.toCodeButton, closeButton);
+		this._register(addDisposableListener(this.toCodeButton, EventType.CLICK, () => this.takeEditsToCode()));
 		header.append(heading, headerActions);
 
 		const componentsHeading = $('h2');
@@ -245,18 +260,34 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		this.applyComponentsHeight();
 
 		this.emptyContent.textContent = localize('browser.cssInspector.instructions', "Select an element in the page to inspect and edit its layout and CSS.");
+		// OpenIDE: the two tabs are the product's segmented control (`.oi-segmented`, the one the
+		// Settings editor draws), not a pair of underlined labels of the panel's own.
 		const tabs = $('.browser-inspector-tabs');
-		const designTab = $<HTMLButtonElement>('button.browser-inspector-tab.active');
-		designTab.type = 'button';
+		const segmented = $('.oi-segmented', { role: 'tablist' });
+		const designTab = $<HTMLButtonElement>('button.oi-segment.browser-inspector-tab.active', { type: 'button', role: 'tab', 'aria-selected': 'true' });
 		designTab.textContent = localize('browser.cssInspector.design', "Design");
-		const cssTab = $<HTMLButtonElement>('button.browser-inspector-tab');
-		cssTab.type = 'button';
+		const cssTab = $<HTMLButtonElement>('button.oi-segment.browser-inspector-tab', { type: 'button', role: 'tab', 'aria-selected': 'false' });
 		cssTab.textContent = 'CSS';
-		tabs.append(designTab, cssTab);
+		segmented.append(designTab, cssTab);
+		tabs.appendChild(segmented);
 
 		this.body.append(this.emptyContent, this.designContent, this.cssContent);
 		this.bodyScroll = this._register(new DomScrollableElement(this.body, { useShadows: false }));
 		this.bodyScroll.getDomNode().classList.add('browser-inspector-body-scroll');
+		// OpenIDE: a popover is anchored to the swatch it came from, and scrolling moves that swatch
+		// out from under it — the picker stays floating over whatever row took its place, pointing at
+		// a colour it is not editing. Scrolling closes it, which is what every anchored popover in the
+		// workbench does.
+		const closePickerOnScroll = () => {
+			if (this.colorPickerOpen) {
+				this.contextViewService.hideContextView();
+			}
+		};
+		this._register(this.bodyScroll.onScroll(closePickerOnScroll));
+		// The wheel too, in CAPTURE: while the picker is open it covers the middle of the panel, so a
+		// wheel there never reaches the scrollable and the list under it never moves — the gesture is
+		// still "I want to scroll this panel", and the answer to it is the same.
+		this._register(addDisposableListener(this.panel.element, EventType.MOUSE_WHEEL, closePickerOnScroll, true));
 		this.panel.element.append(header, this.components, tabs, this.bodyScroll.getDomNode(), this.status);
 
 		this.horizontalSash = this._register(new Sash(this.panel.element, {
@@ -281,18 +312,16 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 
 		this._register(addDisposableListener(this.selectButton, EventType.CLICK, () => this.selectElement()));
 		this._register(addDisposableListener(closeButton, EventType.CLICK, () => this.closeInspector()));
-		this._register(addDisposableListener(designTab, EventType.CLICK, () => {
-			this.selectedTab = 'design';
-			designTab.classList.add('active');
-			cssTab.classList.remove('active');
+		const selectTab = (tab: 'design' | 'css') => {
+			this.selectedTab = tab;
+			designTab.classList.toggle('active', tab === 'design');
+			designTab.setAttribute('aria-selected', String(tab === 'design'));
+			cssTab.classList.toggle('active', tab === 'css');
+			cssTab.setAttribute('aria-selected', String(tab === 'css'));
 			this.render();
-		}));
-		this._register(addDisposableListener(cssTab, EventType.CLICK, () => {
-			this.selectedTab = 'css';
-			cssTab.classList.add('active');
-			designTab.classList.remove('active');
-			this.render();
-		}));
+		};
+		this._register(addDisposableListener(designTab, EventType.CLICK, () => selectTab('design')));
+		this._register(addDisposableListener(cssTab, EventType.CLICK, () => selectTab('css')));
 	}
 
 	override get sidePanelElements(): readonly HTMLElement[] { return [this.panel.element]; }
@@ -311,11 +340,17 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 			this.data = undefined;
 			this.colorTokens = undefined;
 			this.colorTokensUrl = undefined;
+			this.forgetEdits();
 			this.render();
 		}));
 		store.add(model.onDidSelectElement(data => {
 			if (model.elementSelectionPurpose !== BrowserElementSelectionPurpose.Inspector) {
 				return;
+			}
+			// OpenIDE: the edits belong to the element they were made on. Picking another one starts
+			// a new list, or the prompt would mix two elements' declarations under one selector.
+			if (data.elementId !== this.data?.elementId) {
+				this.forgetEdits();
 			}
 			this.data = data;
 			this.setVisible(true);
@@ -326,8 +361,15 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 	override clear(): void {
 		this.model = undefined;
 		this.data = undefined;
+		this.forgetEdits();
 		this.selectingContext.reset();
 		this.render();
+	}
+
+	/** OpenIDE: nothing pending to take to the code. */
+	private forgetEdits(): void {
+		this.appliedEdits.clear();
+		this.toCodeButton.disabled = true;
 	}
 
 	toggleVisible(): void {
@@ -427,10 +469,23 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 			const heading = $('h3');
 			heading.textContent = label;
 			const grid = $('.browser-inspector-control-grid');
+			// OpenIDE: the group that owns the eight margin/padding longhands draws them as ONE box
+			// instead of eight rows — the box model is a shape, and eight labelled numbers are eight
+			// readings of it. The `margin` / `padding` shorthands stay as ordinary rows below.
+			const boxed = OPENIDE_BOX_MODEL_PROPERTIES.every(property => properties.includes(property));
+			section.appendChild(heading);
+			if (boxed) {
+				const box = createOpenideBoxModel(styles, (property, value) => void this.applyStyle(property, value));
+				this.renderStore.add(toDisposable(() => box.dispose()));
+				section.appendChild(box.element);
+			}
 			for (const property of properties) {
+				if (boxed && OPENIDE_BOX_MODEL_PROPERTIES.includes(property)) {
+					continue;
+				}
 				grid.appendChild(this.createEditableProperty(property, styles[property] ?? ''));
 			}
-			section.append(heading, grid);
+			section.appendChild(grid);
 			this.designContent.appendChild(section);
 		}
 	}
@@ -441,8 +496,7 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		propertyInput.placeholder = localize('browser.cssInspector.propertyName', "property");
 		const valueInput = $<HTMLInputElement>('input.browser-inspector-css-value');
 		valueInput.placeholder = localize('browser.cssInspector.propertyValue', "value");
-		const addButton = $<HTMLButtonElement>('button.browser-inspector-add-property');
-		addButton.type = 'button';
+		const addButton = $<HTMLButtonElement>('button.oi-btn.primary.browser-inspector-add-property', { type: 'button' });
 		addButton.textContent = localize('browser.cssInspector.apply', "Apply");
 		const applyNewProperty = () => {
 			const property = propertyInput.value.trim();
@@ -481,6 +535,18 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		const label = $('label');
 		label.textContent = property;
 		label.title = property;
+		// OpenIDE's manipulable controls first: a slider for what is a slider, a number+unit for what
+		// is a measurement, a segmented row for the short enumerations. Whatever it does not claim
+		// falls through to the select / colour / text branches below, unchanged.
+		const manipulable = !compact ? createOpenideStyleControl(property, value, next => void this.applyStyle(property, next), {
+			contextViewService: this.contextViewService,
+			store: this.renderStore,
+		}) : undefined;
+		if (manipulable) {
+			this.renderStore.add(toDisposable(() => manipulable.dispose()));
+			row.append(label, manipulable.element);
+			return row;
+		}
 		const options = !compact ? propertyOptions[property] : undefined;
 		if (options) {
 			const values = [...new Set([...options, ...cssGlobalValues])];
@@ -488,16 +554,15 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 				values.unshift(value);
 			}
 			const selectedIndex = Math.max(0, values.indexOf(value));
-			const select = this.renderStore.add(new SelectBox(
-				values.map(text => ({ text })),
+			const select = this.renderStore.add(new OpenideSettingsDropdown(
+				values.map(label => ({ label })),
 				selectedIndex,
 				this.contextViewService,
-				defaultSelectBoxStyles,
-				{ useCustomDrawn: true, ariaLabel: property, optionsAsChildren: true }
+				property,
 			));
 			const control = $('.browser-inspector-select-control');
 			select.render(control);
-			this.renderStore.add(select.onDidSelect(event => void this.applyStyle(property, event.selected)));
+			this.renderStore.add(select.onDidSelect(event => void this.applyStyle(property, values[event.index])));
 			row.append(label, control);
 		} else if (shouldUseColorControl(property, value)) {
 			row.append(label, this.createColorControl(property, value));
@@ -568,9 +633,9 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 			this.openColorPicker(property, input, swatch, updateSwatch);
 		};
 		swatch.addEventListener('click', open);
-		// El campo es el disparador PRIMARIO del picker (no el swatch chico): al click abre el
-		// ColorPickerWidget, que ya trae su propio campo de texto con switch hex/rgb/hsl. Así el
-		// color deja de vivirse como "un textbox" y el picker es lo primero que aparece.
+		// The field is the PRIMARY trigger for the picker (not the small swatch): clicking it opens
+		// the ColorPickerWidget, which already carries its own text field with a hex/rgb/hsl switch.
+		// A colour then stops reading as "a textbox" and the picker is the first thing to appear.
 		input.addEventListener('click', open);
 
 		control.append(swatch, input);
@@ -596,12 +661,22 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		};
 
 		this.colorPickerOpen = true;
+		// Anchored to the property's ROW, not the swatch: the popover then starts at the panel's
+		// left edge and takes the row's width (capped), so it never runs out over the editor next
+		// door the way a 24px anchor with a content-sized popover did.
+		const row = swatch.closest<HTMLElement>('.browser-inspector-editable-property') ?? swatch;
 		this.contextViewService.showContextView({
-			getAnchor: () => swatch,
+			getAnchor: () => row,
 			render: (container) => {
 				const store = new DisposableStore();
 				const wrapper = $('.browser-inspector-color-picker');
+				wrapper.style.width = `${Math.min(300, Math.max(240, row.getBoundingClientRect().width))}px`;
 				container.appendChild(wrapper);
+				// The header's chip reads the picked colour from here (browser.css): the widget only
+				// paints it as the bar's inline background, which the chip replaces.
+				const paintChip = (color: Color) => wrapper.style.setProperty('--browser-inspector-picked', Color.Format.CSS.format(color) || 'transparent');
+				paintChip(model.color);
+				store.add(model.onDidChangeColor(paintChip));
 
 				const pixelRatio = PixelRatio.getInstance(getWindow(wrapper)).value;
 				const widget = store.add(new ColorPickerWidget(
@@ -649,8 +724,8 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		}, this.panel.element);
 	}
 
-	/** Footer del picker: contraste de legibilidad, copiar, eyedropper y swatches de tokens
-	 *  del proyecto. Vive en el mismo DisposableStore que el widget, así se limpia al cerrar. */
+	/** The picker's footer: legibility contrast, copy, eyedropper and swatches for the project's
+	 *  tokens. It lives in the widget's own DisposableStore, so it is cleaned up on close. */
 	private appendColorPickerFooter(
 		wrapper: HTMLElement,
 		store: DisposableStore,
@@ -661,33 +736,33 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 	): void {
 		const footer = $('.browser-inspector-color-picker-footer');
 
-		// Contraste de legibilidad: texto vs fondo del elemento (o fondo vs texto si editás el
-		// background). Sin un fondo resuelto (transparente) no se muestra: un número falso sería
-		// peor que no decir nada.
+		// Legibility contrast: text against the element's background (or background against text when
+		// editing the background). With no resolved background (transparent) it is not shown: a made-up
+		// number would be worse than saying nothing.
 		const styles = this.data?.allComputedStyles ?? this.data?.computedStyles;
 		const fixedFg = property === 'background-color' ? tryParseCssColor(styles?.['color'] ?? '') : null;
 		const fixedBg = property === 'color' ? tryParseCssColor(styles?.['background-color'] ?? '') : null;
 		const showContrast = (property === 'color' && fixedBg !== null && fixedBg.rgba.a > 0)
 			|| (property === 'background-color' && fixedFg !== null);
 		if (showContrast) {
-			const badge = $('.browser-inspector-contrast');
+			// The product's status pill: `ok` / `error` are its own colours.
+			const badge = $('.oi-pill.browser-inspector-contrast');
 			const render = () => {
 				const f = property === 'color' ? model.color : fixedFg!;
 				const b = property === 'background-color' ? model.color : fixedBg!;
 				const ratio = f.getContrastRatio(b);
 				badge.textContent = localize('browser.cssInspector.contrast', "Contrast {0}  AA {1}  AAA {2}", ratio.toFixed(2), ratio >= 4.5 ? '✓' : '✗', ratio >= 7 ? '✓' : '✗');
 				badge.classList.toggle('ok', ratio >= 4.5);
-				badge.classList.toggle('fail', ratio < 4.5);
+				badge.classList.toggle('error', ratio < 4.5);
 			};
 			render();
 			store.add(model.onDidChangeColor(render));
 			footer.appendChild(badge);
 		}
 
-		// Acciones: copiar el valor actual y, si la API existe, eyedropper desde la pantalla.
+		// Actions: copy the current value and, where the API exists, eyedrop from the screen.
 		const actions = $('.browser-inspector-color-picker-actions');
 		const copyBtn = iconButton(Codicon.copy, localize('browser.cssInspector.copyColor', "Copy color"));
-		copyBtn.classList.add('browser-inspector-footer-btn');
 		store.add(addDisposableListener(copyBtn, EventType.CLICK, () => {
 			const label = model.presentation?.label || Color.Format.CSS.format(model.color) || '';
 			void this.clipboardService.writeText(label);
@@ -697,24 +772,23 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		const win = this.editor.window as unknown as { EyeDropper?: new () => { open(): Promise<{ sRGBHex: string }> } };
 		if (typeof win.EyeDropper === 'function') {
 			const dropBtn = iconButton(Codicon.eye, localize('browser.cssInspector.eyeDropper', "Pick color from screen"));
-			dropBtn.classList.add('browser-inspector-footer-btn');
 			store.add(addDisposableListener(dropBtn, EventType.CLICK, async () => {
 				try {
 					const res = await new win.EyeDropper!().open();
 					const parsed = Color.Format.CSS.parse(res.sRGBHex);
 					if (parsed) {
-						// El setter dispara onDidChangeColor: actualiza UI, swatch y preview en vivo.
+						// The setter fires onDidChangeColor: it updates UI, swatch and preview live.
 						model.color = parsed;
 					}
 				} catch {
-					/* el usuario canceló el eyedropper */
+					/* the user cancelled the eyedropper */
 				}
 			}));
 			actions.appendChild(dropBtn);
 		}
 		footer.appendChild(actions);
 
-		// Tokens de color del proyecto: swatches para saltar a un valor de la paleta.
+		// The project's colour tokens: swatches that jump straight to a palette value.
 		const tokensRow = $('.browser-inspector-color-tokens');
 		footer.appendChild(tokensRow);
 		void this.getColorTokens().then(tokens => {
@@ -744,7 +818,7 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		wrapper.appendChild(footer);
 	}
 
-	/** Custom properties --* de :root que resuelven a color. Cacheado por URL de página. */
+	/** The --* custom properties on :root that resolve to a colour. Cached per page URL. */
 	private async getColorTokens(): Promise<{ name: string; value: string }[]> {
 		const model = this.model;
 		const url = this.data?.url;
@@ -766,14 +840,14 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 					if (p.indexOf('--') !== 0) { continue; }
 					const raw = cs.getPropertyValue(p).trim();
 					if (!raw) { continue; }
-					// Un numero pelado o una medida nunca es un color de la paleta, pero el motor
-					// acepta algunos por compatibilidad: color:1000 resuelve a #001000.
+					// A bare number or a measurement is never a palette colour, but the engine accepts
+					// some of them for compatibility: color:1000 resolves to #001000.
 					if (/^[\\d.]+(px|em|rem|%|s|ms|vh|vw|vmin|vmax|deg|fr)?$/i.test(raw)) { continue; }
-					// Dos centinelas: si el motor RECHAZA el valor, el color queda en el centinela y
-					// asi se distingue "lo acepto" de "lo ignoro". Con color='' no se podia: un valor
-					// invalido dejaba el color HEREDADO, que tambien matchea rgb(...), y cada token
-					// que no era color entraba a la paleta como un swatch del color del texto. Son
-					// dos por si un token vale exactamente igual que el primero.
+					// Two sentinels: when the engine REJECTS the value the colour stays at the sentinel,
+					// which is how "it accepted it" is told apart from "it ignored it". color='' could not
+					// do that: an invalid value left the INHERITED colour, which also matches rgb(...), and
+					// every non-colour token entered the palette as a swatch of the text colour. There are
+					// two in case a token happens to equal the first one exactly.
 					let resolved = '';
 					let isColor = true;
 					for (const sentinel of ['rgb(1, 2, 3)', 'rgb(4, 5, 6)']) {
@@ -831,6 +905,52 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		this.horizontalSash?.layout();
 	}
 
+	/**
+	 * OpenIDE: one entry per property, the last value winning.
+	 *
+	 * A live colour preview fires this on every drag of the picker; keeping the last value is both
+	 * what the page shows and what the source should end up with, and it keeps the prompt from
+	 * being a hundred intermediate reds.
+	 */
+	private rememberEdit(property: string, value: string): void {
+		if (value.trim()) {
+			this.appliedEdits.set(property, value.trim());
+		} else {
+			this.appliedEdits.delete(property);
+		}
+		this.toCodeButton.disabled = this.appliedEdits.size === 0;
+	}
+
+	/**
+	 * OpenIDE: hands the edits to the agent's composer instead of applying them anywhere.
+	 *
+	 * It writes the prompt WITHOUT sending it (`openide.agent.injectPrompt`): what changed in the
+	 * page is a fact, where it belongs in the source is a judgement, and the second one is the
+	 * user's to start. The selector is the same label the components tree shows, because that is
+	 * the identity the user has been looking at while editing.
+	 */
+	private takeEditsToCode(): void {
+		if (!this.appliedEdits.size) {
+			return;
+		}
+		const selected = this.data?.ancestors?.at(-1);
+		const selector = selected ? elementLabel(selected.tagName, selected.id, selected.classNames) : 'el elemento seleccionado';
+		const declarations = [...this.appliedEdits].map(([property, value]) => `  ${property}: ${value};`).join('\n');
+		const url = this.data?.url ?? '';
+		const prompt = [
+			`En la vista previa${url ? ` de ${url}` : ''} ajusté estos estilos del elemento \`${selector}\`:`,
+			'',
+			'```css',
+			`${selector} {`,
+			declarations,
+			'}',
+			'```',
+			'',
+			'Llevá exactamente estos cambios al código fuente (buscá el elemento por su clase, texto o test id) y dejá el resultado equivalente, respetando el sistema de estilos que ya usa el proyecto.',
+		].join('\n');
+		void this.commandService.executeCommand('openide.agent.injectPrompt', prompt);
+	}
+
 	private layoutScrollbars(): void {
 		this.horizontalSash?.layout();
 		this.componentsScroll?.scanDomNode();
@@ -857,6 +977,9 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		const rerender = options.rerender !== false && !this.colorPickerOpen;
 		try {
 			this.data = await model.setElementStyle(elementId, property, value);
+			// OpenIDE: remembered so the "take to the code" button can hand the agent exactly what
+			// changed here — the last value per property, which is what the page ends up with.
+			this.rememberEdit(property, value);
 			if (!options.silent) {
 				this.status.textContent = localize('browser.cssInspector.applied', "Applied {0}", property);
 			}

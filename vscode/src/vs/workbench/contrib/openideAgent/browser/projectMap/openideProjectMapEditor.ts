@@ -16,7 +16,8 @@
 import { $, addDisposableListener, append, clearNode, Dimension, getWindow } from '../../../../../base/browser/dom.js';
 import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { DomScrollableElement } from '../../../../../base/browser/ui/scrollbar/scrollableElement.js';
-import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
+import { RunOnceScheduler } from '../../../../../base/common/async.js';
+import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { DisposableStore, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ScrollbarVisibility } from '../../../../../base/common/scrollable.js';
@@ -28,6 +29,7 @@ import { IModelService } from '../../../../../editor/common/services/model.js';
 import { ILayoutNode, layoutGraph } from '../../../../../code/common/openideCodebaseGraphLayout.js';
 import { ICodebaseMemoryEdge, ICodebaseMemoryNode } from '../../../../../code/common/openideCodebaseMemoryTypes.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { FileKind } from '../../../../../platform/files/common/files.js';
@@ -40,7 +42,6 @@ import { IEditorOpenContext } from '../../../../common/editor.js';
 import { createFileIconThemableTreeContainerScope } from '../../../files/browser/views/explorerView.js';
 import { IEditorGroup } from '../../../../services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
-import { IOpenideAgentService } from '../openideAgentService.js';
 import { IArchitectureItem, IGraphRelations, IGraphView, IOpenideCodebaseGraphService } from '../openideCodebaseGraphService.js';
 import { ICodebaseMemoryService } from '../openideCodebaseMemoryService.js';
 import { OpenideMemoryInput } from '../openideMemoryInput.js';
@@ -59,7 +60,22 @@ function relationLabel(type: ICodebaseMemoryEdge['type']): string {
 	return isOpenideStringKey(key) ? t(key) : type.toLowerCase();
 }
 
+/**
+ * How long a burst of index republishes is allowed to settle before the map reloads.
+ *
+ * Long enough that walking a large repository produces a handful of reloads rather than one per
+ * batch, short enough that a save the user just made shows up while they are still looking at it.
+ */
+const RELOAD_DEBOUNCE_MS = 750;
+
 const MODULES_COLLAPSED_KEY = 'openide.projectMap.modulesCollapsed';
+
+/**
+ * Registered in `openideAgent.contribution.ts`, which imports THIS file to register the editor
+ * pane — so the id travels as a string, the way the chat header holds `openide.memory.open` to
+ * open this very editor. The command registry is the seam between the two.
+ */
+const ASK_IN_NEW_CHAT_COMMAND = 'openide.agent.askInNewChat';
 const SCOPE_COLLAPSED_KEY = 'openide.projectMap.scopeCollapsed';
 const INSPECTOR_COLLAPSED_KEY = 'openide.projectMap.inspectorCollapsed';
 
@@ -89,15 +105,16 @@ export class OpenideProjectMapEditor extends EditorPane {
 	private inspModule!: HTMLElement;
 	private inspRelations!: HTMLElement;
 	private inspScroll!: DomScrollableElement;
-	private inspAgent!: HTMLElement;
 	private empty!: HTMLElement;
 
 	private currentPath = '';
+	/** The scope the current viewport was framed for; a reload of the same one keeps pan and zoom. */
+	private framedPath: string | undefined;
+	private readonly reloadSoon = this._register(new RunOnceScheduler(() => void this.loadGraph(), RELOAD_DEBOUNCE_MS));
 	private hidden = new Set<string>();
 	private graphSerial = 0;
 	private searchSerial = 0;
 	private relationsSerial = 0;
-	private readonly askCts = this._register(new MutableDisposable<CancellationTokenSource>());
 	private readonly hovers = this._register(new DisposableStore());
 	/** The "Path copied" flash; replacing it cancels the pending revert of the previous click. */
 	private readonly copyFeedback = this._register(new MutableDisposable());
@@ -112,7 +129,7 @@ export class OpenideProjectMapEditor extends EditorPane {
 		@ICodebaseMemoryService private readonly memoryService: ICodebaseMemoryService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IClipboardService private readonly clipboardService: IClipboardService,
-		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
+		@ICommandService private readonly commandService: ICommandService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IHoverService private readonly hoverService: IHoverService,
 		@IModelService private readonly modelService: IModelService,
@@ -126,7 +143,11 @@ export class OpenideProjectMapEditor extends EditorPane {
 				: t('projectMap.indexing', progress.processed, progress.total);
 			this.setStatus(`${phase}${progress.current ? ' · ' + progress.current : ''}`, true);
 		}));
-		this._register(this.memoryService.onDidChange(() => void this.loadGraph()));
+		// Coalesced, and never on the spot: a reload runs two service calls and then lays the whole
+		// graph out with forces on this thread. The indexer republishes many times while it walks a
+		// repository, and answering each one turned the map into a slideshow that fought the mouse.
+		// One reload after the burst says the same thing for a fraction of the work.
+		this._register(this.memoryService.onDidChange(() => this.reloadSoon.schedule()));
 		this._register(themeService.onDidColorThemeChange(() => this.applyThemeColors()));
 	}
 
@@ -228,7 +249,6 @@ export class OpenideProjectMapEditor extends EditorPane {
 		this._register(addDisposableListener(open, 'click', () => void this.openSelected()));
 		this._register(addDisposableListener(copy, 'click', () => this.copyPath(copy)));
 		this._register(addDisposableListener(ask, 'click', () => this.askAgent()));
-		this.inspAgent = append(inspBody, $('.openide-pmap-insp-agent.hidden'));
 		this.inspRelations = append(inspBody, $('.openide-pmap-insp-relations'));
 		this.inspScroll = this._register(new DomScrollableElement(inspBody, { vertical: ScrollbarVisibility.Auto, horizontal: ScrollbarVisibility.Hidden, useShadows: false }));
 		append(inspectorCard.body, this.inspScroll.getDomNode());
@@ -315,7 +335,10 @@ export class OpenideProjectMapEditor extends EditorPane {
 			const side = Math.max(900, Math.round(Math.sqrt(view.nodes.length) * 95));
 			const world = { width: side * 1.35, height: side };
 			const layout: ILayoutNode[] = layoutGraph(view.nodes, world.width, world.height, view.edges).nodes;
-			this.map.setGraph(view, layout, world);
+			// Same scope as the view on screen ⇒ this is a republish, not a navigation: keep where
+			// the user was looking.
+			this.map.setGraph(view, layout, world, this.framedPath === this.currentPath);
+			this.framedPath = this.currentPath;
 			this.renderModules(view);
 			this.renderCrumbs(scope?.breadcrumbs ?? []);
 			this.empty.classList.toggle('hidden', view.nodes.length > 0);
@@ -466,9 +489,6 @@ export class OpenideProjectMapEditor extends EditorPane {
 
 	private async renderInspector(node: IProjectMapNode | undefined): Promise<void> {
 		this.hovers.clear();
-		this.askCts.value = undefined;
-		this.inspAgent.classList.add('hidden');
-		clearNode(this.inspAgent);
 		if (!node) {
 			this.inspector.classList.add('hidden');
 			// Closing it hands its height back to the modules list.
@@ -571,32 +591,20 @@ export class OpenideProjectMapEditor extends EditorPane {
 		this.copyFeedback.value = toDisposable(() => clearTimeout(handle));
 	}
 
+	/**
+	 * Hands the question to the DOCK, in a conversation of its own.
+	 *
+	 * It used to run a headless agent right here and stream the answer into a block inside the
+	 * inspector. That block was a second chat with none of the chat: no model picker, no tools you
+	 * could see, no history, no way to ask the follow-up the answer always provokes — and it was
+	 * erased the moment you selected another node, which is the click you make right after reading
+	 * it. The map's job is to point at a module; answering about one is the agent's, and the agent
+	 * already has a surface.
+	 */
 	private askAgent(): void {
 		const node = this.map.selected;
 		if (!node) { return; }
-		const prompt = t('projectMap.analyzePrompt', node.name, node.path);
-		const cts = new CancellationTokenSource();
-		this.askCts.value = cts;
-		clearNode(this.inspAgent);
-		this.inspAgent.classList.remove('hidden');
-		const head = append(this.inspAgent, $('.openide-pmap-insp-subsection'));
-		append(head, icon(ThemeIcon.modify(Codicon.loading, 'spin')));
-		append(head, $('span', undefined, t('projectMap.analyzing')));
-		const body = append(this.inspAgent, $('.openide-pmap-insp-agent-text'));
-		void this.agentService.runAgent(prompt, event => {
-			if (cts.token.isCancellationRequested) { return; }
-			if (event.type === 'text') { body.textContent += event.delta; this.inspScroll.scanDomNode(); }
-		}, cts.token).then(() => {
-			if (cts.token.isCancellationRequested) { return; }
-			clearNode(head);
-			append(head, icon(Codicon.sparkle));
-			append(head, $('span', undefined, t('projectMap.analysis')));
-		}).catch(error => {
-			if (cts.token.isCancellationRequested) { return; }
-			clearNode(head);
-			append(head, icon(Codicon.warning));
-			append(head, $('span', undefined, error instanceof Error ? error.message : String(error)));
-		}).finally(() => { if (this.askCts.value === cts) { this.askCts.value = undefined; } this.inspScroll.scanDomNode(); });
+		void this.commandService.executeCommand(ASK_IN_NEW_CHAT_COMMAND, t('projectMap.analyzePrompt', node.name, node.path));
 	}
 
 	private async openSelected(): Promise<void> {

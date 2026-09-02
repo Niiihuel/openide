@@ -12,6 +12,8 @@
  *  (MCP's stdio transport). Backend only: it parses and lays out — rendering is the client's job.
  *--------------------------------------------------------------------------------------------*/
 
+import { layoutNodeMap, NODE_MAP_KINDS, parseNodeMap } from '../common/diagrams/openideNodeMaps.js';
+import { looksLikeSeqMap, parseSeqMap } from '../common/diagrams/openideSeqMap.js';
 import { DIAGRAM_KINDS, layoutGraph, parseDiagramSource, parseFlowchart, parseMindmap, parseStateDiagram } from '../common/diagrams/openideDiagramEngine.js';
 
 interface IJsonRpcRequest {
@@ -47,6 +49,15 @@ const TOOLS = [
 		description: 'Lista los tipos de diagrama que soporta el motor de OpenIDE.',
 		inputSchema: { type: 'object', properties: {} },
 	},
+	{
+		name: 'map_validate',
+		description: 'Valida un mapa tipado de OpenIDE (JSON, modelo de Archify) y devuelve ok:true con un resumen, o diagnostics [{code, severity, subject, message, fix?}] para reparar y reintentar. Cuatro tipos, elegí por lo que se cuenta: "archmap" (componentes/infra) y "flowmap" (procesos; group = carril) y "lifemap" (estados/ciclos de vida) comparten la forma {type, title?, nodes:[{id, label, kind, sublabel?, group?, emphasis?}], edges:[{from, to, label?, dashed?}]} y difieren solo en kinds (archmap: frontend|backend|database|cloud|security|messagebus|external · flowmap: start|step|decision|tool|end|failure · lifemap: initial|active|waiting|terminal|failure); "seqmap" (secuencia) es {type:"seqmap", title?, actors:[{id, label, kind como archmap, sublabel?}], steps:[{from, to, label, reply?, dashed?}]} y el orden de steps ES el tiempo. El layout es automático y determinista (no hay posiciones que autorear). Cuando pase la validación, emitilo en el chat dentro de un fence con el nombre del tipo (```archmap, ```flowmap, ```lifemap, ```seqmap) y OpenIDE lo dibuja como grafo de nodos con la misma piel. Mantené ≤ 12 nodos primarios, un camino principal claro y labels cortos.',
+		inputSchema: {
+			type: 'object',
+			properties: { source: { type: 'string', description: 'El JSON completo del mapa (con su campo type)' } },
+			required: ['source'],
+		},
+	},
 ];
 
 function textResult(value: unknown): any {
@@ -68,6 +79,34 @@ function callTool(name: string, args: any): any {
 	if (name === 'diagram_parse') {
 		const result = parseDiagramSource(source);
 		return result ? textResult(result) : errorResult('el texto no es un diagrama soportado');
+	}
+	if (name === 'map_validate') {
+		if (looksLikeSeqMap(source)) {
+			const parsed = parseSeqMap(source);
+			if (!parsed.spec) {
+				return textResult({ ok: false, diagnostics: parsed.diagnostics, kinds: NODE_MAP_KINDS.archmap });
+			}
+			return textResult({
+				ok: true,
+				warnings: parsed.diagnostics,
+				summary: { type: 'seqmap', actors: parsed.spec.actors.length, steps: parsed.spec.steps.length },
+			});
+		}
+		const parsed = parseNodeMap(source);
+		if (!parsed.spec) {
+			return textResult({ ok: false, diagnostics: parsed.diagnostics, kinds: NODE_MAP_KINDS });
+		}
+		const layout = layoutNodeMap(parsed.spec);
+		return textResult({
+			ok: true,
+			warnings: parsed.diagnostics,
+			summary: {
+				type: parsed.spec.type,
+				nodes: parsed.spec.nodes.length,
+				edges: parsed.spec.edges.length,
+				groups: layout.hulls.map(hull => hull.label),
+			},
+		});
 	}
 	if (name === 'diagram_layout') {
 		const spec = parseFlowchart(source) ?? parseStateDiagram(source) ?? parseMindmap(source);

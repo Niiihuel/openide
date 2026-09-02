@@ -5,9 +5,11 @@
 
 import { $, addDisposableListener, append } from '../../../../../../base/browser/dom.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IOpenideChatCanvasContent, IOpenideChatContent, isOpenideChatContentOfKind } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
+import { setupChatTooltip } from '../openideChatHover.js';
 import '../media/openideChatCanvas.css';
 
 export const OPENIDE_CHAT_CANVAS_CLASS = 'openide-chat-canvas-card';
@@ -15,7 +17,7 @@ export const OPENIDE_CHAT_CANVAS_CLASS = 'openide-chat-canvas-card';
 /**
  * "Canvas" card: the agent wrote a `.openide/canvases/*.canvas.tsx` and this is the way in.
  *
- * Ported from the webview's `renderCanvasCard` (openideChatHtml.ts:3930-3941) and its `.canvas-*`
+ * Ported from the webview's `renderCanvasCard` and its `.canvas-*`
  * styles (:483-487). The button does what the host did for the webview's `canvasOpen` message
  * (openideChatView.ts:1098-1100): `openide.canvas.open` with the workspace-relative path, which
  * forces OUR canvas editor instead of the text editor the path would otherwise resolve to.
@@ -39,6 +41,7 @@ export class OpenideChatCanvasPart extends OpenideChatContentPart {
 		content: IOpenideChatCanvasContent,
 		_context: IOpenideChatContentPartContext,
 		@ICommandService private readonly _commandService: ICommandService,
+		@IHoverService hoverService: IHoverService,
 	) {
 		super();
 
@@ -51,6 +54,8 @@ export class OpenideChatCanvasPart extends OpenideChatContentPart {
 
 		this._title = append(this.domNode, $('div.openide-chat-canvas-title'));
 		this._path = append(this.domNode, $('div.openide-chat-canvas-path'));
+		// The line already prints the path; the hover is only there for when it is elided.
+		this._register(setupChatTooltip(hoverService, this._path, () => this._content.resource ?? '', { aria: false }));
 
 		const open = append(this.domNode, $('button.openide-chat-canvas-open')) as HTMLButtonElement;
 		open.type = 'button';
@@ -61,7 +66,7 @@ export class OpenideChatCanvasPart extends OpenideChatContentPart {
 	}
 
 	private _render(): void {
-		// openideChatHtml.ts:3934 — `created === false` is "actualizado"; anything else is "creado".
+		// the removed chat webview — `created === false` is "actualizado"; anything else is "creado".
 		// Here `undefined` is a third case (restored, unknowable) and falls back to the bare noun.
 		this._heading.textContent = this._content.created === undefined
 			? 'Canvas'
@@ -71,7 +76,6 @@ export class OpenideChatCanvasPart extends OpenideChatContentPart {
 		this._title.textContent = this._content.title || basename(this._content.resource ?? '');
 		const path = this._content.resource ?? '';
 		this._path.textContent = path;
-		this._path.title = path;
 		// A canvas with no resolved path has nothing to open and no path to print: hide the line
 		// rather than leave an empty row that looks like a rendering bug.
 		this._path.classList.toggle('hidden', !path);

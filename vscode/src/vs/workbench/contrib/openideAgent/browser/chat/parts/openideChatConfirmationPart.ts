@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append } from '../../../../../../base/browser/dom.js';
+import { $, append, clearNode } from '../../../../../../base/browser/dom.js';
 import { localize } from '../../../../../../nls.js';
 import { IOpenideChatConfirmationContent, IOpenideChatContent } from '../../../common/chat/openideChatContent.js';
 import { ToolApprovalDecision } from '../../../common/openideAgentTypes.js';
@@ -17,7 +17,7 @@ import { t } from '../../../common/openideStrings.js';
  * Tool approval. The agent is literally parked on a Promise until this resolves, so the part is
  * not decoration: with no card the run stalls forever and the transcript shows nothing at all.
  *
- * Transcribed from the webview's `.approval` block (openideChatHtml.ts:1040-1067) and its
+ * Transcribed from the webview's `.approval` block and its
  * `addChoice` wiring (:4584-4598).
  *
  * The decision strings are the SERVICE's, not ours, and getting them wrong is silent:
@@ -71,7 +71,7 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 		this._status = append(body, $('.openide-chat-approval-status'));
 
 		this._renderActions(content);
-		this._renderDecision(content.decision);
+		this._renderDecision(content.decision, false);
 	}
 
 	private _renderActions(content: IOpenideChatConfirmationContent): void {
@@ -108,24 +108,39 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 		return { dispose: () => button.removeEventListener('click', listener) };
 	}
 
-	/** Answered cards stay on screen, disabled. Removing them would erase the record of what the
-	 *  user authorised, which is the only place that decision is visible after the fact. */
-	private _renderDecision(decision: IOpenideChatConfirmationContent['decision']): void {
+	/**
+	 * An answered card keeps the record and drops the offer.
+	 *
+	 * The buttons used to stay, greyed out. Three dimmed buttons under a question that has already
+	 * been answered read as a control that stopped working, and one of them still looked like the
+	 * primary action. What has to survive is WHAT was authorised, and that is the status line — so
+	 * that is what is left, with the glyph of the decision in front of it.
+	 *
+	 * `notify` is false only for the first paint, which happens while the part is being built and
+	 * has nobody to tell yet. Every later call has to announce the new height: the row is measured
+	 * and cached by the list, and without this the answered card kept the height of the unanswered
+	 * one and clipped its own answer.
+	 */
+	private _renderDecision(decision: IOpenideChatConfirmationContent['decision'], notify = true): void {
 		this.domNode.classList.toggle('decided', !!decision);
-		for (const button of this._actions.querySelectorAll('button')) {
-			(button as HTMLButtonElement).disabled = !!decision;
-		}
+		this._actions.classList.toggle('hidden', !!decision);
+		clearNode(this._status);
 		if (!decision) {
-			this._status.textContent = '';
+			if (notify) { this._onDidChangeHeight.fire(); }
 			return;
 		}
-		this._status.textContent = decision === 'deny'
+		const denied = decision === 'deny';
+		append(this._status, $(`span.codicon.codicon-${denied ? 'close' : 'check'}`));
+		const text = append(this._status, $('span'));
+		text.textContent = denied
 			? localize('openide.chat.approval.denied', "Rechazado")
 			: decision === 'always'
 				? localize('openide.chat.approval.allowedAlways', "Permitido siempre")
 				: decision === 'session'
 					? t('chat.approval.allowedSession')
 					: localize('openide.chat.approval.allowed', "Permitido");
+		this._status.classList.toggle('denied', denied);
+		if (notify) { this._onDidChangeHeight.fire(); }
 	}
 
 	hasSameContent(other: IOpenideChatContent): boolean {

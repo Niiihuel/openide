@@ -10,11 +10,13 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { ScrollbarVisibility } from '../../../../../base/common/scrollable.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { getOpenideCli, groupOpenideSessions, OpenideSessionGroup } from '../../common/openideAgentCliCatalog.js';
 import { InputBox } from '../../../../../base/browser/ui/inputbox/inputBox.js';
 import { openideInputBoxStyles } from '../openideControlStyles.js';
 import { onDidChangeOpenideLanguage, OpenideStringKey, t } from '../../common/openideStrings.js';
 import { IChatSessionMeta, OpenideChatSessions } from '../openideChatSessions.js';
+import { setupChatTooltip } from './openideChatHover.js';
 import { menuIcon, menuRow, menuRowAction, OpenideChatMenuPopover } from './openideChatMenuDom.js';
 
 /**
@@ -136,6 +138,7 @@ export class OpenideChatSessionsPane extends Disposable {
 		private readonly sessions: OpenideChatSessions,
 		private readonly confirmDelete: (id: string) => Promise<boolean>,
 		@IContextViewService contextViewService: IContextViewService,
+		@IHoverService private readonly hoverService: IHoverService,
 	) {
 		super();
 		this.domNode = append(parent, $('.openide-chat-sessions-pane.hidden'));
@@ -159,7 +162,7 @@ export class OpenideChatSessionsPane extends Disposable {
 		}));
 		append(searchRow, $('span.codicon.codicon-search.openide-chat-sessions-search-icon'));
 		this._search = this._searchBox.inputElement;
-		const filterButton = menuRowAction('filter', t('sessions.filter'));
+		const filterButton = menuRowAction('filter', t('sessions.filter'), { hoverService: this.hoverService, store: this._store });
 		append(head, filterButton);
 
 		this._listHost = $('.openide-chat-sessions-list');
@@ -284,7 +287,12 @@ export class OpenideChatSessionsPane extends Disposable {
 
 		const dot = append(row, $('span.openide-chat-session-dot'));
 		dot.classList.add(session.status ?? 'idle');
-		dot.title = session.status ? t(statusKey(session.status)) : '';
+		if (session.status) {
+			// Per repaint, with the row it belongs to. `aria:false`: the dot is decorative, the row's
+			// own meta line already says the status in text.
+			const status = session.status;
+			this._rowsStore.add(setupChatTooltip(this.hoverService, dot, () => t(statusKey(status)), { aria: false }));
+		}
 
 		const kind = append(row, $('span.openide-chat-sessions-kind'));
 		append(kind, menuIcon(session.kind === 'cli' ? 'terminal' : session.forked ? 'repo-forked' : 'comment-discussion'));
@@ -297,10 +305,10 @@ export class OpenideChatSessionsPane extends Disposable {
 
 		const actions = append(row, $('span.openide-chat-sessions-row-actions'));
 		if (session.unread) {
-			const read = append(actions, menuRowAction('eye', t('sessions.action.markRead')));
+			const read = append(actions, menuRowAction('eye', t('sessions.action.markRead'), { hoverService: this.hoverService, store: this._rowsStore }));
 			this._rowsStore.add(addDisposableListener(read, 'click', event => { event.stopPropagation(); this.sessions.markRead(session.id); this.render(); this._onDidMutate.fire(); }));
 		}
-		const archive = append(actions, menuRowAction(session.archived ? 'unarchive' : 'archive', t(session.archived ? 'sessions.action.unarchive' : 'sessions.action.archive')));
+		const archive = append(actions, menuRowAction(session.archived ? 'unarchive' : 'archive', t(session.archived ? 'sessions.action.unarchive' : 'sessions.action.archive'), { hoverService: this.hoverService, store: this._rowsStore }));
 		this._rowsStore.add(addDisposableListener(archive, 'click', event => {
 			event.stopPropagation();
 			if (session.archived) { this.sessions.unarchive(session.id); } else { this.sessions.archive(session.id); }
@@ -308,10 +316,10 @@ export class OpenideChatSessionsPane extends Disposable {
 			this._onDidMutate.fire();
 		}));
 		if (session.kind === 'cli' && this.sessions.openTabs().some(open => open.id === session.id)) {
-			const close = append(actions, menuRowAction('close', t('sessions.action.closeSession')));
+			const close = append(actions, menuRowAction('close', t('sessions.action.closeSession'), { hoverService: this.hoverService, store: this._rowsStore }));
 			this._rowsStore.add(addDisposableListener(close, 'click', event => { event.stopPropagation(); this._onDidRequestCloseSession.fire(session.id); }));
 		}
-		const remove = append(actions, menuRowAction('trash', t('sessions.action.delete')));
+		const remove = append(actions, menuRowAction('trash', t('sessions.action.delete'), { hoverService: this.hoverService, store: this._rowsStore }));
 		this._rowsStore.add(addDisposableListener(remove, 'click', async event => {
 			event.stopPropagation();
 			if (await this.confirmDelete(session.id)) {

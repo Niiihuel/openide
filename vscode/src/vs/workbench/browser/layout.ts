@@ -11,7 +11,7 @@ import { isWindows, isLinux, isMacintosh, isWeb, isIOS } from '../../base/common
 import { EditorInputCapabilities, GroupIdentifier, isResourceEditorInput, IUntypedEditorInput, pathsToEditors } from '../common/editor.js';
 import { SidebarPart } from './parts/sidebar/sidebarPart.js';
 import { PanelPart } from './parts/panel/panelPart.js';
-import { Position, Parts, PartOpensMaximizedOptions, IWorkbenchLayoutService, positionFromString, positionToString, partOpensMaximizedFromString, PanelAlignment, ActivityBarPosition, LayoutSettings, MULTI_WINDOW_PARTS, SINGLE_WINDOW_PARTS, ZenModeSettings, EditorTabsMode, EditorActionsLocation, shouldShowCustomTitleBar, isHorizontal, isMultiWindowPart, IPartVisibilityChangeEvent } from '../services/layout/browser/layoutService.js';
+import { Position, Parts, PartOpensMaximizedOptions, IWorkbenchLayoutService, positionFromString, positionToString, partOpensMaximizedFromString, PanelAlignment, ActivityBarPosition, LayoutSettings, MULTI_WINDOW_PARTS, SINGLE_WINDOW_PARTS, ZenModeSettings, EditorTabsMode, EditorActionsLocation, shouldShowCustomTitleBar, isHorizontal, isMultiWindowPart, IPartVisibilityChangeEvent, isFloatingTopEdgeExposed } from '../services/layout/browser/layoutService.js';
 import { isTemporaryWorkspace, IWorkspaceContextService, WorkbenchState } from '../../platform/workspace/common/workspace.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../platform/storage/common/storage.js';
 import { IConfigurationChangeEvent, IConfigurationService, isConfigured } from '../../platform/configuration/common/configuration.js';
@@ -98,10 +98,22 @@ enum LayoutClasses {
 	PANEL_HIDDEN = 'nopanel',
 	AUXILIARYBAR_HIDDEN = 'noauxiliarybar',
 	STATUSBAR_HIDDEN = 'nostatusbar',
+	ACTIVITYBAR_HIDDEN = 'noactivitybar',
 	FULLSCREEN = 'fullscreen',
 	MAXIMIZED = 'maximized',
 	WINDOW_BORDER = 'border',
-	NO_SHADOWS = 'no-shadows'
+	NO_SHADOWS = 'no-shadows',
+	/** The floating cards sit against the top window edge: no title bar and no banner above them. */
+	TOP_WINDOW_EDGE = 'top-window-edge',
+	/** Side bars, panel and editor rendered as floating cards (`floatingPanels.css`). */
+	FLOATING_PANELS = 'floating-panels',
+	/**
+	 * Modern UI classes. The modernUI contribution also puts them on every container; seeding
+	 * them here as well means the very first paint already has them and the chrome does not
+	 * flash unstyled for a frame.
+	 */
+	MODERN_UI = 'modern-ui',
+	MODERN_UI_TABS = 'modern-ui-tabs'
 }
 
 interface IPathToOpen extends IPath {
@@ -609,6 +621,20 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 		for (const container of Array.from(this.containers)) {
 			container.classList.toggle(LayoutClasses.NO_SHADOWS, noShadows);
 		}
+	}
+
+	/**
+	 * Always on. Upstream reads `workbench.experimental.modernUI` here; OpenIDE has no such
+	 * experiment, the floating cards ARE the product's layout, and the parts that reserve the
+	 * card insets in code (`PartLayout`, `AbstractPaneCompositePart`, `EditorPart`) rely on this
+	 * answer never changing at runtime.
+	 */
+	isFloatingPanelsEnabled(): boolean {
+		return true;
+	}
+
+	private updateTopWindowEdgeClass(): void {
+		this.mainContainer.classList.toggle(LayoutClasses.TOP_WINDOW_EDGE, isFloatingTopEdgeExposed(this, mainWindow));
 	}
 
 	private setSideBarPosition(position: Position): void {
@@ -1669,6 +1695,14 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 			}));
 		}
 
+		// The floating cards abut the top window edge only while neither of the two grid rows
+		// above the middle section is showing, so track both rather than the title bar alone.
+		this._register(this.onDidChangePartVisibility(({ partId }) => {
+			if (partId === Parts.TITLEBAR_PART || partId === Parts.BANNER_PART) {
+				this.updateTopWindowEdgeClass();
+			}
+		}));
+
 		this._register(this.storageService.onWillSaveState(() => {
 
 			// Side Bar Size
@@ -1842,6 +1876,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 
 	private setActivityBarHidden(hidden: boolean): void {
 		this.stateModel.setRuntimeValue(LayoutStateKeys.ACTIVITYBAR_HIDDEN, hidden);
+		this.mainContainer.classList.toggle(LayoutClasses.ACTIVITYBAR_HIDDEN, hidden);
 		this.workbenchGrid.setViewVisible(this.activityBarPartView, !hidden);
 	}
 
@@ -1879,9 +1914,16 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 			!this.isVisible(Parts.EDITOR_PART, mainWindow) ? LayoutClasses.MAIN_EDITOR_AREA_HIDDEN : undefined,
 			!this.isVisible(Parts.PANEL_PART) ? LayoutClasses.PANEL_HIDDEN : undefined,
 			!this.isVisible(Parts.AUXILIARYBAR_PART) ? LayoutClasses.AUXILIARYBAR_HIDDEN : undefined,
+			!this.isVisible(Parts.ACTIVITYBAR_PART) ? LayoutClasses.ACTIVITYBAR_HIDDEN : undefined,
 			!this.isVisible(Parts.STATUSBAR_PART) ? LayoutClasses.STATUSBAR_HIDDEN : undefined,
+			isFloatingTopEdgeExposed(this, mainWindow) ? LayoutClasses.TOP_WINDOW_EDGE : undefined,
 			this.state.runtime.mainWindowFullscreen ? LayoutClasses.FULLSCREEN : undefined,
-			this.isShadowsDisabled() ? LayoutClasses.NO_SHADOWS : undefined
+			this.isShadowsDisabled() ? LayoutClasses.NO_SHADOWS : undefined,
+			this.isFloatingPanelsEnabled() ? LayoutClasses.FLOATING_PANELS : undefined,
+			this.isFloatingPanelsEnabled() ? LayoutClasses.MODERN_UI : undefined,
+			this.isFloatingPanelsEnabled() ? LayoutClasses.MODERN_UI_TABS : undefined,
+			`panel-position-${positionToString(this.getPanelPosition())}`,
+			`panel-alignment-${this.getPanelAlignment()}`
 		]);
 	}
 
@@ -2013,7 +2055,11 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 		// panel alignment requires the editor part to be visible
 		this.setAuxiliaryBarMaximized(false);
 
+		// Adjust CSS — capture old value before updating state model
+		const oldAlignmentValue = this.getPanelAlignment();
 		this.stateModel.setRuntimeValue(LayoutStateKeys.PANEL_ALIGNMENT, alignment);
+		this.mainContainer.classList.remove(`panel-alignment-${oldAlignmentValue}`);
+		this.mainContainer.classList.add(`panel-alignment-${alignment}`);
 
 		this.adjustPartPositions(this.getSideBarPosition(), alignment, this.getPanelPosition());
 
@@ -2345,6 +2391,8 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 		const panelContainer = assertReturnsDefined(panelPart.getContainer());
 		panelContainer.classList.remove(oldPositionValue);
 		panelContainer.classList.add(newPositionValue);
+		this.mainContainer.classList.remove(`panel-position-${oldPositionValue}`);
+		this.mainContainer.classList.add(`panel-position-${newPositionValue}`);
 
 		// Update Styles
 		panelPart.updateStyles();
@@ -2934,8 +2982,8 @@ class LayoutStateModel extends Disposable {
 
 		// Apply legacy settings
 		const emptyWorkbench = this.contextService.getWorkbenchState() === WorkbenchState.EMPTY;
-		// La ventana sin carpeta es un launcher, no un workspace incompleto: liberamos el lateral
-		// como Cursor sin persistir esa decisión en la configuración del siguiente proyecto.
+		// A folderless window is a launcher, not an incomplete workspace: we free the side bar the
+		// way Cursor does, without persisting that choice into the next project's configuration.
 		this.stateCache.set(LayoutStateKeys.ACTIVITYBAR_HIDDEN.name, emptyWorkbench || this.isActivityBarHidden());
 		if (emptyWorkbench) {
 			this.stateCache.set(LayoutStateKeys.SIDEBAR_HIDDEN.name, true);

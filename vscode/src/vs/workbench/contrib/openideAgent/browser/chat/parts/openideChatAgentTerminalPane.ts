@@ -11,8 +11,9 @@ import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { TerminalLocation } from '../../../../../../platform/terminal/common/terminal.js';
 import { IPathService } from '../../../../../services/path/common/pathService.js';
 import { ITerminalInstance, ITerminalService } from '../../../../terminal/browser/terminal.js';
-import { buildOpenideCliLaunch, getOpenideCli, IOpenideCliDefinition, OpenideCliSessionEvent, OpenideCliSessionStatus, reduceOpenideCliStatus } from '../../../common/openideAgentCliCatalog.js';
+import { buildOpenideCliLaunch, getOpenideCli, IOpenideCliDefinition, OpenideCliSessionEvent, OpenideCliSessionStatus, reduceOpenideCliStatus, OPENIDE_HOSTED_CLI_ENV_RESET } from '../../../common/openideAgentCliCatalog.js';
 import { t } from '../../../common/openideStrings.js';
+import { buildSnippetContext, IComposerSnippet, snippetRange } from '../../../common/chat/openideChatSnippet.js';
 import { IOpenideAgentService } from '../../openideAgentService.js';
 import { IOpenideIdeServerService, OpenideIdeServerService } from '../../openideIdeServerService.js';
 import { IChatSessionMeta } from '../../openideChatSessions.js';
@@ -167,11 +168,14 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 				cwd: session.cwd,
 				hideFromUser: true,
 				isFeatureTerminal: true,
+				// The reset goes FIRST: it clears the session marks a `claude` that started the IDE
+				// would otherwise pass down (see OPENIDE_HOSTED_CLI_ENV_RESET), and everything
+				// OpenIDE sets on purpose is layered on top of it.
 				// CLAUDE_CODE_SSE_PORT is what makes the CLI adopt THIS window instead of picking
 				// whichever lockfile in ~/.claude/ide happens to match its cwd — with two OpenIDE
 				// windows on the same repo, the wrong one is a coin flip. Empty when the IDE
 				// server is off or has no folder to publish, which simply means no IDE tools.
-				env: { OPENIDE_SESSION_ID: session.id, ...this.ideServer.launchEnvironment(), ...launch.env },
+				env: { ...OPENIDE_HOSTED_CLI_ENV_RESET, OPENIDE_SESSION_ID: session.id, ...this.ideServer.launchEnvironment(), ...launch.env },
 			},
 		});
 		const store = new DisposableStore();
@@ -329,6 +333,24 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 	 * Whether this session's state comes from the CLI's own hooks rather than the output
 	 * heuristic. It changes what a turn's file list is worth, so it travels with the turn.
 	 */
+	/**
+	 * The editor selection, into the CLI's prompt: the same fenced block the local chat carries,
+	 * pasted with bracketed paste so a TUI takes it as one paste and not as keystrokes (Claude
+	 * Code shows it as `[Pasted text #1 +N lines]`). False when the session has no live
+	 * terminal, and the caller falls back to the composer.
+	 */
+	sendSnippet(sessionId: string, snippet: IComposerSnippet): boolean {
+		const hosted = this._terminals.get(sessionId);
+		if (!hosted || hosted.exited) {
+			return false;
+		}
+		const block = buildSnippetContext([snippet]) ?? `${snippet.path}:${snippetRange(snippet)}`;
+		void hosted.instance.sendText(block, false, true);
+		this.show(sessionId);
+		this.focus();
+		return true;
+	}
+
 	isHooked(sessionId: string): boolean {
 		return this._terminals.get(sessionId)?.hooked === true;
 	}

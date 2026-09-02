@@ -9,9 +9,11 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/tes
 import { isHardlineDeniedCommand, isSensitiveToolPath, toolApprovalAllowKey } from '../../common/openideApprovalPolicy.js';
 import { isSlashVisibleCapability, IToolApprovalRequest } from '../../common/openideAgentTypes.js';
 import { buildCompactionTranscript, buildStructuredSummaryMessage, compactionSavingsRatio, planContextCompaction, shouldCompactContext } from '../../common/openideContextCompaction.js';
-import { classifyProviderError } from '../../common/openideErrorClassifier.js';
+import { classifyProviderError, humanizeProviderError } from '../../common/openideErrorClassifier.js';
+import { getOpenideLanguage, setOpenideLanguage, t } from '../../common/openideStrings.js';
 import { fallbackStepKey, parseFallbackChain, parseProviderModelTarget } from '../../common/openideFallback.js';
 import { normalizeModelForProvider } from '../../common/openideModelNormalize.js';
+import { repairOpenideChatToolPairs } from '../../common/openideChatHistoryRepair.js';
 import { rewindForSilentModeTransition } from '../../common/openideModeTransition.js';
 import { buildPlanFollowUpPrompt, normalizePlanFollowUpDisposition } from '../../common/openidePlanFollowUp.js';
 import { OPENIDE_BUILTIN_PROVIDERS, resolveProviders } from '../../common/openideProviderCatalog.js';
@@ -33,6 +35,14 @@ import { mergeVisibleOrder, moveBeside, toggleMembership } from '../../common/op
 suite('OpenIDE agent common', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
+	// `setOpenideLanguage` is module-level state shared by every suite in the run, and one test below
+	// drives it to check that a hint is written in the reader's language. Left set, it poisons every
+	// later test that asserts Spanish text — a failure that lands in an unrelated file and moves
+	// around as the module order shifts. Restored here so the switch stays local to the test.
+	let initialLanguage: 'es' | 'en';
+	setup(() => { initialLanguage = getOpenideLanguage(); });
+	teardown(() => { setOpenideLanguage(initialLanguage); });
+
 	test('classifies provider errors and caps retry delays', () => {
 		assert.deepStrictEqual(classifyProviderError('HTTP 401 unauthorized').kind, 'auth');
 		assert.deepStrictEqual(classifyProviderError('HTTP 402 payment required').kind, 'billing');
@@ -46,6 +56,50 @@ suite('OpenIDE agent common', () => {
 		assert.strictEqual(classifyProviderError('HTTP 404: project does not exist', { status: 404, stage: 'loadCodeAssist' }).reason, 'project-not-found');
 		assert.strictEqual(classifyProviderError('HTTP 404: model retired', { status: 404, model: 'old' }).reason, 'model-retired');
 		assert.strictEqual(classifyProviderError('This model does not support function calling').shouldDropTools, true);
+	});
+
+	test('honors the structured wait a 429 body asks for, and says what to do about it', () => {
+		// The real OpenRouter body: the wait lives in JSON fields, never in the prose, and the only
+		// sentence worth showing is buried in `metadata.raw`.
+		const rateLimited = 'HTTP 429: ' + JSON.stringify({
+			error: {
+				message: 'Provider returned error',
+				code: 429,
+				metadata: {
+					raw: 'z-ai/glm-5.2:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations',
+					provider_name: 'Decart',
+					is_byok: false,
+					provider_error_code: 'upstream_429',
+					limit_source: 'upstream_provider_shared_pool',
+					retry_after_seconds: 5,
+					headers: { 'Retry-After': '5' },
+				},
+			},
+		});
+		const classified = classifyProviderError(rateLimited);
+		assert.strictEqual(classified.kind, 'rate-limit');
+		assert.strictEqual(classified.retryAfterMs, 5_000, 'the 5s the provider asked for must beat the exponential backoff');
+		// The hint is one sentence in the reader's language, and it names the wait the body carried:
+		// the free variant's pool is saturated, which is not the account's quota.
+		setOpenideLanguage('es');
+		assert.strictEqual(classifyProviderError(rateLimited).hint, t('error.rateLimit.sharedPool', '5 segundos'));
+		setOpenideLanguage('en');
+		assert.strictEqual(classifyProviderError(rateLimited).hint, t('error.rateLimit.sharedPool', '5 seconds'));
+		// A limit that is the account's own says the other thing, and falls back to "a moment" when
+		// the provider named no wait at all.
+		assert.strictEqual(classifyProviderError('HTTP 429: too many requests').hint, t('error.rateLimit.generic', t('error.rateLimit.aMoment')));
+		assert.strictEqual(
+			humanizeProviderError(rateLimited),
+			'HTTP 429: z-ai/glm-5.2:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations',
+		);
+
+		assert.strictEqual(classifyProviderError('HTTP 429 {"error":{"retry_after_ms":1500}}').retryAfterMs, 1_500);
+		assert.strictEqual(classifyProviderError('HTTP 429 Retry-After: 30').retryAfterMs, 30_000);
+		assert.strictEqual(classifyProviderError('HTTP 429: rate limit, try again in 20s').retryAfterMs, 20_000);
+		assert.strictEqual(classifyProviderError('rate limit exceeded').retryAfterMs, undefined);
+		// Nothing to unwrap: the message survives untouched.
+		assert.strictEqual(humanizeProviderError('Stream stale timeout: no events for 90s.'), 'Stream stale timeout: no events for 90s.');
+		assert.strictEqual(humanizeProviderError('HTTP 500: {"foo":1}'), 'HTTP 500: {"foo":1}');
 	});
 
 	test('detects tool capability errors without misclassifying invalid tool arguments', () => {
@@ -106,6 +160,32 @@ suite('OpenIDE agent common', () => {
 		assert.strictEqual(user?.executionMode, 'plan');
 		assert.strictEqual(messages.length, 1);
 		assert.strictEqual(messages[0].role, 'user');
+	});
+
+	test('repairs an orphan tool message left by an old accepted suggest_mode', () => {
+		const messages = [
+			{ role: 'user' as const, content: 'Armá el portafolio.', messageId: 'request' },
+			// The old bug: the ack of the accepted suggestion landed AFTER the rewind removed its
+			// assistant turn, so the saved history opens with an unannounced tool result.
+			{ role: 'tool' as const, content: 'El usuario aceptó cambiar al modo plan.', toolCallId: 'call_k2r' },
+		];
+		assert.strictEqual(repairOpenideChatToolPairs(messages), 1);
+		assert.deepStrictEqual(messages.map(m => m.role), ['user']);
+		// A healthy history is left byte-identical.
+		assert.strictEqual(repairOpenideChatToolPairs(messages), 0);
+	});
+
+	test('repairs a dangling assistant tool call with a synthetic result in place', () => {
+		const messages = [
+			{ role: 'user' as const, content: 'Listá archivos.' },
+			{ role: 'assistant' as const, content: '', toolCalls: [{ id: 'a', name: 'read_file', argumentsJson: '{}' }, { id: 'b', name: 'read_file', argumentsJson: '{}' }] },
+			{ role: 'tool' as const, content: 'ok', toolCallId: 'a' },
+			{ role: 'user' as const, content: 'seguí' },
+		];
+		assert.strictEqual(repairOpenideChatToolPairs(messages), 1);
+		assert.deepStrictEqual(messages.map(m => m.role), ['user', 'assistant', 'tool', 'tool', 'user']);
+		const results = messages.filter(m => m.role === 'tool').map(m => (m as { toolCallId?: string }).toolCallId);
+		assert.deepStrictEqual(results.sort(), ['a', 'b']);
 	});
 
 	test('canvas html exposes wireframe and choice primitives without neon strokes', () => {

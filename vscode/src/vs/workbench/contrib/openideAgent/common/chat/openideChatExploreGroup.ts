@@ -9,7 +9,7 @@ import { compactExploreDetail, getOpenideToolMeta, lineSpanTarget, OpenideChatEx
 /**
  * Folds consecutive read/search/list calls into ONE collapsible "Exploring" block with a counter.
  *
- * Ported from openideChatHtml.ts:1572-1619 (`ensureExploreGroup` / `exploredLabel` /
+ * Ported from the removed chat webview (`ensureExploreGroup` / `exploredLabel` /
  * `onExploreStart` / `onExploreEnd` / `finalizeExploreGroup`). The webview tracked the group with
  * three mutable module-level variables and live DOM counters; here the entries themselves are the
  * state, so the counter is derived and can never disagree with what the block shows.
@@ -27,7 +27,7 @@ export function createOpenideChatExploreContent(id: string): IOpenideChatExplore
 
 /**
  * Target line for one entry: verb + compacted detail, exactly the single sentence the webview
- * writes into `.part-verb` (openideChatHtml.ts:3174-3177).
+ * writes into `.part-verb`.
  */
 export function exploreEntryTarget(tool: string, argumentsJson: string | undefined): string {
 	const meta = getOpenideToolMeta(tool);

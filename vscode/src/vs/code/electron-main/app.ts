@@ -1210,11 +1210,11 @@ export class CodeApplication extends Disposable {
 		mainProcessElectronServer.registerChannel(LOCAL_FILE_SYSTEM_CHANNEL_NAME, fileSystemProviderChannel);
 		sharedProcessClient.then(client => client.registerChannel(LOCAL_FILE_SYSTEM_CHANNEL_NAME, fileSystemProviderChannel));
 
-		// OpenIDE — backend del agente en el main process (el renderer no spawnea procesos ni
-		// puede saltear CORS; le habla a estos tres canales por mainProcessService.getChannel):
+		// OpenIDE -- the agent's backend in the main process (the renderer neither spawns processes
+		// nor can bypass CORS; it talks to these three channels via mainProcessService.getChannel):
 		//  - openideAgentHost: cliente MCP + hooks de shell + OAuth loopback (Google/Antigravity).
-		//  - openideRequest: HTTP vía main. Streamea SSE token a token (no buffer-ea como el nativo).
-		//  - openideBrowser: automatización de la BrowserWindow oculta (agent browser_* + pick).
+		//  - openideRequest: HTTP through main. Streams SSE token by token (the native one buffers).
+		//  - openideBrowser: automation of the hidden BrowserWindow (agent browser_* + pick).
 		const openideAgentHostChannel = ProxyChannel.fromService(new OpenideAgentHostMainService(this.logService, this.environmentMainService), disposables);
 		mainProcessElectronServer.registerChannel(OPENIDE_AGENT_HOST_CHANNEL, openideAgentHostChannel);
 

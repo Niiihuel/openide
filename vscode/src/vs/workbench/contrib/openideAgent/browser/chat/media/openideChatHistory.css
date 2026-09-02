@@ -1,9 +1,9 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — conversation history popover (the webview's `#historyMenu`).
  *
- *  SOURCE OF TRUTH: browser/openideChatHtml.ts (`#historyMenu`, `.menu-row.has-actions`,
- *  `.menu-row-actions`, `.menu-row-action`). Every colour, size and gap below is transcribed from
- *  it. What is NOT transcribed is the way the trailing action strip is put on screen: the webview
+ *  TRANSCRIBED from the removed chat webview (`#historyMenu`, `.menu-row.has-actions`,
+ *  `.menu-row-actions`, `.menu-row-action`): every colour, size and gap below comes from it. What
+ *  is NOT transcribed is the way the trailing action strip is put on screen: the webview
  *  toggles it with `display`, and that is precisely what made a hovered row change size. The strip
  *  lives in this file rather than in openideChatMenus.css because the history is its only consumer
  *  (`menuRowAction()` is called from openideChatHistoryMenu.ts and nowhere else).
@@ -50,7 +50,7 @@
 }
 
 /* No room is reserved for the strip. The webview does not reserve any either
-   (`openideChatHtml.ts:774`), and reserving it meant every title was ellipsised ~70px early even
+   the removed chat webview, and reserving it meant every title was ellipsised ~70px early even
    with the pointer nowhere near the list — the width was being spent on icons that were not there. */
 
 /* ---- Trailing action strip (fork / archive / delete) --------------------------------------
@@ -86,7 +86,7 @@
 	align-items: center;
 	justify-content: center;
 	border: none;
-	border-radius: var(--vscode-cornerRadius-small, 4px);
+	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: inherit;
 	cursor: pointer;
@@ -98,7 +98,7 @@
 }
 
 /* 13px is the webview's own size for these three icons (`.menu-row-action .codicon`,
-   openideChatHtml.ts:781), which there simply outranks the 14px of `.menu-row .codicon` (:760) by
+   the removed chat webview, which there simply outranks the 14px of `.menu-row .codicon` (:760) by
    coming later in one stylesheet.
 
    Here the same pair cannot be settled by order. `.menu-row .codicon` had to be ported as

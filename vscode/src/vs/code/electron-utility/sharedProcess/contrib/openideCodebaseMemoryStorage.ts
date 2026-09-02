@@ -4,11 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 /*
- *  OpenIDE — almacenamiento persistente del índice de memoria del codebase. Por workspace,
- *  fragmentado por archivo (un JSON por uri hasheada) + un manifiesto con hashes y versión.
- *  Soporta migraciones de esquema, restauración marcando stale, compactación y estadísticas.
+ *  OpenIDE — persistent storage of the codebase-memory index. Per workspace, sharded by file
+ *  (one JSON per hashed uri) plus a manifest with the hashes and the version. It supports schema
+ *  migrations, restoring by marking everything stale, compaction and statistics.
  *
- *  Ubicación: shared process (node). No accede al renderer ni al language server.
+ *  It lives in the shared process (node). It never reaches the renderer or the language server.
  *--------------------------------------------------------------------------------------------*/
 
 import { VSBuffer } from '../../../../base/common/buffer.js';
@@ -28,16 +28,16 @@ interface IStoredManifest {
 	readonly workspaceKey: string;
 	readonly version: ICodebaseIndexVersion;
 	readonly files: Record<string, ICodebaseIndexedFile>;
-	/** Comunidades (módulos) a nivel archivo — members = URIs. Opcional (schema retrocompatible). */
+	/** Communities (modules) at file level — members = URIs. Optional (backwards-compatible schema). */
 	readonly communities?: ICodebaseCommunity[];
-	/** Nodo sintético de import → nodo `file` real que referencia (resuelto en finalizeGraph). */
+	/** A synthetic import node → the real `file` node it refers to (resolved in finalizeGraph). */
 	readonly nodeAliases?: Record<string, string>;
 	/**
-	 * `version.version` con el que se corrió finalizeGraph por última vez. Sin esto, un índice
-	 * podía quedar COMPLETO (todos los archivos `indexed`, staleCount 0) pero sin finalizar, y
-	 * nada lo detectaba: el manifiesto se veía sano, el rebuild sólo se dispara con version 0, y
-	 * el mapa quedaba en 0 relaciones para siempre. Comparar contra `version.version` hace que
-	 * "sin finalizar" y "desactualizado" sean el mismo estado observable, y por lo tanto reparable.
+	 * The `version.version` finalizeGraph last ran against. Without it an index could be COMPLETE
+	 * (every file `indexed`, staleCount 0) yet unfinalized, and nothing would notice: the manifest
+	 * looked healthy, the rebuild only fires at version 0, and the map stayed at 0 relations
+	 * forever. Comparing against `version.version` makes "not finalized" and "out of date" the same
+	 * observable state — and therefore a repairable one.
 	 */
 	readonly graphVersion?: number;
 }
@@ -48,7 +48,7 @@ interface IStoredFilePayload {
 	readonly edges: ICodebaseMemoryEdge[];
 }
 
-/** Hashea un string a un id corto estable (para nombres de archivo de índice). */
+/** Hashes a string into a short stable id (for index file names). */
 function hashString(s: string): string {
 	return crypto.createHash('sha256').update(s).digest('hex');
 }
@@ -64,7 +64,7 @@ export class CodebaseMemoryStorage extends Disposable {
 
 	private manifest: IStoredManifest | undefined;
 	private readonly fileCache = new Map<string, IStoredFilePayload>();
-	/** Con persist=false el índice vive sólo en RAM: manifest + fileCache; disco intacto. */
+	/** With persist=false the index lives in RAM alone: manifest + fileCache, disk untouched. */
 	private persist = true;
 
 	constructor(
@@ -74,8 +74,8 @@ export class CodebaseMemoryStorage extends Disposable {
 		super();
 	}
 
-	/** Apagar la persistencia además borra lo ya escrito (expectativa de privacidad); volver a
-	 *  encenderla requiere un rebuild para materializar el estado en disco. */
+	/** Turning persistence off also deletes what was already written (the privacy expectation);
+	 *  turning it back on needs a rebuild to materialize the state on disk. */
 	async setPersist(value: boolean): Promise<void> {
 		if (this.persist === value) { return; }
 		this.persist = value;
@@ -87,11 +87,11 @@ export class CodebaseMemoryStorage extends Disposable {
 	private manifestUri(): URI { return joinPath(this.indexRoot, 'manifest.json'); }
 	private fileUri(hash: string): URI { return joinPath(this.indexRoot, 'files', `${hash}.json`); }
 
-	/** Carga el manifiesto. Si no existe o está corrupto, arranca limpio. */
+	/** Loads the manifest. Missing or corrupt, it starts clean. */
 	async load(workspaceKey: string): Promise<IStoredManifest> {
 		if (this.manifest && this.manifest.workspaceKey === workspaceKey) { return this.manifest; }
 		if (!this.persist) {
-			// Modo memoria: nunca leer disco — cada sesión arranca con índice vacío.
+			// Memory mode: never read from disk — every session starts with an empty index.
 			this.manifest = { schema: SCHEMA_VERSION, workspaceKey, version: { version: 0, workspaceKey, builtAt: 0, staleCount: 0, nodeCount: 0, edgeCount: 0 }, files: {} };
 			this.fileCache.clear();
 			return this.manifest;
@@ -102,7 +102,7 @@ export class CodebaseMemoryStorage extends Disposable {
 			const validFiles = !!parsed?.files && typeof parsed.files === 'object' && !Array.isArray(parsed.files) && Object.values(parsed.files).every(file => !!file && typeof file.uri === 'string' && typeof file.hash === 'string' && typeof file.language === 'string' && typeof file.nodeCount === 'number' && (file.status === 'indexed' || file.status === 'stale' || file.status === 'error'));
 			const valid = !!parsed && parsed.schema === SCHEMA_VERSION && parsed.workspaceKey === workspaceKey && !!parsed.version && typeof parsed.version.version === 'number' && typeof parsed.version.nodeCount === 'number' && typeof parsed.version.edgeCount === 'number' && validFiles;
 			if (!valid) {
-				// migración o cambio de workspace: arrancamos limpio (el indexer reconstruirá)
+				// a migration or a different workspace: start clean (the indexer will rebuild)
 				this.manifest = { schema: SCHEMA_VERSION, workspaceKey, version: { version: 0, workspaceKey, builtAt: 0, staleCount: 0, nodeCount: 0, edgeCount: 0 }, files: {} };
 			} else {
 				this.manifest = parsed;
@@ -114,7 +114,7 @@ export class CodebaseMemoryStorage extends Disposable {
 		return this.manifest;
 	}
 
-	/** Marca todos los archivos como stale al restaurar (la validación de hashes los confirmará). */
+	/** Marks every file stale on restore (the hash validation confirms them one by one). */
 	markAllStale(): void {
 		if (!this.manifest) { return; }
 		const files: Record<string, ICodebaseIndexedFile> = {};
@@ -126,7 +126,7 @@ export class CodebaseMemoryStorage extends Disposable {
 
 	getFileMeta(uri: string): ICodebaseIndexedFile | undefined { return this.manifest?.files[uri]; }
 
-	/** Lee el payload de un archivo indexado. Cache en memoria. */
+	/** Reads an indexed file's payload. Cached in memory. */
 	async readFile(uri: string): Promise<IStoredFilePayload | undefined> {
 		const cached = this.fileCache.get(uri);
 		if (cached) { return cached; }
@@ -142,7 +142,7 @@ export class CodebaseMemoryStorage extends Disposable {
 		} catch { return undefined; }
 	}
 
-	/** Escribe el payload de un archivo y actualiza su hash/estado en el manifiesto. */
+	/** Writes a file's payload and updates its hash and state in the manifest. */
 	async writeFile(uri: string, hash: string, language: string, payload: IStoredFilePayload): Promise<void> {
 		if (!this.manifest) { return; }
 		if (this.manifest.workspaceKey === 'empty') { return; }
@@ -172,7 +172,7 @@ export class CodebaseMemoryStorage extends Disposable {
 	}
 
 
-	/** Elimina un archivo del índice (archivo borrado del workspace). */
+	/** Removes a file from the index (the file was deleted from the workspace). */
 	async removeFile(uri: string): Promise<void> {
 		if (!this.manifest || !this.manifest.files[uri]) { return; }
 		const prev = await this.readFile(uri).catch(() => undefined);
@@ -201,7 +201,7 @@ export class CodebaseMemoryStorage extends Disposable {
 		}
 	}
 
-	/** Marca un uri como stale (cambió en disco pero todavía no fue reindexado). */
+	/** Marks a uri stale (it changed on disk but has not been reindexed yet). */
 	markStale(uri: string): void {
 		if (!this.manifest?.files[uri]) { return; }
 		const files = { ...this.manifest.files };
@@ -223,13 +223,13 @@ export class CodebaseMemoryStorage extends Disposable {
 		this.manifest = { ...this.manifest, nodeAliases };
 	}
 
-	/** true si el grafo derivado (alias + comunidades) corresponde al índice actual. */
+	/** true when the derived graph (aliases + communities) matches the current index. */
 	isGraphFinalized(): boolean {
 		return !!this.manifest && this.manifest.graphVersion === this.manifest.version.version;
 	}
 
-	/** Sella el grafo derivado contra la versión actual del índice. Lo llama finalizeGraph al
-	 *  terminar; cualquier writeFile/removeFile posterior sube `version` y lo invalida solo. */
+	/** Seals the derived graph against the index's current version. finalizeGraph calls it when it
+	 *  finishes; any later writeFile/removeFile bumps `version` and invalidates it on its own. */
 	markGraphFinalized(): void {
 		if (!this.manifest) { return; }
 		this.manifest = { ...this.manifest, graphVersion: this.manifest.version.version };
@@ -247,7 +247,7 @@ export class CodebaseMemoryStorage extends Disposable {
 		await this.fileService.writeFile(this.manifestUri(), VSBuffer.fromString(JSON.stringify(this.manifest)));
 	}
 
-	/** Borra todo el índice del workspace actual. */
+	/** Deletes the whole index of the current workspace. */
 	async clear(): Promise<void> {
 		this.manifest = undefined;
 		this.fileCache.clear();

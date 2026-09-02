@@ -396,8 +396,8 @@ class AddElementToChatAction extends Action2 {
 			id: AddElementToChatAction.ID,
 			title: localize2('browser.addElementToChatAction', 'Add Element to Chat'),
 			category: BrowserCategory,
-			// El cursor dentro de la página pertenece exclusivamente al flujo de adjuntar
-			// código al chat. El inspector CSS usa su propio glifo y context key.
+			// The cursor inside the page belongs exclusively to the flow that attaches code to
+			// the chat. The CSS inspector uses its own glyph and context key.
 			icon: Codicon.inspect,
 			f1: true,
 			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate(), ChatContextKeys.enabled),

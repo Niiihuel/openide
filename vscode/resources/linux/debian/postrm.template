@@ -15,20 +15,12 @@ if hash update-mime-database 2>/dev/null; then
 	update-mime-database /usr/share/mime
 fi
 
-RET=true
-if [ -e '/usr/share/debconf/confmodule' ]; then
-	. /usr/share/debconf/confmodule
-	db_get @@NAME@@/add-microsoft-repo || true
-fi
-if [ "$RET" = "true" ]; then
-	eval $(apt-config shell APT_SOURCE_PARTS Dir::Etc::sourceparts/d)
-	CODE_SOURCE_PART=${APT_SOURCE_PARTS}vscode.sources
-	rm -f $CODE_SOURCE_PART
-
-	CODE_TRUSTED_PART=/usr/share/keyrings/microsoft.gpg
-	rm -f $CODE_TRUSTED_PART
-fi
+# Upstream removes Microsoft's apt source and signing key here, mirroring the postinst that had
+# added them. OpenIDE's postinst adds NEITHER, so removing them would delete files this package
+# never owned -- uninstalling OpenIDE would silently break a real VS Code install sitting next to
+# it. Nothing to undo, so nothing is removed.
 
 if [ "$1" = "purge" ] && [ -e '/usr/share/debconf/confmodule' ]; then
+	. /usr/share/debconf/confmodule
 	db_purge
 fi

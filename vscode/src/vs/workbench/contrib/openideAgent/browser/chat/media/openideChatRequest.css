@@ -2,7 +2,7 @@
  *  OpenIDE — native chat, the user's turn.
  *
  *  Split out of openideChatNative.css only for size. Same rule as that file: every literal is
- *  transcribed from the webview (browser/openideChatHtml.ts `.msg.user` and friends, lines 67-120
+ *  transcribed from the webview (`.msg.user` and friends, lines 67-120
  *  and 1235-1237), never re-designed.
  *--------------------------------------------------------------------------------------------*/
 
@@ -18,11 +18,20 @@
 	position: relative;
 	width: 100%;
 	box-sizing: border-box;
-	padding: 8px 12px;
-	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-chat-requestBorder, rgba(128, 128, 128, 0.22));
-	border-radius: var(--vscode-cornerRadius-large, 8px);
-	background: var(--vscode-chat-requestBubbleBackground, color-mix(in srgb, var(--vscode-foreground) 5%, var(--vscode-editor-background)));
-	cursor: text;
+	/* Room on the right for the rewind button's 24px column. */
+	padding: 8px 40px 8px 12px;
+	/* The shared card recipe (openideSurfaceCss.ts): the prompt bubble and every tool/content card
+	   in the transcript paint the same surface, border and radius. */
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
+	border-radius: var(--oi-chat-card-radius);
+	background: var(--oi-chat-card-bg, color-mix(in srgb, var(--vscode-foreground) 5%, var(--vscode-editor-background)));
+	/* A pointer, not a text cursor: the bubble opens the turn for editing (Cursor), and the hover
+	   firms up the hairline to say so without repainting the surface. */
+	cursor: pointer;
+	transition: border-color 120ms ease;
+}
+.openide-chat-request-bubble:hover {
+	border-color: var(--oi-border-strong);
 }
 
 .openide-chat-request-text {
@@ -65,7 +74,7 @@
 	height: 18px;
 	max-width: min(260px, 100%);
 	padding: 0 6px;
-	border-radius: 4px;
+	border-radius: var(--oi-radius-sm);
 	background: var(--vscode-chat-slashCommandBackground, #26477866);
 	color: var(--vscode-chat-slashCommandForeground, #85b6ff);
 	font: 12px/1 var(--vscode-editor-font-family, monospace);
@@ -90,7 +99,7 @@
 .openide-chat-request-image {
 	width: 72px;
 	height: 72px;
-	border: 1px solid rgba(128, 128, 128, 0.3);
+	border: 1px solid var(--oi-border-strong);
 	border-radius: 2px;
 	overflow: hidden;
 	background: transparent;
@@ -105,33 +114,29 @@
 
 /* Hover-only, exactly as in the webview: the action is destructive, so it stays out of the way
    until the pointer is on the turn it would revert. */
+/* Always visible and vertically centred on the right, as Cursor draws its rewind: it is the one
+   action a turn has, and hiding it until hover made the bubble read as static text. The bubble
+   reserves its column below. */
 .openide-chat-request-actions {
 	position: absolute;
 	right: 6px;
-	bottom: 6px;
+	top: 50%;
+	transform: translateY(-50%);
 	display: flex;
 	gap: 4px;
-	opacity: 0;
-	transition: opacity 120ms ease;
-}
-
-/* `:focus-within` on the CONTAINER, not on the button: a child cannot be more opaque than the
-   parent that is at `opacity: 0`, so styling the focused button alone would leave it invisible and
-   the row unreachable by keyboard. */
-.openide-chat-request-bubble:hover .openide-chat-request-actions,
-.openide-chat-request-actions:focus-within {
-	opacity: 1;
 }
 
 .openide-chat-request-action {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 20px;
-	height: 20px;
+	/* 24px box around a 16px glyph: the icon grid every other control in the chat uses (Cursor's
+	   rewind is the same 16 in 24). It was 13 in 20, the one odd size in the transcript. */
+	width: 24px;
+	height: 24px;
 	padding: 0;
 	border: none;
-	border-radius: 4px;
+	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	cursor: pointer;
@@ -142,8 +147,14 @@
 	background: var(--vscode-toolbar-hoverBackground);
 }
 
-.monaco-workbench .openide-chat-native .openide-chat-request-bubble .openide-chat-request-action .codicon[class*="codicon-"] {
-	font-size: 13px;
+.openide-chat-request-action .openide-chat-rewind-icon {
+	display: block;
+	width: 16px;
+	height: 16px;
+}
+.monaco-workbench .openide-chat-native .openide-chat-request-bubble .openide-chat-request-action .codicon[class*="codicon-"],
+.monaco-workbench .openide-chat-native .openide-chat-pinned-edit-bar .openide-chat-request-action .codicon[class*="codicon-"] {
+	font-size: 16px;
 	color: inherit;
 }
 

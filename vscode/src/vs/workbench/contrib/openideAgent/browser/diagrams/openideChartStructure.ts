@@ -8,13 +8,13 @@ import { CH_GRID, CH_MUTED, CH_SOFT, chartRamp, chartTitleNode, fgA, IOpenideCha
 import { nextDiagramId, SVG_NAMESPACE, svgNode, svgText, svgTooltip } from './openideDiagramDom.js';
 
 /**
- * quadrant · git, ported from the webview (openideChatHtml.ts:2063-2174).
+ * quadrant · git, ported from the webview.
  *
  * Both draw a FIXED frame and scatter labelled points on it, which is why they share a file: the
  * work in each is reserving room for labels that stick out of that frame, not the frame itself.
  */
 
-/** Rough width of one character at the quadrant's 12px label size (openideChatHtml.ts:2064). */
+/** Rough width of one character at the quadrant's 12px label size (the removed chat webview). */
 const QCHAR = 7.2;
 
 export function renderQuadrantChart(doc: Document, spec: IQuadrantSpec): IOpenideChartRender | undefined {

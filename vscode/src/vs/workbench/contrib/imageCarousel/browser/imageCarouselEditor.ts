@@ -278,10 +278,10 @@ export class ImageCarouselEditor extends EditorPane {
 			}
 		}));
 
-		// Click derecho = alejar. Es el gesto inverso del click izquierdo y evita tener que
-		// sostener un modificador con la otra mano; el menú contextual no aporta nada acá, así
-		// que se cancela. Se usa `contextmenu` y no mousedown/button===2 para que también
-		// responda al gesto equivalente del trackpad y a la tecla de menú.
+		// Right click = zoom out. It is the inverse of the left click and saves holding a modifier
+		// with the other hand; the context menu contributes nothing here, so it is cancelled.
+		// `contextmenu` and not mousedown/button===2, so the equivalent trackpad gesture and the
+		// menu key answer to it as well.
 		this._contentDisposables.add(addDisposableListener(this._elements.mainImageContainer, EventType.CONTEXT_MENU, (e: MouseEvent) => {
 			if (this._isCurrentVideo()) {
 				return;
@@ -291,8 +291,8 @@ export class ImageCarouselEditor extends EditorPane {
 			this._zoomOut();
 		}));
 
-		// El porcentaje devuelve la vista a "ajustar". Alejar por pasos no lo hace: la escala más
-		// baja de ZOOM_LEVELS es 0.1, así que bajando se llega al 10% y nunca a ajustar.
+		// The percentage returns the view to "fit". Stepping out never gets there: the lowest scale
+		// in ZOOM_LEVELS is 0.1, so stepping down reaches 10% and never fit.
 		this._contentDisposables.add(addDisposableListener(this._elements.zoomLevel, EventType.CLICK, () => {
 			this._applyZoom('fit');
 		}));
@@ -732,8 +732,8 @@ window.addEventListener("message",function(e){var m=e.data;if(m.type==="loadVide
 			const newScrollY = container.scrollHeight * dy - container.clientHeight / 2;
 			container.scrollTo(newScrollX, newScrollY);
 
-			// Desborde real, no "está en modo zoom": con una escala por debajo de la de ajuste la
-			// imagen entra entera y no hay barra ninguna. Es lo que posiciona las flechas.
+			// Real overflow, not "it is in zoom mode": below the fit scale the image is fully inside
+			// and there is no scrollbar at all. This is what positions the arrows.
 			container.classList.toggle('scroll-x', container.scrollWidth > container.clientWidth);
 			container.classList.toggle('scroll-y', container.scrollHeight > container.clientHeight);
 		}
@@ -772,10 +772,10 @@ window.addEventListener("message",function(e){var m=e.data;if(m.type==="loadVide
 			this._container.style.height = `${dimension.height}px`;
 		}
 
-		// Maximizar el grupo (o cualquier resize) cambia si la imagen desborda, y con eso si hay
-		// barras de scroll — pero no cambia la escala, así que _applyZoom no se vuelve a correr y
-		// las clases quedaban de un tamaño de editor que ya no existe. Sólo se mide con zoom
-		// activo: en ajustar nunca hay desborde y esto correría en cada frame del arrastre.
+		// Maximizing the group (or any resize) changes whether the image overflows, and with it
+		// whether there are scrollbars -- but not the scale, so _applyZoom never runs again and the
+		// classes were left describing an editor size that no longer exists. Measured only while
+		// zoomed: at fit there is never overflow and this would run on every frame of the drag.
 		if (this._elements && this._zoomScale !== 'fit') {
 			const container = this._elements.mainImageContainer;
 			container.classList.toggle('scroll-x', container.scrollWidth > container.clientWidth);

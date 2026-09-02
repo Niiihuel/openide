@@ -1,9 +1,16 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — native chat: the plan card and the "updating the plan" line.
  *
- *  SOURCE OF TRUTH: browser/openideChatHtml.ts:432-482 (`.plan-wrap` … `.plan-status`, the
- *  skeleton and the Build spinner) and :518-523 (`.flatrow.plan-touch`). Values are transcribed,
- *  not re-decided.
+ *  The card follows Cursor's plan card: label → title → description → tasks, and ONE row of
+ *  actions aligned right. The skeleton and the Build spinner are carried over from the removed
+ *  chat webview; the `.flatrow.plan-touch` line at the bottom is transcribed from it as well.
+ *
+ *  SPECIFICITY NOTE. openideChatNative.css gives every transcript card one shared recipe under
+ *  `.openide-chat-native …` (0,2,0): titles at 12px/500 in descriptionForeground, buttons as the
+ *  workbench's secondary button. The plan card departs from that recipe on purpose — its title is
+ *  the card's subject, not a header, and its actions are ghost + filled — so the rules below are
+ *  scoped `.openide-chat-plan-wrap .openide-chat-plan-card …` (0,3,0). That wins on specificity,
+ *  not on load order, which is what makes it hold whichever sheet the bundler emits first.
  *--------------------------------------------------------------------------------------------*/
 
 .openide-chat-plan-wrap {
@@ -11,148 +18,84 @@
 	margin: 10px 0;
 }
 
-/* Outside the border on purpose: it labels the card, it is not part of it. */
-.openide-chat-plan-label {
-	margin: 0 0 6px 2px;
-	font-size: 11px;
-	color: var(--vscode-descriptionForeground);
-}
-
+/* `inline-size`, not `size`: the width comes from the row, but the HEIGHT is content driven and the
+   list measures it — containing the block axis too would report it as zero. */
 .openide-chat-plan-card {
 	overflow: hidden;
 	min-width: 0;
-	border: 1px solid rgba(128, 128, 128, 0.3);
-	border-radius: 12px;
-	background: rgba(128, 128, 128, 0.025);
+	padding: 12px 14px;
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border-strong));
+	border-radius: var(--oi-chat-card-radius);
+	background: var(--oi-chat-card-bg, var(--oi-tint-1));
+	container-type: inline-size;
+	container-name: openide-plan-card;
 }
 
-.openide-chat-plan-head {
-	display: flex;
-	align-items: center;
-	gap: 7px;
-	min-width: 0;
-	padding: 9px 12px;
-	border-bottom: 1px solid rgba(128, 128, 128, 0.16);
-}
-
-.openide-chat-plan-head > .codicon {
-	flex: 0 0 auto;
-	font-size: 14px;
-	color: var(--vscode-descriptionForeground);
-}
-
-.openide-chat-plan-file {
-	flex: 1 1 auto;
-	min-width: 0;
-	overflow: hidden;
-	white-space: nowrap;
-	text-overflow: ellipsis;
-	color: var(--vscode-descriptionForeground);
-	font-family: var(--vscode-editor-font-family, monospace);
+/* Inside the border, above the title: it names what the card is ("Plan creado"), it is not a
+   status line of the transcript. */
+/* `inline-block`, so the box hugs the words. The shimmer clips its gradient to the TEXT but sizes
+   it to the BOX, so on a full-width block the bright band spends most of the sweep outside the two
+   words that are actually painted — the label looked static next to the status line, which is the
+   same recipe on a box that fits its text. */
+.openide-chat-plan-label {
+	display: inline-block;
+	max-width: 100%;
+	margin: 0 0 6px;
 	font-size: 11.5px;
-	cursor: pointer;
-}
-
-.openide-chat-plan-file:hover {
-	color: var(--vscode-foreground);
-	text-decoration: underline;
-}
-
-.openide-chat-plan-icobtn {
-	flex: 0 0 auto;
-	padding: 3px;
-	border: none;
-	border-radius: 4px;
-	background: none;
+	line-height: 1.3;
 	color: var(--vscode-descriptionForeground);
-	cursor: pointer;
 }
 
-.openide-chat-plan-icobtn:hover {
-	background: rgba(128, 128, 128, 0.18);
-	color: var(--vscode-foreground);
-}
-
-.openide-chat-plan-icobtn .codicon {
-	font-size: 13px;
-}
-
-.openide-chat-plan-icobtn.hidden,
 .openide-chat-plan-footer.hidden {
 	display: none;
 }
 
 .openide-chat-plan-body {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
 	min-width: 0;
-	padding: 14px 16px 6px;
 }
 
 /* Long words wrap instead of widening the row: the list runs with `horizontalScrolling: false`, so
    an unbroken token here would push every other row in the transcript sideways. */
-.openide-chat-plan-title {
-	margin: 0 0 6px;
-	font-size: 15px;
-	font-weight: 650;
+/* Clickable — it is the card's only link to the file now that the head is gone — but styled as a
+   title, not as a link: the whole card is the affordance, the hover says so. */
+.openide-chat-plan-wrap .openide-chat-plan-card .openide-chat-plan-title {
+	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
 	line-height: 1.35;
+	color: var(--vscode-foreground);
 	overflow-wrap: anywhere;
+	cursor: pointer;
+}
+
+.openide-chat-plan-wrap .openide-chat-plan-card .openide-chat-plan-title:hover {
+	text-decoration: underline;
 }
 
 .openide-chat-plan-desc {
-	margin: 0 0 8px;
+	margin: 0;
 	font-size: 12.5px;
 	line-height: 1.55;
 	color: var(--vscode-descriptionForeground);
 	overflow-wrap: anywhere;
 }
 
-.openide-chat-plan-readlink {
-	padding: 0;
-	border: none;
-	background: transparent;
-	color: var(--vscode-textLink-foreground);
-	font-family: inherit;
-	font-size: 12.5px;
-	cursor: pointer;
-}
-
-.openide-chat-plan-readlink:hover {
-	text-decoration: underline;
-}
-
 /* Plan being written: the SAME shell as the final card, so when the plan closes the card does not
-   appear out of nowhere — the one you were already looking at finishes filling in. */
+   appear out of nowhere — the one you were already looking at finishes filling in. The bars are
+   `.openide-chat-sk` from openideChatActivity.css; only the spacing around them is the plan's. */
 .openide-chat-plan-sk {
-	display: flex;
-	flex-direction: column;
-	gap: 9px;
-	padding: 2px 0 10px;
-}
-
-.openide-chat-plan-sk-line {
-	height: 10px;
-	border-radius: 3px;
-	background: linear-gradient(90deg,
-			rgba(128, 128, 128, 0.16) 25%,
-			rgba(128, 128, 128, 0.34) 37%,
-			rgba(128, 128, 128, 0.16) 63%);
-	background-size: 200% 100%;
-	animation: openide-chat-shimmer-sweep 1.9s linear infinite;
-}
-
-.openide-chat-plan-sk-w90 { width: 90%; }
-.openide-chat-plan-sk-w76 { width: 76%; }
-.openide-chat-plan-sk-w55 { width: 55%; }
-
-@media (prefers-reduced-motion: reduce) {
-	.openide-chat-plan-sk-line { animation: none; }
+	padding: 2px 0 4px;
 }
 
 .openide-chat-plan-tasks {
-	margin: 12px 0 4px;
+	margin: 6px 0 0;
 	padding: 10px 12px;
-	border: 1px solid rgba(128, 128, 128, 0.15);
-	border-radius: 9px;
-	background: rgba(128, 128, 128, 0.105);
+	border: 1px solid var(--oi-border-soft);
+	border-radius: var(--oi-radius-lg);
+	background: var(--oi-tint-2);
 }
 
 .openide-chat-plan-tasks-head {
@@ -192,80 +135,93 @@
 	text-decoration: line-through;
 }
 
-/* ONE row, always: with `flex-wrap: wrap` the spacer pushed "Rechazar" to the right edge and
-   "Build" fell to a second line, sticking out of the card's rounded corner (the user's report).
-   The row never wraps; what gives under pressure is the Build shortcut hint and then the
-   Rechazar label, which may ellipsize — never the layout. */
-.openide-chat-plan-actions {
+/* ---- The action row -------------------------------------------------------------------- */
+
+/* ONE row, always. The previous card spread its affordances vertically — a "read the plan" link in
+   the body, Rechazar and Build in a footer — and the user's report was literally that the buttons
+   sat one above the other. Now every action is a sibling in this row, right-aligned, and the row
+   never wraps: `flex-wrap: nowrap` plus `white-space: nowrap`, which also has to beat
+   `.openide-chat-row * { white-space: normal }` (openideChatNative.css) — hence the (0,3,0) scope.
+
+   What gives under pressure, in order: the ghost labels shrink (`flex: 0 1 auto` + ellipsis), the
+   filled button never does (`flex: 0 0 auto`), and below 320px of card the shortcut hint is dropped
+   by the container query at the end of this section. A `@container` and not a `@media`: the chat
+   lives in the auxiliary bar, so the window's width says nothing about the card's. */
+.openide-chat-plan-wrap .openide-chat-plan-card .openide-chat-plan-actions {
 	display: flex;
 	align-items: center;
 	justify-content: flex-end;
 	gap: 8px;
-	padding: 10px 14px 12px;
 	flex-wrap: nowrap;
 	white-space: nowrap;
 	min-width: 0;
+	margin-top: 10px;
 }
 
-.openide-chat-plan-sp {
-	flex: 1;
-}
-
-.openide-chat-plan-reject {
+.openide-chat-plan-wrap .openide-chat-plan-card .openide-chat-plan-ghost {
 	flex: 0 1 auto;
 	min-width: 0;
+	height: 24px;
+	padding: 0 8px;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	padding: 4px 8px;
 	border: none;
-	border-radius: 5px;
+	border-radius: var(--oi-radius-md);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	font-family: inherit;
 	font-size: 12.5px;
+	line-height: 24px;
 	cursor: pointer;
 }
 
-.openide-chat-plan-reject:hover {
-	background: rgba(128, 128, 128, 0.14);
+.openide-chat-plan-wrap .openide-chat-plan-card .openide-chat-plan-ghost:hover {
+	background: var(--oi-tint-2);
 	color: var(--vscode-foreground);
 }
 
-.openide-chat-plan-build {
+/* The split: one silhouette, two buttons, joined by a hairline drawn in the button's own text
+   colour so it reads as a seam and not as a border between two controls. */
+/* The split Build is the shared `.oi-split` primitive (openideSurfaceCss.ts); the plan editor's
+   toolbar draws the same one. Only the plain primary (`.openide-chat-plan-build`, used by the
+   external-review Approve and the running status) is styled here. */
+.openide-chat-plan-split { align-self: center; }
+
+.openide-chat-plan-wrap .openide-chat-plan-card .openide-chat-plan-build {
 	display: inline-flex;
 	align-items: center;
 	flex: 0 0 auto;
+	gap: 0;
+	height: 24px;
+	padding: 0 8px;
 	white-space: nowrap;
-	gap: 6px;
-	padding: 4px 12px;
 	border: 1px solid var(--vscode-button-border, transparent);
-	border-radius: 6px;
+	border-radius: var(--oi-radius-md);
 	background: var(--vscode-button-background);
 	color: var(--vscode-button-foreground);
 	font-family: inherit;
 	font-size: 12.5px;
-	font-weight: 600;
+	/* 500, not 600: Cursor's Build is set in the same weight as the ghost buttons beside it; the
+	   fill is what makes it primary. */
+	font-weight: 500;
+	line-height: 1;
 	cursor: pointer;
 }
 
-.openide-chat-plan-build:hover {
+.openide-chat-plan-wrap .openide-chat-plan-card .openide-chat-plan-build:hover {
 	background: var(--vscode-button-hoverBackground);
 }
 
-.openide-chat-plan-build .codicon {
+.openide-chat-plan-wrap .openide-chat-plan-card .openide-chat-plan-build .codicon {
 	font-size: 13px;
 	color: inherit;
 }
 
-.openide-chat-plan-kbd {
-	flex: 0 1 auto;
-	min-width: 0;
-	overflow: hidden;
-	opacity: 0.72;
-	font-family: var(--vscode-editor-font-family, monospace);
-	font-size: 11px;
-}
+/* The shortcut hint is the shared `.oi-kbd` (openideSurfaceCss.ts) and it is ALWAYS shown: Cursor
+   keeps "Ctrl+⏎" on the button in its narrowest dock, and hiding it under a width query is what
+   made the button read as a different control depending on the panel width. Under pressure the
+   ghost "View plan" beside it ellipsizes first. */
 
 /* Same surface, no longer a button: a build already running must not read as an offer to build. */
 .openide-chat-plan-build-status {
@@ -273,30 +229,18 @@
 	pointer-events: none;
 }
 
-.openide-chat-plan-spinner {
-	width: 12px;
-	height: 12px;
-	border: 2px solid color-mix(in srgb, currentColor 32%, transparent);
-	border-top-color: currentColor;
-	border-radius: 50%;
-	animation: openide-chat-plan-spin 900ms linear infinite;
-}
+/* `.openide-chat-plan-spinner` and its keyframes live in `browser/media/openideChat.css`: the plan
+   editor's toolbar shows the same running control and does not load this sheet, and two copies of
+   a spinner are two things to keep in step. */
 
-@keyframes openide-chat-plan-spin {
-	to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.openide-chat-plan-spinner { animation: none; }
-}
-
-.openide-chat-plan-status {
-	padding: 8px 12px;
+/* Rejected: the row keeps its place and its alignment, with a status word where the buttons were. */
+.openide-chat-plan-wrap .openide-chat-plan-card .openide-chat-plan-status {
+	min-height: 26px;
 	font-size: 12.5px;
 	color: var(--vscode-descriptionForeground);
 }
 
-/* ---- "Actualizando el plan…" (openideChatHtml.ts:518-523) ---------------------------------- */
+/* ---- "Actualizando el plan…" (the removed chat webview) ---------------------------------- */
 /* A line, not a card: the detail lives in the plan editor. */
 
 .openide-chat-plan-touch {
@@ -306,14 +250,14 @@
 	min-width: 0;
 	margin: 0 -5px;
 	padding: 3px 5px;
-	border-radius: 4px;
+	border-radius: var(--oi-radius-sm);
 	font-size: 12.5px;
 	color: var(--vscode-descriptionForeground);
 	cursor: pointer;
 }
 
 .openide-chat-plan-touch:hover {
-	background: rgba(128, 128, 128, 0.10);
+	background: var(--oi-tint-2);
 	color: var(--vscode-foreground);
 }
 
@@ -322,7 +266,10 @@
 	font-size: 13px;
 }
 
+/* Same rule as the plan label: the shimmer needs a box that fits the words. `flex: 0 1 auto` keeps
+   it from claiming the whole row, which is what a flex child does by default here. */
 .openide-chat-plan-touch-text {
+	flex: 0 1 auto;
 	min-width: 0;
 	overflow: hidden;
 	white-space: nowrap;

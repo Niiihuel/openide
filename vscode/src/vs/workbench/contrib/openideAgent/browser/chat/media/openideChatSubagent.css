@@ -1,203 +1,171 @@
 /*---------------------------------------------------------------------------------------------
- *  OpenIDE — native chat: the delegated specialist card.
+ *  OpenIDE — native chat: the delegated specialist ROW.
  *
- *  SOURCE OF TRUTH: browser/openideChatHtml.ts:691-722 (`.sub-card` and friends). Values are
- *  transcribed, not re-decided.
+ *  This was a bordered card with a 40px head and a 240px scrolling body, transcribed from the chat
+ *  webview this replaced. It was never a native decision, and it read as a foreign object sitting
+ *  between the activity lines around it. The row now belongs to the activity family
+ *  (openideChatActivity.css): that file owns the box — the 16px glyph column, the 22px line, the
+ *  vertical thread — and everything below is only what a specialist has and a tool call does not.
  *
- *  One structural difference from the webview, and it is forced by the list: there, cards are
- *  stacked inside a `.delegation-children` box that owns the border and the radius. Here each card
- *  is its own content part in a virtualized list, so the frame moves onto the card itself. The
- *  numbers (1px, rgba(128,128,128,0.24), 9px radius) are `.delegation-children`'s own.
+ *  The root carries `openide-chat-tool-activity`, so the thread drawn by that file's `+` and
+ *  `:has(+)` selectors runs through a specialist instead of breaking at it.
  *--------------------------------------------------------------------------------------------*/
 
-.openide-chat-sub-card {
+/* The activity rows give the verb `flex: 1` because nothing follows it. Here two things do, and
+   they belong to the title: the model answers "with what" and the counter "how much". Letting the
+   verb claim the free space pushed them into the middle of the row, reading as three unrelated
+   columns instead of one caption. The spacer after them is what holds the controls to the right. */
+.openide-chat-sub .openide-chat-part-verb {
+	flex: 0 1 auto;
+}
+
+/* The model the orchestrator routed this specialist to. Muted and secondary to the title: it
+   answers "with what", which only matters once you already read "what". Shown only when it differs
+   from the turn's own model (see `subagentModelBadge`), so it is absent most of the time. */
+.openide-chat-sub .openide-chat-sub-model {
+	flex: 0 1 auto;
+	min-width: 0;
 	overflow: hidden;
-	min-width: 0;
-	margin: 6px 0;
-	border: 1px solid rgba(128, 128, 128, 0.24);
-	border-radius: 9px;
-	background: rgba(128, 128, 128, 0.018);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	font-size: 11.5px;
 }
 
-.openide-chat-sub-head {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	min-height: 40px;
-	padding: 5px 9px;
-	cursor: pointer;
-	user-select: none;
-	font-size: 12.5px;
+.openide-chat-sub .openide-chat-sub-count {
+	flex: 0 0 auto;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11.5px;
 }
 
-.openide-chat-sub-head:hover {
-	background: rgba(128, 128, 128, 0.07);
-}
+.openide-chat-sub .hidden { display: none; }
 
-.openide-chat-sub-st {
-	width: 18px;
-	height: 18px;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	font-size: 14px;
-	flex: 0 0 18px;
-	color: var(--vscode-descriptionForeground);
-}
-
-/* Own keyframe rather than codicon's `codicon-modifier-spin`: that modifier is a class the codicon
-   stylesheet owns, and reusing it here would make this card break whenever it is renamed upstream. */
-.openide-chat-sub-spin {
-	animation: openide-chat-sub-spin 1.5s steps(30) infinite;
-}
-
-@keyframes openide-chat-sub-spin {
-	100% { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.openide-chat-sub-spin { animation: none; }
-}
-
-.openide-chat-sub-st-ok {
-	color: var(--openide-green);
-}
-
-.openide-chat-sub-st-err {
-	color: var(--vscode-errorForeground);
-}
-
-.openide-chat-sub-title {
-	flex: 1;
-	min-width: 0;
-	font-weight: 600;
+/* Status glyph. `--openide-chat-gutter` is the activity column; the glyph sits at the family's
+   13px so a specialist and a tool call line up down the thread. */
+.openide-chat-sub .openide-chat-part-icon > .codicon {
 	font-size: 13px;
-	color: var(--vscode-foreground);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+}
+.openide-chat-sub .openide-chat-sub-st-ok { color: var(--openide-green, #2b9771); }
+.openide-chat-sub .openide-chat-sub-st-err { color: var(--vscode-errorForeground); }
+
+/* A keyframe of its own rather than the codicon-modifier spin: that one is applied through a class
+   the icon theme can remap, and a specialist that stops spinning while it runs reads as finished. */
+.openide-chat-sub .openide-chat-sub-spin { animation: openide-chat-sub-spin 1s linear infinite; }
+@keyframes openide-chat-sub-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-sub .openide-chat-sub-spin { animation: none; }
 }
 
-.openide-chat-sub-count {
+/* The two controls the row carries: BARE GLYPHS, no chip, no plate, no rounded background.
+   A boxed hover turns a 22px text line into a row of little cards, which is exactly the shape this
+   redesign took out. The affordance is the glyph itself brightening to the foreground colour, plus
+   its tooltip — the same way the activity rows treat their own chevron.
+
+   Hidden until the row is hovered or something inside it has focus, so the row reads as text at
+   rest. `:focus-within` is not optional: without it the buttons are unreachable by keyboard. */
+.openide-chat-sub .openide-chat-sub-action,
+.openide-chat-sub .openide-chat-sub-chevron {
 	flex: 0 0 auto;
-	color: var(--vscode-descriptionForeground);
-	font-size: 11.5px;
-	font-family: var(--vscode-editor-font-family, monospace);
-	white-space: nowrap;
-}
-
-.openide-chat-sub-model {
-	flex: 0 1 140px;
-	max-width: 140px;
-	color: var(--vscode-descriptionForeground);
-	font-size: 11.5px;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
-.openide-chat-sub-chev {
-	flex: 0 0 auto;
-	font-size: 16px;
-	color: var(--vscode-descriptionForeground);
-	transition: transform 120ms ease;
-}
-
-.openide-chat-sub-collapsed .openide-chat-sub-chev {
-	transform: rotate(180deg);
-}
-
-/* The live line: what the specialist is doing right now. The shimmer is painted here and never on
-   the title — putting it on the title left a heading animating after the run had finished. */
-.openide-chat-sub-status {
-	padding: 0 9px 7px 35px;
-	margin-top: -3px;
-	font-size: 11.5px;
-	line-height: 1.3;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	color: var(--vscode-descriptionForeground);
-}
-
-.openide-chat-sub-done .openide-chat-sub-status {
-	display: none;
-}
-
-/* 240px scroll box. Same reason as every other cap in this chat: the list has no horizontal
-   scrolling, so a specialist's output has to be bounded inside its own card. */
-.openide-chat-sub-body {
-	border-top: 1px solid rgba(128, 128, 128, 0.13);
-	padding: 7px 10px 9px 35px;
-	max-height: 240px;
-	overflow-y: auto;
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-	background: rgba(128, 128, 128, 0.018);
-}
-
-.openide-chat-sub-collapsed .openide-chat-sub-body {
-	display: none;
-}
-
-.openide-chat-sub-text {
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
-	line-height: 1.45;
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
-}
-
-.openide-chat-sub-tool {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	font-size: 11.5px;
-	color: var(--vscode-descriptionForeground);
-	font-family: var(--vscode-editor-font-family, monospace);
-	min-width: 0;
-}
-
-.openide-chat-sub-tool-icon {
-	display: inline-flex;
-	align-items: center;
-	flex: 0 0 auto;
-}
-
-.openide-chat-sub-tool-icon .codicon {
-	font-size: 12px;
-}
-
-.openide-chat-sub-tool-name {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	min-width: 0;
-}
-
-.openide-chat-sub-tool-error {
-	color: var(--vscode-errorForeground);
-}
-
-/* Head actions: Stop while running, open chat always (openideChatHtml.ts:3612-3710). */
-.openide-chat-sub-action {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	width: 20px;
 	height: 20px;
 	padding: 0;
-	border: none;
-	border-radius: 4px;
+	border: 0;
+	border-radius: 0;
 	background: transparent;
-	color: var(--vscode-descriptionForeground);
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
 	cursor: pointer;
 	opacity: 0;
-	transition: opacity 120ms ease;
+	transition: opacity 100ms ease, color 100ms ease;
 }
-.openide-chat-sub-head:hover .openide-chat-sub-action,
-.openide-chat-sub-action:focus-visible { opacity: 1; }
-.openide-chat-sub-action:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
-.openide-chat-sub-stop:hover { color: var(--vscode-errorForeground); }
-.openide-chat-sub-action.hidden { display: none; }
+.openide-chat-sub:hover .openide-chat-sub-action,
+.openide-chat-sub:hover .openide-chat-sub-chevron,
+.openide-chat-sub:focus-within .openide-chat-sub-action,
+.openide-chat-sub:focus-within .openide-chat-sub-chevron,
+.openide-chat-sub.openide-chat-part-open .openide-chat-sub-chevron {
+	opacity: 1;
+}
+/* Colour only. No background: see above. */
+.openide-chat-sub .openide-chat-sub-action:hover,
+.openide-chat-sub .openide-chat-sub-chevron:hover {
+	background: transparent;
+	color: var(--vscode-foreground);
+}
+/* The keyboard needs to see where it is, and with no hover plate the ring is the only signal. */
+.openide-chat-sub .openide-chat-sub-action:focus-visible,
+.openide-chat-sub .openide-chat-sub-chevron:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+	color: var(--vscode-foreground);
+}
+.openide-chat-sub .openide-chat-sub-action .codicon,
+.openide-chat-sub .openide-chat-sub-chevron .codicon {
+	font-size: 13px;
+	color: inherit;
+}
+/* One glyph, turned — the tree's twistie, the same 90deg the activity groups use. */
+.openide-chat-sub .openide-chat-sub-chevron .codicon { transition: transform 120ms ease; }
+.openide-chat-sub.openide-chat-part-open .openide-chat-sub-chevron .codicon { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-sub .openide-chat-sub-chevron .codicon { transition: none; }
+	.openide-chat-sub .openide-chat-sub-action,
+	.openide-chat-sub .openide-chat-sub-chevron { transition: none; }
+}
+
+/* The live line, under the title and aligned to the text — 22px = the 16px glyph column plus the
+   head's 6px gap, so it starts where the title starts. */
+/* `inline-block` so the shimmer's gradient is sized to the words rather than to the card's full
+   width; on a block box the bright band is off the text for most of the sweep and the line reads
+   as static. `margin-left` rather than `padding-left` for the gutter, because padding is part of
+   the box the gradient is measured against. */
+.openide-chat-sub .openide-chat-sub-status {
+	display: inline-block;
+	max-width: 100%;
+	margin-left: calc(var(--openide-chat-gutter, 16px) + 6px);
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	font-size: 11.5px;
+	line-height: 16px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	/* `.openide-chat-row *` sets `white-space: normal`, which would wrap the line and make the row
+	   change height every time the specialist starts another call. */
+	white-space: nowrap;
+}
+.openide-chat-sub .openide-chat-sub-status.hidden { display: none; }
+
+/* The tail: the last few lines, NOT a scrolling window onto the whole trace. The full transcript
+   is one click away in the specialist's own tab, and a scrollbar inside a chat row is a trap — the
+   wheel stops belonging to the conversation you are reading. */
+.openide-chat-sub .openide-chat-sub-tail {
+	padding: 1px 0 4px calc(var(--openide-chat-gutter, 16px) + 6px);
+}
+
+.openide-chat-sub .openide-chat-sub-tool {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11.5px;
+	line-height: 17px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.openide-chat-sub .openide-chat-sub-tool .codicon { flex: 0 0 auto; font-size: 12px; }
+.openide-chat-sub .openide-chat-sub-tool-name { overflow: hidden; text-overflow: ellipsis; }
+.openide-chat-sub .openide-chat-sub-tool-error,
+.openide-chat-sub .openide-chat-sub-tool-error .codicon { color: var(--vscode-errorForeground); }
+
+.openide-chat-sub .openide-chat-sub-text {
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	font-size: 12px;
+	line-height: 1.45;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.openide-chat-sub .openide-chat-sub-result { margin-top: 3px; color: var(--vscode-foreground); }

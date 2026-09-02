@@ -6,13 +6,16 @@
 import { $, addDisposableListener, append, clearNode, reset } from '../../../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../../../base/common/lifecycle.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IBackgroundTerminalEvent } from '../../../common/openideAgentTypes.js';
+import { t } from '../../../common/openideStrings.js';
 import { IOpenideAgentService } from '../../openideAgentService.js';
+import { setupChatTooltip } from '../openideChatHover.js';
 import '../media/openideChatTerminals.css';
 
 /**
  * The background terminals of the turn: the webview's `terms-tray`
- * (openideChatHtml.ts:4364-4405) on workbench DOM.
+ * on workbench DOM.
  *
  * A sibling of `OpenideChatFilesTray` in every structural respect — same dock surface, same
  * head/toggle/body grammar — and deliberately NOT merged with it. What they show has opposite
@@ -43,6 +46,7 @@ export class OpenideChatTerminalsTray extends Disposable {
 	constructor(
 		parent: HTMLElement,
 		@IOpenideAgentService private readonly _agentService: IOpenideAgentService,
+		@IHoverService private readonly _hoverService: IHoverService,
 	) {
 		super();
 
@@ -86,12 +90,17 @@ export class OpenideChatTerminalsTray extends Disposable {
 			append(row, $('span.codicon.codicon-terminal'));
 			// Monospace and shimmering: it is a command, and it is running.
 			const label = append(row, $('span.openide-chat-terms-label.openide-chat-shimmer'));
+			// The row store, not `this`: a terminal that exits takes its row with it. The text node
+			// already carries the command, so the hover only un-elides it.
+			store.add(setupChatTooltip(this._hoverService, label, () => label.textContent ?? '', { aria: false }));
 			// Reveal without stealing focus, which is what `followBackgroundTerminal` is for: the
 			// user clicked a row in the chat, so the chat is where they are still typing.
 			store.add(addDisposableListener(row, 'click', () => this._reveal(event.id)));
 
-			const stop = append(row, $<HTMLButtonElement>('button.openide-chat-terms-stop', { type: 'button', title: 'Stop' }));
-			stop.setAttribute('aria-label', `Detener ${event.command}`);
+			const stop = append(row, $<HTMLButtonElement>('button.openide-chat-terms-stop', { type: 'button' }));
+			// Named after the command it kills: the tray can hold several rows, and a column of
+			// buttons all called "Stop" cannot be told apart from the keyboard.
+			store.add(setupChatTooltip(this._hoverService, stop, () => t('chat.part.terminalStopOf', label.textContent ?? '')));
 			append(stop, $('span.codicon.codicon-close'));
 			store.add(addDisposableListener(stop, 'click', (mouse: MouseEvent) => {
 				// Without this the click also reveals the terminal that is being killed.
@@ -104,7 +113,6 @@ export class OpenideChatTerminalsTray extends Disposable {
 			this._rows.set(event.id, entry);
 		}
 		entry.label.textContent = event.command;
-		entry.label.title = event.command;
 		this._syncVisibility();
 	}
 

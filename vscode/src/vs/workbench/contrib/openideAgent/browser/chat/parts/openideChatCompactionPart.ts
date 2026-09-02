@@ -17,7 +17,7 @@ type CompactionStatus = IOpenideChatCompactionContent['status'];
 /**
  * "Contexto compactado": the card that says the conversation was summarised to fit the window.
  *
- * Ported from the webview's `renderCompaction` (openideChatHtml.ts:3403-3429) and its
+ * Ported from the webview's `renderCompaction` and its
  * `.compaction-*` styles (:553-570). It updates IN PLACE from running to finished — the webview
  * kept an `activeCompaction` reference for that, and the reducer does the same thing on its side by
  * rewriting the content at `draft.compactionIndex` (openideChatReducer.ts:206-212). Here that
@@ -89,7 +89,7 @@ export class OpenideChatCompactionPart extends OpenideChatContentPart {
 	}
 }
 
-/** openideChatHtml.ts:3412. */
+/** the removed chat webview. */
 function compactionGlyph(status: CompactionStatus): string {
 	switch (status) {
 		case 'started': return 'loading';
@@ -99,7 +99,7 @@ function compactionGlyph(status: CompactionStatus): string {
 	}
 }
 
-/** openideChatHtml.ts:3415. */
+/** the removed chat webview. */
 function compactionTitle(status: CompactionStatus): string {
 	switch (status) {
 		case 'started': return 'Compactando contexto…';
@@ -109,7 +109,7 @@ function compactionTitle(status: CompactionStatus): string {
 	}
 }
 
-/** openideChatHtml.ts:3426. `automatic` is the unnamed default, as in the webview's ternary. */
+/** the removed chat webview. `automatic` is the unnamed default, as in the webview's ternary. */
 function compactionOrigin(origin: ICompactionSnapshot['origin']): string {
 	switch (origin) {
 		case 'manual': return 'Manual';
@@ -119,7 +119,7 @@ function compactionOrigin(origin: ICompactionSnapshot['origin']): string {
 }
 
 /**
- * The numbers win over the message (openideChatHtml.ts:3417-3424).
+ * The numbers win over the message (the removed chat webview).
  *
  * "82K → 12K tokens · 85% liberado" answers the only question the card raises; the free-text message
  * is the fallback for the statuses that have no numbers to show.
@@ -136,7 +136,7 @@ function compactionDetail(status: CompactionStatus, snapshot: ICompactionSnapsho
 }
 
 /**
- * openideChatHtml.ts:3398-3401.
+ * the removed chat webview.
  *
  * One decimal under 10K and none above, because "12.3K" and "123K" are both four characters wide —
  * the card's detail line is sized for that and a fifth character would push the origin badge.

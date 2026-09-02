@@ -175,8 +175,8 @@ export function buildClaudeMcpConfig(endpoint: IOpenideMcpEndpoint): string {
 }
 
 export const OPENIDE_CLI_CATALOG: readonly IOpenideCliDefinition[] = [
-	{ id: 'claude', name: 'Claude Code', binary: 'claude', launchArgs: [], resumeArgs: id => ['--resume', id], supportsHooks: true, icon: 'anthropic', transcriptDir: '.claude/projects', mcpInjection: claudeMcpInjection, mcpConfigBuilder: buildClaudeMcpConfig },
-	{ id: 'codex', name: 'Codex', binary: 'codex', launchArgs: [], resumeArgs: id => ['resume', id], supportsHooks: false, icon: 'openai-codex', transcriptDir: '.codex/sessions', mcpInjection: codexMcpInjection },
+	{ id: 'claude', name: 'Claude Code', binary: 'claude', launchArgs: [], resumeArgs: id => ['--resume', id], supportsHooks: true, icon: 'claude', transcriptDir: '.claude/projects', mcpInjection: claudeMcpInjection, mcpConfigBuilder: buildClaudeMcpConfig },
+	{ id: 'codex', name: 'Codex', binary: 'codex', launchArgs: [], resumeArgs: id => ['resume', id], supportsHooks: false, icon: 'openai', transcriptDir: '.codex/sessions', mcpInjection: codexMcpInjection },
 	{ id: 'gemini', name: 'Gemini CLI', binary: 'gemini', launchArgs: [], resumeArgs: id => ['--resume', id], supportsHooks: false, icon: 'gemini' },
 	{ id: 'opencode', name: 'opencode', binary: 'opencode', launchArgs: [], resumeArgs: id => ['--session', id], supportsHooks: false, icon: 'opencode', mcpInjection: opencodeMcpInjection, mcpConfigBuilder: buildOpencodeMcpConfig },
 	{ id: 'amp', name: 'Amp', binary: 'amp', launchArgs: [], supportsHooks: false, icon: 'amp' },
@@ -249,6 +249,36 @@ export function isOpenideCliId(value: unknown): value is OpenideCliId {
 export function isSafeProviderSessionId(value: string): boolean {
 	return /^[A-Za-z0-9._-]{1,200}$/.test(value);
 }
+
+/**
+ * Variables a hosted CLI must NOT inherit from the IDE's own process.
+ *
+ * Claude Code marks every process it spawns with these so a nested `claude` knows it is a child
+ * of a running session — and a child session turns transcript saving off, cannot be resumed and
+ * never appears in `~/.claude/projects`, which is exactly where OpenIDE looks for it. When the
+ * IDE itself was started from a Claude Code terminal (a developer running the dev build from
+ * the agent, or a user launching OpenIDE from a shell where `claude` is running) the whole
+ * Electron tree inherits the marks, the integrated terminal passes them on, and the hosted
+ * Claude Code opens as a child of a session it has nothing to do with: "Transcript saving is
+ * off — inherited CLAUDE_CODE_CHILD_SESSION".
+ *
+ * Only the session marks are cleared, by name: `CLAUDE_CONFIG_DIR`, `ANTHROPIC_*` and anything
+ * else the user set on purpose stay, and `CLAUDE_CODE_SSE_PORT` — which the IDE sets itself to
+ * adopt this window — is added after this reset. `null` is how a terminal environment removes
+ * a variable (`ITerminalEnvironment`).
+ */
+export const OPENIDE_HOSTED_CLI_ENV_RESET: Readonly<Record<string, null>> = Object.freeze({
+	CLAUDECODE: null,
+	CLAUDE_CODE_CHILD_SESSION: null,
+	CLAUDE_CODE_SESSION_ID: null,
+	CLAUDE_CODE_BRIDGE_SESSION_ID: null,
+	CLAUDE_CODE_MESSAGING_SOCKET: null,
+	CLAUDE_CODE_MESSAGING_TOKEN: null,
+	CLAUDE_CODE_ENTRYPOINT: null,
+	CLAUDE_CODE_EXECPATH: null,
+	CLAUDE_PID: null,
+	CLAUDE_EFFORT: null,
+});
 
 export interface IOpenideCliLaunch {
 	readonly executable: string;

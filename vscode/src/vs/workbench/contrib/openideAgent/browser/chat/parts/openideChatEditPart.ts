@@ -3,43 +3,32 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, append, getWindow, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
-import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
-import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
-import { MutableDisposable } from '../../../../../../base/common/lifecycle.js';
-import { ScrollbarVisibility } from '../../../../../../base/common/scrollable.js';
-import { ILanguageService } from '../../../../../../editor/common/languages/language.js';
+import { $, append } from '../../../../../../base/browser/dom.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService } from '../../../../../../platform/notification/common/notification.js';
 import { IOpenideChatContent, IOpenideChatEditContent, isOpenideChatContentOfKind } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
 import { IOpenideAgentService } from '../../openideAgentService.js';
+import { t } from '../../../common/openideStrings.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
-import { appendOpenideChatEditDiff } from './openideChatEditDiff.js';
+import { setupChatTooltip } from '../openideChatHover.js';
+import { OpenideDiffBlock } from '../../openideDiffBlock.js';
 import { OpenideChatFileRow } from './openideChatFileRow.js';
 import '../media/openideChatFiles.css';
 
 export const OPENIDE_CHAT_EDIT_CARD_CLASS = 'openide-chat-edit-card';
 
-const OPEN_TOOLTIP = 'Abrir el archivo y revisar el cambio';
-const REVIEW_TOOLTIP = 'Revisar el cambio en el editor';
-const EXPAND_TOOLTIP = 'Expandir diff';
-const COLLAPSE_TOOLTIP = 'Compactar diff';
-/** Webview `.part.edit-card:not(.open) .ediff { max-height: 108px }` (openideChatHtml.ts:381). */
-const COLLAPSED_HEIGHT = 108;
-
 /**
  * The `write_file` / `edit_file` card.
  *
- * Visually this is the webview's `.part.edit-card` (openideChatHtml.ts:340-347): one bordered
- * card, one header, file icon + basename + `nuevo` badge + ±N, and clicking anywhere on it opens
- * the change. What is NOT here is the `.ediff` body — the inline diff, its fade, its expand
- * chevron and the 200 lines of overflow measuring behind them. That is the product decision in
- * section 6.2 of the migration plan: the diff is reviewed in the EDITOR, so the card is a remote
- * control for `OpenideEditReview`, not a second, worse diff viewer that has to re-tokenize code
- * with a regex highlighter to show eight lines of context.
+ * Visually this is the webview's `.part.edit-card`: one bordered card, one header — file icon +
+ * basename + `nuevo` badge + ±N — and, under it, the inline diff. The diff is NOT this part's:
+ * it is `OpenideDiffBlock`, the one block the product has for showing a change inline, shared
+ * with the Agent Changes view so a change looks the same wherever it is met. The card only
+ * decides when the block is shown (once the write's diff lands) and what sits above it.
  *
- * `openDiff` is the whole remote control, and it is already two behaviours in one
+ * Clicking the header opens the change in the editor. `openDiff` is the whole remote control, and it is already two behaviours in one
  * (openideAgentService.ts:1543-1559): a file with a pending snapshot opens with the inline review
  * attached, a file already kept or reverted opens flat. That is exactly the difference between
  * "revisar el cambio" and "abrir el archivo", decided by state rather than by two buttons the user
@@ -58,25 +47,26 @@ export class OpenideChatEditPart extends OpenideChatContentPart {
 	private _isComplete: boolean;
 	private readonly _row: OpenideChatFileRow;
 	private readonly _body: HTMLElement;
-	private readonly _expand: HTMLButtonElement;
-	private readonly _diffTokens = this._register(new MutableDisposable<CancellationTokenSource>());
-	/** The workbench scrollbar over the diff — the IDE's own, never Chromium's. */
-	private readonly _scrollable = this._register(new MutableDisposable<DomScrollableElement>());
-	private _renderedDiff: readonly unknown[] | undefined;
+	/** The stand-in bars, while the write has no diff yet. Kept so they are never rebuilt. */
+	private _skeleton: HTMLElement | undefined;
+	private readonly _diff: OpenideDiffBlock;
 
 	constructor(
 		content: IOpenideChatEditContent,
 		context: IOpenideChatContentPartContext,
 		@IInstantiationService instantiationService: IInstantiationService,
-		@ILanguageService private readonly _languageService: ILanguageService,
 		@IOpenideAgentService private readonly _agentService: IOpenideAgentService,
 		@INotificationService private readonly _notificationService: INotificationService,
+		@IHoverService hoverService: IHoverService,
 	) {
 		super();
 
 		this._content = content;
 		this._isComplete = context.element.isComplete;
 		this.domNode = $(`div.${OPENIDE_CHAT_EDIT_CARD_CLASS}`);
+		// The card is a plain div: the row inside it is the `role=button`, and it carries the
+		// accessible name, so this hover only says out loud what a click on the card does.
+		this._register(setupChatTooltip(hoverService, this.domNode, () => t('chat.part.openEdit'), { aria: false }));
 		this._row = this._register(instantiationService.createInstance(OpenideChatFileRow, {
 			className: 'openide-chat-edit-head',
 			onClick: () => this._openReview(),
@@ -85,19 +75,15 @@ export class OpenideChatEditPart extends OpenideChatContentPart {
 		// The trailing button is not a duplicate of the row click: it is the affordance that took
 		// the place of the expand chevron, so the card still LOOKS actionable at rest. Without it
 		// a bordered card with a filename reads as a label nobody thinks to click.
-		this._row.setActions([{ icon: 'go-to-file', tooltip: REVIEW_TOOLTIP, run: () => this._openReview() }]);
+		this._row.setActions([{ icon: 'go-to-file', tooltip: () => t('chat.part.reviewEdit'), run: () => this._openReview() }]);
 
-		// The body: the inline diff, its fade and the chevron that expands it — the webview's
-		// `.part-body` + `.ediff` + `.edit-fade` + `.edit-expand` (openideChatHtml.ts:3141-3160),
-		// which is also Cursor's edit block: a few lines at rest, the chevron only on hover and
-		// only when there is more underneath.
+		// The body: the skeleton while the write is in flight, then the shared diff block — the
+		// webview's `.part-body` + `.ediff`, which is also Cursor's edit block: a few lines at
+		// rest, the chevron only on hover and only when there is more underneath.
 		this._body = append(this.domNode, $('div.openide-chat-edit-body'));
-		this._expand = $('button.openide-chat-edit-expand', { type: 'button' });
-		append(this._expand, $('span.codicon.codicon-chevron-down'));
-		this._register(addDisposableListener(this._expand, 'click', event => {
-			event.stopPropagation();
-			this._toggleOpen();
-		}));
+		this._diff = this._register(instantiationService.createInstance(OpenideDiffBlock));
+		append(this._body, this._diff.domNode);
+		this._register(this._diff.onDidChangeHeight(() => this._onDidChangeHeight.fire()));
 		this._render();
 	}
 
@@ -106,68 +92,48 @@ export class OpenideChatEditPart extends OpenideChatContentPart {
 		this._row.setFile(diff.path);
 		// Pending = the write is in flight and its diff has not landed. Once the turn settles a
 		// card without a diff is a failed or empty write, and must stop pretending to work.
-		this._row.setPending(!diff.diffLines && !this._isComplete);
+		const pending = !diff.diffLines && !this._isComplete;
+		this._row.setPending(pending);
+		this._renderPending(pending);
 		this._renderDiff();
 		// Per-EDIT numbers, not the turn's accumulated ones: the webview header shows
-		// `m.editAdded`/`m.editRemoved` (openideChatHtml.ts:3352-3354) precisely so a card says what
+		// `m.editAdded`/`m.editRemoved` precisely so a card says what
 		// THIS write did, while the tray keeps showing the running total against the baseline.
 		this._row.setStats({ added: diff.editAdded, removed: diff.editRemoved, created: diff.created });
+		// After the stats: they rebuild that lane, and the badge lives beside them.
+		this._row.setWaiting(this._content.waitingFor);
 		this.domNode.classList.toggle('openide-chat-edit-created', !!diff.created);
-		this.domNode.title = OPEN_TOOLTIP;
+	}
+
+	/**
+	 * Bars where the diff will go, while the write is still in flight.
+	 *
+	 * The card used to be a bare filename until the whole diff landed, so a large file looked like
+	 * a row that had stopped — the same reason the plan card fakes its body. Built ONCE and then
+	 * only shown or hidden: rebuilding it on every delta of the write would restart the sweep and
+	 * the bars would never finish one.
+	 */
+	private _renderPending(pending: boolean): void {
+		if (pending && !this._skeleton) {
+			const skeleton = $('div.openide-chat-edit-sk.openide-chat-sk');
+			for (const width of ['w90', 'w55', 'w76']) {
+				append(skeleton, $(`div.openide-chat-sk-line.openide-chat-sk-${width}`));
+			}
+			this._skeleton = skeleton;
+			this._body.insertBefore(skeleton, this._diff.domNode);
+		}
+		this.domNode.classList.toggle('pending', pending);
+		if (!pending && this._skeleton) {
+			this._skeleton.remove();
+			this._skeleton = undefined;
+		}
 	}
 
 	private _renderDiff(): void {
-		const lines = this._content.diff.diffLines;
-		if (lines === this._renderedDiff) {
-			return;
-		}
-		this._renderedDiff = lines;
-		this._diffTokens.value = undefined;
-		this._scrollable.value = undefined;
-		this._body.replaceChildren();
-		this.domNode.classList.remove('open', 'needs-expand');
+		const diff = this._content.diff;
+		const lines = diff.diffLines;
 		this.domNode.classList.toggle('has-diff', !!lines?.length);
-		if (!lines?.length) {
-			return;
-		}
-		const tokens = new CancellationTokenSource();
-		this._diffTokens.value = tokens;
-		const diff = appendOpenideChatEditDiff(this._body, this._content.diff.path, lines, !!this._content.diff.created, this._languageService, tokens.token, () => this._scrollable.value?.scanDomNode());
-		const scrollable = new DomScrollableElement(diff, {
-			vertical: ScrollbarVisibility.Auto,
-			horizontal: ScrollbarVisibility.Auto,
-			useShadows: false,
-			horizontalScrollbarSize: 8,
-			verticalScrollbarSize: 8,
-		});
-		this._scrollable.value = scrollable;
-		scrollable.getDomNode().classList.add('openide-chat-edit-scroll');
-		append(this._body, scrollable.getDomNode());
-		append(this._body, $('div.openide-chat-edit-fade'));
-		this._expand.title = EXPAND_TOOLTIP;
-		append(this._body, this._expand);
-		// Measured, not counted: `needs-expand` must be false for a one-line replacement even
-		// though it has a diff, or every card grows a chevron that does nothing.
-		scheduleAtNextAnimationFrame(getWindow(this.domNode), () => {
-			if (!diff.isConnected || tokens.token.isCancellationRequested) {
-				return;
-			}
-			let height = 0;
-			for (const row of diff.children) {
-				height += row.getBoundingClientRect().height;
-			}
-			this.domNode.classList.toggle('needs-expand', height > COLLAPSED_HEIGHT + 1);
-			scrollable.scanDomNode();
-		});
-		this._onDidChangeHeight.fire();
-	}
-
-	private _toggleOpen(): void {
-		const open = this.domNode.classList.toggle('open');
-		this._expand.replaceChildren($(`span.codicon.codicon-chevron-${open ? 'up' : 'down'}`));
-		this._expand.title = open ? COLLAPSE_TOOLTIP : EXPAND_TOOLTIP;
-		this._scrollable.value?.scanDomNode();
-		this._onDidChangeHeight.fire();
+		this._diff.setDiff(lines?.length ? { path: diff.path, lines, created: !!diff.created } : undefined);
 	}
 
 	private _openReview(): void {

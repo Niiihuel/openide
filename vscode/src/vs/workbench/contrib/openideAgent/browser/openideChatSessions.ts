@@ -13,6 +13,7 @@
  *  strip and moves it to the Archived section; deleting removes it for good.
  *--------------------------------------------------------------------------------------------*/
 
+import { Emitter, Event } from '../../../../base/common/event.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { IChatMessage, IContextBreakdown, IMessageChangeSet } from '../common/openideAgentTypes.js';
@@ -31,6 +32,14 @@ export interface IChatSessionMeta {
 	hasError: boolean;
 	/** Born as a fork of another session (the UI marks it with the repo-forked codicon). */
 	forked: boolean;
+	/**
+	 * Set on a specialist's mirror session: which subagent run it transcribes.
+	 *
+	 * Persisted so the link survives a reload. Without it the binding lived only in
+	 * `OpenideChatSessionEffects._mirrors`, an in-memory Map, and every restored specialist row
+	 * offered to open a chat the window could no longer find.
+	 */
+	subagentRunId?: string;
 	kind: OpenideChatSessionKind;
 	/** For `cli` sessions: which agent (catalog id). */
 	cliId?: OpenideCliId;
@@ -160,6 +169,7 @@ export class OpenideChatSessions {
 					archived: !!s.archived,
 					hasError: !!s.hasError,
 					forked: !!s.forked,
+					subagentRunId: typeof s.subagentRunId === 'string' && s.subagentRunId ? s.subagentRunId : undefined,
 					kind: s.kind === 'cli' && isOpenideCliId(s.cliId) ? 'cli' : 'native',
 					cliId: s.kind === 'cli' && isOpenideCliId(s.cliId) ? s.cliId : undefined,
 					// A CLI that was running when the window closed is not running any more.
@@ -393,7 +403,15 @@ export class OpenideChatSessions {
 		return id;
 	}
 
-	createBackground(title: string, messages: IChatMessage[]): string {
+	/** The mirror session of a specialist run, if this window still has one. */
+	sessionOfSubagentRun(runId: string): string | undefined {
+		for (const session of this.sessions.values()) {
+			if (session.subagentRunId === runId) { return session.id; }
+		}
+		return undefined;
+	}
+
+	createBackground(title: string, messages: IChatMessage[], subagentRunId?: string): string {
 		const id = generateUuid();
 		const session: IChatSession = {
 			id,
@@ -403,6 +421,7 @@ export class OpenideChatSessions {
 			hasError: false,
 			forked: true,
 			kind: 'native',
+			subagentRunId,
 			messages,
 			changeSetsByMessageId: {},
 		};
@@ -499,6 +518,7 @@ export class OpenideChatSessions {
 		this.openTabIds = this.openTabIds.filter(t => t !== id);
 		if (this.activeId === id) { this.activeId = this.openTabIds[this.openTabIds.length - 1]; }
 		this.persist();
+		this._onDidDelete.fire(id);
 	}
 
 	/** Moves a tab next to another one (drag and drop in the strip). */
@@ -526,6 +546,10 @@ export class OpenideChatSessions {
 		s.archived = false;
 		this.persist();
 	}
+
+	private readonly _onDidDelete = new Emitter<string>();
+	/** A conversation was deleted by the user. What indexes sessions elsewhere (the Agent Changes view) drops it on this. */
+	readonly onDidDelete: Event<string> = this._onDidDelete.event;
 
 	delete(id: string): void {
 		this.sessions.delete(id);
@@ -560,11 +584,13 @@ export class OpenideChatSessions {
 
 	/** Deletes every session. The caller confirms first; this is VS Code's "clear history". */
 	deleteAll(): void {
+		const ids = [...this.sessions.keys()];
 		this.sessions.clear();
 		this.order = [];
 		this.openTabIds = [];
 		this.activeId = undefined;
 		this.persist();
+		for (const id of ids) { this._onDidDelete.fire(id); }
 	}
 
 	private prune(): void {

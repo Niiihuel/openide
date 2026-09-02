@@ -38,9 +38,10 @@
 	border-radius: var(--vscode-cornerRadius-small);
 }
 
-/* Select / dropdown controls */
-.modern-ui .monaco-select-box,
-.modern-ui .monaco-select-box-dropdown-container {
+/* Select / dropdown controls. The TRIGGER is a control (small radius); the dropdown LIST it
+ * opens is an overlay and keeps the large radius `selectBoxCustom.css` gives it — including it
+ * here flattened the settings enum dropdown to 4px while every other menu opens at 8px. */
+.modern-ui .monaco-select-box {
 	border-radius: var(--vscode-cornerRadius-small);
 }
 

@@ -76,8 +76,8 @@ export class OpenideSubagentSettingsSection extends Disposable implements IOpeni
 		showDiagnostics(this.routing.policyDiagnostics());
 
 		const actions = append(policy, $('.openide-settings-section-actions'));
-		const save = append(actions, $('button.openide-settings-section-button.primary', { type: 'button' }, t('settings.subagents.save'))) as HTMLButtonElement;
-		const revert = append(actions, $('button.openide-settings-section-button', { type: 'button' }, t('settings.subagents.discard'))) as HTMLButtonElement;
+		const save = append(actions, $('button.oi-btn.openide-settings-section-button.primary', { type: 'button' }, t('settings.subagents.save'))) as HTMLButtonElement;
+		const revert = append(actions, $('button.oi-btn.openide-settings-section-button', { type: 'button' }, t('settings.subagents.discard'))) as HTMLButtonElement;
 
 		this.renderStore.add(addDisposableListener(save, 'click', () => {
 			let parsedJson: unknown;

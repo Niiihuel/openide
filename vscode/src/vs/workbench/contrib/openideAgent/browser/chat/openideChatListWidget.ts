@@ -8,20 +8,21 @@ import { IMouseWheelEvent } from '../../../../../base/browser/mouseEvent.js';
 import { Button } from '../../../../../base/browser/ui/button/button.js';
 import { IListAccessibilityProvider } from '../../../../../base/browser/ui/list/listWidget.js';
 import { IObjectTreeElement, ITreeContextMenuEvent, ITreeRenderer } from '../../../../../base/browser/ui/tree/tree.js';
-import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { FuzzyScore } from '../../../../../base/common/filters.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { ScrollEvent } from '../../../../../base/common/scrollable.js';
 import { localize } from '../../../../../nls.js';
+import { t } from '../../common/openideStrings.js';
 import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../../platform/instantiation/common/serviceCollection.js';
 import { WorkbenchObjectTree } from '../../../../../platform/list/browser/listService.js';
-import { asCssVariable, editorBackground, foreground } from '../../../../../platform/theme/common/colorRegistry.js';
+import { asCssVariable, buttonBackground, buttonForeground, buttonHoverBackground } from '../../../../../platform/theme/common/colorRegistry.js';
 import { isOpenideChatMarkdownContent, isOpenideChatProgressContent } from '../../common/chat/openideChatContent.js';
-import { IOpenideChatItem, isOpenideChatRequestItem, isOpenideChatResponseItem } from '../../common/chat/openideChatItem.js';
+import { IOpenideChatItem, IOpenideChatRequestItem, isOpenideChatRequestItem, isOpenideChatResponseItem } from '../../common/chat/openideChatItem.js';
 import { IOpenideChatListDelegateOptions, OpenideChatListDelegate } from './openideChatListDelegate.js';
+import { createStrokeIcon } from './openideChatIcons.js';
 
 export interface IOpenideChatListStyles {
 	/** Fed to every list state override so focus/hover/selection are invisible in the transcript. */
@@ -38,12 +39,6 @@ export interface IOpenideChatListWidgetOptions {
 
 /** Number of pixels of slack allowed before the list stops counting as "at the bottom". */
 const AT_BOTTOM_TOLERANCE = 2;
-
-/**
- * Large enough that `reveal` always lands past the end of the last row, however tall it grew
- * mid-stream. Same trick as upstream's chat list.
- */
-const REVEAL_END_OFFSET = 1e6;
 
 class OpenideChatListAccessibilityProvider implements IListAccessibilityProvider<IOpenideChatItem> {
 
@@ -93,6 +88,7 @@ export class OpenideChatListWidget extends Disposable {
 
 	private readonly _container: HTMLElement;
 	private readonly _tree: WorkbenchObjectTree<IOpenideChatItem, FuzzyScore>;
+	private readonly _delegate: OpenideChatListDelegate;
 	private readonly _scrollDownButton: Button;
 
 	private _items: readonly IOpenideChatItem[] = [];
@@ -106,6 +102,8 @@ export class OpenideChatListWidget extends Disposable {
 	 * every streamed token.
 	 */
 	private _mutating = false;
+	/** Guards `repinToTail` against the re-entrancy of its own reveal. */
+	private _repinning = false;
 	private _visibleChangeCount = 0;
 	private _refreshEpoch = 0;
 
@@ -137,11 +135,12 @@ export class OpenideChatListWidget extends Disposable {
 		));
 
 		const styles = options.styles ?? {};
+		this._delegate = new OpenideChatListDelegate(options.delegateOptions);
 		this._tree = this._register(scopedInstantiationService.createInstance(
 			WorkbenchObjectTree<IOpenideChatItem, FuzzyScore>,
 			'OpenideChatList',
 			this._container,
-			new OpenideChatListDelegate(options.delegateOptions),
+			this._delegate,
 			options.renderers.slice(),
 			{
 				identityProvider: { getId: (element: IOpenideChatItem) => element.id },
@@ -154,6 +153,15 @@ export class OpenideChatListWidget extends Disposable {
 				hideTwistiesOfChildlessElements: true,
 				// Rows draw their own text: a list-imposed line height clips multi-line markdown.
 				setRowLineHeight: false,
+				// Room under the last row for the dock's exclusion gradient, which rises 34px above
+				// the composer (`openideChatComposer.css`, `.openide-chat-dock::before`). The
+				// gradient is there so a scrolled LINE fades into the dock instead of being cut by a
+				// hard rule; without this it also faded whatever happened to end there, and an
+				// ask card's Send button came out half dissolved. `paddingBottom` extends the
+				// list's scroll height (listView.ts:1116), so the last row can clear the gradient --
+				// CSS padding on the rows container would not, because the scrollable size is
+				// computed from the row heights, not from the DOM.
+				paddingBottom: 40,
 				accessibilityProvider: new OpenideChatListAccessibilityProvider(),
 				overrideStyles: {
 					listFocusBackground: styles.listBackground,
@@ -179,20 +187,25 @@ export class OpenideChatListWidget extends Disposable {
 		// var(--vscode-editor-background)` — and `Button` writes its colours as inline styles, which
 		// no stylesheet can override. So the palette is handed to the widget instead of to CSS.
 		this._scrollDownButton = this._register(new Button(this._container, {
-			buttonBackground: asCssVariable(foreground),
-			buttonForeground: asCssVariable(editorBackground),
-			buttonHoverBackground: asCssVariable(foreground),
+			// The product's amber, the same as the composer's send: one filled circle, one colour.
+			buttonBackground: asCssVariable(buttonBackground),
+			buttonForeground: asCssVariable(buttonForeground),
+			buttonHoverBackground: asCssVariable(buttonHoverBackground),
 			buttonSecondaryBackground: undefined,
 			buttonSecondaryForeground: undefined,
 			buttonSecondaryHoverBackground: undefined,
 			buttonSeparator: undefined,
 			supportIcons: true,
-			title: localize('openide.chat.list.scrollDown', "Go to the end of the conversation"),
+			// `Button` puts its own title on the workbench hover (`setTitle`), so this is already the
+			// native tip; it only had to stop being an English-only `localize()` default.
+			title: t('chat.list.scrollDown'),
 		}));
 		this._scrollDownButton.element.classList.add('openide-chat-scroll-down');
 		// `arrow-down`, not `chevron-down`: the webview's `#jumpDown` uses the arrow, and the two
 		// glyphs read differently at 14px inside a filled circle.
-		this._scrollDownButton.label = `$(${Codicon.arrowDown.id})`;
+		// The same heavy stroke arrow as the composer's send: the codicon glyph at 14px read as a
+		// hairline inside the filled circle.
+		this._scrollDownButton.element.replaceChildren(createStrokeIcon(this._container.ownerDocument, ['M12 5v14', 'm19 12-7 7-7-7'], { strokeWidth: 2.5, size: 14 }));
 		this._register(this._scrollDownButton.onDidClick(() => {
 			this.setFollowTail(true);
 			this.scrollToEnd();
@@ -205,7 +218,10 @@ export class OpenideChatListWidget extends Disposable {
 			this._onDidScroll.fire(event);
 			this.updateScrollDownButton();
 		}));
-		this._register(this._tree.onDidChangeContentHeight(height => this._onDidChangeContentHeight.fire(height)));
+		this._register(this._tree.onDidChangeContentHeight(height => {
+			this.repinToTail();
+			this._onDidChangeContentHeight.fire(height);
+		}));
 		this._register(this._tree.onDidFocus(() => this._onDidFocus.fire()));
 		this._register(this._tree.onContextMenu(event => this._onContextMenu.fire(event)));
 
@@ -267,6 +283,36 @@ export class OpenideChatListWidget extends Disposable {
 		return this._items;
 	}
 
+	/**
+	 * The last request row whose top edge has scrolled past the top of the viewport — the one whose
+	 * turn the viewport is showing — or `undefined` when the first rows are still in view.
+	 *
+	 * Geometry is summed from the delegate's heights, which are the sizes the view laid the rows out
+	 * with (`CachedListVirtualDelegate` answers from the measured `currentRenderedHeight`), so this
+	 * agrees with the list's own positions without reaching into its range map. Walked over the
+	 * tree's nodes and not over `_items`: with a diff identity in play the tree may hold an earlier
+	 * snapshot of a row, and the height cache is keyed by the object the view measured.
+	 */
+	findScrolledPastRequest(): IOpenideChatRequestItem | undefined {
+		const scrollTop = this._tree.scrollTop;
+		let top = 0;
+		let found: IOpenideChatRequestItem | undefined;
+		for (const node of this._tree.getNode(null).children) {
+			if (top >= scrollTop) {
+				break;
+			}
+			const element = node.element;
+			if (!element) {
+				continue;
+			}
+			if (isOpenideChatRequestItem(element)) {
+				found = element;
+			}
+			top += this._delegate.getHeight(element);
+		}
+		return found;
+	}
+
 	/** Forces every row to repaint, e.g. after a renderer-affecting setting changed. */
 	rerenderAll(): void {
 		this._refreshEpoch++;
@@ -320,6 +366,35 @@ export class OpenideChatListWidget extends Disposable {
 		this.updateScrollDownButton();
 	}
 
+	/**
+	 * Re-pins the tail once the tree has MEASURED what it just rendered.
+	 *
+	 * `withPersistedAutoScroll` already scrolls to the end, but it does so against the delegate's
+	 * estimated row heights: a row is measured only after it is in the DOM, and a streamed markdown
+	 * row almost always ends up taller than the estimate. The scroll therefore lands short by the
+	 * difference, and nothing re-ran — `_followTail` was still true, so no later mutation corrected
+	 * it either. What the user saw was the tail drifting out from under the bottom of the viewport
+	 * while the run was working, far enough for the last line to sit inside the dock's fade
+	 * (`.openide-chat-dock::before`) and read as half-erased.
+	 *
+	 * `_mutating` is held across the reveal for the same reason it is in `withPersistedAutoScroll`:
+	 * the scroll event this fires is ours, and reading it as user intent would detach the tail.
+	 */
+	private repinToTail(): void {
+		if (!this._followTail || this._suppressAutoScroll || this._repinning) {
+			return;
+		}
+		this._repinning = true;
+		this._mutating = true;
+		try {
+			this.scrollToEnd();
+		} finally {
+			this._mutating = false;
+			this._repinning = false;
+		}
+		this.updateScrollDownButton();
+	}
+
 	setFollowTail(value: boolean): void {
 		if (this._followTail === value) {
 			return;
@@ -338,18 +413,23 @@ export class OpenideChatListWidget extends Disposable {
 	}
 
 	/**
-	 * Reveals the object the TREE holds for the tail row, not the snapshot this widget last
-	 * received. With a `diffIdentityProvider` in play, `setChildren` keeps the previous node
-	 * whenever the identity is unchanged (objectTree.ts:27-35), so the two are not always the same
-	 * object — and revealing a snapshot the tree never adopted silently does nothing, which shows
-	 * up as the transcript losing the bottom after a resize.
+	 * Scrolls to the true end of the scrollable content, `paddingBottom` included.
+	 *
+	 * This used to be `reveal(lastNode, <huge relativeTop>)`, on the assumption that a large enough
+	 * `relativeTop` lands past the end of the row however tall it grew mid-stream. It cannot:
+	 * `List.reveal` clamps it to 1 (listWidget.ts:1983), and `relativeTop === 1` means "this row's
+	 * bottom flush with the viewport's bottom" — which is exactly the edge the dock's exclusion
+	 * gradient rises from. The 40px of `paddingBottom` this list asks for so the tail can clear that
+	 * gradient were therefore never scrolled into, and the last line of a reply sat inside the fade,
+	 * half dissolved, for as long as the run kept writing.
+	 *
+	 * Setting `scrollTop` is also what makes this independent of the tree's node identity: there is
+	 * no element to look up, so nothing silently does nothing when `setChildren` kept a node this
+	 * widget's last snapshot does not match. The setter clamps, and `scrollHeight` already carries
+	 * the padding (listView.ts:1116).
 	 */
 	scrollToEnd(): void {
-		const last = this._tree.getNode(null).children.at(-1)?.element;
-		if (!last) {
-			return;
-		}
-		this._tree.reveal(last, Math.max(last.currentRenderedHeight ?? 0, REVEAL_END_OFFSET));
+		this._tree.scrollTop = this._tree.scrollHeight - this._tree.renderHeight;
 	}
 
 	private updateScrollDownButton(): void {

@@ -1045,9 +1045,9 @@ export class GettingStartedPage extends EditorPane {
 		this.setSlide('categories');
 	}
 
-	/** Portada propia de OpenIDE para una ventana realmente vacía. Se monta dentro del
-	 * Welcome editor nativo: conserva restauración, accesibilidad, recientes y comandos del
-	 * workbench, pero no aparece cuando ya existe una carpeta o workspace. */
+	/** OpenIDE's own cover page for a genuinely empty window. It is mounted inside the native
+	 * Welcome editor, so it keeps restoration, accessibility, recents and the workbench's
+	 * commands, but it does not appear once a folder or workspace exists. */
 	private async buildOpenIDEEmptyWorkbench(): Promise<void> {
 		this.categoriesSlideDisposables.clear();
 		this.container.classList.add('openide-empty-window');

@@ -4,11 +4,15 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, append } from '../../../../../../base/browser/dom.js';
+import { setOpenideChatShimmer } from './openideChatActivityRow.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { IOpenideChatContent, IOpenideChatPlanUpdateContent, isOpenideChatContentOfKind } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem, isOpenideChatResponseItem } from '../../../common/chat/openideChatItem.js';
+import { t } from '../../../common/openideStrings.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
+import { setupChatTooltip } from '../openideChatHover.js';
 import { openOpenideChatPlan, resolveOpenideChatPlanUri } from './openideChatPlanActions.js';
 import '../media/openideChatPlan.css';
 
@@ -17,7 +21,7 @@ export const OPENIDE_CHAT_PLAN_TOUCH_CLASS = 'openide-chat-plan-touch';
 /**
  * "Actualizando el plan…": one clickable line, never a diff.
  *
- * The webview's `startPlanTouch` / `finishPlanTouch` (openideChatHtml.ts:3256-3271) and the
+ * The webview's `startPlanTouch` / `finishPlanTouch` and the
  * `.flatrow.plan-touch` styles (:518-523). The reason it is a line and not an edit card is written
  * down at :437-439: the agent ticks the plan's checkboxes with `edit_file` on
  * `.openide/plans/*.md`, and showing that diff filled the chat with raw markdown while the plan
@@ -42,6 +46,7 @@ export class OpenideChatPlanUpdatePart extends OpenideChatContentPart {
 		context: IOpenideChatContentPartContext,
 		@ICommandService private readonly _commandService: ICommandService,
 		@IWorkspaceContextService private readonly _contextService: IWorkspaceContextService,
+		@IHoverService hoverService: IHoverService,
 	) {
 		super();
 
@@ -51,7 +56,7 @@ export class OpenideChatPlanUpdatePart extends OpenideChatContentPart {
 		this.domNode = $(`div.${OPENIDE_CHAT_PLAN_TOUCH_CLASS}`);
 		append(this.domNode, $('span.codicon.codicon-checklist'));
 		this._text = append(this.domNode, $('span.openide-chat-plan-touch-text'));
-		this.domNode.title = 'Abrir el plan';
+		this._register(setupChatTooltip(hoverService, this.domNode, () => t('chat.part.openPlan')));
 		this.domNode.setAttribute('role', 'button');
 		this.domNode.setAttribute('tabindex', '0');
 
@@ -70,6 +75,9 @@ export class OpenideChatPlanUpdatePart extends OpenideChatContentPart {
 		// Without the count the webview's `finishPlanTouch` cannot say "· N tareas" either: it reads
 		// it out of the edit_file result, which never reaches the native content model.
 		this._text.textContent = this._settled ? 'Plan actualizado' : 'Actualizando el plan…';
+		// The line said it was working with a spinning glyph alone; the text stayed flat while every
+		// other in-flight line in the transcript breathes. Same class, so there is one recipe.
+		setOpenideChatShimmer(this._text, !this._settled);
 		this.domNode.classList.toggle('openide-chat-plan-touch-done', this._settled);
 	}
 

@@ -5,7 +5,7 @@
 
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — pure scheduling and formatting for account usage, transcribed from Orca's
- *  rate-limit service (refs/orca/src/main/rate-limits/service.ts). Orca centralizes polling,
+ *  rate-limit service in its main process. Orca centralizes polling,
  *  stale-data handling and the failure backoff in one main-process service; the constants and
  *  the decisions are reproduced here as pure functions so the browser monitor stays small and
  *  every rule is unit-testable without timers.

@@ -149,17 +149,32 @@ export class OpenideChatSessionEffects extends Disposable {
 		this._onDidChangeUsage.fire(next);
 	}
 
-	/** The mirror conversation of a specialist run, for "open chat" on its card. */
+	/**
+	 * The mirror conversation of a specialist run, for "open" on its row.
+	 *
+	 * The Map holds only what THIS window opened, so after a reload it is empty while the sessions
+	 * themselves are still on disk. The fallback re-binds from the session store and seeds the Map,
+	 * which also arms `startMirror`'s guard: a run whose mirror was recovered must not get a second
+	 * session if it somehow reports itself again.
+	 */
 	mirrorSessionOf(runId: string): string | undefined {
-		return this._mirrors.get(runId)?.sessionId;
+		const known = this._mirrors.get(runId)?.sessionId;
+		if (known) { return known; }
+		const recovered = this.sessions.sessionOfSubagentRun(runId);
+		if (recovered) {
+			this._mirrors.set(runId, { sessionId: recovered, messages: this.sessions.messagesOf(recovered) });
+		}
+		return recovered;
 	}
 
 	private startMirror(runId: string, title: string, prompt: string): void {
-		if (this._mirrors.has(runId)) {
+		// `mirrorSessionOf` and not `_mirrors.has`: after a reload the Map is empty but the session
+		// exists, and re-creating it would fork the specialist's history into a second tab.
+		if (this.mirrorSessionOf(runId)) {
 			return; // subagentStart is re-emitted on reconnect; a second session would fork the history
 		}
 		const messages: IChatMessage[] = [{ role: 'user', content: prompt }];
-		const sessionId = this.sessions.createBackground(title, messages);
+		const sessionId = this.sessions.createBackground(title, messages, runId);
 		this._mirrors.set(runId, { sessionId, messages });
 	}
 

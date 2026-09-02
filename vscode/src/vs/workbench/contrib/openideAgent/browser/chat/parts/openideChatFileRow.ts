@@ -10,15 +10,19 @@ import { ILanguageService } from '../../../../../../editor/common/languages/lang
 import { getIconClasses } from '../../../../../../editor/common/services/getIconClasses.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { FileKind } from '../../../../../../platform/files/common/files.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { basenameForChat } from '../../../common/chat/openideChatToolMeta.js';
+import { t } from '../../../common/openideStrings.js';
+import { OpenideTurnFileStatus } from '../../../common/openideCliTurnChanges.js';
+import { setupChatTooltip } from '../openideChatHover.js';
 import '../media/openideChatFiles.css';
 
 /**
  * The one row that shows "a file the agent touched".
  *
  * The webview paints this exact row TWICE, with two different sets of classes and two different
- * font sizes: `.part.edit-card .part-head` in the transcript (openideChatHtml.ts:341-347, 388-391)
- * and `.dock-file-row` in the dock tray (openideChatHtml.ts:945-952). Same grammar in both —
+ * font sizes: `.part.edit-card .part-head` in the transcript (the removed chat webview, 388-391)
+ * and `.dock-file-row` in the dock tray. Same grammar in both —
  * file icon, basename, ±N, trailing hover actions — so they drifted independently: the transcript
  * shows `+N` at 11.5px with the `nuevo` badge, the dock shows it at 11px with none, and a fix to
  * one never reached the other. Section 6.2 of the migration plan calls that out and asks for a
@@ -36,11 +40,23 @@ export interface IOpenideChatFileStats {
 	readonly removed?: number;
 	/** Renders the `nuevo` badge. A created file is not "+N lines", it is a new file. */
 	readonly created?: boolean;
+	/** Git's status letter (A/M/D/R/U), where the row describes a file by its state. */
+	readonly status?: OpenideTurnFileStatus;
 }
+
+/** Letter per status — the vocabulary Source Control taught everyone to read. */
+const STATUS_LETTER: Record<OpenideTurnFileStatus, string> = {
+	added: 'A',
+	modified: 'M',
+	deleted: 'D',
+	renamed: 'R',
+	untracked: 'U',
+};
 
 export interface IOpenideChatFileRowAction {
 	readonly icon: string;
-	readonly tooltip: string;
+	/** A factory, like every tooltip in the dock: it is read at hover time, in the current language. */
+	readonly tooltip: () => string;
 	/** Tints the button on hover: `accept` green, `reject` red, absent stays neutral. */
 	readonly tone?: 'accept' | 'reject';
 	readonly run: () => void;
@@ -67,6 +83,9 @@ export class OpenideChatFileRow extends Disposable {
 	private readonly _icon: HTMLElement;
 	private readonly _name: HTMLElement;
 	private readonly _stats: HTMLElement;
+	/** The "queued behind another conversation" badge; empty and hidden the rest of the time. */
+	private readonly _waiting: HTMLElement;
+	private _waitingText = '';
 	private readonly _actions: HTMLElement;
 	private readonly _actionStore = this._register(new DisposableStore());
 
@@ -76,6 +95,7 @@ export class OpenideChatFileRow extends Disposable {
 		options: IOpenideChatFileRowOptions,
 		@IModelService private readonly _modelService: IModelService,
 		@ILanguageService private readonly _languageService: ILanguageService,
+		@IHoverService private readonly _hoverService: IHoverService,
 	) {
 		super();
 
@@ -83,7 +103,15 @@ export class OpenideChatFileRow extends Disposable {
 		this._icon = append(this.domNode, $('span.openide-chat-file-icon'));
 		this._name = append(this.domNode, $('span.openide-chat-file-name'));
 		this._stats = append(this.domNode, $('span.openide-chat-file-stats'));
+		this._waiting = append(this.domNode, $('span.openide-chat-file-badge.openide-chat-file-waiting.hidden'));
+		// One registration with a factory, not one per repaint: the badge is truncated in a narrow
+		// dock and the hover is where the conversation's full name still fits.
+		this._register(setupChatTooltip(this._hoverService, this._waiting, () => this._waitingText));
 		this._actions = append(this.domNode, $('span.openide-chat-file-actions'));
+		// The name is elided by CSS and the tail of a path is what identifies it, so the hover only
+		// completes what the row already shows: `aria: false`, or the row's accessible name would be
+		// the same string twice.
+		this._register(setupChatTooltip(this._hoverService, this._name, () => this._path, { aria: false }));
 		// The icon theme keys TypeScript & co. on the LANGUAGE id, which is `unknown` until the
 		// extension host registers languages after a restore. Re-resolving on change is what
 		// turns the generic file glyph into the real one a second later.
@@ -119,7 +147,6 @@ export class OpenideChatFileRow extends Disposable {
 		// the same). Resolving the real URI would need a service the parts do not have, for nothing.
 		this._refreshIcon();
 		reset(this._name, basenameForChat(path));
-		this._name.title = path;
 	}
 
 	/**
@@ -138,6 +165,22 @@ export class OpenideChatFileRow extends Disposable {
 		this._name.classList.toggle('openide-chat-shimmer', pending);
 	}
 
+	/**
+	 * The write is queued behind another conversation working on the same file.
+	 *
+	 * It goes in the badge lane, beside `nuevo` and the `+N −N`, because that is this row's
+	 * language: a fact about the file is a badge, not a second line. Amber for the same reason the
+	 * review's gutter is amber — it is work that has not settled yet.
+	 */
+	setWaiting(holder: string | undefined): void {
+		// ONE WORD on the badge, like `nuevo` beside it: the lane is a row of short facts, and a
+		// sentence here squeezes the filename into two lines in a narrow dock. Who it is waiting for
+		// is the hover.
+		this._waitingText = holder ? t('chat.file.waitingFor', holder) : '';
+		this._waiting.textContent = holder ? t('chat.file.waiting') : '';
+		this._waiting.classList.toggle('hidden', !holder);
+	}
+
 	setStats(stats: IOpenideChatFileStats): void {
 		clearNode(this._stats);
 		if (stats.created) {
@@ -151,14 +194,20 @@ export class OpenideChatFileRow extends Disposable {
 			// tabular-nums column. A hyphen is narrower and the two numbers visibly stagger.
 			append(this._stats, $('span.openide-chat-diff-removed', undefined, `−${stats.removed}`));
 		}
+		if (stats.status) {
+			// Last, on the right, where Source Control puts it.
+			append(this._stats, $(`span.openide-chat-file-status.${stats.status}`, undefined, STATUS_LETTER[stats.status]));
+		}
 	}
 
 	setActions(actions: readonly IOpenideChatFileRowAction[]): void {
 		this._actionStore.clear();
 		clearNode(this._actions);
 		for (const action of actions) {
-			const button = append(this._actions, $<HTMLButtonElement>('button.openide-chat-file-action', { type: 'button', title: action.tooltip }));
-			button.setAttribute('aria-label', action.tooltip);
+			const button = append(this._actions, $<HTMLButtonElement>('button.openide-chat-file-action', { type: 'button' }));
+			// The action store, not `this`: `setActions` rebuilds these buttons, and a hover left
+			// behind on a removed node is one leaked listener per repaint.
+			this._actionStore.add(setupChatTooltip(this._hoverService, button, action.tooltip));
 			if (action.tone) {
 				button.classList.add(`openide-chat-file-action-${action.tone}`);
 			}

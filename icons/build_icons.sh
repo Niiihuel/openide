@@ -22,11 +22,14 @@ done
 [[ -z "${SRC_PREFIX}" ]] && SRC_PREFIX=""
 [[ -z "${VSCODE_PREFIX}" ]] && VSCODE_PREFIX=""
 
+# A missing tool used to `exit 0` — a silent success that regenerated nothing. That is how the
+# tree kept shipping the upstream community build's icon as OpenIDE's on Windows: the script ran,
+# found no `icotool`, said one line and left. It fails now.
 check_programs() { # {{{
   for arg in "$@"; do
     if ! command -v "${arg}" &> /dev/null; then
-      echo "${arg} could not be found"
-      exit 0
+      echo "${arg} could not be found — install it or use dev/gen-windows-icons.sh, which needs ImageMagick alone" >&2
+      exit 1
     fi
   done
 } # }}}

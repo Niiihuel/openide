@@ -3,12 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IOpenideChatCanvasContent, IOpenideChatContent, IOpenideChatPlanContent } from './openideChatContent.js';
+import { IOpenideChatCanvasContent, IOpenideChatContent, IOpenideChatPlanContent, IOpenideChatSubagentContent, OpenideChatSubagentStatus } from './openideChatContent.js';
+import { ISubagentRun } from '../openideSubagentTypes.js';
 import { IOpenideChatReducerStep } from './openideChatReducer.js';
 import {
 	closeOpenideChatMarkdown, commitOpenideChatDraft, createOpenideChatDraft, finalizeOpenideChatExplore,
 	finalizeOpenideChatThinking, IOpenideChatDraft, IOpenideChatReducerState, OPENIDE_CHAT_NO_INDEX,
-	pushOpenideChatContent, removeOpenideChatContentAt, setOpenideChatContentAt,
+	getOpenideChatContentAt, pushOpenideChatContent, removeOpenideChatContentAt, setOpenideChatContentAt,
 } from './openideChatReducerState.js';
 
 /**
@@ -35,7 +36,17 @@ export type IOpenideChatSurfaceEvent =
 	| { readonly type: 'planDraft'; readonly path: string; readonly title: string; readonly done: boolean }
 	/** `plan_save` closed: the reviewable card, in the place the draft was holding. */
 	| { readonly type: 'planCard'; readonly path: string; readonly title: string; readonly markdown: string; readonly external?: boolean }
-	| { readonly type: 'canvasCard'; readonly path: string; readonly title: string; readonly created: boolean };
+	| { readonly type: 'canvasCard'; readonly path: string; readonly title: string; readonly created: boolean }
+	/**
+	 * A delegated specialist's run moved while its card is already on screen.
+	 *
+	 * `delegate_to_subagent` reports the run ONCE, through the loop, and for a background run that
+	 * report is the clone `create()` returns before anything has been resolved: status `queued`,
+	 * empty timeline, and `model` still the definition's literal `'default'`. The real model is
+	 * decided later, by `recordRoutingDecision`, which reaches nobody because the run service's
+	 * own `onDidChangeRun` is not the loop. This is that second report.
+	 */
+	| { readonly type: 'subagentRunUpdate'; readonly run: ISubagentRun };
 
 /**
  * Folds one surface event into the transcript.
@@ -53,6 +64,7 @@ export function applyOpenideChatSurfaceEvent(
 		case 'planDraft': applyPlanDraft(draft, ev.path, ev.title, ev.done); break;
 		case 'planCard': applyPlanCard(draft, ev.path, ev.title, ev.markdown, ev.external === true); break;
 		case 'canvasCard': applyCanvasCard(draft, ev.path, ev.title, ev.created); break;
+		case 'subagentRunUpdate': applySubagentRunUpdate(draft, ev.run); break;
 	}
 	const next = commitOpenideChatDraft(state, draft);
 	return { state: next, items: next.items, sessionEffects: draft.effects };
@@ -62,7 +74,7 @@ export function applyOpenideChatSurfaceEvent(
  * Every card below interrupts the prose the same way a tool call does: the model stopped writing
  * and produced an artefact, and leaving the paragraph open makes the next `text` delta land under
  * the card instead of above it. The webview says this as `assistant = null; finalizeReasoning();`
- * at the top of all three renderers (openideChatHtml.ts:3831, :3862, :3931).
+ * at the top of all three renderers (the removed chat webview, :3862, :3931).
  */
 function interruptProse(draft: IOpenideChatDraft): void {
 	closeOpenideChatMarkdown(draft);
@@ -129,6 +141,39 @@ function applyPlanCard(draft: IOpenideChatDraft, path: string, title: string, ma
 		return;
 	}
 	setOpenideChatContentAt(draft, existing, content);
+}
+
+/**
+ * Refreshes a specialist's card in place. UPDATE-ONLY, and that is the whole contract.
+ *
+ * `draft.subagents` is a per-TURN cursor: `beginOpenideChatTurn` resets it, and between turns the
+ * draft's content is empty anyway. A background run that finishes three turns later would therefore
+ * not find its card and, if this were allowed to push, would append a second one into whatever
+ * reply happens to be open — a duplicate of a specialist nobody delegated there. So when the run is
+ * not in the live cursor the update is simply dropped; the result still reaches the conversation as
+ * a message through the controller's terminal delivery, which is the path that survives a turn.
+ *
+ * Creation stays with the loop (`applySubagentRun`), which is the only place that knows the card
+ * belongs to the reply being written.
+ */
+function applySubagentRunUpdate(draft: IOpenideChatDraft, run: ISubagentRun): void {
+	const index = draft.subagents.get(run.runId);
+	if (index === undefined) { return; }
+	const existing = getOpenideChatContentAt<IOpenideChatSubagentContent>(draft, index, 'subagent');
+	if (!existing) { return; }
+	const status: OpenideChatSubagentStatus =
+		run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled' ? run.status
+			: run.status === 'interrupted' ? 'cancelled' : 'running';
+	setOpenideChatContentAt(draft, index, {
+		...existing,
+		model: run.model,
+		status,
+		run,
+		// The run service's timeline wins only when it HAS one. `reduceNestedSubagentEvent` builds
+		// synthetic events for the nested-frame path and numbers them off `card.timeline.length`;
+		// overwriting those with an empty array would renumber the next one onto a hole.
+		timeline: run.timeline.length ? run.timeline : existing.timeline,
+	});
 }
 
 function applyCanvasCard(draft: IOpenideChatDraft, path: string, title: string, created: boolean): void {

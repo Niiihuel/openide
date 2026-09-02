@@ -20,12 +20,12 @@ import {
 	ISubagentTargetHealth,
 	parseSubagentRoutingPolicy,
 	scoreSubagentTargets,
-	SubagentTargetHealthStatus,
 	SubagentTaskProfile,
 	SUBAGENT_ROUTING_PRESET_WEIGHTS,
 	subagentTargetKey,
 } from '../common/openideSubagentRouting.js';
 import { IClassifiedProviderError } from '../common/openideErrorClassifier.js';
+import { activeModelHealth, recordModelFailure, recordModelSuccess } from '../common/openideModelHealth.js';
 
 const HEALTH_STORAGE_KEY = 'openide.subagents.routing.health.v1';
 const POLICY_SETTING = 'openide.subagents.routing.policy';
@@ -102,15 +102,17 @@ export class SubagentRoutingService implements ISubagentRoutingService {
 	}
 
 	recordFailure(target: Pick<ISubagentRoutingTarget, 'providerId' | 'model'>, error: IClassifiedProviderError, now = Date.now()): ISubagentTargetHealth {
-		const status = this.healthStatus(error);
-		const until = this.cooldownUntil(error, now);
-		const health: ISubagentTargetHealth = { providerId: target.providerId, model: target.model, status, reason: error.reason, ...(until ? { until } : {}), updatedAt: now };
-		this.health.set(subagentTargetKey(target), health); this.persistHealth();
+		const key = subagentTargetKey(target);
+		// The RAW record, not the active one: `activeHealth` reports an expired cooldown as available,
+		// and the failure streak has to survive precisely that — the wait running out and the target
+		// failing again is the evidence that the wait was too short.
+		const health = recordModelFailure(this.health.get(key), target, error, now);
+		this.health.set(key, health); this.persistHealth();
 		return health;
 	}
 
 	recordSuccess(target: Pick<ISubagentRoutingTarget, 'providerId' | 'model'>, now = Date.now()): void {
-		this.health.set(subagentTargetKey(target), { providerId: target.providerId, model: target.model, status: 'available', updatedAt: now });
+		this.health.set(subagentTargetKey(target), recordModelSuccess(target, now));
 		this.persistHealth();
 	}
 
@@ -121,25 +123,7 @@ export class SubagentRoutingService implements ISubagentRoutingService {
 	}
 
 	private activeHealth(health: ISubagentTargetHealth | undefined, now: number): ISubagentTargetHealth | undefined {
-		if (!health) { return undefined; }
-		if (health.until && health.until <= now) { return { ...health, status: 'available', reason: undefined, until: undefined, updatedAt: now }; }
-		return health;
-	}
-
-	private healthStatus(error: IClassifiedProviderError): SubagentTargetHealthStatus {
-		if (error.kind === 'auth') { return 'auth'; }
-		if (error.kind === 'billing') { return 'billing'; }
-		if (error.kind === 'rate-limit') { return 'rate-limit'; }
-		if (error.reason === 'model-not-found' || error.reason === 'model-retired') { return 'model-not-found'; }
-		if (error.reason === 'provider-unavailable' || error.reason === 'project-not-found') { return 'provider-unavailable'; }
-		return 'cooldown';
-	}
-
-	private cooldownUntil(error: IClassifiedProviderError, now: number): number | undefined {
-		if (error.kind === 'auth' || error.kind === 'billing' || error.reason === 'project-not-found') { return undefined; }
-		if (error.reason === 'model-not-found' || error.reason === 'model-retired' || error.reason === 'provider-unavailable') { return now + 24 * 60 * 60_000; }
-		if (error.kind === 'rate-limit') { return now + (error.retryAfterMs ?? 5 * 60_000); }
-		return now + 60_000;
+		return activeModelHealth(health, now);
 	}
 
 	private loadHealth(): void {

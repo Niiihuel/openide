@@ -28,9 +28,11 @@
 }
 
 /* The mark is the element's background seen through the SVG: `currentColor` keeps it on the
-   surface's own foreground, which is what makes a third-party logo read as part of the IDE. */
+   surface's own foreground, which is what makes a third-party logo read as part of the IDE.
+   `--oi-brand-tint` is set inline by the adapter for the few brands whose colour IS the mark
+   (Anthropic's terracotta, NVIDIA's green): same silhouette, the brand's ink instead of ours. */
 .openide-provider-icon.logo-ready {
-	background-color: currentColor;
+	background-color: var(--oi-brand-tint, currentColor);
 	-webkit-mask-size: contain;
 	mask-size: contain;
 	-webkit-mask-repeat: no-repeat;
@@ -39,11 +41,20 @@
 	mask-position: center;
 }
 
+/* A mark that paints itself (Gemini, Mistral, Cohere, DeepSeek…): the SVG as an image, no mask,
+   so its own colours come through. The adapter sets `background-image` inline. */
+.openide-provider-icon.logo-image {
+	background-color: transparent;
+	background-size: contain;
+	background-repeat: no-repeat;
+	background-position: center;
+}
+
 /* Fallback for a provider SVGL and models.dev do not publish (Amp, vLLM, Jan, SambaNova…):
    its initials in the same slot, framed so they read as a mark and not as clipped text. */
 .openide-provider-icon.monogram {
 	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 30%, transparent);
-	border-radius: var(--vscode-cornerRadius-small, 4px);
+	border-radius: var(--oi-radius-sm);
 	background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
 	font-size: 8px;
 	font-weight: 700;

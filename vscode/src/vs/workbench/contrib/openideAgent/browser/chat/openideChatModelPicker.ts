@@ -5,7 +5,8 @@
 
 import { addDisposableListener, getWindow } from '../../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent.js';
-import { List } from '../../../../../base/browser/ui/list/listWidget.js';
+import { IListVirtualDelegate } from '../../../../../base/browser/ui/list/list.js';
+import { IListStyles, List } from '../../../../../base/browser/ui/list/listWidget.js';
 import { KeyCode } from '../../../../../base/common/keyCodes.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../nls.js';
@@ -14,23 +15,80 @@ import { AnchorAlignment, AnchorPosition } from '../../../../../base/browser/ui/
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { defaultListStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
 import { IOpenideAgentService, IOpenidePickerGroup, IOpenidePickerModel } from '../openideAgentService.js';
-import { createCodicon, createMenuContent, createMenuEmpty, createMenuRow, OpenideComposerPopover } from './openideComposerMenu.js';
+import { createCodicon, createMenuCheck, createMenuContent, createMenuEmpty, createMenuRow, OpenideComposerPopover } from './openideComposerMenu.js';
 import { OpenideChatModelDetail } from './openideChatModelDetail.js';
 import { t } from '../../common/openideStrings.js';
 import {
-	IModelEntryRow, IModelSectionRow, MODEL_ROW_HEIGHT, MODEL_SECTION_HEIGHT, ModelPickerDelegate,
+	IModelEntryRow, IModelSectionRow, MODEL_ROW_TEMPLATE, MODEL_SECTION_HEIGHT, MODEL_SECTION_TEMPLATE,
 	ModelPickerRow, ModelRowRenderer, ModelSectionRenderer,
 } from './openideChatModelPickerRows.js';
 
 /**
+ * Height of one model row: the menu family's 28px (`.openide-menu-row` / `.openide-mp-row` in
+ * openideChatMenus.css), which the virtual list has to be told up front. Pinned here rather than
+ * taken from the rows module so the picker and its stylesheet agree on the one number.
+ */
+const PICKER_ROW_HEIGHT = 24;
+
+/**
  * Chrome above and below the virtualized rows, which the list height has to leave room for.
  *
- * Search row (28 + 4 margin) and the content's own 4px padding top/bottom = 40; the footer that
- * carries the add-provider action (4 + 24 + 4 + 1 border) = 33; the hint bar (5 + ~15 + 5 + 1
- * border) = 26.
+ * Search row (28, border inside it) + 4 margin and the content's own 4px padding top/bottom = 40;
+ * the footer that carries the add-provider action (4 + 24 + 4 + 1 border) = 33.
  */
-const PICKER_CHROME_HEIGHT = 99;
+const PICKER_CHROME_HEIGHT = 73;
 const PICKER_MAX_HEIGHT = 420;
+
+/**
+ * The list's own row paint is switched off: it never holds DOM focus (the search field drives it),
+ * and its hover/focus fills would land on the outer `.monaco-list-row`, a square box that ignores
+ * the 4px inset and the row radius. The fill is painted by CSS on the inner `.openide-mp-row`
+ * instead, the same way every other menu row paints it.
+ */
+const PICKER_LIST_STYLES: IListStyles = {
+	...defaultListStyles,
+	listFocusBackground: undefined,
+	listFocusForeground: undefined,
+	listActiveSelectionBackground: undefined,
+	listActiveSelectionForeground: undefined,
+	listActiveSelectionIconForeground: undefined,
+	listFocusAndSelectionOutline: undefined,
+	listFocusAndSelectionBackground: undefined,
+	listFocusAndSelectionForeground: undefined,
+	listInactiveSelectionBackground: undefined,
+	listInactiveSelectionIconForeground: undefined,
+	listInactiveSelectionForeground: undefined,
+	listInactiveFocusForeground: undefined,
+	listInactiveFocusBackground: undefined,
+	listHoverBackground: undefined,
+	listHoverForeground: undefined,
+	listFocusOutline: undefined,
+	listInactiveFocusOutline: undefined,
+	listSelectionOutline: undefined,
+	listHoverOutline: undefined,
+};
+
+class PickerDelegate implements IListVirtualDelegate<ModelPickerRow> {
+	getHeight(element: ModelPickerRow): number {
+		return element.kind === 'section' ? MODEL_SECTION_HEIGHT : PICKER_ROW_HEIGHT;
+	}
+	getTemplateId(element: ModelPickerRow): string {
+		return element.kind === 'section' ? MODEL_SECTION_TEMPLATE : MODEL_ROW_TEMPLATE;
+	}
+}
+
+/**
+ * The shared row plus the family's trailing check. The base renderer already toggles
+ * `.openide-menu-active` on the row for the current model; the check node is what CSS reveals
+ * under that class, and the column stays reserved on every row so the stars keep their line.
+ */
+class CheckedModelRowRenderer extends ModelRowRenderer {
+	override renderTemplate(container: HTMLElement): ReturnType<ModelRowRenderer['renderTemplate']> {
+		const template = super.renderTemplate(container);
+		template.container.appendChild(createMenuCheck(container.ownerDocument));
+		return template;
+	}
+}
 
 function pickerKey(providerId: string, modelId: string): string {
 	return `${providerId}/${modelId}`;
@@ -142,11 +200,11 @@ export class OpenideChatModelPicker extends Disposable {
 		this._emptyHost = document.createElement('div');
 		content.appendChild(this._emptyHost);
 
-		this._list = store.add(new List<ModelPickerRow>('OpenideChatModelPicker', this._listHost, new ModelPickerDelegate(), [
+		this._list = store.add(new List<ModelPickerRow>('OpenideChatModelPicker', this._listHost, new PickerDelegate(), [
 			new ModelSectionRenderer(row => this._toggleSection(row)),
-			new ModelRowRenderer(row => this._toggleFavorite(row)),
+			new CheckedModelRowRenderer(row => this._toggleFavorite(row)),
 		], { horizontalScrolling: false, mouseSupport: true }));
-		this._list.style(defaultListStyles);
+		this._list.style(PICKER_LIST_STYLES);
 		store.add(this._list.onMouseClick(event => {
 			if (event.element?.kind === 'model') { this._choose(event.element); }
 		}));
@@ -172,18 +230,8 @@ export class OpenideChatModelPicker extends Disposable {
 		footer.appendChild(add);
 		container.appendChild(footer);
 
-		const hints = document.createElement('div');
-		hints.className = 'openide-mp-hints';
-		for (const [key, label] of [['↑↓', localize('openide.chat.model.navigate', "navegar")], ['↵', localize('openide.chat.model.choose', "elegir")]]) {
-			const hint = document.createElement('span');
-			const kbd = document.createElement('kbd');
-			kbd.textContent = key;
-			const text = document.createElement('span');
-			text.textContent = label;
-			hint.append(kbd, text);
-			hints.appendChild(hint);
-		}
-		container.appendChild(hints);
+		// No shortcut bar: the arrows and Enter work from the search field as before, the bar only
+		// said so and cost a hairline and 26px (Cursor's list ends at its footer).
 
 		// The search box owns the keyboard: the list is driven from it, so the caret never leaves
 		// the field the user is typing in.
@@ -276,9 +324,9 @@ export class OpenideChatModelPicker extends Disposable {
 				? localize('openide.chat.model.noResults', "Sin resultados")
 				: localize('openide.chat.model.noProviders', "Sin proveedores conectados")));
 		}
-		const contentHeight = rows.reduce((total, row) => total + (row.kind === 'section' ? MODEL_SECTION_HEIGHT : MODEL_ROW_HEIGHT), 0);
+		const contentHeight = rows.reduce((total, row) => total + (row.kind === 'section' ? MODEL_SECTION_HEIGHT : PICKER_ROW_HEIGHT), 0);
 		const viewport = getWindow(host).innerHeight;
-		const available = Math.max(MODEL_ROW_HEIGHT, Math.min(PICKER_MAX_HEIGHT, viewport * 0.6) - PICKER_CHROME_HEIGHT);
+		const available = Math.max(PICKER_ROW_HEIGHT, Math.min(PICKER_MAX_HEIGHT, viewport * 0.6) - PICKER_CHROME_HEIGHT);
 		const height = Math.min(contentHeight, available);
 		host.style.height = `${height}px`;
 		list.layout(height);
@@ -333,7 +381,7 @@ export class OpenideChatModelPicker extends Disposable {
 		// Derived from the list geometry instead of the row node: a virtualized row can be recycled
 		// between the hover and the moment the panel is actually painted.
 		const top = this._listHost.getBoundingClientRect().top + list.getElementTop(index) - list.scrollTop;
-		this._detail.schedule(host, { top, height: MODEL_ROW_HEIGHT }, element.group, element.model);
+		this._detail.schedule(host, { top, height: PICKER_ROW_HEIGHT }, element.group, element.model);
 	}
 
 	private _toggleSection(row: IModelSectionRow): void {

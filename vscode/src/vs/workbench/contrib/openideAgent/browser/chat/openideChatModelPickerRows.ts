@@ -112,7 +112,6 @@ interface IModelRowTemplate {
 	readonly iconSlot: HTMLElement;
 	readonly name: HTMLElement;
 	readonly size: HTMLElement;
-	readonly check: HTMLElement;
 	readonly star: HTMLElement;
 	readonly store: DisposableStore;
 	current?: IModelEntryRow;
@@ -142,13 +141,11 @@ export class ModelRowRenderer implements IListRenderer<IModelEntryRow, IModelRow
 		name.className = 'openide-mp-name';
 		const size = append(row, document.createElement('span'));
 		size.className = 'openide-mp-size';
-		const check = append(row, document.createElement('span'));
-		check.className = 'openide-mp-check';
 		const star = append(row, document.createElement('span'));
 		star.className = 'openide-mp-star';
 		star.setAttribute('role', 'button');
 		container.appendChild(row);
-		const template: IModelRowTemplate = { container: row, iconSlot, name, size, check, star, store };
+		const template: IModelRowTemplate = { container: row, iconSlot, name, size, star, store };
 		// Stopped here and not on the list: the star is an action ON the row, and letting the click
 		// through would also select the model the user was only bookmarking.
 		store.add(addDisposableListener(star, 'click', event => {
@@ -167,10 +164,9 @@ export class ModelRowRenderer implements IListRenderer<IModelEntryRow, IModelRow
 		templateData.iconSlot.appendChild(createProviderIcon(document, element.group.id, element.group.label));
 		templateData.name.textContent = element.model.name;
 		templateData.size.textContent = element.model.context;
-		clearNode(templateData.check);
-		if (element.active) {
-			templateData.check.appendChild(createCodicon(document, 'check'));
-		}
+		// The active model wears the persistent tint of `.openide-menu-active`; the list's own
+		// hover/focus paint is lighter and always wins visually over it.
+		templateData.container.classList.toggle('openide-menu-active', element.active);
 		clearNode(templateData.star);
 		templateData.star.classList.toggle('on', element.favorite);
 		templateData.star.appendChild(createCodicon(document, element.favorite ? 'star-full' : 'star-empty'));

@@ -4,10 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 /*
- *  OpenIDE — layout del mapa visual del Project Map. Agrupa por módulo (comunidad) en vez de
- *  correr un force-directed global: es O(n), determinista (mismo grafo → mismas coordenadas) y
- *  comunica de un vistazo lo mismo que el "un color, un módulo" de Graphify. Un Fruchterman-
- *  Reingold sobre 300 nodos son ~27M de operaciones y da un dibujo distinto en cada corrida.
+ *  OpenIDE — the layout of the Project Map. It groups by module (community) instead of running a
+ *  global force-directed pass: that is O(n), deterministic (same graph → same coordinates) and it
+ *  says at a glance what Graphify's "one colour, one module" says. A Fruchterman-Reingold over 300
+ *  nodes is ~27M operations and draws a different picture on every run.
  *--------------------------------------------------------------------------------------------*/
 
 export interface ILayoutInputNode {
@@ -35,25 +35,25 @@ export interface ILayoutEdge {
 	readonly target: string;
 }
 
-/** Iteraciones del refinamiento por fuerzas. Fijas: son parte de la definición del resultado. */
+/** Iterations of the force refinement. Fixed: they are part of the definition of the result. */
 const FORCE_ITERATIONS = 160;
-/** Longitud de reposo del resorte de una arista, en unidades del lienzo. */
+/** Rest length of an edge's spring, in canvas units. */
 const SPRING_LENGTH = 46;
 const SPRING_STRENGTH = 0.09;
 const REPULSION = 3200;
-/** Atracción al centro: evita que los componentes desconectados se vayan al infinito. */
+/** Pull towards the centre: without it the disconnected components drift off to infinity. */
 const GRAVITY = 0.015;
-/** Atracción al centroide del módulo: mantiene compacto cada cluster (Graphify: un color, un módulo). */
+/** Pull towards the module's centroid: what keeps each cluster compact (Graphify: one colour, one module). */
 const COHESION = 0.03;
 
 const MIN_RADIUS = 3.5;
 const MAX_RADIUS = 13;
-/** Margen para que ningún círculo (ni su borde) quede cortado contra el viewport. */
+/** Margin so no circle — nor its outline — is cut off against the viewport. */
 const PADDING = 24;
-/** Ángulo áureo: reparte los nodos de un módulo en espiral sin alinearlos en rayos. */
+/** Golden angle: spreads a module's nodes in a spiral without lining them up into spokes. */
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
-/** Radio del nodo por grado, con compresión raíz para que un hub no tape a sus vecinos. */
+/** Node radius by degree, root-compressed so a hub does not swallow its neighbours. */
 function radiusFor(degree: number, maxDegree: number): number {
 	if (maxDegree <= 0) { return MIN_RADIUS; }
 	const ratio = Math.sqrt(Math.max(0, degree) / maxDegree);
@@ -61,9 +61,9 @@ function radiusFor(degree: number, maxDegree: number): number {
 }
 
 /**
- * Dispone los nodos agrupados por módulo. Los módulos se ubican en un círculo (los más grandes
- * primero, en orden determinista) y dentro de cada uno los nodos van en espiral, del más
- * conectado al menos. Devuelve coordenadas ya encajadas en `width` × `height`.
+ * Lays the nodes out grouped by module. The modules sit on a circle (the biggest first, in a
+ * deterministic order) and inside each one the nodes spiral outwards, most connected first. The
+ * coordinates come back already fitted into `width` × `height`.
  */
 export function layoutGraph(nodes: readonly ILayoutInputNode[], width: number, height: number, edges: readonly ILayoutEdge[] = []): ILayoutResult {
 	if (!nodes.length) { return { nodes: [], width, height }; }
@@ -73,8 +73,8 @@ export function layoutGraph(nodes: readonly ILayoutInputNode[], width: number, h
 		const bucket = byCommunity.get(node.community);
 		if (bucket) { bucket.push(node); } else { byCommunity.set(node.community, [node]); }
 	}
-	// Orden total: tamaño desc, y a igual tamaño por nombre — sin esto el dibujo cambiaría
-	// entre corridas aunque el grafo fuera idéntico.
+	// A TOTAL order: size descending, and by name at equal size — without the tie-break the picture
+	// would change between runs on an identical graph.
 	const communities = [...byCommunity.entries()]
 		.map(([label, members]) => ({
 			label,
@@ -84,15 +84,15 @@ export function layoutGraph(nodes: readonly ILayoutInputNode[], width: number, h
 
 	const maxDegree = nodes.reduce((max, node) => Math.max(max, node.degree), 0);
 
-	// Se resuelve en un espacio NORMALIZADO [-1, 1] y recién al final se estira a cada eje. Con
-	// un radio único basado en min(ancho, alto) el dibujo se encerraba en el cuadrado central y
-	// en un dock angosto y alto dejaba más de la mitad del panel vacío.
+	// Solved in a NORMALIZED [-1, 1] space and stretched to each axis only at the end. With a single
+	// radius based on min(width, height) the drawing was locked inside the central square, and in a
+	// narrow tall dock it left more than half the panel empty.
 	const clusterCenters: { x: number; y: number; spread: number }[] = [];
 	if (communities.length === 1) {
 		clusterCenters.push({ x: 0, y: 0, spread: 1 });
 	} else {
 		const ring = 0.62;
-		// Techo por módulo: el arco disponible entre vecinos, para que uno grande no los invada.
+		// Ceiling per module: the arc available between neighbours, so a big one does not invade them.
 		const maxSpread = (Math.PI * ring) / Math.max(2, communities.length) * 0.92;
 		const totalMembers = nodes.length;
 		for (let index = 0; index < communities.length; index++) {
@@ -113,7 +113,7 @@ export function layoutGraph(nodes: readonly ILayoutInputNode[], width: number, h
 		const center = clusterCenters[index];
 		const members = community.members;
 		members.forEach((node, position) => {
-			// Espiral de Vogel: distribución pareja, sin anillos ni rayos visibles.
+			// Vogel's spiral: an even distribution, with no visible rings or spokes.
 			const t = members.length === 1 ? 0 : Math.sqrt(position / members.length);
 			const angle = position * GOLDEN_ANGLE;
 			placed.push({
@@ -130,10 +130,10 @@ export function layoutGraph(nodes: readonly ILayoutInputNode[], width: number, h
 }
 
 /**
- * Refinamiento por fuerzas (repulsión + resortes + gravedad), como el ForceAtlas2 que usa
- * Graphify, pero SEMBRADO con las posiciones por comunidad y con un número fijo de iteraciones:
- * sin `random()` ni condición de corte por tiempo, el mismo grafo da siempre el mismo dibujo.
- * Sin esto las posiciones ignoran las aristas y el mapa se ve como una nube ordenada de puntos.
+ * Force refinement (repulsion + springs + gravity), the ForceAtlas2 Graphify runs — except SEEDED
+ * with the per-community positions and capped at a fixed number of iterations: with no `random()`
+ * and no time-based stop, the same graph always draws the same picture. Without this pass the
+ * positions ignore the edges and the map reads as a tidy cloud of dots.
  */
 function relax(nodes: readonly ILayoutNode[], edges: readonly ILayoutEdge[], width: number, height: number): ILayoutNode[] {
 	if (nodes.length < 2 || !edges.length) { return [...nodes]; }
@@ -146,7 +146,7 @@ function relax(nodes: readonly ILayoutNode[], edges: readonly ILayoutEdge[], wid
 		.filter((pair): pair is readonly [number, number] => pair[0] !== undefined && pair[1] !== undefined && pair[0] !== pair[1]);
 	const centerX = width / 2;
 	const centerY = height / 2;
-	// Escala: el resorte y la repulsión están calibrados para ~1000px de ancho.
+	// Scale: the spring and the repulsion are calibrated for a canvas around 1000px wide.
 	const scale = Math.max(0.35, Math.min(2, Math.min(width, height) / 700));
 	const springLength = SPRING_LENGTH * scale;
 	const repulsion = REPULSION * scale * scale;
@@ -161,7 +161,7 @@ function relax(nodes: readonly ILayoutNode[], edges: readonly ILayoutEdge[], wid
 	const linkCount = new Array<number>(nodes.length).fill(0);
 	for (const [a, b] of links) { linkCount[a]++; linkCount[b]++; }
 	for (let iteration = 0; iteration < FORCE_ITERATIONS; iteration++) {
-		// Enfriamiento lineal: los primeros pasos reordenan, los últimos sólo acomodan.
+		// Linear cooling: the first steps rearrange, the last ones only settle.
 		const cooling = 1 - iteration / FORCE_ITERATIONS;
 		dx.fill(0); dy.fill(0);
 		for (let a = 0; a < nodes.length; a++) {
@@ -170,7 +170,7 @@ function relax(nodes: readonly ILayoutNode[], edges: readonly ILayoutEdge[], wid
 				let deltaY = ys[a] - ys[b];
 				let distanceSquared = deltaX * deltaX + deltaY * deltaY;
 				if (distanceSquared < 0.01) {
-					// Superpuestos exactos: se separan por su orden, nunca al azar.
+					// Exactly overlapping: pushed apart by their order, never at random.
 					deltaX = (a - b) * 0.01; deltaY = 0.01; distanceSquared = deltaX * deltaX + deltaY * deltaY;
 				}
 				const force = repulsion / distanceSquared;
@@ -191,8 +191,8 @@ function relax(nodes: readonly ILayoutNode[], edges: readonly ILayoutEdge[], wid
 			dx[a] += pullX; dy[a] += pullY;
 			dx[b] -= pullX; dy[b] -= pullY;
 		}
-		// Cohesión de módulo: cada nodo tira hacia el centroide de su comunidad. Es lo que
-		// mantiene "un color, un cluster" cuando los resortes cruzados quieren mezclarlos.
+		// Module cohesion: every node pulls towards its community's centroid. It is what
+		// keeps "one colour, one cluster" when the crossing springs try to blend them.
 		centroidSumX.fill(0); centroidSumY.fill(0); centroidCount.fill(0);
 		for (let index = 0; index < nodes.length; index++) {
 			const community = communityIndex[index];
@@ -204,11 +204,11 @@ function relax(nodes: readonly ILayoutNode[], edges: readonly ILayoutEdge[], wid
 				dx[index] += (centroidSumX[community] / centroidCount[community] - xs[index]) * COHESION;
 				dy[index] += (centroidSumY[community] / centroidCount[community] - ys[index]) * COHESION;
 			}
-			// Sin aristas nada lo sostiene: gravedad triple para que no quede orbitando lejos.
+			// With no edges nothing holds it: triple gravity so it does not orbit far away.
 			const gravity = linkCount[index] === 0 ? GRAVITY * 3 : GRAVITY;
 			dx[index] += (centerX - xs[index]) * gravity;
 			dy[index] += (centerY - ys[index]) * gravity;
-			// Techo de desplazamiento por paso: sin él una repulsión cercana dispara el nodo.
+			// Ceiling on the movement per step: without it a close repulsion launches the node.
 			const step = Math.min(18, Math.hypot(dx[index], dy[index])) * cooling;
 			const magnitude = Math.hypot(dx[index], dy[index]) || 1;
 			xs[index] += (dx[index] / magnitude) * step;
@@ -218,7 +218,7 @@ function relax(nodes: readonly ILayoutNode[], edges: readonly ILayoutEdge[], wid
 	return fitToCanvas(nodes.map((node, index) => ({ ...node, x: xs[index], y: ys[index] })), width, height);
 }
 
-/** Reescala el resultado para que ocupe el lienzo sin deformar las proporciones del dibujo. */
+/** Rescales the result to fill the canvas without distorting the drawing's proportions. */
 function fitToCanvas<T extends ILayoutNode>(nodes: readonly T[], width: number, height: number): T[] {
 	let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 	for (const node of nodes) {
@@ -235,7 +235,7 @@ function fitToCanvas<T extends ILayoutNode>(nodes: readonly T[], width: number, 
 	return nodes.map(node => ({ ...node, x: offsetX + (node.x - minX) * factor, y: offsetY + (node.y - minY) * factor }));
 }
 
-/** Encaja las coordenadas dentro del viewport contemplando el radio de cada círculo. */
+/** Fits the coordinates inside the viewport, each circle's radius included. */
 function clampToViewport<T extends ILayoutNode>(nodes: readonly T[], width: number, height: number): T[] {
 	return nodes.map(node => ({
 		...node,
@@ -246,14 +246,14 @@ function clampToViewport<T extends ILayoutNode>(nodes: readonly T[], width: numb
 
 //#region Layout en capas (Sugiyama)
 
-/** Separación entre capas y entre nodos de una misma capa, en unidades del lienzo. */
+/** Distance between layers, and between the nodes of one layer, in canvas units. */
 const LAYER_GAP = 150;
 const NODE_GAP = 46;
-/** Barridos de reducción de cruces. Cuatro alcanzan la meseta en grafos de este tamaño. */
+/** Crossing-reduction sweeps. Four reach the plateau on graphs of this size. */
 const ORDERING_SWEEPS = 4;
 
 export interface ILayeredNode extends ILayoutNode {
-	/** Índice de capa (0 = sin dependencias internas). Lo usa el render para agrupar y etiquetar. */
+	/** Layer index (0 = no internal dependencies). The renderer groups and labels by it. */
 	readonly layer: number;
 }
 
@@ -265,17 +265,17 @@ export interface ILayeredResult {
 }
 
 /**
- * Rompe los ciclos del grafo de dependencias para poder estratificarlo. Un DFS con marca de
- * "en pila" clasifica como back-edge la arista que vuelve a un nodo del camino actual; se la
- * excluye del cálculo de capas (la arista SIGUE dibujándose, sólo no define profundidad).
- * El orden de visita es el de `order`, así que la elección de qué arista cae es determinista.
+ * Breaks the cycles of the dependency graph so it can be stratified. A DFS with an "on the
+ * stack" mark classifies as a back-edge any edge returning to a node of the current path; that
+ * edge is left out of the layer computation (it is still DRAWN, it just does not define depth).
+ * The visit order is `order`, so which edge gets dropped is deterministic.
  */
 function acyclicEdges(order: readonly string[], adjacency: ReadonlyMap<string, string[]>): Set<string> {
 	const state = new Map<string, 0 | 1 | 2>(); // 0/undefined = sin ver, 1 = en pila, 2 = cerrado
 	const back = new Set<string>();
 	for (const root of order) {
 		if (state.get(root)) { continue; }
-		// Iterativo: un DFS recursivo desborda la pila en repos con cadenas largas de imports.
+		// Iterative: a recursive DFS overflows the stack on repos with long import chains.
 		const stack: { id: string; next: number }[] = [{ id: root, next: 0 }];
 		state.set(root, 1);
 		while (stack.length) {
@@ -294,21 +294,21 @@ function acyclicEdges(order: readonly string[], adjacency: ReadonlyMap<string, s
 }
 
 /**
- * Layout jerárquico en capas: la profundidad de dependencia define la capa, y las dependencias
- * fluyen en una sola dirección. Es lo que hace legible a un diagrama de React Flow — de un
- * vistazo se ve qué está arriba (entrypoints), qué está abajo (utilidades) y quién depende de
- * quién. Un force-directed comunica densidad, no jerarquía: para "entender la estructura" es la
- * herramienta equivocada, y sin aristas degenera directamente en una bola.
+ * Layered hierarchical layout: dependency depth defines the layer, and dependencies flow in a
+ * single direction. It is what makes a React Flow diagram readable — at a glance you see what is
+ * on top (entrypoints), what is at the bottom (utilities) and who depends on whom. A
+ * force-directed layout says density, not hierarchy: for "understand the structure" it is the
+ * wrong tool, and with no edges it degenerates into a ball.
  *
- * Tres etapas clásicas de Sugiyama: asignar capas por camino más largo, ordenar dentro de cada
- * capa con la heurística de la mediana para reducir cruces, y repartir las coordenadas. Sin
- * `random()` y con órdenes totales en cada desempate: mismo grafo → mismo dibujo.
+ * The three classic Sugiyama stages: assign layers by longest path, order within each layer with
+ * the median heuristic to reduce crossings, and spread the coordinates. With no `random()` and a
+ * total order at every tie-break: same graph → same drawing.
  */
 export function layoutLayered(nodes: readonly ILayoutInputNode[], edges: readonly ILayoutEdge[], width: number, height: number): ILayeredResult {
 	if (!nodes.length) { return { nodes: [], width, height, layers: 0 }; }
 
-	// Orden base determinista: por módulo, luego por grado, luego por id. Siembra el DFS y
-	// desempata todo lo que venga después.
+	// A deterministic base order: by module, then by degree, then by id. It seeds the DFS and
+	// breaks the ties of everything that comes after.
 	const ordered = [...nodes].sort((a, b) => a.community.localeCompare(b.community) || b.degree - a.degree || a.id.localeCompare(b.id));
 	const known = new Set(ordered.map(node => node.id));
 	const order = ordered.map(node => node.id);
@@ -331,9 +331,9 @@ export function layoutLayered(nodes: readonly ILayoutInputNode[], edges: readonl
 	const back = acyclicEdges(order, outgoing);
 	const isBack = (source: string, target: string): boolean => back.has(source + '\0' + target);
 
-	// Capa = camino más largo desde un nodo sin dependencias entrantes. Se resuelve en orden
-	// topológico (Kahn) sobre el grafo ya sin ciclos, así cada nodo se visita con sus
-	// predecesores resueltos.
+	// Layer = longest path from a node with no incoming dependencies. Solved in topological
+	// order (Kahn) over the already acyclic graph, so every node is visited with its
+	// predecessors already resolved.
 	const layerOf = new Map<string, number>();
 	const pendingCount = new Map<string, number>();
 	for (const id of order) {
@@ -356,9 +356,9 @@ export function layoutLayered(nodes: readonly ILayoutInputNode[], edges: readonl
 	const layers: string[][] = Array.from({ length: layerCount }, () => []);
 	for (const id of order) { layers[layerOf.get(id)!].push(id); }
 
-	// Reducción de cruces por mediana: cada nodo se mueve a la posición mediana de sus vecinos en
-	// la capa adyacente. Se alterna la dirección del barrido para que el orden converja por los
-	// dos lados en vez de arrastrar sólo el sesgo de la primera capa.
+	// Median crossing reduction: each node moves to the median position of its neighbours in the
+	// adjacent layer. The sweep alternates direction so the order converges from both ends instead
+	// of dragging the bias of the first layer alone.
 	const positionOf = new Map<string, number>();
 	const reindex = (): void => { for (const layer of layers) { layer.forEach((id, index) => positionOf.set(id, index)); } };
 	reindex();
@@ -374,16 +374,16 @@ export function layoutLayered(nodes: readonly ILayoutInputNode[], edges: readonl
 		for (const index of indices) {
 			const neighbours = downward ? incoming : outgoing;
 			const keys = new Map(layers[index].map(id => [id, median(id, neighbours)] as const));
-			// El id como último criterio deja el orden total: `sort` estable no alcanza porque el
-			// arreglo de entrada ya viene permutado por el barrido anterior.
+			// The id as the last criterion is what makes the order total: a stable `sort` is not enough,
+			// because the input array arrives already permuted by the previous sweep.
 			layers[index] = [...layers[index]].sort((a, b) => keys.get(a)! - keys.get(b)! || a.localeCompare(b));
 			reindex();
 		}
 	}
 
-	// Coordenadas: capas apiladas en Y (arriba lo que no depende de nada), miembros repartidos en
-	// X y centrados. El lienzo se dimensiona por el contenido y después se encaja en el viewport,
-	// así un grafo ancho no se recorta ni uno chico queda perdido en una esquina.
+	// Coordinates: layers stacked on Y (what depends on nothing goes on top), members spread on X
+	// and centred. The canvas is sized by the content and then fitted into the viewport, so a wide
+	// graph is not cropped and a small one is not lost in a corner.
 	const maxDegree = nodes.reduce((max, node) => Math.max(max, node.degree), 0);
 	const inputById = new Map(nodes.map(node => [node.id, node] as const));
 	const widest = layers.reduce((max, layer) => Math.max(max, layer.length), 1);

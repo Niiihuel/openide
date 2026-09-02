@@ -43,7 +43,9 @@ jobs:
         run: node dev/audit-comment-language.mjs
 
       - name: Audit surface tokens
-        run: node dev/audit-surface-tokens.mjs
+        run: |
+          node dev/audit-surface-tokens.mjs
+          node --test dev/audit-surface-tokens.test.mjs
 
       - name: Audit script permissions
         run: node dev/audit-script-permissions.mjs

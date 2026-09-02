@@ -10,8 +10,10 @@ import assert from 'assert';
 import { applyAgentEvent } from '../../common/chat/openideChatReducer.js';
 import { createOpenideChatReducerState, IOpenideChatReducerState } from '../../common/chat/openideChatReducerState.js';
 import { applyOpenideChatSurfaceEvent, IOpenideChatSurfaceEvent } from '../../common/chat/openideChatSurface.js';
-import { IOpenideChatCanvasContent, IOpenideChatContent, IOpenideChatPlanContent } from '../../common/chat/openideChatContent.js';
-import { isOpenideChatResponseItem } from '../../common/chat/openideChatItem.js';
+import { IOpenideChatCanvasContent, IOpenideChatContent, IOpenideChatPlanContent, IOpenideChatSubagentContent } from '../../common/chat/openideChatContent.js';
+import { createOpenideChatRequestItem, isOpenideChatResponseItem } from '../../common/chat/openideChatItem.js';
+import { beginOpenideChatTurn } from '../../common/chat/openideChatReducerState.js';
+import { ISubagentRun } from '../../common/openideSubagentTypes.js';
 import { AgentLoopEvent } from '../../common/openideAgentTypes.js';
 
 /**
@@ -37,7 +39,7 @@ suite('OpenIDE chat surface events', () => {
 	}
 
 	function isSurface(event: IOpenideChatSurfaceEvent | AgentLoopEvent): event is IOpenideChatSurfaceEvent {
-		return event.type === 'planDraft' || event.type === 'planCard' || event.type === 'canvasCard';
+		return event.type === 'planDraft' || event.type === 'planCard' || event.type === 'canvasCard' || event.type === 'subagentRunUpdate';
 	}
 
 	function contentOf(state: IOpenideChatReducerState): readonly IOpenideChatContent[] {
@@ -151,6 +153,79 @@ suite('OpenIDE chat surface events', () => {
 		const state = fold([{ type: 'canvasCard', path: '.openide/canvases/A.canvas.tsx', title: 'A', created: false }]);
 		assert.strictEqual(state.items.length, 1);
 		assert.strictEqual(contentOf(state).length, 1);
+	});
+
+	/**
+	 * A delegated specialist reports its run to the loop ONCE. For a background run that report is
+	 * the clone `delegate()` returns before routing has run, so the card is born holding the
+	 * definition's literal `'default'` — everything real about the run lands afterwards, on the run
+	 * service's own emitter, which is not the loop.
+	 */
+	suite('a specialist run that keeps moving after it was reported', () => {
+
+		const RUN: ISubagentRun = {
+			runId: 'run_1', definitionId: 'explore', definitionVersion: 1, definitionName: 'explore',
+			parentConversationId: 'hook-uuid', parentMessageId: 'msg', depth: 1, task: 'buscar',
+			status: 'queued', createdAt: NOW, model: 'default', readonly: true, background: true,
+			metrics: { inputTokens: 0, outputTokens: 0, toolCalls: 0, filesRead: 0, filesModified: 0, searches: 0, errors: 0, cancellations: 0, routingAttempts: 0, fallbacks: 0 },
+			timeline: [], childRunIds: [], deliveryState: 'pending', generation: 1, attemptCount: 1,
+		};
+
+		function armed(): IOpenideChatReducerState {
+			return beginOpenideChatTurn(createOpenideChatReducerState(), createOpenideChatRequestItem({ id: 'req_1', text: 'dale', modelId: 'gpt-5.6-luna' }));
+		}
+
+		function cardOf(state: IOpenideChatReducerState): IOpenideChatSubagentContent | undefined {
+			const last = state.items[state.items.length - 1];
+			const content = last && isOpenideChatResponseItem(last) ? last.content : [];
+			return content.find((row): row is IOpenideChatSubagentContent => row.kind === 'subagent');
+		}
+
+		test('the routed model replaces the placeholder the card was born with', () => {
+			let state = applyAgentEvent(armed(), { type: 'subagentRun', run: RUN }, { now: NOW }).state;
+			assert.strictEqual(cardOf(state)?.model, 'default');
+			const routed: ISubagentRun = { ...RUN, status: 'running', model: 'grok-4.6', providerId: 'xai' };
+			state = applyOpenideChatSurfaceEvent(state, { type: 'subagentRunUpdate', run: routed }, { now: NOW }).state;
+			assert.strictEqual(cardOf(state)?.model, 'grok-4.6');
+			assert.strictEqual(cardOf(state)?.status, 'running');
+		});
+
+		test('the card records the model of the turn that delegated it', () => {
+			// Without the parent's model the row cannot decide whether naming the specialist's model
+			// says anything: repeating the model you are already running is noise.
+			const state = applyAgentEvent(armed(), { type: 'subagentRun', run: RUN }, { now: NOW }).state;
+			assert.strictEqual(cardOf(state)?.parentModel, 'gpt-5.6-luna');
+		});
+
+		test('updating twice with the same run leaves one card, not two', () => {
+			let state = applyAgentEvent(armed(), { type: 'subagentRun', run: RUN }, { now: NOW }).state;
+			const routed: ISubagentRun = { ...RUN, status: 'running', model: 'grok-4.6' };
+			state = applyOpenideChatSurfaceEvent(state, { type: 'subagentRunUpdate', run: routed }, { now: NOW }).state;
+			state = applyOpenideChatSurfaceEvent(state, { type: 'subagentRunUpdate', run: routed }, { now: NOW }).state;
+			const last = state.items[state.items.length - 1];
+			const content = last && isOpenideChatResponseItem(last) ? last.content : [];
+			assert.strictEqual(content.filter(row => row.kind === 'subagent').length, 1);
+		});
+
+		test('an update for a run with no card on screen is dropped, never appended', () => {
+			// THE invariant. `draft.subagents` is a per-turn cursor, so a background run finishing
+			// three turns later finds nothing — and pushing there would append a second card of a
+			// specialist nobody delegated into that reply. The result still reaches the user through
+			// the controller's terminal delivery, which is the path that survives a turn.
+			const state = armed();
+			const step = applyOpenideChatSurfaceEvent(state, { type: 'subagentRunUpdate', run: { ...RUN, status: 'completed' } }, { now: NOW });
+			assert.strictEqual(step.items, state.items);
+			assert.strictEqual(cardOf(step.state), undefined);
+		});
+
+		test('an empty timeline never wipes the one the card already accumulated', () => {
+			// The nested-frame path builds synthetic events numbered off `timeline.length`; letting a
+			// run snapshot with no timeline overwrite them would renumber the next one onto a hole.
+			let state = applyAgentEvent(armed(), { type: 'subagentRun', run: { ...RUN, timeline: [{ sequence: 0, timestamp: NOW, type: 'toolStart', toolName: 'read_file' }] } }, { now: NOW }).state;
+			assert.strictEqual(cardOf(state)?.timeline.length, 1);
+			state = applyOpenideChatSurfaceEvent(state, { type: 'subagentRunUpdate', run: { ...RUN, timeline: [] } }, { now: NOW }).state;
+			assert.strictEqual(cardOf(state)?.timeline.length, 1);
+		});
 	});
 
 	test('a no-op event does not move the items', () => {

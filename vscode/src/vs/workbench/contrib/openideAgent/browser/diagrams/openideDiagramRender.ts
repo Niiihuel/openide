@@ -9,6 +9,8 @@ import { renderSequenceChart } from './openideChartSequence.js';
 import { renderGitChart, renderQuadrantChart } from './openideChartStructure.js';
 import { IOpenideChartRender } from './openideChartTheme.js';
 import { renderGraphDiagramSvg } from './openideGraphDiagram.js';
+import { INodeMapFocus, renderNodeMapSvg } from './openideNodeMapDiagram.js';
+import { renderSeqMapSvg } from './openideSeqMapDiagram.js';
 import './media/openideDiagrams.css';
 
 /**
@@ -16,7 +18,7 @@ import './media/openideDiagrams.css';
  *
  * It exists so the chat part and the plan viewer cannot drift apart — the webview had TWO
  * dispatchers (`renderDiagramResult` for the graph family, `renderChartHtml` for the charts,
- * openideChatHtml.ts:2176-2192 and :2282-2292) and the plan viewer a third copy of both.
+ * the removed chat webview and :2282-2292) and the plan viewer a third copy of both.
  *
  * The container markup is transcribed from the webview: the OUTER box clips and the INNER box
  * scrolls. That split is not cosmetic — it is what keeps the full-screen button pinned while a wide
@@ -34,6 +36,11 @@ export interface IOpenideDiagramRender {
 	 * and journey charts are lists of HTML rows with no single node that means anything on its own.
 	 */
 	readonly svg?: SVGSVGElement;
+	/**
+	 * The picture's selection, for the frames that offer one. Only the typed maps have it: a chart
+	 * has no nodes to pin, and a mermaid graph's focus is hover-only.
+	 */
+	readonly focus?: INodeMapFocus;
 }
 
 function renderChartSpec(doc: Document, spec: ChartSpec): IOpenideChartRender | undefined {
@@ -78,12 +85,21 @@ export function renderOpenideDiagram(doc: Document, source: string): IOpenideDia
 			scroll.appendChild(svg);
 			return { domNode, svg };
 		}
+		if (result.family === 'nodemap' || result.family === 'seqmap') {
+			// The typed maps keep the dotted grid: it is the graph family's canvas texture, and the
+			// Project Map (whose visual grammar this is) draws the same dots behind its nodes.
+			const map = result.family === 'seqmap'
+				? renderSeqMapSvg(doc, result.spec, result.layout)
+				: renderNodeMapSvg(doc, result.spec, result.layout);
+			scroll.appendChild(map.svg);
+			return { domNode, svg: map.svg, focus: map.focus };
+		}
 		const chart = renderChartSpec(doc, result.spec);
 		if (!chart || !chart.nodes.length) {
 			return undefined;
 		}
 		// The dotted grid says "canvas" and belongs to the graph family only; a chart draws its own
-		// axes and would fight it (openideChatHtml.ts:213).
+		// axes and would fight it (the removed chat webview).
 		domNode.classList.add('openide-diagram-chart');
 		for (const node of chart.nodes) {
 			scroll.appendChild(node);

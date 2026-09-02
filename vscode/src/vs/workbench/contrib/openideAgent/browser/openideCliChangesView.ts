@@ -17,12 +17,17 @@
  *  For a hosted CLI that inline view already exists — the agent's own TUI prints its diff as it
  *  works — so grouping by turn here only broke apart the one thing the panel is for.
  *
- *  ── Why it borrows so much ─────────────────────────────────────────────────────────────────
- *  Rows take their icon from the user's file icon theme through `getIconClasses`, and the
- *  container opts into that theme the way the Explorer does. It is not decoration: a list of
- *  paths that does not look like every other list of paths in the IDE reads as something bolted
- *  on, and has to be learned separately. The status letter sits on the right, where Source
- *  Control puts it, and the agent's mark is the same one the dock paints for that provider.
+ *  ── One row, one review, shared with the chat ─────────────────────────────────────────────
+ *  A file row is `OpenideChatFileRow`, the same primitive the transcript's edit card and the
+ *  dock's tray paint, with the same ±N — counted by `buildDiffPreview`, the same engine. A click
+ *  opens the change the way the harness opens its own: the file in the editor with the blocks
+ *  painted and Undo/Keep (`OpenideEditReview`), seeded with this session's baseline. This view
+ *  used to draw its own row and send the reader to a side-by-side diff editor, so a change
+ *  looked one way in the chat and another way here. The diff lives in the editor, only there.
+ *
+ *  The container opts into the user's file icon theme the way the Explorer does — the row's
+ *  icon comes through `getIconClasses` — and the status letter sits on the right, where Source
+ *  Control puts it. The agent's mark is the one the dock paints for that provider.
  *
  *  ── Saying only what we know ───────────────────────────────────────────────────────────────
  *  The list is "what changed while the agent was working", the user's own edits in those windows
@@ -33,14 +38,9 @@
 
 import { $, addDisposableListener, append, clearNode } from '../../../../base/browser/dom.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
-import { URI } from '../../../../base/common/uri.js';
-import { getIconClasses } from '../../../../editor/common/services/getIconClasses.js';
-import { ILanguageService } from '../../../../editor/common/languages/language.js';
-import { IModelService } from '../../../../editor/common/services/model.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
-import { FileKind } from '../../../../platform/files/common/files.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
@@ -51,22 +51,13 @@ import { IViewletViewOptions } from '../../../browser/parts/views/viewsViewlet.j
 import { ViewPane } from '../../../browser/parts/views/viewPane.js';
 import { createFileIconThemableTreeContainerScope } from '../../files/browser/views/explorerView.js';
 import { IOpenideCliChangedFile, IOpenideCliChangesService, IOpenideCliChangesSession, OpenideCliChangesService } from './openideCliChangesService.js';
-import { OpenideTurnFileStatus } from '../common/openideCliTurnChanges.js';
 import { getOpenideCli } from '../common/openideAgentCliCatalog.js';
 import { applyProviderIcon } from './openideProviderIcons.js';
 import { t } from '../common/openideStrings.js';
+import { OpenideChatFileRow } from './chat/parts/openideChatFileRow.js';
 import './media/openideCliChanges.css';
 
 export const OPENIDE_CLI_CHANGES_VIEW_ID = 'workbench.view.openideCliChanges';
-
-/** Letter and tint per status — the vocabulary Source Control taught everyone to read. */
-const STATUS_BADGE: Record<OpenideTurnFileStatus, { readonly letter: string; readonly cls: string }> = {
-	added: { letter: 'A', cls: 'added' },
-	modified: { letter: 'M', cls: 'modified' },
-	deleted: { letter: 'D', cls: 'deleted' },
-	renamed: { letter: 'R', cls: 'renamed' },
-	untracked: { letter: 'U', cls: 'untracked' },
-};
 
 /** What each state is called, and what its tooltip explains. */
 const ACTIVITY_LABEL = {
@@ -105,8 +96,6 @@ export class OpenideCliChangesView extends ViewPane {
 		@IThemeService themeService: IThemeService,
 		@IHoverService hoverService: IHoverService,
 		@IOpenideCliChangesService private readonly changes: OpenideCliChangesService,
-		@IModelService private readonly modelService: IModelService,
-		@ILanguageService private readonly languageService: ILanguageService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 		this._register(this.changes.onDidChange(() => {
@@ -238,34 +227,30 @@ export class OpenideCliChangesView extends ViewPane {
 	}
 
 	private paintFile(section: HTMLElement, session: IOpenideCliChangesSession, file: IOpenideCliChangedFile): void {
-		const resource = URI.file(`${session.cwd}/${file.path}`);
-		const row = append(section, $('.openide-cli-changes-file'));
-		row.setAttribute('role', 'button');
-
-		const icon = append(row, $('span.openide-cli-changes-icon'));
-		icon.classList.add(...getIconClasses(this.modelService, this.languageService, resource, FileKind.FILE));
-
-		const slash = file.path.lastIndexOf('/');
-		append(row, $('span.openide-cli-changes-name')).textContent = slash < 0 ? file.path : file.path.slice(slash + 1);
-		if (slash > 0) {
-			append(row, $('span.openide-cli-changes-dir')).textContent = file.path.slice(0, slash);
-		}
-
-		// The status letter goes last, on the right, where Source Control puts it.
-		const badge = STATUS_BADGE[file.status];
-		const mark = append(row, $('span.openide-cli-changes-badge'));
-		mark.classList.add(badge.cls);
-		mark.textContent = badge.letter;
-
+		const open = () => void this.changes.openDiff(session.sessionId, file);
+		const row = this.renderStore.add(this.instantiationService.createInstance(OpenideChatFileRow, {
+			className: 'openide-cli-changes-row',
+			onClick: open,
+		}));
+		append(section, row.domNode);
+		row.setFile(file.path);
+		row.setStats({ status: file.status });
+		row.setActions([{ icon: 'go-to-file', tooltip: () => t('cliChanges.row.openEditor'), run: open }]);
+		row.domNode.title = file.from ? t('cliChanges.renamedFrom', file.path, file.from) : file.path;
 		if (!file.exact) {
 			// The file was already sitting in the tree untracked when the conversation began, so
 			// nothing records what it looked like: the diff will show all of it. Marked, because a
 			// diff that shows everything looks like the agent rewrote everything.
-			const warn = append(row, $('span.codicon.codicon-question.openide-cli-changes-nobase'));
+			const warn = append(row.domNode, $('span.codicon.codicon-question.openide-cli-changes-nobase'));
 			warn.title = t('cliChanges.noBaseline');
 		}
-		row.title = file.from ? t('cliChanges.renamedFrom', file.path, file.from) : file.path;
-		this.renderStore.add(addDisposableListener(row, 'click', () => void this.changes.openDiff(session.sessionId, file)));
+		// The ±N, the way the tray's rows carry it. Counted lazily and cached by the service, so
+		// a repaint of a long list does not re-read every file.
+		void this.changes.preview(session.sessionId, file).then(preview => {
+			if (preview && row.domNode.isConnected) {
+				row.setStats({ added: preview.added, removed: preview.removed, created: preview.created, status: file.status });
+			}
+		});
 	}
 
 	override layoutBody(height: number, width: number): void {

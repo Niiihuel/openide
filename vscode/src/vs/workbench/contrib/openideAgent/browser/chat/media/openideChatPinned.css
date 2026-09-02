@@ -1,0 +1,76 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat: the request pinned at the top of the transcript, and its inline editor.
+ *
+ *  Cursor's request block stays in view while its reply scrolls under it. The transcript is a
+ *  virtualised list, so the row cannot be `position: sticky`; this overlay stands in for it
+ *  (openideChatPinnedRequest.ts). It has to pass for the row: same bubble, same paddings, and NO
+ *  entrance animation — a fade on something already on screen is a flicker. It paints on the island
+ *  colour, because the row it covers must not show through, and fades out under its bottom edge so
+ *  that row dissolves rather than being cut.
+ *--------------------------------------------------------------------------------------------*/
+.openide-chat-pinned {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 0;
+	z-index: 5;
+	/* The row's own padding (openideChatNative.css `.openide-chat-row`), so the pinned bubble sits
+	   exactly over the column the rows use, and the row's font size and line height. */
+	padding: 6px 18px 0 10px;
+	background: var(--oi-surface);
+	font-size: var(--openide-chat-font-size, 13px);
+	line-height: 1.45;
+	display: none;
+}
+.openide-chat-pinned.visible {
+	display: block;
+}
+.openide-chat-pinned::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 100%;
+	height: 14px;
+	background: linear-gradient(to bottom, var(--oi-surface), transparent);
+	pointer-events: none;
+}
+/* The row's card colour is a translucent tint; here it sits on the island, which is what the row
+   sits on too, so the two compute to the same colour. */
+.openide-chat-pinned > .openide-chat-request-bubble.hidden { display: none; }
+
+/* ---- The inline editor ---- */
+.openide-chat-pinned-edit.hidden { display: none; }
+/* The second composer is the main one's class, stripped of what only makes sense at the dock: the
+   band padding, the raised z-index, the fade gradient that rises over the transcript, and the
+   permission/usage strip that belongs to the conversation, not to this message. */
+.openide-chat-pinned-edit .openide-chat-dock {
+	padding: 0;
+	z-index: auto;
+	isolation: auto;
+	background: transparent;
+}
+.openide-chat-pinned-edit .openide-chat-dock::before { display: none; }
+.openide-chat-pinned-edit .openide-chat-footer { display: none; }
+/* Kept short: a long message does not push the editor down over the transcript, it scrolls behind
+   a fade. The composer reads this ceiling (`_autosize`) instead of its own 180px. */
+.openide-chat-pinned-edit .openide-chat-prompt { max-height: 120px; }
+.openide-chat-pinned-edit .openide-chat-prompt.scrollable {
+	-webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+	mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+}
+
+/* Cursor's pinned message: the picture first and small, the text under it fading out at the
+   clamp. A click while the reply is still coming opens it out — the whole text, the pictures
+   at the row's size — and a second click folds it back. */
+.openide-chat-pinned > .openide-chat-request-bubble { display: flex; flex-direction: column; }
+.openide-chat-pinned .openide-chat-request-images { order: -1; margin: 0 0 6px; }
+.openide-chat-pinned .openide-chat-request-image { width: 48px; height: 48px; }
+.openide-chat-pinned.expanded .openide-chat-request-image { width: 96px; height: 96px; }
+.openide-chat-pinned.expanded .openide-chat-request-text.openide-chat-request-collapsed {
+	max-height: none;
+	-webkit-mask-image: none;
+	mask-image: none;
+}
+.openide-chat-request-image.openable { cursor: zoom-in; }
+.openide-chat-request-image.openable:hover { border-color: var(--vscode-focusBorder); }

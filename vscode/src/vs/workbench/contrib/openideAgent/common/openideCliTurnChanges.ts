@@ -146,6 +146,25 @@ export type OpenideTouchedPaths = ReadonlyMap<string, OpenideTouchKind>;
 export const MAX_TOUCHED_PER_TURN = 500;
 
 /**
+ * Pathspecs per `git status` call. The host refuses a git invocation with more than 64 argv
+ * entries — a guard against runaway command lines — and the status that closes a turn used to
+ * hand it every touched path at once. Past ~59 files the call was rejected before git ever ran,
+ * the turn fell back to the watcher's raw verdicts, and the view filled with a dev server's
+ * build output as `U` rows. So the paths go in batches that stay under the guard with room for
+ * the fixed arguments.
+ */
+export const GIT_PATHSPEC_BATCH = 50;
+
+/** Splits the touched paths into `git status` calls that fit the host's argv guard. */
+export function pathspecBatches(paths: readonly string[], size = GIT_PATHSPEC_BATCH): string[][] {
+	const batches: string[][] = [];
+	for (let index = 0; index < paths.length; index += size) {
+		batches.push(paths.slice(index, index + size));
+	}
+	return batches;
+}
+
+/**
  * The turn's file list: the watcher says which paths, git says what kind.
  *
  * A path git no longer reports is one that ended the turn matching HEAD. The watcher saw it
@@ -154,11 +173,23 @@ export const MAX_TOUCHED_PER_TURN = 500;
  * for nothing. The exception is a path the watcher saw DELETED that git does not mention, which
  * is an untracked file that is simply gone: git has nothing to say about it and it is still news.
  */
-export function turnFilesFromWatch(touched: OpenideTouchedPaths, records: readonly IPorcelainRecord[]): IOpenideTurnFile[] {
+export function turnFilesFromWatch(touched: OpenideTouchedPaths, records: readonly IPorcelainRecord[], ignored?: ReadonlySet<string>): IOpenideTurnFile[] {
 	const byPath = new Map(records.map(record => [record.path, record]));
 	const files: IOpenideTurnFile[] = [];
 	for (const [path, kind] of touched) {
+		if (ignored?.has(path)) {
+			// `git check-ignore` said so. It covers what `status --ignored` cannot: a path the
+			// repo ignores that no longer exists — a dev server's rebuilt `.next/` is hundreds of
+			// deleted chunks per turn, and none of them is the agent's work.
+			continue;
+		}
 		const record = byPath.get(path);
+		if (record?.xy === '!!') {
+			// Ignored by the repo (`--ignored=matching`): a dev server's `.next/`, a `*.log`, a
+			// `.tsbuildinfo`. The watcher saw it change, and it is exactly the change nobody
+			// asked the agent about. Dropped, not shown as untracked.
+			continue;
+		}
 		if (record) {
 			files.push({ path, status: turnFileStatusOf(record.xy), from: record.from });
 			continue;
@@ -166,6 +197,25 @@ export function turnFilesFromWatch(touched: OpenideTouchedPaths, records: readon
 		if (kind === 'deleted') {
 			files.push({ path, status: 'deleted' });
 		}
+	}
+	return files.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+/**
+ * The turn's file list when git could NOT be asked: the watcher's own verdicts, spelled in the
+ * view's vocabulary.
+ *
+ * Coarser than `turnFilesFromWatch` — it cannot tell a rename from a delete-plus-create, nor
+ * drop a path that ended the turn identical to HEAD — but honest. The alternative, an empty
+ * list, read as "the agent changed nothing", which is the one thing a failed status must not say.
+ */
+export function turnFilesFromWatchOnly(touched: OpenideTouchedPaths, ignored?: ReadonlySet<string>): IOpenideTurnFile[] {
+	const files: IOpenideTurnFile[] = [];
+	for (const [path, kind] of touched) {
+		if (ignored?.has(path)) {
+			continue;
+		}
+		files.push({ path, status: kind === 'added' ? 'untracked' : kind === 'deleted' ? 'deleted' : 'modified' });
 	}
 	return files.sort((left, right) => left.path.localeCompare(right.path));
 }
@@ -260,8 +310,13 @@ export class OpenideCliTurnLog {
 		return this.open ? [...this.open.touched.keys()] : [];
 	}
 
-	/** A turn ended. Returns the closed turn, or undefined when none was open. */
-	end(records: readonly IPorcelainRecord[], at: number): IOpenideCliTurn | undefined {
+	/**
+	 * A turn ended. Returns the closed turn, or undefined when none was open.
+	 *
+	 * `records` is git's answer for the touched paths, or `undefined` when git had none — then
+	 * the watcher's verdicts stand in.
+	 */
+	end(records: readonly IPorcelainRecord[] | undefined, at: number, ignored?: ReadonlySet<string>): IOpenideCliTurn | undefined {
 		const open = this.open;
 		if (!open) {
 			return undefined;
@@ -270,7 +325,7 @@ export class OpenideCliTurnLog {
 		const closed: IOpenideCliTurn = {
 			...open.turn,
 			endedAt: at,
-			files: turnFilesFromWatch(open.touched, records),
+			files: records ? turnFilesFromWatch(open.touched, records, ignored) : turnFilesFromWatchOnly(open.touched, ignored),
 			truncated: open.touched.size >= MAX_TOUCHED_PER_TURN,
 		};
 		this.turns[this.turns.length - 1] = closed;

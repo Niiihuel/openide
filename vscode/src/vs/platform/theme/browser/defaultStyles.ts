@@ -244,13 +244,13 @@ export const defaultMenuStyles: IMenuStyles = {
 	borderColor: asCssVariableWithDefault(menuBorder, editorWidgetBorder),
 	foregroundColor: asCssVariable(menuForeground),
 	backgroundColor: asCssVariable(menuBackground),
-	// DIVERGENCIA DEL FORK: upstream tinta el item seleccionado con `list.hoverBackground`, que es
-	// el color de hover de las LISTAS, no el del menú. Con el tema del producto eso da #1f1f1f
-	// sobre un menú de fondo #1c1c1c — tres valores de diferencia, invisible — y upstream lo
-	// compensa con `menu.selectionBorder`, borde que acá sólo se dibuja en navegación por teclado.
-	// Resultado: pasar el mouse por un menú nativo no daba ninguna señal. Se prefiere el color que
-	// el tema registra PARA ESTO (`menu.selectionBackground`), con el de upstream como fallback
-	// para cualquier tema que no lo defina.
+	// FORK DIVERGENCE: upstream tints the selected item with `list.hoverBackground`, which is the
+	// hover colour of LISTS, not of the menu. Under the product theme that gives #1f1f1f over a
+	// #1c1c1c menu background -- three values apart, invisible -- and upstream compensates with
+	// `menu.selectionBorder`, a border that here is only drawn during keyboard navigation.
+	// The result: hovering a native menu gave no feedback at all. We prefer the colour the theme
+	// registers FOR THIS (`menu.selectionBackground`), with upstream's as the fallback for any
+	// theme that does not define it.
 	selectionForegroundColor: asCssVariableWithDefault(menuSelectionForeground, asCssVariable(listHoverForeground)),
 	selectionBackgroundColor: asCssVariableWithDefault(menuSelectionBackground, asCssVariable(listHoverBackground)),
 	selectionBorderColor: asCssVariable(menuSelectionBorder),

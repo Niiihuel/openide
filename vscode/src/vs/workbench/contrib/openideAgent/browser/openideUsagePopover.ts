@@ -5,7 +5,7 @@
 
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — the account-usage popover, transcribed from Orca's UsageRosterPanel
- *  (refs/orca/src/renderer/src/components/status-bar/UsageRosterPanel.tsx): one block per account
+ *  (its status-bar roster panel): one block per account
  *  with logo · name · plan on the first line, the tightest reset on the right, then the windows as
  *  label + bar + percentage, "updated N ago" next to the refresh button, and two navigation rows
  *  at the bottom. It only SUBSCRIBES: the numbers, the polling and the backoff live in

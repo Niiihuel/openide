@@ -84,13 +84,13 @@ const MAP = [
 	['ungroup-by-ref-type', 'collection'], ['group-by-ref-type', 'collection-fill'],
 
 	// ---- activity bar / views
-	['files', 'files'], ['file-directory', 'folder'], ['source-control', 'git'], ['debug-alt', 'bug'], ['debug-alt-small', 'bug'], ['bug', 'bug'], ['extensions', 'puzzle'],
+	['files', 'files'], ['file-directory', 'folder'], ['source-control', 'git'], ['debug-alt', 'bug'], ['debug-alt-small', 'bug'], ['bug', 'bug'], ['extensions', 'box-seam'],
 	['account', 'person-circle'], ['remote', 'hdd-network'], ['remote-explorer', 'hdd-rack'], ['home', 'house'], ['layers', 'layers'], ['layers-active', 'layers-fill'], ['layers-dot', 'layers-half'],
 	['output', 'terminal'], ['terminal', 'terminal'], ['terminal-bash', 'terminal'], ['terminal-cmd', 'terminal'], ['terminal-powershell', 'terminal'],
 	['terminal-tmux', 'terminal-split'], ['terminal-ubuntu', 'terminal'], ['terminal-debian', 'terminal'], ['terminal-linux', 'terminal'],
 	['notebook', 'journal-code'], ['book', 'book'], ['bookmark', 'bookmark'], ['compass', 'compass'], ['map', 'map'], ['location', 'geo-alt'],
 	['explorer-view-icon', 'files'], ['search-view-icon', 'search'], ['source-control-view-icon', 'git'], ['run-view-icon', 'bug'],
-	['extensions-view-icon', 'puzzle'], ['ports-view-icon', 'plug'], ['debug-console-view-icon', 'terminal'], ['output-view-icon', 'terminal'],
+	['extensions-view-icon', 'box-seam'], ['ports-view-icon', 'plug'], ['debug-console-view-icon', 'terminal'], ['output-view-icon', 'terminal'],
 	['settings-view-bar-icon', 'gear'], ['accounts-view-bar-icon', 'person-circle'], ['remote-explorer-view-icon', 'hdd-rack'],
 
 	// ---- explorer / files
@@ -249,6 +249,10 @@ const MAP = [
 
 	// ---- chat / agent. `chat-square` is the house glyph for conversation, by request.
 	['openide-chat', 'chat-square'], ['chat-view-icon', 'chat-square'], ['chat-sessions-icon', 'chat-square-text'],
+	// Agent Changes: its own entry rather than riding on `git-pull-request-go-to-changes`, which is
+	// what it aliases. A sheet and not a box, because the activity bar now puts the extensions box
+	// directly under it and two boxes in a column say nothing to the eye.
+	['openide-cli-changes', 'file-earmark-diff'],
 	['comment-discussion-sparkle', 'chat-square-heart'], ['comment-discussion-quote', 'chat-square-quote'],
 	['chat-import', 'box-arrow-in-down'], ['chat-export', 'box-arrow-up'], ['new-session', 'chat-square-dots'], ['session-in-progress', 'chat-square-fill'],
 	['send-to-remote-agent', 'send'], ['go-to-editing-session', 'chat-square-text'], ['edit-session', 'chat-square-text'],
@@ -259,7 +263,7 @@ const MAP = [
 	['copilot-blocked', 'slash-circle'], ['copilot-not-connected', 'plug'], ['copilot-unavailable', 'slash-circle'],
 	['copilot-in-progress', 'arrow-repeat'], ['copilot-error', 'x-circle-fill'], ['copilot-success', 'check-circle-fill'], ['copilot-snooze', 'moon'],
 	['collection', 'collection'], ['new-collection', 'collection-fill'], ['collection-small', 'collection'],
-	['extensions-large', 'puzzle'], ['index-zero', 'hash'], ['keyboard-tab', 'arrow-bar-right'], ['keyboard-tab-above', 'arrow-bar-up'], ['keyboard-tab-below', 'arrow-bar-down'],
+	['extensions-large', 'box-seam'], ['index-zero', 'hash'], ['keyboard-tab', 'arrow-bar-right'], ['keyboard-tab-above', 'arrow-bar-up'], ['keyboard-tab-below', 'arrow-bar-down'],
 
 	// ---- title-bar layout toggles, where the theme carries the open/closed state
 	//

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IOpenideChatDelegationContent, IOpenideChatEditContent, IOpenideChatExploreContent, IOpenideChatTerminalContent, IOpenideChatToolContent, OpenideChatToolState } from './openideChatContent.js';
+import { IOpenideChatAskContent, IOpenideChatDelegationContent, IOpenideChatEditContent, IOpenideChatExploreContent, IOpenideChatTerminalContent, IOpenideChatToolContent, OpenideChatToolState } from './openideChatContent.js';
 import { appendOpenideChatExploreEntry, createOpenideChatExploreContent, createOpenideChatExploreEntry, enrichOpenideChatExploreEntry, settleOpenideChatExploreEntry } from './openideChatExploreGroup.js';
 import {
 	closeOpenideChatMarkdown, finalizeOpenideChatExplore, finalizeOpenideChatThinking, getOpenideChatContentAt,
@@ -28,6 +28,46 @@ const LINE_RANGE_SUFFIX = /\s+L\d+(?:-\d+)?$/;
 function truncateResult(result: string): string {
 	const value = String(result ?? '');
 	return value.length > MAX_RESULT_CHARS ? `${value.slice(0, MAX_RESULT_CHARS)}\n…` : value;
+}
+
+/** What an unanswered question contributes to the blob; every ask surface writes the same word. */
+export const OPENIDE_CHAT_ASK_SKIPPED = '(omitida)';
+const ASK_ANSWER_PREFIX = /R:\s*([\s\S]*)$/;
+
+/**
+ * Splits the single blob `ask_user` returns back into one answer per question.
+ *
+ * One question: the whole result IS the answer. Several: `P: …\nR: …` blocks separated by a blank
+ * line — the only separator there is, because the answers were never persisted individually. Shared
+ * by the live settle below and by the transcript restore path, so the two can never disagree.
+ */
+export function parseOpenideChatAskAnswers(questionCount: number, result: string): string[] {
+	if (questionCount <= 1) {
+		return [result || OPENIDE_CHAT_ASK_SKIPPED];
+	}
+	const blocks = String(result ?? '').split('\n\n');
+	return Array.from({ length: questionCount }, (_unused, index) =>
+		ASK_ANSWER_PREFIX.exec(blocks[index] ?? '')?.[1].trim() || OPENIDE_CHAT_ASK_SKIPPED);
+}
+
+/**
+ * Live settle of the ask card: `ask_user` routes as silent (no activity row), so its `toolResult`
+ * used to change nothing and `isComplete` stayed false for the whole session — the card's answered
+ * state lived in a part-local flag that a list re-render lost. The pending card is found by scan
+ * because the content's `requestId` is the ask's own uuid, not the tool call id.
+ */
+function settleOpenideChatAsk(draft: IOpenideChatDraft, result: string): void {
+	for (let index = draft.content.length - 1; index >= 0; index--) {
+		const content = draft.content[index];
+		if (content.kind !== 'ask' || content.isComplete) { continue; }
+		const ask = content as IOpenideChatAskContent;
+		setOpenideChatContentAt(draft, index, {
+			...ask,
+			answers: parseOpenideChatAskAnswers(ask.questions.length, result),
+			isComplete: true,
+		} satisfies IOpenideChatAskContent);
+		return;
+	}
 }
 
 /**
@@ -62,10 +102,13 @@ function startExploreEntry(draft: IOpenideChatDraft, callId: string, name: strin
 
 function startTerminal(draft: IOpenideChatDraft, callId: string, argumentsJson: string): number {
 	const args = parseToolArguments(argumentsJson);
+	const description = typeof args['description'] === 'string' && args['description'].trim() ? args['description'].trim() : undefined;
 	return pushOpenideChatContent(draft, {
 		kind: 'terminal',
 		callId,
 		command: String(args['command'] ?? ''),
+		// Only when the model gave one: the card falls back to the command's first executable.
+		...(description ? { description } : {}),
 		background: false,
 		output: '',
 		state: 'running',
@@ -133,7 +176,29 @@ export function applyOpenideChatToolStart(draft: IOpenideChatDraft, callId: stri
  * A result with no matching start is not dropped: providers do cancel and replay, and a row that
  * never appears is indistinguishable from a bug. The start is synthesized instead.
  */
+/**
+ * The call is queued behind another conversation, or has just stopped being.
+ *
+ * Only the edit card carries it: a write is the only call that queues, and its card is where the
+ * user is already looking to see what is happening to that file. Everything else ignores the event
+ * rather than inventing a row for it.
+ */
+export function applyOpenideChatToolWaiting(draft: IOpenideChatDraft, callId: string, holder: string | undefined): void {
+	const cursor = draft.tools.get(callId);
+	if (!cursor || cursor.route !== 'edit') {
+		return;
+	}
+	const edit = getOpenideChatContentAt<IOpenideChatEditContent>(draft, cursor.index, 'edit');
+	if (!edit || edit.waitingFor === holder) {
+		return;
+	}
+	setOpenideChatContentAt(draft, cursor.index, { ...edit, waitingFor: holder });
+}
+
 export function applyOpenideChatToolResult(draft: IOpenideChatDraft, callId: string, name: string, result: string, isError: boolean): void {
+	if (name === 'ask_user' && !isError) {
+		settleOpenideChatAsk(draft, result);
+	}
 	if (!draft.tools.has(callId)) {
 		applyOpenideChatToolStart(draft, callId, name, '');
 	}

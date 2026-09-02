@@ -78,7 +78,7 @@ export class OpenideChatComposerVoice extends Disposable {
 	}
 
 	/**
-	 * Hold-to-talk (openideChatHtml.ts:6023-6036): pointer down starts, pointer up/leave/cancel stops.
+	 * Hold-to-talk (the removed chat webview): pointer down starts, pointer up/leave/cancel stops.
 	 * Split from `toggle` because a release while the recorder is still `starting` must not be
 	 * read as "press again", which would leave it recording with nobody holding the button.
 	 */

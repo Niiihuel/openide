@@ -41,6 +41,28 @@ export const CONTEXT_BROWSER_CAN_GO_BACK = new RawContextKey<boolean>('browserCa
 export const CONTEXT_BROWSER_CAN_GO_FORWARD = new RawContextKey<boolean>('browserCanGoForward', false, localize('browser.canGoForward', "Whether the browser can go forward"));
 export const CONTEXT_BROWSER_FOCUSED = new RawContextKey<boolean>('browserFocused', true, localize('browser.editorFocused', "Whether the browser editor is focused"));
 export const CONTEXT_BROWSER_HAS_URL = new RawContextKey<boolean>('browserHasUrl', false, localize('browser.hasUrl', "Whether the browser has a URL loaded"));
+/** Chromium's ERR_CONNECTION_REFUSED: nothing accepted the connection. */
+const CONNECTION_REFUSED = -102;
+/** How often the closed port is probed, and how long before we stop waiting for it. */
+const PORT_POLL_MS = 2000;
+const PORT_WAIT_TIMEOUT_MS = 10 * 60_000;
+
+/** The port of a URL pointing at THIS machine, or undefined when it points anywhere else. */
+function localPortOf(raw: string): string | undefined {
+	let url: URL;
+	try {
+		url = new URL(raw);
+	} catch {
+		return undefined;
+	}
+	const host = url.hostname.toLowerCase();
+	const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]' || host.endsWith('.localhost');
+	if (!isLocal) {
+		return undefined;
+	}
+	return url.port || (url.protocol === 'https:' ? '443' : '80');
+}
+
 export const CONTEXT_BROWSER_HAS_ERROR = new RawContextKey<boolean>('browserHasError', false, localize('browser.hasError', "Whether the browser has a load error"));
 
 /**
@@ -371,6 +393,11 @@ export class BrowserEditor extends EditorPane {
 	private _hasErrorContext!: IContextKey<boolean>;
 
 	private readonly _inputDisposables = this._register(new DisposableStore());
+	/** Listeners of the error pane, rebuilt with it on every failed load. */
+	private readonly _errorDisposables = this._register(new DisposableStore());
+	/** The local URL being waited on, and the timer doing the waiting. */
+	private _waitingForUrl: string | undefined;
+	private _waitingForPort: ReturnType<typeof setTimeout> | undefined;
 	private overlayManager: BrowserOverlayManager | undefined;
 	private _screenshotTimeout: ReturnType<typeof setTimeout> | undefined;
 	constructor(
@@ -736,28 +763,123 @@ export class BrowserEditor extends EditorPane {
 		);
 
 		if (error) {
-			while (this._errorContainer.firstChild) {
-				this._errorContainer.removeChild(this._errorContainer.firstChild);
-			}
-
-			const errorContent = $('.browser-error-content');
-			const errorIcon = $('.browser-error-icon');
-			errorIcon.appendChild(renderIcon(Codicon.error));
-
-			const errorMessage = $('.browser-error-message');
-			errorMessage.textContent = error.errorDescription || localize('browser.loadError', "Unable to connect");
-
-			errorContent.appendChild(errorIcon);
-			errorContent.appendChild(errorMessage);
-
-			this._errorContainer.appendChild(errorContent);
-
+			this._renderLoadError(error);
 			this.setBackgroundImage(undefined);
 		} else {
+			this._stopWaitingForServer();
 			this.setBackgroundImage(this._model.screenshot);
 		}
 
 		this.updateVisibility();
+	}
+
+	/**
+	 * The page that did not load, said in a way a person can act on.
+	 *
+	 * It used to be a red icon and the raw Chromium string (`ERR_CONNECTION_REFUSED`) alone in the
+	 * middle of an empty pane, which reads as "still loading" rather than "this failed". The
+	 * anatomy — icon, title, description with its code, and the URL — is upstream's own
+	 * (`features/browserEditorErrorFeatures.ts`); what is added here is the case this browser is
+	 * mostly used for: a LOCAL PORT with nothing listening, which is almost never a broken URL and
+	 * almost always a dev server that has not started yet. So it says so, offers to retry, and
+	 * waits for the port on its own.
+	 */
+	private _renderLoadError(error: IBrowserViewLoadError): void {
+		this._errorDisposables.clear();
+		while (this._errorContainer.firstChild) {
+			this._errorContainer.removeChild(this._errorContainer.firstChild);
+		}
+		const port = localPortOf(error.url);
+		const refused = error.errorCode === CONNECTION_REFUSED;
+		const waitingForPort = refused && port !== undefined;
+
+		const errorContent = $('.browser-error-content');
+		const errorIcon = $('.browser-error-icon');
+		errorIcon.appendChild(renderIcon(waitingForPort ? Codicon.plug : Codicon.globe));
+		errorContent.appendChild(errorIcon);
+
+		const title = $('.browser-error-title');
+		title.textContent = waitingForPort
+			? localize('browser.portClosed', "Nothing is listening on port {0}", port)
+			: localize('browser.loadErrorLabel', "Failed to Load Page");
+		errorContent.appendChild(title);
+
+		const detail = $('.browser-error-message');
+		detail.textContent = waitingForPort
+			? localize('browser.portClosedHint', "The server is probably not running yet. Start it and this page loads on its own.")
+			: `${error.errorDescription || localize('browser.loadError', "Unable to connect")} (${error.errorCode})`;
+		errorContent.appendChild(detail);
+
+		const urlRow = $('.browser-error-url');
+		urlRow.textContent = error.url;
+		errorContent.appendChild(urlRow);
+
+		const actions = $('.browser-error-actions');
+		const retry = $<HTMLButtonElement>('button.browser-error-retry', { type: 'button' });
+		retry.textContent = localize('browser.retry', "Retry");
+		this._errorDisposables.add(addDisposableListener(retry, EventType.CLICK, () => {
+			void this._model?.loadURL(error.url);
+		}));
+		actions.appendChild(retry);
+		if (waitingForPort) {
+			const waiting = $('span.browser-error-waiting');
+			waiting.textContent = localize('browser.waitingForPort', "Waiting for the port…");
+			actions.appendChild(waiting);
+		}
+		errorContent.appendChild(actions);
+
+		this._errorContainer.appendChild(errorContent);
+		if (waitingForPort) {
+			this._waitForServer(error.url);
+		} else {
+			this._stopWaitingForServer();
+		}
+	}
+
+	/**
+	 * Polls the URL until something answers, then reloads it once.
+	 *
+	 * A probe, not a reload loop: `no-cors` tells us whether the connection was ACCEPTED without
+	 * needing to read the response, so the page is loaded exactly once — when there is something to
+	 * load. Reloading every two seconds instead would flash an error page at the user for as long
+	 * as the server takes to boot.
+	 */
+	private _waitForServer(url: string): void {
+		if (this._waitingForUrl === url) {
+			return; // already watching this one
+		}
+		this._stopWaitingForServer();
+		this._waitingForUrl = url;
+		const startedAt = Date.now();
+		const probe = async () => {
+			if (this._waitingForUrl !== url) {
+				return;
+			}
+			if (Date.now() - startedAt > PORT_WAIT_TIMEOUT_MS) {
+				this._stopWaitingForServer(); // it is not coming: stop knocking
+				return;
+			}
+			try {
+				await fetch(url, { mode: 'no-cors', cache: 'no-store' });
+				if (this._waitingForUrl === url) {
+					this._stopWaitingForServer();
+					void this._model?.loadURL(url);
+				}
+				return;
+			} catch {
+				// still nothing there
+			}
+			this._waitingForPort = setTimeout(probe, PORT_POLL_MS);
+		};
+		this._waitingForPort = setTimeout(probe, PORT_POLL_MS);
+	}
+
+	private _stopWaitingForServer(): void {
+		this._waitingForUrl = undefined;
+		if (this._waitingForPort !== undefined) {
+			clearTimeout(this._waitingForPort);
+			this._waitingForPort = undefined;
+		}
 	}
 
 	getUrl(): string | undefined {

@@ -7,6 +7,7 @@ import assert from 'assert';
 import { $ } from '../../../../../base/browser/dom.js';
 import { Emitter } from '../../../../../base/common/event.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { NullHoverService } from '../../../../../platform/hover/test/browser/nullHoverService.js';
 import { OpenideChatTerminalsTray } from '../../browser/chat/parts/openideChatTerminalsTray.js';
 import { IOpenideAgentService } from '../../browser/openideAgentService.js';
 import { IBackgroundTerminalEvent } from '../../common/openideAgentTypes.js';
@@ -45,7 +46,7 @@ suite('OpenIDE ChatTerminalsTray', () => {
 	function createTray(): { tray: OpenideChatTerminalsTray; parent: HTMLElement; stub: IStub } {
 		const parent = $('div');
 		const stub = stubService();
-		const tray = store.add(new OpenideChatTerminalsTray(parent, stub.service));
+		const tray = store.add(new OpenideChatTerminalsTray(parent, stub.service, NullHoverService));
 		return { tray, parent, stub };
 	}
 
@@ -66,9 +67,9 @@ suite('OpenIDE ChatTerminalsTray', () => {
 		assert.strictEqual(rows(tray).length, 1);
 		const label = tray.domNode.querySelector('.openide-chat-terms-label');
 		assert.strictEqual(label?.textContent, 'npm run dev');
-		// The full command is the tooltip: the row ellipsises, and a truncated `--port 3000` is
-		// exactly the part the user is looking for.
-		assert.strictEqual((label as HTMLElement).title, 'npm run dev');
+		// The full command is the tooltip, and the tooltip is the WORKBENCH hover: no `title=`
+		// attribute is left on the row, or the OS would draw its own tip over the IDE's.
+		assert.strictEqual((label as HTMLElement).title, '');
 	});
 
 	test('the heading counts and pluralises', () => {
@@ -154,7 +155,7 @@ suite('OpenIDE ChatTerminalsTray', () => {
 	test('a disposed tray stops listening', () => {
 		const parent = $('div');
 		const stub = stubService();
-		const tray = new OpenideChatTerminalsTray(parent, stub.service);
+		const tray = new OpenideChatTerminalsTray(parent, stub.service, NullHoverService);
 		tray.dispose();
 		stub.fire({ id: 'a', command: 'npm run dev', status: 'running' });
 		assert.strictEqual(tray.isEmpty, true);

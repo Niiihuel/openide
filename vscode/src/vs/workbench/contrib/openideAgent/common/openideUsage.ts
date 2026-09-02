@@ -80,8 +80,8 @@ export interface IMergedUsageAccount<T extends IUsageMergeCandidate> {
 
 /**
  * Folds rows that are the SAME subscription into one, transcribed from how Orca decides two
- * accounts are the same (refs/orca/src/main/{claude-accounts/claude-duplicate-account,
- * codex-accounts/codex-auth-identity}.ts). Orca's rule, and the one that matters here:
+ * accounts are the same (its per-provider duplicate-account and auth-identity readers). Orca's
+ * rule, and the one that matters here:
  *
  *   - identity comes from a claim in the credential, never from which integration produced it;
  *   - a STRONG identity (an account id) is what merges; nothing else does. Orca will fall back to

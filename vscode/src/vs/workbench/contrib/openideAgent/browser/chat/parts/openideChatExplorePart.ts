@@ -4,17 +4,21 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, append } from '../../../../../../base/browser/dom.js';
+import { DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../../nls.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IOpenideChatContent, IOpenideChatExploreContent, IOpenideChatExploreEntry, isOpenideChatContentOfKind } from '../../../common/chat/openideChatContent.js';
 import { isOpenideChatExploreActive, openideChatExploreLabel } from '../../../common/chat/openideChatExploreGroup.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
 import { getOpenideToolMeta, toolVisualKind } from '../../../common/chat/openideChatToolMeta.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
+import { isOpenideChatTextClipped, setupChatTooltip } from '../openideChatHover.js';
 import {
 	activityLine,
 	createOpenideChatActivityRow,
 	IOpenideChatActivityRow,
 	OPENIDE_CHAT_PART_ERROR_CLASS,
+	OPENIDE_CHAT_PART_LIVE_CLASS,
 	setOpenideChatActivityIcon,
 	setOpenideChatShimmer,
 	renderOpenideChatActivityLine,
@@ -26,16 +30,20 @@ export const OPENIDE_CHAT_ACTIVITY_GROUP_CLASS = 'openide-chat-activity-group';
 interface IRenderedEntry {
 	readonly callId: string;
 	readonly row: IOpenideChatActivityRow;
+	/** The row's hover. Dropping the entry drops its node, so the hover has to go with it. */
+	readonly store: DisposableStore;
 	target: string;
 	state: IOpenideChatExploreEntry['state'];
 	tool: string;
+	/** The untruncated line, which is what the hover shows. */
+	line: string;
 }
 
 /**
  * Line of one explore entry.
  *
  * Errors drop the target and say so, which is what `finishTool` does for a failed explore call
- * (openideChatHtml.ts:3464): the row is then about the failure, and a path next to the word "error"
+ * (the removed chat webview): the row is then about the failure, and a path next to the word "error"
  * reads as if the path itself were the problem.
  */
 function entryLine(entry: IOpenideChatExploreEntry): string {
@@ -48,12 +56,16 @@ function entryLine(entry: IOpenideChatExploreEntry): string {
 }
 
 /**
- * The collapsible "Exploring" block.
+ * The collapsed record of one exploration phase.
  *
- * Consecutive reads and searches are one phase, not N rows: the webview folds them into a single
- * `<details>` whose summary shimmers as "Exploring" while anything is in flight and settles into
- * "Explored 3 files, 1 search". Collapsed it keeps a masked 68px peek of the rows, which is what
- * makes the block feel like a folded phase rather than a hidden one.
+ * Consecutive reads and searches are one phase, not N rows: they fold into a single `<details>`
+ * that reads "Explored 3 files, 1 search" and opens to the list of what was actually touched.
+ *
+ * It is born CLOSED and it is not shown at all while it is the tail of a running turn. That is the
+ * change the user asked for: watching the agent work is the job of the turn's status line, which
+ * says "Read openideChatWidget.ts" and swaps that out for the next step in the same place. A block
+ * that expanded itself live turned every phase into a tree growing under the answer. What is left
+ * here is the record — one line, counted, expandable when the user wants the detail.
  */
 export class OpenideChatExplorePart extends OpenideChatContentPart {
 
@@ -66,11 +78,16 @@ export class OpenideChatExplorePart extends OpenideChatContentPart {
 
 	private _content: IOpenideChatExploreContent;
 	private _turnComplete: boolean;
-	private _collapsedOnComplete = false;
-	/** `openide.chat.tools.defaultExpanded`: the settled group stays open instead of folding. */
+	/** Whether this phase is the turn's trailing content, and so the one the status line is showing. */
+	private _live = false;
+	/** `openide.chat.tools.defaultExpanded`: the group starts open instead of folded. */
 	private readonly _defaultExpanded: boolean;
 
-	constructor(content: IOpenideChatExploreContent, context: IOpenideChatContentPartContext) {
+	constructor(
+		content: IOpenideChatExploreContent,
+		context: IOpenideChatContentPartContext,
+		private readonly _hoverService: IHoverService,
+	) {
 		super();
 
 		this._content = content;
@@ -78,9 +95,10 @@ export class OpenideChatExplorePart extends OpenideChatContentPart {
 		this._turnComplete = context.element.isComplete;
 
 		this._details = $(`details.${OPENIDE_CHAT_ACTIVITY_GROUP_CLASS}`) as HTMLDetailsElement;
-		// Created open, like `ensureExploreGroup` (openideChatHtml.ts:1577): the point of the block
-		// is that the user can watch which files are being opened while it happens.
-		this._details.open = true;
+		// Closed unless the user asked for open groups. It used to be created open so the reads could
+		// be watched as they happened; the status line does that now, and an open block would put the
+		// same rows on screen twice.
+		this._details.open = this._defaultExpanded;
 		this.domNode = this._details;
 
 		const summary = append(this._details, $('summary.openide-chat-activity-summary'));
@@ -90,6 +108,24 @@ export class OpenideChatExplorePart extends OpenideChatContentPart {
 
 		this._register(this._registerToggle());
 		this._render();
+	}
+
+	/**
+	 * While the phase is the tail of a running turn it has NO block: the status line is reading out
+	 * the file being opened right now, one line, swapped in place. The block appears — collapsed,
+	 * counted, expandable — once something else lands after it or the turn ends.
+	 *
+	 * Keyed off the tail and not off `isOpenideChatExploreActive` on purpose: between two reads
+	 * every entry is momentarily settled, so keying off "active" would flash the whole block open
+	 * and shut once per file the agent touches.
+	 */
+	setLive(live: boolean): void {
+		if (this._live === live) {
+			return;
+		}
+		this._live = live;
+		this._details.classList.toggle(OPENIDE_CHAT_PART_LIVE_CLASS, live);
+		this._onDidChangeHeight.fire();
 	}
 
 	private _registerToggle() {
@@ -103,17 +139,8 @@ export class OpenideChatExplorePart extends OpenideChatContentPart {
 		this._label.textContent = openideChatExploreLabel(this._content);
 		setOpenideChatShimmer(this._label, active);
 		this._syncEntries();
-
-		// Collapsing keys off the TURN being over, not off `isComplete` on the content: between two
-		// consecutive reads every entry is momentarily settled, so collapsing on that would slam the
-		// block shut and reopen it a frame later, once per file the agent touches.
-		if (this._turnComplete && !active && !this._collapsedOnComplete) {
-			this._collapsedOnComplete = true;
-			// `openide.chat.tools.defaultExpanded` keeps the settled group readable in place.
-			if (!this._defaultExpanded) {
-				this._details.open = false;
-			}
-		}
+		// No auto-collapse any more: the block is born folded, so the only thing that ever opens it
+		// is the user clicking it — and a turn finishing must not undo that click.
 	}
 
 	/**
@@ -143,7 +170,13 @@ export class OpenideChatExplorePart extends OpenideChatContentPart {
 	private _createEntry(entry: IOpenideChatExploreEntry): IRenderedEntry {
 		const row = createOpenideChatActivityRow({ explore: true, visualKindId: toolVisualKind(entry.tool).id });
 		append(this._body, row.root);
-		const rendered: IRenderedEntry = { callId: entry.callId, row, target: '', state: entry.state, tool: entry.tool };
+		const store = this._register(new DisposableStore());
+		const rendered: IRenderedEntry = { callId: entry.callId, row, store, target: '', state: entry.state, tool: entry.tool, line: '' };
+		// The row truncates: the untruncated line is the hover, because a path's tail is the part
+		// that identifies it and the tail is exactly what the ellipsis eats. Only WHEN it truncates,
+		// though — a tip that repeats a line already on screen is a box over the row above it. It
+		// repeats the row, so it is not a second accessible name.
+		store.add(setupChatTooltip(this._hoverService, row.head, () => isOpenideChatTextClipped(row.verb) ? rendered.line : '', { aria: false, atMouse: true }));
 		this._paintEntry(rendered, entry);
 		return rendered;
 	}
@@ -165,9 +198,7 @@ export class OpenideChatExplorePart extends OpenideChatContentPart {
 		} else {
 			renderOpenideChatActivityLine(rendered.row.verb, verb, entry.target);
 		}
-		// The row truncates: the untruncated line is the tooltip, because a path's tail is the part
-		// that identifies it and the tail is exactly what the ellipsis eats.
-		rendered.row.head.title = line;
+		rendered.line = line;
 		setOpenideChatShimmer(rendered.row.verb, entry.state === 'running');
 		rendered.row.root.classList.toggle(OPENIDE_CHAT_PART_ERROR_CLASS, entry.state === 'error');
 		rendered.target = entry.target;
@@ -178,6 +209,7 @@ export class OpenideChatExplorePart extends OpenideChatContentPart {
 	private _dropEntriesFrom(index: number): void {
 		for (let i = index; i < this._entries.length; i++) {
 			this._entries[i]?.row.root.remove();
+			this._entries[i]?.store.dispose();
 		}
 		this._entries.length = Math.min(this._entries.length, index);
 	}

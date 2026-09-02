@@ -8,6 +8,9 @@ import { AnchorAlignment, IAnchor } from '../../../../../base/browser/ui/context
 import { AnchorPosition } from '../../../../../base/common/layout.js';
 import { Disposable, DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { IContextViewService, IOpenContextView } from '../../../../../platform/contextview/browser/contextView.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
+import { setupChatTooltip } from './openideChatHover.js';
+import { MENU_ENTER_CLASS } from './openideComposerMenu.js';
 import './media/openideChatMenus.css';
 
 /**
@@ -46,18 +49,34 @@ export function menuEmpty(label: string): HTMLElement {
  * A row is a `<button>` so it is reachable by keyboard without re-implementing focus handling.
  * `icon` is a codicon name, or a ready-made node when the row carries a brand mark instead of a
  * glyph (the session-kind picker hands it a provider icon).
+ *
+ * Every row ends in a `.openide-menu-check` that CSS reveals only while the row carries
+ * `.openide-menu-active` (the map switcher adds it after building the row), and pins to the trailing
+ * edge with `order` however many children a caller appends after the label.
  */
 export function menuRow(icon: string | HTMLElement, label: string): { readonly row: HTMLButtonElement; readonly labelElement: HTMLElement } {
 	const row = $<HTMLButtonElement>('button.openide-menu-row', { type: 'button' });
 	append(append(row, $('span.openide-menu-row-icon')), typeof icon === 'string' ? menuIcon(icon) : icon);
 	const labelElement = append(row, $('span.openide-menu-label'));
 	labelElement.textContent = label;
+	append(append(row, $('span.openide-menu-check')), menuIcon('check'));
 	return { row, labelElement };
 }
 
-export function menuRowAction(icon: string, tooltip: string): HTMLButtonElement {
-	const button = $<HTMLButtonElement>('button.openide-menu-row-action', { type: 'button', title: tooltip });
-	button.setAttribute('aria-label', tooltip);
+/**
+ * `hover` upgrades the tip to the workbench hover and takes the `title` off. It is optional and not
+ * the default because these rows also live inside POPOVERS: a context view is exactly the place
+ * upstream still falls back to the native tooltip (`nativeHoverDelegate`, hover.ts), so only the
+ * callers that mount rows in a regular pane pass it.
+ */
+export function menuRowAction(icon: string, tooltip: string, hover?: { readonly hoverService: IHoverService; readonly store: DisposableStore }): HTMLButtonElement {
+	const button = $<HTMLButtonElement>('button.openide-menu-row-action', { type: 'button' });
+	if (hover) {
+		hover.store.add(setupChatTooltip(hover.hoverService, button, () => tooltip));
+	} else {
+		button.title = tooltip;
+		button.setAttribute('aria-label', tooltip);
+	}
 	append(button, menuIcon(icon));
 	return button;
 }
@@ -107,6 +126,8 @@ export interface IOpenideChatMenuLayout {
 export abstract class OpenideChatMenuPopover extends Disposable {
 
 	private _contextView: IOpenContextView | undefined;
+	/** The live menu container, for the entrance class; cleared when the view hides. */
+	private _container: HTMLElement | undefined;
 
 	constructor(
 		protected readonly contextViewService: IContextViewService,
@@ -145,8 +166,12 @@ export abstract class OpenideChatMenuPopover extends Disposable {
 			// rendering it, and focusing a node still parked at 0,0 makes the container jump.
 			focus: () => this.initialFocus()?.focus(),
 			onDOMEvent: (event: Event) => this.onDOMEvent(event, trigger),
-			onHide: () => { this._contextView = undefined; },
+			onHide: () => { this._contextView = undefined; this._container = undefined; },
 		});
+		// After showContextView returned, never inside `render`: the context view measures and places
+		// the menu synchronously in that call, and a fixed-position view (aux windows) reads its own
+		// rect — which the animation's translate would shift. Nothing has painted yet at this point.
+		this._container?.classList.add(MENU_ENTER_CLASS);
 	}
 
 	close(): void {
@@ -159,12 +184,15 @@ export abstract class OpenideChatMenuPopover extends Disposable {
 	 */
 	protected relayout(): void {
 		if (this._contextView) {
+			// Ends the entrance first: a relayout inside its 90ms would measure a translated view.
+			this._container?.classList.remove(MENU_ENTER_CLASS);
 			this.contextViewService.layout();
 		}
 	}
 
 	private renderContainer(container: HTMLElement, header: HTMLElement): DisposableStore {
 		const store = new DisposableStore();
+		this._container = container;
 		container.classList.add('openide-menu', this.menuLayout.menuClass);
 		if (this.menuLayout.stretchToAnchor) {
 			// The layout algorithm only positions the left edge; the webview pins BOTH edges to the

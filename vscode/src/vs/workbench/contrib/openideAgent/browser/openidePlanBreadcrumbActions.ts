@@ -12,6 +12,8 @@ import { ICommandService } from '../../../../platform/commands/common/commands.j
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { OpenideChatModelPicker } from './chat/openideChatModelPicker.js';
+import { appendKbd, PRIMARY_ENTER_HINT } from './chat/openideChatKbd.js';
+import { createMenuContent, createMenuRow, OpenideComposerPopover } from './chat/openideComposerMenu.js';
 import { t } from '../common/openideStrings.js';
 import { IOpenideCliChangesService, IOpenideSessionBaseline, OpenideCliChangesService } from './openideCliChangesService.js';
 import { IOpenideAgentService } from './openideAgentService.js';
@@ -45,6 +47,8 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 	/** Keeps "✓ Finalizado" on screen a moment before offering to run again. */
 	private _completedShownAt = 0;
 	private _completedTimer: ReturnType<typeof setTimeout> | undefined;
+	/** The chevron's menu on the Build split: the alternatives to the default run. */
+	private readonly _morePopover = this._register(new OpenideComposerPopover(this._contextViewService));
 
 	constructor(
 		document: Document,
@@ -185,29 +189,35 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 
 		const running = this._agentService.isPlanBuildRunning(resource);
 		const completed = this._agentService.isPlanBuildCompleted(resource);
-		const button = append(host, $('button.openide-review-btn.openide-plan-run-btn', { type: 'button' })) as HTMLButtonElement;
+		// The SAME split pill the chat's plan card shows (`.oi-split`, openideSurfaceCss.ts): "Build
+		// Ctrl+⏎" and a chevron holding the alternatives, as Cursor draws it in the plan's toolbar.
+		const split = append(host, $('span.oi-split.openide-plan-run-split'));
+		const button = append(split, $('button.oi-split-main.openide-plan-run-btn', { type: 'button' })) as HTMLButtonElement;
 		const icon = append(button, document.createElement('span'));
 		const text = append(button, $('span.oreview-btn-label'));
 
 		if (running) {
-			// Cursor's running state: the label breathes, the run keeps going while the user chats.
-			button.classList.add('running');
+			// The SAME control the chat's plan card shows while a build runs, down to the ring
+			// spinner: one running plan, one look, wherever you happen to be reading it. `primary`
+			// is the amber fill the card uses; the ring is `.openide-chat-plan-spinner`, not the
+			// codicon spinner, because the codicon one is a glyph the icon theme can remap and the
+			// two surfaces then drift apart.
+			//
+			// No stop button here, by explicit decision: the run is the CHAT's, and stopping it is
+			// offered where it is owned. A second, quieter stop in the plan's own toolbar is the
+			// kind of control that gets pressed by accident while reading.
+			split.classList.add('running');
 			button.disabled = true;
-			icon.className = 'codicon codicon-loading codicon-modifier-spin';
+			icon.className = 'openide-chat-plan-spinner';
 			text.textContent = localize('openide.plan.running', "Ejecutando…");
 			text.classList.add('openide-chat-shimmer');
 			button.title = t('plan.runningTitle');
-			const stop = append(host, $('button.openide-review-btn.openide-plan-stop-btn', { type: 'button' })) as HTMLButtonElement;
-			append(stop, $('span.codicon.codicon-debug-stop'));
-			stop.title = t('plan.stop');
-			stop.setAttribute('aria-label', stop.title);
-			this._renderStore.add(addDisposableListener(stop, 'click', () => this._agentService.cancelPlanBuild(resource)));
 			return;
 		}
 
 		const justCompleted = completed && this._completedShownAt > 0 && Date.now() - this._completedShownAt < COMPLETED_HOLD_MS;
 		if (justCompleted) {
-			button.classList.add('primary', 'completed');
+			split.classList.add('completed');
 			button.disabled = true;
 			icon.className = 'codicon codicon-check';
 			text.textContent = localize('openide.plan.completed', "Finalizado");
@@ -216,15 +226,38 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 			return;
 		}
 
-		button.classList.add('primary');
-		icon.className = 'codicon codicon-play';
-		text.textContent = completed
-			? localize('openide.plan.runAgain', "Ejecutar de nuevo")
-			: localize('openide.plan.run', "Ejecutar plan");
+		// No play glyph: the word and the shortcut are the button, as on the chat's card. A plan
+		// that already ran says so on the button itself.
+		icon.remove();
+		// Always "Build", as Cursor: a plan that already ran says so in the tooltip and in the menu,
+		// not by growing the button to "Ejecutar de nuevo" in a bar that has no room for it.
+		text.textContent = t('chat.plan.build');
+		appendKbd(button, PRIMARY_ENTER_HINT);
 		button.title = completed
 			? t('plan.runAgainTitle')
 			: localize('openide.plan.build', "Ejecutar el plan");
 		this._renderStore.add(addDisposableListener(button, 'click', () => this._launch(resource, completed)));
+
+		const more = append(split, $('button.oi-split-more', { type: 'button' })) as HTMLButtonElement;
+		append(more, $('span.codicon.codicon-chevron-down'));
+		more.title = t('chat.plan.moreActions');
+		this._renderStore.add(addDisposableListener(more, 'click', () => this._morePopover.toggle(split, {
+			anchorPosition: AnchorPosition.BELOW,
+			anchorAlignment: AnchorAlignment.RIGHT,
+			render: (container, store) => {
+				const content = createMenuContent(container.ownerDocument);
+				container.appendChild(content);
+				const build = createMenuRow(container.ownerDocument, {
+					icon: 'play', label: completed ? localize('openide.plan.runAgain', "Ejecutar de nuevo") : t('chat.plan.build'),
+					keybinding: PRIMARY_ENTER_HINT, active: true,
+				});
+				store.add(addDisposableListener(build, 'click', () => { this._morePopover.close(); this._launch(resource, completed); }));
+				content.appendChild(build);
+				const chat = createMenuRow(container.ownerDocument, { icon: 'comment-discussion', label: localize('openide.plan.openChat', "Abrir el chat") });
+				store.add(addDisposableListener(chat, 'click', () => { this._morePopover.close(); void this._commandService.executeCommand('workbench.view.openideChat.view.focus'); }));
+				content.appendChild(chat);
+			},
+		})));
 	}
 
 	/**

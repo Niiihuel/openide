@@ -409,8 +409,8 @@
 	background-color: var(--vscode-menu-background);
 	color: var(--vscode-menu-foreground);
 	border: 1px solid var(--vscode-menu-border, var(--vscode-editorHoverWidget-border));
-	border-radius: 5px;
-	box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+	border-radius: var(--vscode-cornerRadius-large, 8px);
+	box-shadow: var(--vscode-shadow-lg, 0 2px 8px var(--vscode-widget-shadow));
 	z-index: 50;
 	width: max-content;
 }

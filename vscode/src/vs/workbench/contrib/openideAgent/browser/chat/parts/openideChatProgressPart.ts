@@ -7,6 +7,9 @@ import { $, reset } from '../../../../../../base/browser/dom.js';
 import { IOpenideChatContent, IOpenideChatProgressContent, isOpenideChatProgressContent } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
+import { OPENIDE_CHAT_PART_LIVE_CLASS } from './openideChatActivityRow.js';
+// For `.openide-chat-part-live`: the class is declared there, with the rows it was written for.
+import '../media/openideChatActivity.css';
 
 export const OPENIDE_CHAT_PROGRESS_CLASS = 'openide-chat-progress';
 
@@ -62,6 +65,11 @@ export class OpenideChatProgressPart extends OpenideChatContentPart {
 	}
 
 	private _render(): void {
+		// An ACTIVE line is the step in flight, and the step in flight is drawn once: on the turn's
+		// status line, which is already saying this exact text and swaps it out for the next step.
+		// The row keeps existing so that the moment something lands after it — which is what makes
+		// `_active` false and rebuilds the part — the line settles into the transcript as a record.
+		this.domNode.classList.toggle(OPENIDE_CHAT_PART_LIVE_CLASS, this._active);
 		this._label.classList.toggle(OPENIDE_CHAT_SHIMMER_CLASS, this._active);
 		// Plain text on purpose: this row exists to surface events nobody wrote a part for yet,
 		// and running unreviewed strings through a markdown renderer widens that surface.

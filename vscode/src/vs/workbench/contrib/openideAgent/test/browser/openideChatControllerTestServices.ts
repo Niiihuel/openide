@@ -40,6 +40,9 @@ export function stubOpenideChatControllerHostServices(instantiationService: Test
 	instantiationService.stub(ISubagentOrchestrationService, {
 		onDidChangeRun: onDidChangeRun.event,
 		markDelivered: (runId: string) => { delivered.push(runId); },
+		// The restore asks the store which specialists this conversation delegated. Empty here: a
+		// test that wants restored cards seeds them through the transcript, not through the stub.
+		getRunsForParent: () => [],
 	} as unknown as ISubagentOrchestrationService);
 	return { learning, contextIds, delivered, fireRun: event => onDidChangeRun.fire(event) };
 }

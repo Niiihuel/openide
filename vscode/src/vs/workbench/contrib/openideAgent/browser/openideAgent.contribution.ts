@@ -40,6 +40,17 @@ import { IViewContainersRegistry, IViewDescriptor, IViewsRegistry, ViewContainer
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { EditorContextKeys } from '../../../../editor/common/editorContextKeys.js';
+import { ICodeEditorService } from '../../../../editor/browser/services/codeEditorService.js';
+import { getIconClasses } from '../../../../editor/common/services/getIconClasses.js';
+import { IModelService } from '../../../../editor/common/services/model.js';
+import { ILanguageService } from '../../../../editor/common/languages/language.js';
+import { FileKind } from '../../../../platform/files/common/files.js';
+import { IComposerSnippet, SNIPPET_MAX_CHARS } from '../common/chat/openideChatSnippet.js';
+import './autocomplete/openideAutocomplete.js';
+import { OPENIDE_AUTOCOMPLETE_DEBOUNCE, OPENIDE_AUTOCOMPLETE_DISABLE_IN, OPENIDE_AUTOCOMPLETE_ENABLED, OPENIDE_AUTOCOMPLETE_MAX_TOKENS, OPENIDE_AUTOCOMPLETE_MODEL, OPENIDE_AUTOCOMPLETE_MULTILINE, OPENIDE_AUTOCOMPLETE_TOGGLE_COMMAND } from './autocomplete/openideAutocomplete.js';
+import { OPENIDE_QUICK_EDIT_COMMAND, OPENIDE_SELECTION_HINT_SETTING } from './editor/openideSelectionHint.js';
+import { CTX_OPENIDE_QUICK_EDIT_VISIBLE, OPENIDE_QUICK_EDIT_CLOSE_COMMAND, OPENIDE_QUICK_EDIT_MODEL, OpenideQuickEdit } from './editor/openideQuickEdit.js';
+import { OPENIDE_SELECTION_TO_CLI_KEY } from './chat/openideChatWidget.js';
 import { isCodeEditor } from '../../../../editor/browser/editorBrowser.js';
 import { IOpenideAgentService } from './openideAgentService.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
@@ -50,6 +61,8 @@ import { EditorExtensions, IEditorFactoryRegistry } from '../../../common/editor
 import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/editor.js';
 import { IEditorService, MODAL_GROUP } from '../../../services/editor/common/editorService.js';
 import { OpenideDiagramEditor } from './diagrams/openideDiagramEditor.js';
+import { OpenideArchMapEditor } from './diagrams/openideArchMapEditor.js';
+import { OpenideArchMapInput, OpenideArchMapInputSerializer } from './openideArchMapInput.js';
 import { OpenideDiagramInput, toOpenideDiagramPayload } from './openideDiagramInput.js';
 import { OpenidePlanEditor } from './plan/openidePlanEditor.js';
 import { OpenidePlanInput } from './openidePlanInput.js';
@@ -81,7 +94,6 @@ import { LifecyclePhase } from '../../../services/lifecycle/common/lifecycle.js'
 import { IOpenideIdeServerService, OpenideIdeServerService, OPENIDE_IDE_SERVER_SETTING } from './openideIdeServerService.js';
 import { IOpenideCliChangesService, OpenideCliChangesService } from './openideCliChangesService.js';
 import { OpenideCliChangesView, OPENIDE_CLI_CHANGES_VIEW_ID } from './openideCliChangesView.js';
-import { OpenideStyleView, OPENIDE_STYLE_VIEW_ID } from './openideStyleView.js';
 import { IOpenideIdePlanReview, OpenideIdePlanReview, OPENIDE_IDE_PLAN_APPROVE, OPENIDE_IDE_PLAN_REJECT, planDecisionMessage, planPathFromSaveResult } from './openideIdePlanReview.js';
 import { externalToolName } from '../common/openideIdeExposure.js';
 import { CODEBASE_NOTES_ENABLED_SETTING, CODEBASE_NOTES_LINKING_SETTING, CODEBASE_NOTES_MAX_CHARS_SETTING } from '../../../../code/common/openideCodebaseNotes.js';
@@ -507,36 +519,6 @@ Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([{
 }], openideCliChangesContainer);
 
 /**
- * Visual style editor. Its own container in the sidebar: it is a workspace for one element, not a
- * strip beside the chat, and it has to stay open while the user works the preview next to it.
- */
-const openideStylesIcon = registerIcon('openide-styles', Codicon.paintcan, localize('openide.styles.icon', "Icono del editor visual de estilos"));
-
-const openideStylesContainer: ViewContainer = Registry.as<IViewContainersRegistry>(ViewExtensions.ViewContainersRegistry).registerViewContainer({
-	id: OPENIDE_STYLE_VIEW_ID,
-	title: { value: t('style.title'), original: 'Styles' },
-	icon: openideStylesIcon,
-	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [OPENIDE_STYLE_VIEW_ID, { mergeViewWithContainerWhenSingleView: true }]),
-	storageId: OPENIDE_STYLE_VIEW_ID,
-	order: 5,
-	hideIfEmpty: false,
-}, ViewContainerLocation.Sidebar);
-
-Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([{
-	id: OPENIDE_STYLE_VIEW_ID,
-	name: { value: t('style.title'), original: 'Styles' },
-	containerIcon: openideStylesIcon,
-	ctorDescriptor: new SyncDescriptor(OpenideStyleView),
-	canToggleVisibility: false,
-	canMoveView: true,
-}], openideStylesContainer);
-
-Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViewWelcomeContent(OPENIDE_STYLE_VIEW_ID, {
-	content: `${t('style.empty')}\n${t('style.emptyHint')}\n[${t('style.emptyAction')}](command:openide.agent.pickElement)`,
-	when: 'default',
-});
-
-/**
  * The view's empty state, which is what it shows most of the time. It is the workbench's own
  * welcome view — the same component behind "You have not yet opened a folder" in the Explorer — so
  * the fork does not carry a second empty-state design that has to be kept in step with the IDE's.
@@ -569,6 +551,27 @@ registerAction2(class extends Action2 {
 		const editorService = accessor.get(IEditorService);
 		const instantiationService = accessor.get(IInstantiationService);
 		await editorService.openEditor(instantiationService.createInstance(OpenideMemoryInput));
+	}
+});
+
+// Command: the Project Map retold as an architecture map — the SAME index, one level up.
+//
+// It opens a derived editor and nothing else: there is no file to write, because the index already
+// knows which modules exist and what they import. A saved copy would start lying the moment a
+// folder moves, and it would be a second place holding an answer we can always recompute.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'openide.archmap.project',
+			// The palette entry keeps the product prefix; the tab keeps the plain name.
+			title: { value: t('archmap.project.command'), original: 'OpenIDE: Project architecture' },
+			category: Categories.View,
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(IEditorService).openEditor(new OpenideArchMapInput());
 	}
 });
 
@@ -659,6 +662,26 @@ registerAction2(class extends Action2 {
 		} catch (e) {
 			notificationService.error(e instanceof Error ? e.message : String(e));
 		}
+	}
+});
+
+/**
+ * Undo of an automatic account switch, behind the button the failover notice puts in the transcript.
+ * Not on the palette: it only means anything right after a switch, and the notice is the only place
+ * that knows one happened.
+ */
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'openide.agent.undoAccountFailover',
+			title: localize2('openide.agent.undoAccountFailover', 'Agente IA: Volver a la cuenta anterior'),
+			category: Categories.Preferences,
+			f1: false,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(IOpenideAgentService).undoAccountFailover();
 	}
 });
 
@@ -828,6 +851,15 @@ class OpenidePlanEditorResolverContribution implements IWorkbenchContribution {
 PlatformRegistry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench)
 	.registerWorkbenchContribution(OpenidePlanEditorResolverContribution, LifecyclePhase.Restored);
 
+// The project's architecture map is DERIVED, so its editor is registered over a synthetic scheme
+// and a singleton input — the same arrangement as the Project Map above, and for the same reason:
+// there is no document behind it, only the index.
+Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(OpenideArchMapInput.ID, OpenideArchMapInputSerializer);
+Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
+	EditorPaneDescriptor.create(OpenideArchMapEditor, OpenideArchMapEditor.ID, localize('openide.archmap.editorName', "Project architecture")),
+	[new SyncDescriptor(OpenideArchMapInput)]
+);
+
 // Subagentes: editor especializado para definiciones Markdown del workspace/importadas.
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
 	EditorPaneDescriptor.create(OpenideSubagentEditor, OpenideSubagentEditor.ID, localize('openide.subagent.editorName', "Subagent")),
@@ -995,6 +1027,26 @@ registerAction2(class extends Action2 {
 	}
 });
 
+/**
+ * Ask the agent about something, in a conversation of its own.
+ *
+ * A COMMAND rather than a direct call because the caller is the Project Map — an EditorPane in
+ * another folder — and the chat view's id lives here, next to its registration. Routing through
+ * the command registry is how every other surface in the fork reaches the dock (the Project Map
+ * itself is opened from the chat header the same way), and it keeps the two from importing each
+ * other. Not in the palette: it is meaningless without its argument.
+ */
+// Kept in sync by hand with `ASK_IN_NEW_CHAT_COMMAND` in projectMap/openideProjectMapEditor.ts:
+// this file imports that one to register its editor pane, so the id cannot be shared as a symbol.
+CommandsRegistry.registerCommand('openide.agent.askInNewChat', async (accessor, prompt?: unknown) => {
+	if (typeof prompt !== 'string' || !prompt.trim()) {
+		return;
+	}
+	const viewsService = accessor.get(IViewsService);
+	const view = await viewsService.openView<OpenideChatViewPane>(OPENIDE_CHAT_VIEW_ID, true);
+	view?.askInNewChat(prompt);
+});
+
 // Command: open the chat's context breakdown panel. Triggered by the indicator
 // ████░░░░░░ del status bar (footer nativo del agente).
 registerAction2(class extends Action2 {
@@ -1067,6 +1119,80 @@ registerAction2(class extends Action2 {
 		view?.injectCanvasPrompt({ prompt, send: request?.send !== false, canvas: typeof request?.canvas === 'string' ? request.canvas : undefined });
 	}
 });
+// Command: the editor selection, into the chat (Continue's "Add to Chat", Ctrl+L). The snippet
+// becomes a chip above the prompt — path, lines, text captured NOW — and the prompt takes focus,
+// so the shortcut is "point at this and ask". With nothing selected it only brings the chat up.
+// Ctrl+L is bound only while a selection exists: without one the editor keeps its own
+// "expand line selection", which is what the key means there.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'openide.agent.addSelectionToChat',
+			title: localize2('openide.agent.addSelectionToChat', 'OpenIDE Agent: Agregar la selección al chat'),
+			category: Categories.Help,
+			f1: true,
+			keybinding: {
+				weight: KeybindingWeight.WorkbenchContrib + 10,
+				when: ContextKeyExpr.and(EditorContextKeys.editorTextFocus, EditorContextKeys.hasNonEmptySelection),
+				primary: KeyMod.CtrlCmd | KeyCode.KeyL,
+			},
+			menu: [{ id: MenuId.EditorContext, group: '0_openide', order: 1, when: EditorContextKeys.hasNonEmptySelection }],
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const snippet = selectionSnippet(accessor);
+		const viewsService = accessor.get(IViewsService);
+		const view = await viewsService.openView<OpenideChatViewPane>(OPENIDE_CHAT_VIEW_ID, true);
+		if (view && snippet) {
+			view.attachSnippet(snippet);
+		}
+	}
+});
+
+/**
+ * The active editor's selection as a snippet, or undefined when there is none.
+ *
+ * Continue's `getRangeInFileWithContents`: a selection that starts after nothing but whitespace
+ * is widened to the start of its line, and one that ends at column 1 of a line does not include
+ * that line — what the user sees as "these lines", not the caret's exact offsets.
+ */
+function selectionSnippet(accessor: ServicesAccessor): IComposerSnippet | undefined {
+	const editor = accessor.get(ICodeEditorService).getActiveCodeEditor();
+	const model = editor?.getModel();
+	const selection = editor?.getSelection();
+	if (!editor || !model || !selection || selection.isEmpty()) {
+		return undefined;
+	}
+	const startLine = selection.startLineNumber;
+	let startColumn = selection.startColumn;
+	let endLine = selection.endLineNumber;
+	let endColumn = selection.endColumn;
+	if (!model.getLineContent(startLine).slice(0, startColumn - 1).trim()) {
+		startColumn = 1;
+	}
+	if (endColumn === 1 && endLine > startLine) {
+		endLine -= 1;
+		endColumn = model.getLineMaxColumn(endLine);
+	}
+	const text = model.getValueInRange({ startLineNumber: startLine, startColumn, endLineNumber: endLine, endColumn });
+	if (!text.trim()) {
+		return undefined;
+	}
+	const uri = model.uri;
+	const folder = accessor.get(IWorkspaceContextService).getWorkspaceFolder(uri);
+	const path = folder ? uri.path.slice(folder.uri.path.length).replace(/^\//, '') || uri.path : uri.scheme === 'file' ? uri.fsPath : uri.path;
+	return {
+		path,
+		startLine,
+		endLine,
+		text: text.length > SNIPPET_MAX_CHARS ? text.slice(0, SNIPPET_MAX_CHARS) + '…' : text,
+		languageId: model.getLanguageId(),
+		iconClasses: getIconClasses(accessor.get(IModelService), accessor.get(ILanguageService), uri, FileKind.FILE).join(' '),
+		uri: uri.toString(),
+	};
+}
+
 // Command: new chat (clears the conversation). Appears as an action in the chat panel title.
 registerAction2(class extends Action2 {
 	constructor() {
@@ -1204,10 +1330,22 @@ configurationRegistry.registerConfiguration({
 				required: ['providerId'],
 			},
 		},
+		'openide.agent.accountFailover': {
+			type: 'string',
+			enum: ['off', 'auto', 'ask'],
+			enumDescriptions: [
+				localize('openide.agent.accountFailover.off', "Corta el turno y explica que la cuenta se quedó sin cuota."),
+				localize('openide.agent.accountFailover.auto', "Sigue en otra cuenta con margen y avisa después. Pregunta igual si hay más de una candidata o si la otra cuenta es medida."),
+				localize('openide.agent.accountFailover.ask', "Pregunta siempre a qué cuenta seguir."),
+			],
+			default: 'off',
+			order: 6,
+			description: localize('openide.agent.accountFailover.desc', "Qué hacer cuando la cuenta activa de un proveedor se queda sin cuota y hay otra conectada del mismo proveedor. Por defecto no hace nada: cambiar de cuenta gasta otra suscripción."),
+		},
 		'openide.memory.enabled': { type: 'boolean', default: true, order: 20, description: localize('openide.memory.enabled', 'Habilita la memoria del codebase.') },
 		'openide.memory.indexOnOpen': { type: 'boolean', default: true, order: 21, description: localize('openide.memory.indexOnOpen', 'Valida y actualiza la memoria al abrir el workspace.') },
 		'openide.memory.incrementalIndexing': { type: 'boolean', default: true, order: 22, description: localize('openide.memory.incremental', 'Actualiza sólo archivos modificados mediante watcher.') },
-		'openide.memory.persistIndex': { type: 'boolean', default: true, markdownDescription: localize('openide.memory.persist', 'Guarda el índice en `.openide/memory-indexes/` del workspace para reutilizarlo entre sesiones. Al apagarlo se borra lo ya escrito y el índice vive sólo en memoria: cada ventana nueva lo reconstruye desde cero.'), order: 23 },
+		'openide.memory.persistIndex': { type: 'boolean', default: true, markdownDescription: localize('openide.memory.persist', 'Guarda el índice en el almacenamiento del perfil de OpenIDE (nunca dentro del proyecto) para reutilizarlo entre sesiones. Al apagarlo se borra lo ya escrito y el índice vive sólo en memoria: cada ventana nueva lo reconstruye desde cero.'), order: 23 },
 		'openide.memory.maxContextTokens': { type: 'number', default: 3000, minimum: 500, maximum: 12000, order: 24, description: localize('openide.memory.maxContext', 'Presupuesto máximo de Project Map recuperado automáticamente.') },
 		'openide.memory.maxRetrievedNodes': { type: 'number', default: 24, minimum: 3, maximum: 100, order: 25, description: localize('openide.memory.maxNodes', 'Máximo de nodos relevantes recuperados para el agente.') },
 		'openide.memory.maxTraversalDepth': { type: 'number', default: 3, minimum: 1, maximum: 6, order: 26, description: localize('openide.memory.maxDepth', 'Techo de profundidad para los recorridos del grafo (explore, impacto, callers). 1-2 = vecindad inmediata; 4+ sólo tiene sentido en consultas muy acotadas.') },
@@ -1786,4 +1924,139 @@ registerAction2(class extends Action2 {
 		await terminalService.revealTerminal(instance);
 		instance.sendText(picked.command.command, true);
 	}
+});
+
+// ---- Editor: quick edit, selection hint, AI autocomplete ------------------------------------
+
+// Command: rewrite the selection from one instruction (Continue's Edit, Cursor's Ctrl+K). The
+// keybinding is guarded by a non-empty selection, so without one Ctrl+K stays the chord prefix
+// the rest of the workbench knows it as.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: OPENIDE_QUICK_EDIT_COMMAND,
+			title: localize2('openide.quickEdit', 'OpenIDE Agent: Edición rápida de la selección'),
+			category: Categories.Help,
+			f1: true,
+			precondition: EditorContextKeys.hasNonEmptySelection,
+			keybinding: {
+				// Above the built-in extensions: Ctrl+K is the first key of dozens of chords, and
+				// the resolver takes the heaviest matching binding — at workbench weight, a chord
+				// registered by an extension still won and the key only armed the chord.
+				weight: KeybindingWeight.ExternalExtension + 1,
+				when: ContextKeyExpr.and(EditorContextKeys.editorTextFocus, EditorContextKeys.hasNonEmptySelection, EditorContextKeys.writable),
+				primary: KeyMod.CtrlCmd | KeyCode.KeyK,
+			},
+			menu: [{ id: MenuId.EditorContext, group: '0_openide', order: 2, when: ContextKeyExpr.and(EditorContextKeys.hasNonEmptySelection, EditorContextKeys.writable) }],
+		});
+	}
+
+	run(accessor: ServicesAccessor): void {
+		const editor = accessor.get(ICodeEditorService).getActiveCodeEditor();
+		if (editor) {
+			OpenideQuickEdit.get(editor)?.start();
+		}
+	}
+});
+
+// Escape closes the quick edit input from wherever focus is; while a rewrite runs it cancels it.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: OPENIDE_QUICK_EDIT_CLOSE_COMMAND,
+			title: localize2('openide.quickEdit.close', 'OpenIDE Agent: Cerrar la edición rápida'),
+			f1: false,
+			precondition: CTX_OPENIDE_QUICK_EDIT_VISIBLE,
+			keybinding: { weight: KeybindingWeight.WorkbenchContrib + 20, when: CTX_OPENIDE_QUICK_EDIT_VISIBLE, primary: KeyCode.Escape },
+		});
+	}
+
+	run(accessor: ServicesAccessor): void {
+		for (const editor of accessor.get(ICodeEditorService).listCodeEditors()) {
+			OpenideQuickEdit.get(editor)?.close();
+		}
+	}
+});
+
+// Command: the status bar's toggle for the AI autocomplete.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: OPENIDE_AUTOCOMPLETE_TOGGLE_COMMAND,
+			title: localize2('openide.autocomplete.toggle', 'OpenIDE Agent: Activar o desactivar el autocompletado IA'),
+			category: Categories.Help,
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const configuration = accessor.get(IConfigurationService);
+		const enabled = configuration.getValue<boolean>(OPENIDE_AUTOCOMPLETE_ENABLED) !== false;
+		await configuration.updateValue(OPENIDE_AUTOCOMPLETE_ENABLED, !enabled);
+	}
+});
+
+Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
+	id: 'openideEditor',
+	order: 101,
+	title: localize('openide.editor.title', "Editor con IA"),
+	type: 'object',
+	properties: {
+		[OPENIDE_AUTOCOMPLETE_ENABLED]: {
+			type: 'boolean',
+			default: true,
+			description: localize('openide.autocomplete.enabled', "Muestra sugerencias del modelo como texto fantasma mientras escribís. Tab acepta; Alt+\\ pide una a mano."),
+		},
+		[OPENIDE_AUTOCOMPLETE_MODEL]: {
+			type: 'string',
+			default: '',
+			markdownDescription: localize('openide.autocomplete.model', "Proveedor y modelo para el autocompletado, como `proveedor/modelo` (por ejemplo `openai/gpt-4.1-mini` o `ollama/qwen2.5-coder:1.5b`). Vacío usa el proveedor y el modelo activos del chat. Un modelo chico y rápido acá es lo que hace que el autocompletado se sienta instantáneo."),
+		},
+		[OPENIDE_AUTOCOMPLETE_DEBOUNCE]: {
+			type: 'number',
+			default: 350,
+			minimum: 0,
+			maximum: 5000,
+			description: localize('openide.autocomplete.debounce', "Milisegundos de pausa en la escritura antes de pedir una sugerencia."),
+		},
+		[OPENIDE_AUTOCOMPLETE_MULTILINE]: {
+			type: 'string',
+			enum: ['auto', 'always', 'never'],
+			default: 'auto',
+			enumDescriptions: [
+				localize('openide.autocomplete.multiline.auto', "Varias líneas al final de una línea; una sola en medio de una línea o en un comentario."),
+				localize('openide.autocomplete.multiline.always', "Siempre permite sugerencias de varias líneas."),
+				localize('openide.autocomplete.multiline.never', "Sólo completa la línea actual."),
+			],
+			description: localize('openide.autocomplete.multiline', "Cuándo una sugerencia puede ocupar varias líneas."),
+		},
+		[OPENIDE_AUTOCOMPLETE_MAX_TOKENS]: {
+			type: 'number',
+			default: 256,
+			minimum: 16,
+			maximum: 2048,
+			description: localize('openide.autocomplete.maxTokens', "Tokens máximos por sugerencia."),
+		},
+		[OPENIDE_AUTOCOMPLETE_DISABLE_IN]: {
+			type: 'array',
+			default: [],
+			items: { type: 'string' },
+			markdownDescription: localize('openide.autocomplete.disableIn', "Globs de archivos donde no se pide autocompletado (por ejemplo `**/*.md`, `**/secrets/**`)."),
+		},
+		[OPENIDE_QUICK_EDIT_MODEL]: {
+			type: 'string',
+			default: '',
+			markdownDescription: localize('openide.quickEdit.model', "Proveedor y modelo de la edición rápida (Ctrl+K), como `proveedor/modelo`. Vacío usa el modelo activo del chat. También se elige desde el selector del propio cuadro de edición."),
+		},
+		[OPENIDE_SELECTION_HINT_SETTING]: {
+			type: 'boolean',
+			default: true,
+			description: localize('openide.editor.selectionHint', "Muestra sobre una selección los botones Agregar al chat y Edición rápida."),
+		},
+		[OPENIDE_SELECTION_TO_CLI_KEY]: {
+			type: 'boolean',
+			default: true,
+			markdownDescription: localize('openide.chat.selectionToCli', "Con la pestaña de un CLI hospedado activa (Claude Code, Codex, opencode…), *Agregar al chat* pega el fragmento en el prompt de ese CLI. Desactivado, el fragmento va siempre a un chat local del arnés, abriendo uno nuevo si hace falta."),
+		},
+	},
 });

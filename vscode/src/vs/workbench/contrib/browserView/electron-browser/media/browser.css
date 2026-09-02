@@ -260,13 +260,18 @@
 		}
 	}
 
+	/* ---- OpenIDE: the CSS inspector, on the product's own primitives --------------------------
+	   Everything here is drawn with the surface tokens (openideSurfaceCss.ts) and the same controls
+	   the Settings editor uses: `.oi-segmented` for the tabs, `.oi-btn` for the one labelled button,
+	   `OpenideSettingsDropdown` for every select (the shared popover, not the SelectBox list), and the
+	   Settings icon-button recipe for the header glyphs. The panel used to carry its own three
+	   `--browser-inspector-*` variables and its own tab/button/section styles: one more dialect in a
+	   product that has one. */
 	.browser-inspector-panel {
 		min-width: 280px;
-		--browser-inspector-background: var(--vscode-openide-islandBackground, var(--vscode-editor-background));
-		--browser-inspector-foreground: var(--vscode-editor-foreground, var(--vscode-foreground));
-		--browser-inspector-border: var(--vscode-openide-shellSeparator, var(--vscode-panel-border, transparent));
-		background: var(--browser-inspector-background);
-		color: var(--browser-inspector-foreground);
+		background: var(--oi-surface);
+		color: var(--vscode-foreground);
+		font-size: var(--oi-text-sm);
 
 		> .monaco-sash.horizontal {
 			z-index: 6;
@@ -291,12 +296,12 @@
 		align-items: center;
 		justify-content: space-between;
 		min-height: 36px;
-		padding: 0 8px 0 12px;
-		border-bottom: 1px solid var(--browser-inspector-border);
+		padding: 0 6px 0 12px;
+		border-bottom: 1px solid var(--oi-border-soft);
 
 		strong {
+			font-size: var(--oi-text-md);
 			font-weight: 600;
-			color: var(--browser-inspector-foreground);
 		}
 	}
 
@@ -305,32 +310,40 @@
 		gap: 2px;
 	}
 
-	.browser-inspector-icon-button,
-	.browser-inspector-tab {
-		border: 0;
-		background: transparent;
-		color: inherit;
-		cursor: pointer;
-	}
-
+	/* The Settings editor's icon button (`.openide-settings-iconbtn`), same recipe: a row-height
+	   square, no frame, the 16px glyph every action button in the IDE carries. */
 	.browser-inspector-icon-button {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: 28px;
-		height: 28px;
+		width: var(--oi-row-md);
+		height: var(--oi-row-md);
+		flex: 0 0 auto;
 		padding: 0;
-		border-radius: var(--vscode-cornerRadius-small);
-		color: var(--vscode-descriptionForeground);
+		border: 0;
+		border-radius: var(--oi-radius-md);
+		background: transparent;
+		color: var(--oi-text-muted);
+		cursor: pointer;
+
+		.codicon {
+			font-size: 16px;
+		}
 
 		&:hover {
-			background: var(--vscode-toolbar-hoverBackground);
-			color: var(--browser-inspector-foreground);
+			background: var(--oi-hover-strong);
+			color: var(--vscode-foreground);
 		}
 
 		&.active {
-			background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground));
-			color: var(--vscode-toolbar-activeForeground, var(--browser-inspector-foreground));
+			background: var(--vscode-toolbar-activeBackground, var(--oi-hover-strong));
+			color: var(--vscode-toolbar-activeForeground, var(--vscode-foreground));
+		}
+
+		&:disabled {
+			opacity: .4;
+			cursor: default;
+			background: transparent;
 		}
 
 		&:focus-visible {
@@ -339,23 +352,32 @@
 		}
 	}
 
+	/* Group titles — the components list and every design section — are the same eyebrow: small
+	   caps in the muted colour, the way a section label reads across the fork's surfaces. */
+	.browser-inspector-components h2,
+	.browser-inspector-section h3 {
+		margin: 0;
+		font-size: var(--oi-text-xs);
+		font-weight: 600;
+		letter-spacing: .06em;
+		text-transform: uppercase;
+		color: var(--oi-text-muted);
+	}
+
 	.browser-inspector-components {
 		min-height: 150px;
 		display: flex;
 		flex-direction: column;
-		border-bottom: 1px solid var(--browser-inspector-border);
+		border-bottom: 1px solid var(--oi-border-soft);
 
 		h2 {
-			margin: 0;
-			padding: 12px 12px 8px;
-			font-size: 13px;
-			font-weight: 600;
+			padding: 10px 12px 6px;
 		}
 	}
 
 	.browser-inspector-components-tree {
 		height: 100%;
-		padding-bottom: 8px;
+		padding: 0 6px 8px;
 	}
 
 	.browser-inspector-components-scroll,
@@ -365,17 +387,35 @@
 		min-height: 0;
 	}
 
+	/* A row of the ancestor tree: the selector in the editor font, the selection painted like a
+	   list row of the workbench (rounded, the list's own selection colour). */
 	.browser-inspector-component-row {
 		display: flex;
 		align-items: center;
 		gap: 5px;
-		min-height: 28px;
+		min-height: 26px;
 		padding-right: 8px;
+		border-radius: var(--oi-radius-md);
+		font-family: var(--monaco-monospace-font);
+		font-size: var(--oi-text-xs);
 		white-space: nowrap;
 
+		.codicon {
+			font-size: 14px;
+			color: var(--oi-text-muted);
+		}
+
+		&:hover {
+			background: var(--oi-hover);
+		}
+
 		&.selected {
-			background: var(--vscode-list-inactiveSelectionBackground, var(--vscode-list-activeSelectionBackground));
-			color: var(--vscode-list-inactiveSelectionForeground, var(--vscode-list-activeSelectionForeground));
+			background: var(--vscode-list-activeSelectionBackground, var(--oi-tint-3));
+			color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+
+			.codicon {
+				color: inherit;
+			}
 		}
 	}
 
@@ -384,43 +424,37 @@
 		text-overflow: ellipsis;
 	}
 
+	/* Design / CSS: the `.oi-segmented` control, stretched to the panel so the two tabs share it. */
 	.browser-inspector-tabs {
 		display: flex;
-		gap: 4px;
-		padding: 0 10px;
-		border-bottom: 1px solid var(--browser-inspector-border);
+		padding: 8px 12px;
+		border-bottom: 1px solid var(--oi-border-soft);
+
+		.oi-segmented {
+			display: flex;
+			flex: 1 1 auto;
+		}
 	}
 
 	.browser-inspector-tab {
-		padding: 7px 8px 6px;
-		border-bottom: 2px solid transparent;
-		color: var(--vscode-descriptionForeground);
-
-		&:hover {
-			color: var(--browser-inspector-foreground);
-			background: var(--vscode-toolbar-hoverBackground);
-		}
-
-		&.active {
-			border-bottom-color: var(--vscode-tab-activeBorderTop, var(--vscode-focusBorder));
-			color: var(--browser-inspector-foreground);
-		}
+		flex: 1 1 0;
+		min-width: 0;
 
 		&:focus-visible {
 			outline: 1px solid var(--vscode-focusBorder);
-			outline-offset: -2px;
+			outline-offset: -1px;
 		}
 	}
 
 	.browser-inspector-body {
 		height: 100%;
 		min-width: 0;
-		background: var(--browser-inspector-background);
+		background: var(--oi-surface);
 	}
 
 	.browser-inspector-empty {
 		padding: 18px 12px;
-		color: var(--vscode-descriptionForeground);
+		color: var(--oi-text-muted);
 		line-height: 1.45;
 
 		&.hidden {
@@ -434,14 +468,14 @@
 
 	.browser-inspector-section {
 		padding: 12px;
-		border-bottom: 1px solid var(--browser-inspector-border);
+		border-bottom: 1px solid var(--oi-border-soft);
+
+		&:last-child {
+			border-bottom: 0;
+		}
 
 		h3 {
-			margin: 0 0 10px;
-			font-size: 12px;
-			font-weight: 600;
-			text-transform: uppercase;
-			color: var(--vscode-descriptionForeground);
+			margin-bottom: 10px;
 		}
 	}
 
@@ -452,6 +486,125 @@
 		gap: 7px;
 	}
 
+	/* Every text field of the panel is the fork's input: row height, the soft hairline, the medium
+	   radius, the theme's input colours, ONE ring on focus. Border-box, so a 28px field is 28px. */
+	.browser-inspector-editable-property input,
+	.browser-inspector-css-toolbar input,
+	.browser-inspector-css-filter,
+	.openide-inspector-length {
+		min-width: 0;
+		height: var(--oi-row-md);
+		box-sizing: border-box;
+		padding: 0 8px;
+		border: 1px solid var(--oi-border-soft);
+		border-radius: var(--oi-radius-md);
+		outline: none;
+		background: var(--vscode-input-background);
+		color: var(--vscode-input-foreground);
+		font: inherit;
+		font-size: var(--oi-text-sm);
+
+		&::placeholder {
+			color: var(--vscode-input-placeholderForeground, var(--oi-text-muted));
+		}
+
+		&:hover {
+			border-color: var(--oi-border);
+		}
+
+		&:focus,
+		&:focus-within {
+			border-color: var(--vscode-focusBorder);
+		}
+	}
+
+	/* ---- OpenIDE: the box model, drawn (openideInspectorControls.ts) ----
+	   Two nested boxes and eight fields where the sides are: margin outside, padding inside, and the
+	   field you type in is the side you are changing. The numbers are small on purpose — this is a
+	   diagram with inputs, not a form with a picture. */
+	.openide-inspector-boxmodel {
+		margin: 0 0 12px;
+
+		.openide-inspector-box {
+			position: relative;
+			display: grid;
+			grid-template-columns: 34px 1fr 34px;
+			grid-template-rows: 22px 1fr 22px;
+			align-items: center;
+			justify-items: center;
+			padding: 4px;
+			border: 1px dashed var(--oi-border);
+			border-radius: var(--oi-radius-md);
+			background: var(--oi-raised);
+		}
+
+		.openide-inspector-box-padding {
+			grid-column: 2;
+			grid-row: 2;
+			width: 100%;
+			background: color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent);
+		}
+
+		.openide-inspector-box-label {
+			position: absolute;
+			top: 2px;
+			left: 6px;
+			color: var(--oi-text-muted);
+			font-size: 10px;
+			letter-spacing: .04em;
+			text-transform: uppercase;
+			pointer-events: none;
+		}
+
+		.openide-inspector-box-content {
+			grid-column: 2;
+			grid-row: 2;
+			width: 100%;
+			height: 22px;
+			border: 1px solid var(--oi-border);
+			border-radius: var(--oi-radius-sm);
+		}
+
+		.openide-inspector-box-field {
+			box-sizing: border-box;
+			width: 34px;
+			height: 20px;
+			padding: 0;
+			border: 1px solid transparent;
+			border-radius: var(--oi-radius-sm);
+			background: transparent;
+			color: var(--vscode-foreground);
+			font: inherit;
+			font-size: var(--oi-text-xs);
+			text-align: center;
+
+			&::placeholder {
+				color: var(--oi-text-muted);
+			}
+
+			&:hover {
+				border-color: var(--oi-border);
+			}
+
+			&:focus {
+				border-color: var(--vscode-focusBorder);
+				box-shadow: none;
+				outline: none;
+			}
+		}
+
+		/* Chromium's spinner inside a 34px cell is half the control; the arrow keys still work. */
+		.openide-inspector-box-field::-webkit-inner-spin-button {
+			appearance: none;
+			margin: 0;
+		}
+
+		.openide-inspector-box-top { grid-column: 2; grid-row: 1; }
+		.openide-inspector-box-bottom { grid-column: 2; grid-row: 3; }
+		.openide-inspector-box-left { grid-column: 1; grid-row: 2; }
+		.openide-inspector-box-right { grid-column: 3; grid-row: 2; }
+	}
+
 	.browser-inspector-editable-property {
 		display: grid;
 		grid-template-columns: minmax(90px, .75fr) minmax(110px, 1.25fr);
@@ -460,74 +613,175 @@
 
 		label {
 			overflow: hidden;
-			color: var(--vscode-descriptionForeground);
+			color: var(--oi-text-muted);
 			text-overflow: ellipsis;
 			white-space: nowrap;
 		}
 
-		input,
-		select {
-			min-width: 0;
-			height: 28px;
-			padding: 3px 7px;
-			border: 1px solid var(--vscode-input-border, transparent);
-			border-radius: var(--vscode-cornerRadius-small);
-			outline: none;
-			background: var(--vscode-input-background);
-			color: var(--vscode-input-foreground);
-			font: inherit;
+		/* ---- OpenIDE: the manipulable controls (openideInspectorControls.ts) ---- */
 
-			&:focus {
-				border-color: var(--vscode-focusBorder);
-				box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+		/* A measurement is ONE value, so it is one control: the frame belongs to the pair, the number
+		   takes the room and the unit sits against it behind a hairline. Two separate boxes with a
+		   gap read as two fields, which is what this looked like before. Same anatomy as the
+		   reference builder's `input-group.css-unit`. */
+		.openide-inspector-length {
+			display: flex;
+			align-items: stretch;
+			padding: 0;
+			overflow: hidden;
+
+			input.openide-inspector-number {
+				flex: 5 1 0;
+				min-width: 0;
+				height: 100%;
+				border: none;
+				border-radius: 0;
+				background: transparent;
+
+				&:focus {
+					border: none;
+					box-shadow: none;
+				}
+			}
+
+			/* The unit is the product's own dropdown (the Settings one, the shared popover as its
+			   list). Its closed pill is stripped back to "text at the right edge of the field": the
+			   frame is the control's, not the trigger's. */
+			.openide-inspector-unit {
+				display: flex;
+				flex: 0 0 auto;
+				align-items: stretch;
+				min-width: 54px;
+				border-left: 1px solid var(--oi-border-soft);
+
+				.openide-settings-dropdown {
+					width: 100%;
+					height: 100%;
+					padding: 0 6px 0 8px;
+					border: 0;
+					border-radius: 0;
+					background: transparent;
+					color: var(--oi-text-muted);
+					font-size: var(--oi-text-sm);
+
+					&:hover {
+						background: var(--oi-hover);
+						color: var(--vscode-foreground);
+					}
+				}
+			}
+
+			/* `auto`, `normal`, a `calc`: there is no number to show, so the word takes the whole
+			   control — the reference's own `.input-group.auto`. Picking a unit brings it back. */
+			&.keyword {
+				input.openide-inspector-number {
+					display: none;
+				}
+
+				.openide-inspector-unit {
+					flex: 1 1 auto;
+					border-left: none;
+
+					.openide-settings-dropdown {
+						color: var(--vscode-input-foreground);
+					}
+				}
+			}
+		}
+
+		.openide-inspector-range {
+			display: grid;
+			grid-template-columns: 1fr 34px;
+			align-items: center;
+			gap: 6px;
+			min-width: 0;
+
+			input[type='range'] {
+				height: 18px;
+				padding: 0;
+				border: none;
+				background: transparent;
+				accent-color: var(--vscode-focusBorder);
+
+				&:hover,
+				&:focus {
+					border: none;
+					box-shadow: none;
+				}
+			}
+
+			.openide-inspector-readout {
+				color: var(--oi-text-muted);
+				font-variant-numeric: tabular-nums;
+				text-align: right;
+			}
+		}
+
+		/* The `.oi-segmented` control with glyphs for options: four segments that split the width,
+		   the active one filled the way the Settings tabs are. */
+		.openide-inspector-segmented {
+			display: flex;
+			min-width: 0;
+
+			.openide-inspector-segment {
+				display: flex;
+				flex: 1 1 0;
+				align-items: center;
+				justify-content: center;
+				min-width: 0;
+				min-height: 24px;
+				padding: 0;
+
+				&:focus-visible {
+					outline: 1px solid var(--vscode-focusBorder);
+					outline-offset: -1px;
+				}
 			}
 		}
 
 		&.compact {
-			padding: 4px 12px;
-			border-bottom: 1px solid color-mix(in srgb, var(--browser-inspector-border) 55%, transparent);
+			padding: 3px 12px;
+			border-bottom: 1px solid var(--oi-border-soft);
 			font-family: var(--monaco-monospace-font);
-			font-size: 11px;
+			font-size: var(--oi-text-xs);
 		}
 	}
 
+	/* The enumerations: the Settings dropdown, widened to the control column so the value column
+	   lines up with the fields above and below it. */
 	.browser-inspector-select-control {
 		min-width: 0;
 
-		.monaco-select-box {
+		.openide-settings-dropdown {
+			display: flex;
 			width: 100%;
-			border-color: var(--vscode-input-border, transparent);
-			background: var(--vscode-dropdown-background, var(--vscode-input-background));
-			color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
 		}
 	}
 
 	.browser-inspector-color-control {
 		display: grid;
-		grid-template-columns: 28px minmax(0, 1fr);
+		grid-template-columns: var(--oi-row-md) minmax(0, 1fr);
 		align-items: center;
 		gap: 6px;
 		min-width: 0;
 	}
 
-	.browser-inspector-color-swatch {
+	/* A checkerboard behind a colour that may be transparent, in the theme's own greys: the editor
+	   ground and a foreground mix, so it reads on a dark theme as well as on a light one. */
+	.browser-inspector-color-swatch,
+	.browser-inspector-token-swatch {
+		--browser-inspector-checker: color-mix(in srgb, var(--vscode-foreground) 22%, var(--vscode-editor-background));
 		position: relative;
 		box-sizing: border-box;
-		width: 28px;
-		height: 28px;
 		padding: 0;
-		border: 1px solid var(--vscode-input-border, color-mix(in srgb, var(--browser-inspector-foreground) 25%, transparent));
-		border-radius: var(--vscode-cornerRadius-small);
+		border: 1px solid var(--oi-border-soft);
 		cursor: pointer;
-		/* Checkerboard behind transparent colors */
-		background-color: #fff;
+		background-color: var(--vscode-editor-background);
 		background-image:
-			linear-gradient(45deg, #cfcfcf 25%, transparent 25%),
-			linear-gradient(-45deg, #cfcfcf 25%, transparent 25%),
-			linear-gradient(45deg, transparent 75%, #cfcfcf 75%),
-			linear-gradient(-45deg, transparent 75%, #cfcfcf 75%);
-		background-size: 10px 10px;
-		background-position: 0 0, 0 5px, 5px -5px, -5px 0;
+			linear-gradient(45deg, var(--browser-inspector-checker) 25%, transparent 25%),
+			linear-gradient(-45deg, var(--browser-inspector-checker) 25%, transparent 25%),
+			linear-gradient(45deg, transparent 75%, var(--browser-inspector-checker) 75%),
+			linear-gradient(-45deg, transparent 75%, var(--browser-inspector-checker) 75%);
 
 		&::after {
 			content: '';
@@ -538,8 +792,7 @@
 		}
 
 		&:hover {
-			outline: 1px solid var(--vscode-focusBorder);
-			outline-offset: -1px;
+			border-color: var(--oi-border);
 		}
 
 		&:focus-visible {
@@ -552,22 +805,124 @@
 		}
 	}
 
+	.browser-inspector-color-swatch {
+		width: var(--oi-row-md);
+		height: var(--oi-row-md);
+		border-radius: var(--oi-radius-md);
+		background-size: 10px 10px;
+		background-position: 0 0, 0 5px, 5px -5px, -5px 0;
+	}
+
 	.browser-inspector-color-input {
 		min-width: 0;
 		width: 100%;
 	}
 
+	/* ---- The picker's popover ----
+	   The workbench's ColorPickerWidget, dressed as one of the product's popovers: the overlay
+	   ground, the large radius, the widget shadow, and a width the panel sets (the property row's,
+	   capped) instead of whatever the token swatches happened to add up to. The widget's own header
+	   paints the picked colour across the whole bar with a checkerboard PNG behind it — a white
+	   strip over a dark panel. Here that bar is a row: a 16px chip of the picked colour (from the
+	   variable the panel keeps in sync), the presentation text in the editor font, and the original
+	   colour as a second chip at the right, still clickable to go back to it. */
 	.browser-inspector-color-picker {
-		box-shadow: 0 2px 8px var(--vscode-widget-shadow);
-		border-radius: var(--vscode-cornerRadius-small, 3px);
+		--browser-inspector-checker: color-mix(in srgb, var(--vscode-foreground) 22%, var(--vscode-editor-background));
+		box-sizing: border-box;
 		overflow: hidden;
-		background: var(--vscode-editorHoverWidget-background);
-		color: var(--vscode-editorHoverWidget-foreground);
-		border: 1px solid var(--vscode-editorHoverWidget-border);
+		border: 1px solid var(--oi-border);
+		border-radius: var(--oi-radius-lg);
+		background: var(--oi-overlay);
+		color: var(--vscode-foreground);
+		box-shadow: 0 8px 24px var(--vscode-widget-shadow);
 
 		.colorpicker-widget {
-			/* Hover color picker is designed for editor hover; keep fixed size */
-			width: 254px;
+			width: 100%;
+			height: auto;
+		}
+
+		.colorpicker-header {
+			height: auto;
+			min-height: 36px;
+			align-items: center;
+			gap: 8px;
+			padding: 6px 10px 0;
+			background: none;
+			image-rendering: auto;
+		}
+
+		.colorpicker-header .picked-color {
+			position: relative;
+			flex: 1 1 auto;
+			width: auto;
+			min-width: 0;
+			justify-content: flex-start;
+			gap: 6px;
+			height: 24px;
+			line-height: 24px;
+			margin: 0 -6px;
+			padding: 0 6px;
+			border-radius: var(--oi-radius-md);
+			background: transparent !important;
+			color: var(--vscode-foreground) !important;
+			font-family: var(--monaco-monospace-font);
+			font-size: var(--oi-text-xs);
+
+			&:hover {
+				background: var(--oi-hover) !important;
+			}
+
+			&::before {
+				content: '';
+				flex: 0 0 auto;
+				width: 16px;
+				height: 16px;
+				box-sizing: border-box;
+				border: 1px solid var(--oi-border);
+				border-radius: var(--oi-radius-sm);
+				background-color: var(--vscode-editor-background);
+				background-image:
+					linear-gradient(var(--browser-inspector-picked, transparent), var(--browser-inspector-picked, transparent)),
+					linear-gradient(45deg, var(--browser-inspector-checker) 25%, transparent 25%),
+					linear-gradient(-45deg, var(--browser-inspector-checker) 25%, transparent 25%),
+					linear-gradient(45deg, transparent 75%, var(--browser-inspector-checker) 75%),
+					linear-gradient(-45deg, transparent 75%, var(--browser-inspector-checker) 75%);
+				background-size: auto, 8px 8px, 8px 8px, 8px 8px, 8px 8px;
+				background-position: 0 0, 0 0, 0 4px, 4px -4px, -4px 0;
+			}
+
+			.codicon {
+				font-size: 14px;
+				color: var(--oi-text-muted);
+			}
+
+			.picked-color-presentation {
+				margin: 0;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+		}
+
+		.colorpicker-header .original-color {
+			flex: 0 0 auto;
+			width: 16px;
+			height: 16px;
+			box-sizing: border-box;
+			border: 1px solid var(--oi-border);
+			border-radius: var(--oi-radius-sm);
+		}
+
+		.colorpicker-body {
+			padding: 8px 10px 10px;
+		}
+
+		.colorpicker-body .saturation-wrap {
+			min-width: 0;
+			border-radius: var(--oi-radius-md);
+		}
+
+		.colorpicker-body .strip {
+			border-radius: var(--oi-radius-sm);
 		}
 	}
 
@@ -576,39 +931,20 @@
 		flex-direction: column;
 		gap: 8px;
 		padding: 8px 10px;
-		border-top: 1px solid var(--vscode-editorHoverWidget-border);
+		border-top: 1px solid var(--oi-border-soft);
 	}
 
+	/* The contrast reading is an `.oi-pill`: `ok` / `error` colour it like every other status pill. */
 	.browser-inspector-contrast {
-		font-size: 11px;
+		align-self: flex-start;
 		font-family: var(--monaco-monospace-font);
-		color: var(--vscode-descriptionForeground);
-
-		&.ok { color: var(--vscode-testing-iconPassed, #3fb950); }
-		&.fail { color: var(--vscode-testing-iconFailed, #f85149); }
+		font-size: var(--oi-text-xs);
 	}
 
 	.browser-inspector-color-picker-actions {
 		display: flex;
 		align-items: center;
-		gap: 4px;
-	}
-
-	.browser-inspector-footer-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 26px;
-		height: 26px;
-		padding: 0;
-		border: 1px solid var(--vscode-input-border, transparent);
-		border-radius: var(--vscode-cornerRadius-small);
-		background: var(--vscode-editorHoverWidget-background);
-		color: var(--vscode-editorHoverWidget-foreground);
-		cursor: pointer;
-
-		&:hover { background: var(--vscode-list-hoverBackground); }
-		&:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+		gap: 2px;
 	}
 
 	.browser-inspector-color-tokens {
@@ -618,32 +954,11 @@
 	}
 
 	.browser-inspector-token-swatch {
-		position: relative;
-		box-sizing: border-box;
 		width: 18px;
 		height: 18px;
-		padding: 0;
-		border: 1px solid var(--vscode-input-border, color-mix(in srgb, var(--browser-inspector-foreground) 25%, transparent));
-		border-radius: 4px;
-		cursor: pointer;
-		background-color: #fff;
-		background-image:
-			linear-gradient(45deg, #cfcfcf 25%, transparent 25%),
-			linear-gradient(-45deg, #cfcfcf 25%, transparent 25%),
-			linear-gradient(45deg, transparent 75%, #cfcfcf 75%),
-			linear-gradient(-45deg, transparent 75%, #cfcfcf 75%);
+		border-radius: var(--oi-radius-sm);
 		background-size: 8px 8px;
 		background-position: 0 0, 0 4px, 4px -4px, -4px 0;
-
-		&::after {
-			content: '';
-			position: absolute;
-			inset: 0;
-			border-radius: inherit;
-			background: var(--browser-inspector-swatch-color, transparent);
-		}
-
-		&:hover { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 	}
 
 	.browser-inspector-css-toolbar {
@@ -653,40 +968,15 @@
 		padding: 10px 12px 6px;
 	}
 
-	.browser-inspector-css-toolbar input,
-	.browser-inspector-css-filter {
-		min-width: 0;
-		height: 28px;
-		box-sizing: border-box;
-		padding: 3px 7px;
-		border: 1px solid var(--vscode-input-border, transparent);
-		border-radius: var(--vscode-cornerRadius-small);
-		outline: none;
-		background: var(--vscode-input-background);
-		color: var(--vscode-input-foreground);
-
-		&:focus {
-			border-color: var(--vscode-focusBorder);
-			box-shadow: 0 0 0 1px var(--vscode-focusBorder);
-		}
-	}
-
 	.browser-inspector-css-filter {
 		width: calc(100% - 24px);
 		margin: 4px 12px 8px;
 	}
 
+	/* `.oi-btn.primary`, sized to the row so it lines up with the two fields beside it. */
 	.browser-inspector-add-property {
-		border: 0;
-		border-radius: var(--vscode-cornerRadius-small);
-		padding: 0 10px;
-		background: var(--vscode-button-background);
-		color: var(--vscode-button-foreground);
-		cursor: pointer;
-
-		&:hover {
-			background: var(--vscode-button-hoverBackground);
-		}
+		min-height: var(--oi-row-md);
+		padding: 0 12px;
 
 		&:focus-visible {
 			outline: 1px solid var(--vscode-focusBorder);
@@ -697,11 +987,11 @@
 	.browser-inspector-status {
 		min-height: 24px;
 		box-sizing: border-box;
-		padding: 4px 10px;
-		border-top: 1px solid var(--browser-inspector-border);
-		background: var(--browser-inspector-background);
-		color: var(--vscode-descriptionForeground);
-		font-size: 11px;
+		padding: 4px 12px;
+		border-top: 1px solid var(--oi-border-soft);
+		background: var(--oi-surface);
+		color: var(--oi-text-muted);
+		font-size: var(--oi-text-xs);
 
 		&.error {
 			color: var(--vscode-errorForeground);
@@ -875,12 +1165,69 @@
 		padding: 12px;
 	}
 
+	/* The error pane says four things in the order a person reads them: what happened, why, where,
+	   and what to do. Upstream's anatomy (`browserEditorErrorFeatures.ts`), plus the actions row —
+	   the failure this browser sees most is a dev server that has not started, and for that a
+	   retry belongs on the page, not in the toolbar. */
+	.browser-error-title {
+		margin-bottom: 6px;
+		color: var(--vscode-foreground);
+		font-size: 15px;
+		font-weight: 600;
+		text-align: center;
+	}
+
 	.browser-error-message {
 		max-width: 360px;
 		padding: 0 20px;
-		color: var(--vscode-errorForeground);
+		color: var(--vscode-descriptionForeground);
 		font-size: 13px;
+		line-height: 1.5;
 		text-align: center;
+	}
+
+	.browser-error-url {
+		max-width: 420px;
+		margin-top: 10px;
+		overflow: hidden;
+		color: var(--vscode-descriptionForeground);
+		font-family: var(--monaco-monospace-font);
+		font-size: 12px;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.browser-error-actions {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-top: 18px;
+	}
+
+	.browser-error-retry {
+		padding: 4px 14px;
+		border: 1px solid var(--vscode-button-border, transparent);
+		border-radius: var(--vscode-cornerRadius-small);
+		background: var(--vscode-button-background);
+		color: var(--vscode-button-foreground);
+		font: inherit;
+		cursor: pointer;
+
+		&:hover {
+			background: var(--vscode-button-hoverBackground);
+		}
+
+		&:focus-visible {
+			outline: 1px solid var(--vscode-focusBorder);
+			outline-offset: 2px;
+		}
+	}
+
+	/* Not a spinner: nothing is in flight between probes, and a spinner that never resolves is a
+	   worse lie than the blank page this replaced. */
+	.browser-error-waiting {
+		color: var(--vscode-descriptionForeground);
+		font-size: 12px;
 	}
 
 	.browser-find-widget-wrapper {
@@ -1041,8 +1388,9 @@
 
 		.codicon {
 			font-size: 40px;
-			margin-bottom: 24px;
-			color: var(--vscode-errorForeground);
+			margin-bottom: 20px;
+			/* A closed port is not an error in red: it is a state the page is waiting to leave. */
+			color: var(--vscode-descriptionForeground);
 		}
 	}
 

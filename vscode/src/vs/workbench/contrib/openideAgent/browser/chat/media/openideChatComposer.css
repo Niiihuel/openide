@@ -1,7 +1,7 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — native chat composer.
  *
- *  Every value here is transcribed from the webview (browser/openideChatHtml.ts, `<style>` block):
+ *  Every value here is transcribed from the webview (the removed webview, `<style>` block):
  *  the webview is the visual source of truth while both renderers ship, and a native composer that
  *  looked like the workbench's own chat would read as a different product inside the same dock.
  *  Where a rule differs from that file it is a bug, not a decision.
@@ -49,7 +49,7 @@
 	width: 100%;
 }
 
-/* The webview's `#filesStack` (openideChatHtml.ts:1079-1082), and it has to be stated HERE.
+/* The webview's `#filesStack`, and it has to be stated HERE.
    `.openide-chat-composer` is `align-items: center`, so a child without an explicit width is
    stretched by nothing and shrink-wraps its content instead: the tray came out as wide as its own
    text — much narrower than the card and, once its own asymmetric margins were added, off its
@@ -65,10 +65,13 @@
 	width: min(100%, 760px);
 	box-sizing: border-box;
 	margin: 0 auto;
-	border-radius: var(--vscode-cornerRadius-large, 8px);
+	border-radius: var(--oi-radius-lg);
 	/* The block owns the single hairline outline: trays and card draw none of their own, so the
 	   corners are one continuous curve instead of two nested radii clipping each other. */
-	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-chat-requestBorder, var(--vscode-input-border, rgba(128, 128, 128, 0.28)));
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--vscode-input-border, var(--oi-border)));
+	/* The transcript card surface (--oi-chat-card-*): the prompt box wears the same lighter grey
+	   as the bubbles and tool cards, and the trays stacked inside it inherit it for free. */
+	background: var(--oi-chat-card-bg, transparent);
 }
 
 .openide-chat-tray-host {
@@ -96,7 +99,7 @@
 	   The outline itself is painted by `.openide-chat-block`; the card only keeps the interior
 	   hairline that separates it from a stacked tray. */
 	border: 0;
-	border-radius: var(--vscode-cornerRadius-large, 8px);
+	border-radius: var(--oi-radius-lg);
 	background: transparent;
 	transition: border-color 150ms ease-in-out;
 }
@@ -110,71 +113,97 @@
    `layout()` exactly like `ChatInputPart` (4s until the first layout). The only change is the
    colour: `--openide-chat-working-accent` (hook) → link colour → focusBorder, because the OpenIDE
    themes grey out `focusBorder` and `chat.inputWorkingBorderColor1`. */
-@property --openide-chat-anim-angle {
-	syntax: '<angle>';
-	inherits: false;
-	initial-value: 135deg;
-}
-
-@keyframes openide-chat-working-border-spin {
-	from { --openide-chat-anim-angle: 135deg; }
-	to { --openide-chat-anim-angle: 495deg; }
-}
-
+/* ---- Working border beam — upstream chat.css:1150-1300 (`.chat-input-container.working`): a 1px
+   comet on the block's outer edge and a 2px blurred halo behind it, both clipped to the edge by
+   padding + an inverted mask so they follow the block's radius, with 350ms opacity fades and a
+   duration set by width from `layout()` exactly like `ChatInputPart` (4s until the first layout).
+   Two changes from upstream. The colour: `--openide-chat-working-accent` (hook) → link colour →
+   focusBorder, because the OpenIDE themes grey out `focusBorder` and `chat.inputWorkingBorderColor1`.
+   And the mechanism: upstream animates a registered `<angle>` custom property that its conic
+   gradient reads, which re-rasterises the whole block on every frame — measured at ~21% of a core
+   for as long as a turn runs, against ~1% with the beam off. Here the gradient is STATIC and a
+   square carrying it spins under the mask with `transform`, which the compositor handles: ~5% for
+   the same picture. That square has to be a child, and a pseudo-element cannot have one, so the
+   two layers are real elements (`.openide-chat-beam`) built by the composer. */
 .openide-chat-block {
 	--openide-chat-anim-duration: 4s;
 	--openide-chat-working-color: var(--openide-chat-working-accent, var(--vscode-textLink-foreground, var(--vscode-focusBorder)));
 }
 
-.openide-chat-block::before {
-	content: '';
+@keyframes openide-chat-working-border-spin {
+	to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+.openide-chat-beam {
 	position: absolute;
 	inset: -1px;
 	border-radius: inherit;
+	/* The window the spinning square is seen through: `padding` sets the stroke width and the
+	   inverted mask keeps only that rim, so the beam follows the block's corners. */
+	-webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+	mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	overflow: hidden;
+	opacity: 0;
+	transition: opacity 350ms ease;
+	pointer-events: none;
+}
+
+.openide-chat-beam > i {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	/* Square, and wide enough that a corner of the block is still covered at every angle: the
+	   side has to clear the block's diagonal. `min-height` carries the case of a composer grown
+	   tall by its trays, where twice the WIDTH would no longer reach. */
+	width: 220%;
+	min-height: 220%;
+	aspect-ratio: 1;
+	transform: translate(-50%, -50%);
+	pointer-events: none;
+}
+
+.openide-chat-beam.comet {
 	padding: var(--vscode-strokeThickness, 1px);
-	background: conic-gradient(from var(--openide-chat-anim-angle),
+	z-index: 2;
+}
+
+.openide-chat-beam.comet > i {
+	background: conic-gradient(from 135deg,
 		transparent 0deg,
 		color-mix(in srgb, var(--openide-chat-working-color) 90%, transparent) 20deg,
 		var(--openide-chat-working-color) 30deg,
 		color-mix(in srgb, var(--openide-chat-working-color) 60%, transparent) 50deg,
 		transparent 90deg,
 		transparent 360deg);
-	-webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-	mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-	-webkit-mask-composite: xor;
-	mask-composite: exclude;
-	opacity: 0;
-	transition: opacity 350ms ease;
-	pointer-events: none;
-	z-index: 2;
 }
 
-.openide-chat-block::after {
-	content: '';
-	position: absolute;
-	inset: -1px;
-	border-radius: inherit;
+.openide-chat-beam.halo {
 	padding: 2px;
-	background: conic-gradient(from var(--openide-chat-anim-angle),
+	filter: blur(1.5px);
+	z-index: 1;
+}
+
+.openide-chat-beam.halo > i {
+	background: conic-gradient(from 135deg,
 		transparent 0deg,
 		color-mix(in srgb, var(--openide-chat-working-color) 60%, transparent) 25deg,
 		color-mix(in srgb, var(--openide-chat-working-color) 35%, transparent) 50deg,
 		transparent 90deg,
 		transparent 360deg);
-	-webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-	mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-	-webkit-mask-composite: xor;
-	mask-composite: exclude;
-	filter: blur(1.5px);
-	opacity: 0;
-	transition: opacity 350ms ease;
-	pointer-events: none;
-	z-index: 1;
 }
 
-.openide-chat-block.working::before,
-.openide-chat-block.working::after {
+.openide-chat-block.working > .openide-chat-beam {
 	opacity: 1;
+}
+
+/* Only while the beam is actually shown: an animation left running under `opacity: 0` still
+   composites every frame, which is the whole cost this is here to avoid. `will-change` goes on
+   with it for the same reason — a permanent layer promotion on an invisible element is just
+   memory held for nothing. */
+.openide-chat-block.working > .openide-chat-beam > i {
+	will-change: transform;
 	animation: openide-chat-working-border-spin var(--openide-chat-anim-duration) linear infinite;
 }
 
@@ -184,8 +213,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.openide-chat-block.working::before,
-	.openide-chat-block.working::after {
+	.openide-chat-block.working > .openide-chat-beam > i {
 		animation: none;
 	}
 }
@@ -198,7 +226,7 @@
 .openide-chat-block > .openide-chat-tray-host {
 	width: 100%;
 	margin: 0;
-	border-radius: var(--vscode-cornerRadius-large, 8px) var(--vscode-cornerRadius-large, 8px) 0 0;
+	border-radius: var(--oi-radius-lg) var(--oi-radius-lg) 0 0;
 	overflow: hidden;
 }
 .openide-chat-block .openide-chat-tray-host > * {
@@ -212,8 +240,8 @@
 .openide-chat-block .openide-chat-tray-host > :not(.hidden):first-child,
 .openide-chat-block .openide-chat-tray-host > .hidden + :not(.hidden),
 .openide-chat-block .openide-chat-tray-host > .hidden + .hidden + :not(.hidden) {
-	border-top-left-radius: var(--vscode-cornerRadius-large, 8px);
-	border-top-right-radius: var(--vscode-cornerRadius-large, 8px);
+	border-top-left-radius: var(--oi-radius-lg);
+	border-top-right-radius: var(--oi-radius-lg);
 }
 /* `:not(.hidden)`, NOT just `> *`: the three trays (queue, files, terms) are always in the DOM and
    hide themselves with a class, so `> *` matched with nothing on screen. The card then drew its
@@ -222,7 +250,7 @@
 .openide-chat-block:has(.openide-chat-tray-host > :not(.hidden)) > .openide-chat-input-card {
 	border-top-left-radius: 0;
 	border-top-right-radius: 0;
-	border-top: var(--vscode-strokeThickness, 1px) solid var(--vscode-chat-requestBorder, var(--vscode-input-border, rgba(128, 128, 128, 0.28)));
+	border-top: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--vscode-input-border, var(--oi-border)));
 }
 
 /* ---- Prompt ----------------------------------------------------------------------------- */
@@ -249,13 +277,6 @@
 }
 
 .openide-chat-prompt.scrollable { overflow-y: auto; }
-/* Workbench-style scrollbar, not the OS one with stepper arrows. */
-.openide-chat-prompt::-webkit-scrollbar { width: 10px; }
-.openide-chat-prompt::-webkit-scrollbar-track { background: transparent; }
-.openide-chat-prompt::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); }
-.openide-chat-prompt::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
-.openide-chat-prompt::-webkit-scrollbar-thumb:active { background: var(--vscode-scrollbarSlider-activeBackground); }
-.openide-chat-prompt::-webkit-scrollbar-button { display: none; }
 
 .openide-chat-prompt::placeholder {
 	color: var(--vscode-descriptionForeground);
@@ -272,7 +293,7 @@
 
 /* ---- Attachments ------------------------------------------------------------------------ */
 
-/* ---- Pick & Polish chip (openideChatHtml.ts:1215-1220, #pickChip) ---- */
+/* ---- Pick & Polish chip (the removed chat webview, #pickChip) ---- */
 
 /* Tinted with `textLink-foreground` rather than the card's neutral grey, and it is the only
    element of the composer that is: everything else in here is something the user typed, while this
@@ -286,7 +307,7 @@
 	padding: 2px 6px;
 	margin-bottom: 2px;
 	border: 1px solid color-mix(in srgb, var(--vscode-textLink-foreground) 45%, transparent);
-	border-radius: var(--vscode-cornerRadius-small, 4px);
+	border-radius: var(--oi-radius-sm);
 	background: color-mix(in srgb, var(--vscode-textLink-foreground) 8%, transparent);
 	font-size: 12px;
 }
@@ -338,13 +359,17 @@
 	position: relative;
 	width: 44px;
 	height: 44px;
-	border: 1px solid rgba(128, 128, 128, 0.3);
+	border: 1px solid var(--oi-border-strong);
 	border-radius: 2px;
 	overflow: hidden;
 	cursor: zoom-in;
 }
 
 .openide-attach-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Restored attachment whose bytes are still being read back from its asset. Holds the frame so
+   the strip does not jump when the thumbnail lands. */
+.openide-attach-chip.pending { background: var(--oi-tint-2); cursor: default; }
 
 .openide-attach-remove {
 	position: absolute;
@@ -357,7 +382,7 @@
 	justify-content: center;
 	padding: 0;
 	border: none;
-	border-radius: var(--vscode-cornerRadius-small, 4px);
+	border-radius: var(--oi-radius-sm);
 	background: rgba(0, 0, 0, 0.55);
 	color: #fff;
 	cursor: pointer;
@@ -367,7 +392,8 @@
 
 /* ---- Control row ------------------------------------------------------------------------ */
 
-.openide-chat-input-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* Fixed height: the trailing slot swaps microphone, send and stop, and the row must not move. */
+.openide-chat-input-row { display: flex; align-items: center; gap: 4px; min-width: 0; height: 24px; }
 .openide-chat-input-row .openide-composer-spacer { flex: 1; }
 
 .openide-composer-anchor { position: relative; display: flex; flex-shrink: 0; }
@@ -382,7 +408,7 @@
 	max-width: 100%;
 	padding: 0 4px;
 	border: none;
-	border-radius: var(--vscode-cornerRadius-small, 4px);
+	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: var(--vscode-foreground);
 	font-family: inherit;
@@ -404,6 +430,13 @@
 .openide-composer-model.unset .openide-composer-trigger-label {
 	color: var(--vscode-descriptionForeground);
 	font-weight: 400;
+}
+
+/* A turn running somewhere other than the chosen model reads "chosen → running". The marker is the
+   warning colour and nothing else: the chip is still the control that opens the picker, and the
+   detour lasts one turn. */
+.openide-composer-model.rerouted .openide-composer-trigger-label {
+	color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #d7ba7d));
 }
 
 .monaco-workbench .openide-chat-native .openide-chat-input-card .openide-composer-chevron.codicon[class*="codicon-"] {
@@ -434,9 +467,9 @@
 .monaco-workbench .openide-chat-native .openide-composer-provider-icon[hidden] { display: none; }
 
 .monaco-workbench .openide-chat-native .openide-composer-provider-icon.monogram {
-	border: 1px solid rgba(128, 128, 128, 0.35);
-	border-radius: var(--vscode-cornerRadius-small, 4px);
-	background: rgba(128, 128, 128, 0.1);
+	border: 1px solid var(--oi-border-strong);
+	border-radius: var(--oi-radius-sm);
+	background: var(--oi-tint-2);
 	font-size: 7.5px;
 	font-weight: 700;
 	letter-spacing: -0.04em;
@@ -446,12 +479,12 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 22px;
-	height: 22px;
+	width: 24px;
+	height: 24px;
 	padding: 0;
 	flex: 0 0 auto;
 	border: none;
-	border-radius: var(--vscode-cornerRadius-small, 4px);
+	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	cursor: pointer;
@@ -463,7 +496,12 @@
 	color: var(--vscode-foreground);
 }
 
-.monaco-workbench .openide-chat-native .openide-chat-input-card .openide-composer-util .codicon[class*="codicon-"] { font-size: 13px; color: inherit; }
+/* 16px: the workbench's icon convention (style.css:229). The webview's 13px marks read a size
+   short of every other glyph in the IDE. */
+.monaco-workbench .openide-chat-native .openide-chat-input-card .openide-composer-util .codicon[class*="codicon-"] { font-size: 16px; color: inherit; }
+/* The stroke icons (paperclip) at the same size as the codicons beside them and as the rewind icon
+   of the request bubble: 16px is the one glyph size of the composer. */
+.openide-composer-util .openide-stroke-icon { width: 16px; height: 16px; display: block; }
 .openide-composer-util[hidden] { display: none; }
 
 /* Following is a state, not an accent: the filled pill read as a second primary button. */
@@ -481,12 +519,14 @@
 	width: 24px;
 	height: 24px;
 	border-radius: 50%;
-	background: rgba(128, 128, 128, 0.14);
+	background: var(--oi-border-soft);
 	color: var(--vscode-foreground);
 }
-.openide-composer-mic:hover { background: rgba(128, 128, 128, 0.26); }
+.openide-composer-mic:hover { background: var(--oi-border); }
 .openide-composer-mic.rec { color: var(--vscode-errorForeground); animation: openide-mic-pulse 1.2s ease-in-out infinite; }
 .openide-composer-mic.busy { pointer-events: none; }
+.openide-composer-mic.unavailable { color: var(--vscode-descriptionForeground); }
+.monaco-workbench .openide-chat-native .openide-chat-input-card .openide-composer-mic .codicon[class*="codicon-"] { font-size: 14px; }
 
 @keyframes openide-mic-pulse {
 	0%, 100% { opacity: 1; }
@@ -497,53 +537,68 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
+	/* Same 24px as the microphone it replaces in the slot, and the same box as the other icons of
+	   the row: a taller send made the row, and with it the whole composer, jump the moment the
+	   first character was typed. */
 	width: 24px;
 	height: 24px;
 	flex: 0 0 auto;
 	padding: 0;
 	border: none;
 	border-radius: 50%;
-	background: var(--vscode-foreground);
-	color: var(--vscode-editor-background);
+	background: var(--vscode-button-background, var(--vscode-foreground));
+	color: var(--vscode-button-foreground, var(--vscode-editor-background));
 	cursor: pointer;
-	transition: transform 120ms ease, opacity 120ms ease;
+	transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;
 }
 
 .openide-composer-send[hidden] { display: none; }
-.openide-composer-send:hover { opacity: 0.85; }
+.openide-composer-send:hover { background: var(--vscode-button-hoverBackground, var(--vscode-foreground)); opacity: 0.95; }
 .openide-composer-send:active { transform: scale(0.92); }
 .openide-composer-send:disabled {
-	background: rgba(128, 128, 128, 0.25);
+	background: var(--oi-border);
 	color: var(--vscode-descriptionForeground);
 	cursor: default;
 }
 .openide-composer-send:disabled:hover { opacity: 1; }
-.monaco-workbench .openide-chat-native .openide-chat-input-card .openide-composer-send .codicon[class*="codicon-"] { font-size: 12px; color: inherit; }
+.monaco-workbench .openide-chat-native .openide-chat-input-card .openide-composer-send .codicon[class*="codicon-"] { font-size: 16px; color: inherit; }
+.openide-composer-send .openide-stroke-icon { width: 14px; height: 14px; display: block; }
 
 .openide-stop-square { width: 8px; height: 8px; border-radius: 1.5px; background: currentColor; }
 
-/* The prompt is a raw <textarea>, so it gets the platform scrollbar — arrow buttons and all —
-   the moment the text passes max-height. Nothing else in the workbench looks like that: its own
-   widgets scroll through DomScrollableElement. This is the same recipe openideSettings.css uses
-   for the panes it cannot route through that widget: kill the buttons, transparent track, and a
-   thumb that only appears while the pointer is over the field.
-   `scrollbar-color: auto` first, because Chromium ignores the ::-webkit rules when the standard
-   property was inherited from the workbench base styles. */
-.openide-chat-prompt {
-	scrollbar-width: thin;
-	scrollbar-color: auto;
+/* The prompt is a raw <textarea>, so past max-height it gets the platform scrollbar — stepper
+   arrows, opaque thumb, always visible — and nothing else in the workbench looks like that. It
+   cannot be routed through DomScrollableElement either: that widget scrolls a child element, and
+   a textarea scrolls ITSELF. Taking that away is what keeps the caret in view while you type at
+   the bottom of a long prompt, so the fix is to skin the textarea's own bar to match the
+   workbench's overlay scrollbar.
+
+   NEVER set `scrollbar-width` here. It is the standard property, and a non-`auto` value makes
+   Chromium render the STANDARD scrollbar and ignore every ::-webkit-scrollbar rule below —
+   `thin` was set here and that is exactly why the arrows were showing despite
+   `scrollbar-button { display: none }`. `scrollbar-color: auto` is the opposite case: `auto` IS
+   the initial value, so it only cancels a non-auto value inherited from the workbench base
+   styles and hands rendering back to the ::-webkit rules. Same trap as imageCarousel.css.
+
+   Auto-hide: the thumb is transparent at rest and appears while the pointer is over the field or
+   while `.scrolling` is on (set by the composer for a beat after each scroll, so a wheel or a
+   keyboard-driven scroll shows the bar too). */
+.openide-chat-prompt::-webkit-scrollbar-thumb {
+	/* Shape (12px gutter, 6px pill) comes from the shared skin in openideSurfaceCss.ts via
+	   .openide-chat-native *; only the visibility is decided here. */
+	background-color: transparent;
+	transition: background-color 120ms ease;
 }
-.openide-chat-prompt::-webkit-scrollbar { width: 10px; height: 10px; }
-.openide-chat-prompt::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
-.openide-chat-prompt::-webkit-scrollbar-track { background: transparent; border: none; }
-.openide-chat-prompt::-webkit-scrollbar-corner { background: transparent; }
-.openide-chat-prompt::-webkit-scrollbar-thumb { background: transparent; border: none; border-radius: 0; }
-.openide-chat-prompt:hover::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4)); }
-.openide-chat-prompt::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100, 100, 100, 0.7)); }
-.openide-chat-prompt::-webkit-scrollbar-thumb:active { background: var(--vscode-scrollbarSlider-activeBackground, rgba(191, 191, 191, 0.4)); }
+.openide-chat-prompt:hover::-webkit-scrollbar-thumb,
+.openide-chat-prompt.scrolling::-webkit-scrollbar-thumb { background-color: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4)); }
+.openide-chat-prompt::-webkit-scrollbar-thumb:hover { background-color: var(--vscode-scrollbarSlider-hoverBackground, rgba(100, 100, 100, 0.7)); }
+.openide-chat-prompt::-webkit-scrollbar-thumb:active { background-color: var(--vscode-scrollbarSlider-activeBackground, rgba(191, 191, 191, 0.4)); }
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-prompt::-webkit-scrollbar-thumb { transition: none; }
+}
 
 /* ---- Chips above the prompt: references (@), capabilities (/), pasted links -------------- */
-/* openideChatHtml.ts:1221-1230 (#fileReferenceStrip, .file-reference-chip), :82-96 (.capability-chip),
+/* the removed chat webview (#fileReferenceStrip, .file-reference-chip), :82-96 (.capability-chip),
    :80-107 (#linkStrip, .link-chip). */
 
 .openide-chat-chip-host { display: contents; }
@@ -560,17 +615,59 @@
 	height: 18px; max-width: min(260px, 100%); display: inline-flex; align-items: center; gap: 4px;
 	padding: 0 2px 0 4px;
 	border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-background, transparent));
-	border-radius: var(--vscode-cornerRadius-small, 4px);
+	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: var(--vscode-foreground); font-size: 12px;
 }
 .openide-chat-reference-chip > .codicon { flex: 0 0 auto; color: var(--vscode-descriptionForeground); }
+/* The same cards inside a sent message's bubble. */
+.openide-chat-request-snippets { display: flex; flex-direction: column; gap: 5px; margin-bottom: 6px; }
+.openide-chat-request-snippets.hidden { display: none; }
+
+/* A selection sent from the editor: Cursor's code-block card. Full width of the strip, a head
+   row like a reference pill, and the first lines of the code in the editor's font under it. */
+.openide-chat-snippet-card {
+	flex: 1 1 100%;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--vscode-chat-requestBorder, var(--oi-border));
+	border-radius: var(--oi-radius-md);
+	background: var(--oi-tint-1);
+	overflow: hidden;
+}
+.openide-chat-snippet-head {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	height: 22px;
+	padding: 0 2px 0 6px;
+	font-size: 12px;
+	color: var(--vscode-foreground);
+}
+.openide-chat-snippet-head > .codicon { flex: 0 0 auto; color: var(--vscode-descriptionForeground); }
+.openide-chat-snippet-head .openide-chat-chip-name { font-variant-numeric: tabular-nums; }
+.openide-chat-snippet-code {
+	margin: 0;
+	padding: 4px 8px 6px;
+	max-height: 96px;
+	overflow: hidden;
+	border-top: 1px solid var(--oi-border-soft);
+	color: var(--vscode-descriptionForeground);
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11px;
+	line-height: 1.5;
+	white-space: pre;
+	text-overflow: ellipsis;
+	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
+	mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent 100%);
+}
 
 /* Copilot's slash-command pill (chatColors.ts:36-46): tinted text, no icon, editor font. */
 .openide-chat-capability-chip {
 	height: 18px; max-width: min(260px, 100%); display: inline-flex; align-items: center; gap: 4px;
 	padding: 0 6px;
-	border-radius: var(--vscode-cornerRadius-small, 4px);
+	border-radius: var(--oi-radius-sm);
 	background: var(--vscode-chat-slashCommandBackground, #26477866);
 	color: var(--vscode-chat-slashCommandForeground, #85b6ff);
 	font: 12px/1 var(--vscode-editor-font-family, monospace);
@@ -580,7 +677,7 @@
 	height: 18px; max-width: min(280px, 100%); display: inline-flex; align-items: center; gap: 4px;
 	padding: 0 2px 0 4px;
 	border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-background, transparent));
-	border-radius: var(--vscode-cornerRadius-small, 4px);
+	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: var(--vscode-foreground); font: 12px/1 var(--vscode-font-family);
 }
@@ -590,7 +687,7 @@
 
 .openide-chat-chip-remove {
 	width: 17px; height: 17px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
-	padding: 0; border: none; border-radius: var(--vscode-cornerRadius-small, 4px); background: transparent;
+	padding: 0; border: none; border-radius: var(--oi-radius-sm); background: transparent;
 	color: var(--vscode-descriptionForeground); cursor: pointer;
 }
 .openide-chat-capability-chip .openide-chat-chip-remove { margin-right: -4px; }
@@ -601,17 +698,22 @@
 /* Drop target while an image is dragged over the card. */
 .openide-chat-input-card.dragover { border-color: var(--vscode-focusBorder); }
 
-/* ---- `@` / `/` autocomplete (openideChatHtml.ts:1188-1204) ------------------------------- */
+/* ---- `@` / `/` autocomplete (the removed chat webview) ------------------------------- */
 
 .openide-menu.openide-chat-suggest-menu {
 	min-width: var(--openide-menu-anchor-width, 0);
 	max-width: var(--openide-menu-anchor-width, calc(100vw - 16px));
 }
-.openide-chat-suggest .openide-menu-content { padding: 4px; max-height: min(440px, 56vh); }
+/* Shorter than the menu's own 420px ceiling: the popover opens over the transcript, so every pixel
+   of it is a pixel of the conversation you cannot see while you pick. Seven entries is enough to
+   choose from -- past that you are typing to filter, not scanning. */
+.openide-chat-suggest .openide-menu-content { padding: 4px; max-height: min(300px, 42vh); }
 .openide-chat-suggest .openide-menu-row.focus {
-	outline: none;
-	background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
-	color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground, #fff));
+	/* The suggest widget marks the focused completion with an inset outline, not only a fill. */
+	outline: 1px solid var(--vscode-editorSuggestWidget-focusOutline, transparent);
+	outline-offset: -1px;
+	background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground)));
+	color: var(--vscode-editorSuggestWidget-selectedForeground, var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground, #fff)));
 }
 .openide-chat-suggest .openide-menu-label {
 	font-family: var(--vscode-editor-font-family, monospace);
@@ -629,32 +731,124 @@
 }
 .openide-chat-suggest .openide-menu-row.focus .openide-chat-suggest-file-dir { color: inherit; opacity: 0.75; }
 .openide-chat-suggest .openide-menu-row-icon .openide-chat-file-icon { width: 16px; height: 16px; display: inline-block; background-size: 16px; }
-.openide-chat-suggest-section + .openide-chat-suggest-section { border-top: 1px solid rgba(128, 128, 128, 0.18); margin-top: 4px; padding-top: 4px; }
-.openide-chat-suggest-section .openide-menu-row { min-height: 42px; align-items: flex-start; padding-top: 5px; padding-bottom: 5px; }
-.openide-chat-suggest-section .openide-menu-row-icon { padding-top: 2px; }
-.openide-chat-suggest-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
-.openide-chat-suggest .openide-menu-detail {
-	display: block; width: 100%; max-width: none; margin-left: 0;
-	overflow: hidden; text-overflow: clip; white-space: nowrap;
-	font-size: 11.5px; color: var(--vscode-descriptionForeground);
-	-webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 44px), transparent 100%);
-	mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 44px), transparent 100%);
+.openide-chat-suggest-section + .openide-chat-suggest-section { border-top: 1px solid var(--oi-border-soft); margin-top: 4px; padding-top: 4px; }
+/* The group heading scrolls with its group. Pinning it with `position: sticky` had Chromium
+   repainting rows OUTSIDE the panel's rounded clip -- a row would appear above the heading, past
+   the border, which no layout can produce. What tells you the list is scrolled is the shadow
+   below, the way it does everywhere else in the workbench. */
+.openide-chat-suggest-section .openide-menu-section {
+	padding: 5px 8px 3px 8px;
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--vscode-descriptionForeground);
 }
+/* `ScrollableElement` with `useShadows` (scrollableElement.ts): an inset shadow at the scrolled
+   edge, painted only once there is something above. It is a sibling of the scroller, not a child
+   of it -- inside, it would scroll away with the rows it is meant to cover. */
+.openide-menu.openide-chat-suggest-menu { position: relative; }
+.openide-chat-suggest-shadow {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 6px;
+	z-index: 2;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 100ms linear;
+	box-shadow: var(--vscode-scrollbar-shadow, rgba(0, 0, 0, 0.36)) 0 6px 6px -6px inset;
+}
+.openide-chat-suggest-shadow.visible { opacity: 1; }
+/* Two lines per entry: what you type on the first, what it does on the second. On one line the
+   name, its signature and its description shared the dock's ~330px and every one of them ended in
+   an ellipsis. Colours come from the `editorSuggestWidget.*` tokens rather than the menu's, because
+   this IS a suggest widget and a theme that restyles completions should restyle these too. */
+.openide-chat-suggest-section .openide-menu-row {
+	min-height: 0;
+	align-items: flex-start;
+	padding: 3px 10px 4px 4px;
+	color: var(--vscode-editorSuggestWidget-foreground, var(--vscode-menu-foreground, var(--vscode-foreground)));
+}
+/* The icon lines up with the first line's text, not with the middle of a two-line row. */
+.openide-chat-suggest-section .openide-menu-row > .openide-menu-row-icon { height: 17px; align-items: center; }
+.openide-chat-suggest-text {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+.openide-chat-suggest-title {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	min-width: 0;
+	line-height: 17px;
+}
+/* The name holds its ground; the signature after it yields first. */
+.openide-chat-suggest-name {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 12.5px;
+}
+.openide-chat-suggest-hint {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 12px;
+	opacity: 0.55;
+}
+/* The description, in the UI font: a monospace second line would read as more code, when the point
+   of the line is that it is prose. */
+.openide-chat-suggest-desc {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--vscode-font-family);
+	font-size: 11.5px;
+	line-height: 15px;
+	color: var(--vscode-descriptionForeground);
+}
+/* The typed characters. Upstream bolds them and tints them; without it nothing says why a row
+   matched. */
+.openide-chat-suggest-hit {
+	font-weight: 600;
+	color: var(--vscode-editorSuggestWidget-highlightForeground, var(--vscode-list-highlightForeground));
+}
+.openide-chat-suggest .openide-menu-row.focus .openide-chat-suggest-hit {
+	color: var(--vscode-editorSuggestWidget-focusHighlightForeground, inherit);
+}
+.openide-chat-suggest .openide-menu-row.focus .openide-chat-suggest-desc,
 .openide-chat-suggest .openide-menu-row.focus .openide-menu-detail { color: inherit; opacity: 0.72; }
-.openide-chat-suggest-risk { flex: 0 0 auto; margin-top: 2px; font-size: 10px; color: var(--vscode-descriptionForeground); }
+.openide-chat-suggest-risk {
+	flex: 0 0 auto;
+	font-size: 9.5px;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--vscode-descriptionForeground);
+}
 .openide-chat-suggest-risk.exec { color: var(--vscode-errorForeground); }
 .openide-chat-suggest-risk.write { color: var(--vscode-editorWarning-foreground); }
-.openide-chat-suggest-hint { font-style: italic; }
 .openide-chat-suggest-ghost { cursor: default; }
 
-/* ---- Queue tray (openideChatHtml.ts:882-944, .queue-tray + .dock-queue-*) ------------------ */
+/* ---- Queue tray (the removed chat webview, .queue-tray + .dock-queue-*) ------------------ */
 
 .openide-chat-queue-tray {
 	position: relative; z-index: 0; display: flex; flex-direction: column; gap: 1px;
 	width: 100%; box-sizing: border-box; margin: 0 0 -10px; padding: 3px 7px 14px;
-	border: 1px solid rgba(128, 128, 128, 0.26); border-radius: var(--vscode-cornerRadius-medium, 6px);
+	border: 1px solid var(--oi-border); border-radius: var(--oi-radius-md);
 	background: var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
-	box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+	box-shadow: var(--oi-shadow-sm);
 }
 .openide-chat-queue-tray.hidden, .openide-chat-queue-tray .hidden { display: none !important; }
 .openide-chat-queue-head { display: flex; align-items: center; gap: 4px; min-height: 20px; }
@@ -668,28 +862,19 @@
 .monaco-workbench .openide-chat-native .openide-chat-queue-row > .codicon[class*="codicon-"]:first-child { font-size: 12px; color: var(--vscode-descriptionForeground); }
 .openide-chat-queue-main { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; }
 .openide-chat-queue-text { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--vscode-foreground); }
-.openide-chat-queue-intent { flex: 0 0 auto; border: 1px solid rgba(128, 128, 128, 0.24); border-radius: 999px; padding: 0 5px; color: var(--vscode-descriptionForeground); font-size: 9.5px; line-height: 15px; white-space: nowrap; }
+.openide-chat-queue-intent { flex: 0 0 auto; border: 1px solid var(--oi-border); border-radius: var(--oi-radius-circle); padding: 0 5px; color: var(--vscode-descriptionForeground); font-size: 9.5px; line-height: 15px; white-space: nowrap; }
 .openide-chat-queue-actions { display: inline-flex; align-items: center; gap: 2px; min-width: max-content; }
-.openide-chat-queue-btn { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border: none; border-radius: var(--vscode-cornerRadius-small, 4px); background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; padding: 0; flex: 0 0 auto; opacity: 0.85; }
-.openide-chat-queue-btn:hover { background: rgba(128, 128, 128, 0.14); color: var(--vscode-foreground); opacity: 1; }
+.openide-chat-queue-btn { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border: none; border-radius: var(--oi-radius-sm); background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; padding: 0; flex: 0 0 auto; opacity: 0.85; }
+.openide-chat-queue-btn:hover { background: var(--oi-border-soft); color: var(--vscode-foreground); opacity: 1; }
 .monaco-workbench .openide-chat-native .openide-chat-queue-btn .codicon[class*="codicon-"] { font-size: 12px; color: inherit; }
 
 
-/* ---- Toolbar separators (upstream chat-input-toolbars: `+ | ⟨⟩ | Models | ⚙`) --------------
-   A 1px hairline between the triggers of the input row, 12px tall, never after the last one. */
+/* ---- Trigger spacing (upstream chat-input-toolbars) ---------------------------------------
+   Upstream draws a 12px hairline between the triggers of the input row. Cursor does not: its mode
+   pill, model name and effort sit on the same line told apart by their own shapes, and the user
+   asked for the dock to carry no lines at all. The spacing the hairline occupied stays. */
 .openide-chat-input-row > .openide-composer-anchor + .openide-composer-anchor {
-	position: relative;
-	margin-left: 6px;
-	padding-left: 6px;
-}
-.openide-chat-input-row > .openide-composer-anchor + .openide-composer-anchor::before {
-	content: '';
-	position: absolute;
-	left: 0;
-	top: 50%;
-	height: 12px;
-	transform: translateY(-50%);
-	border-left: 1px solid var(--vscode-chat-requestBorder, rgba(128, 128, 128, 0.3));
+	margin-left: 10px;
 }
 
 /* ---- Footer row (upstream `.chat-secondary-toolbar` + context usage container) ------------- */
@@ -719,7 +904,7 @@
 	height: 20px;
 	padding: 0 5px;
 	border: 0;
-	border-radius: var(--vscode-cornerRadius-small, 4px);
+	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: inherit;
 	font: inherit;
@@ -733,7 +918,7 @@
 	width: 1px;
 	height: 12px;
 	margin: 0 4px;
-	background: var(--vscode-chat-requestBorder, rgba(128, 128, 128, 0.3));
+	background: var(--vscode-chat-requestBorder, var(--oi-border-strong));
 	flex: 0 0 auto;
 }
 .openide-chat-footer-spacer { flex: 1 1 auto; }
@@ -770,13 +955,13 @@
 	width: 100%;
 	height: 4px;
 	background-color: var(--vscode-editorWidget-border);
-	border-radius: 4px;
+	border-radius: var(--oi-radius-sm);
 	border: 1px solid var(--vscode-editorWidget-border);
 	margin: 4px 0;
 	display: flex;
 	box-sizing: border-box;
 }
-.openide-chat-si-bit { height: 100%; background-color: var(--vscode-focusBorder); border-radius: 4px; transition: width 0.3s ease; }
+.openide-chat-si-bit { height: 100%; background-color: var(--vscode-focusBorder); border-radius: var(--oi-radius-sm); transition: width 0.3s ease; }
 .openide-chat-si-quota.warning .openide-chat-si-bit { background-color: var(--vscode-editorWarning-foreground); }
 .openide-chat-si-quota.error .openide-chat-si-bit { background-color: var(--vscode-editorError-foreground); }
 .openide-chat-si-description { font-size: 11px; color: var(--vscode-descriptionForeground); display: flex; align-items: center; gap: 3px; }

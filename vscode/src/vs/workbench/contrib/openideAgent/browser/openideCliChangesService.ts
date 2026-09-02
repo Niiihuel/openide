@@ -37,9 +37,10 @@ import { IModelService } from '../../../../editor/common/services/model.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { ITextModelService } from '../../../../editor/common/services/resolverService.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
+import { IOpenideAgentService } from './openideAgentService.js';
 import { IOpenideAgentHostService, OPENIDE_AGENT_HOST_CHANNEL } from '../../../../platform/openideAgentHost/common/openideAgentHost.js';
 import { OpenideCliId, OpenideCliSessionStatus } from '../common/openideAgentCliCatalog.js';
-import { t } from '../common/openideStrings.js';
+import { buildDiffPreview, countDiff, OpenideDiffLine } from '../common/openideDiffPreview.js';
 import {
 	IOpenideCliTurn,
 	IOpenideTurnFile,
@@ -49,6 +50,7 @@ import {
 	OpenideCliTurnLog,
 	OpenideTouchKind,
 	parsePorcelainZ,
+	pathspecBatches,
 	turnBoundaryOf,
 } from '../common/openideCliTurnChanges.js';
 
@@ -129,6 +131,19 @@ export interface IOpenideSessionBaseline {
 	readonly exact: boolean;
 }
 
+/**
+ * A file's change as the sidebar shows it inline: the SAME compact diff the transcript's edit
+ * card carries (`buildDiffPreview`), so a change reads identically whether it is met in the chat
+ * or in Agent Changes. Computed on demand from the session's baseline and the file on disk.
+ */
+export interface IOpenideCliChangePreview {
+	readonly lines: readonly OpenideDiffLine[];
+	readonly added: number;
+	readonly removed: number;
+	/** The session created the file: the diff is all additions and the row says `nuevo`. */
+	readonly created: boolean;
+}
+
 interface ITracked {
 	readonly log: OpenideCliTurnLog;
 	readonly cliId: OpenideCliId;
@@ -142,11 +157,15 @@ interface ITracked {
 	/**
 	 * Paths already dirty when the conversation began, captured once.
 	 *
-	 * Undefined until the first turn opens. It is the whole point of the distinction: a path
-	 * missing from this set was clean, so HEAD is exactly what it looked like before the agent
-	 * arrived.
+	 * It is the whole point of the distinction: a path missing from this set was clean, so HEAD
+	 * is exactly what it looked like before the agent arrived.
+	 *
+	 * Resolves to `undefined` when git could not answer (timed out, output over the cap, not a
+	 * repo). That is UNKNOWN, not "nothing was dirty": treating a failed status as an empty set
+	 * filed every pre-existing untracked file as "the session created it", and the undo button
+	 * then deleted files the agent had merely edited.
 	 */
-	dirtyAtStart?: Promise<ReadonlySet<string>>;
+	readonly dirtyAtStart: Promise<ReadonlySet<string> | undefined>;
 	/** Baseline per path, resolved once, the first time the session touches it. */
 	readonly baselines: Map<string, IOpenideSessionBaseline>;
 	/** In-flight baseline captures, so two events for one path do not both read it. */
@@ -162,7 +181,13 @@ interface ITracked {
  * read as a revision.
  */
 function statusArgs(paths: readonly string[]): string[] {
-	return ['status', '--porcelain', '-z', '--untracked-files=all', '--', ...paths];
+	// `--ignored=matching` only when scoped: it makes git NAME the touched paths the repo ignores
+	// (`!!`), so a build's output is dropped instead of listed as untracked. On the whole tree it
+	// would return every ignored file in the project — `.next/` alone is thousands — and blow
+	// through the host's output cap, which reports as a failed status.
+	return paths.length
+		? ['status', '--porcelain', '-z', '--untracked-files=all', '--ignored=matching', '--', ...paths]
+		: ['status', '--porcelain', '-z', '--untracked-files=all'];
 }
 
 /**
@@ -180,6 +205,13 @@ export class OpenideCliChangesService extends Disposable {
 
 	private readonly host: IOpenideAgentHostService;
 	private readonly tracked = new Map<string, ITracked>();
+	/**
+	 * Inline previews, keyed by session and path. A preview reads the file and diffs it, and the
+	 * view repaints on every event, so without this each event would re-read every expanded
+	 * file. Dropped wholesale whenever a session changes or a tracked file is written: the two
+	 * moments a preview can go stale.
+	 */
+	private readonly previews = new Map<string, Promise<IOpenideCliChangePreview | undefined>>();
 
 	private readonly _onDidChange = this._register(new Emitter<string>());
 	/** A session's turns changed. Carries the session id. */
@@ -201,11 +233,17 @@ export class OpenideCliChangesService extends Disposable {
 		@ILanguageService private readonly languageService: ILanguageService,
 		@ITextModelService textModelService: ITextModelService,
 		@IFileService private readonly fileService: IFileService,
+		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
 	) {
 		super();
 		this.host = ProxyChannel.toService<IOpenideAgentHostService>(mainProcessService.getChannel(OPENIDE_AGENT_HOST_CHANNEL));
 		this._register(textModelService.registerTextModelContentProvider(OPENIDE_CLI_CHANGES_SCHEME, this));
 		this._register(fileService.onDidFilesChange(event => this.onFilesChanged(event)));
+	}
+
+	private fireChange(sessionId: string): void {
+		this.previews.clear();
+		this._onDidChange.fire(sessionId);
 	}
 
 	sessions(): readonly IOpenideCliChangesSession[] {
@@ -230,7 +268,7 @@ export class OpenideCliChangesService extends Disposable {
 	/** Drops a session's history — it was deleted, or the user cleared it. */
 	forget(sessionId: string): void {
 		if (this.tracked.delete(sessionId)) {
-			this._onDidChange.fire(sessionId);
+			this.fireChange(sessionId);
 		}
 	}
 
@@ -265,7 +303,7 @@ export class OpenideCliChangesService extends Disposable {
 				// can write before that boundary's queued git call returns, and a baseline
 				// captured while this was still undefined got misfiled as "the session created
 				// it" — which paints the whole file as new.
-				dirtyAtStart: this.gitStatus(session.cwd, []).then(records => new Set(records.map(record => record.path))),
+				dirtyAtStart: this.gitStatus(session.cwd, []).then(records => records && new Set(records.map(record => record.path))),
 			};
 			this.tracked.set(session.id, entry);
 		}
@@ -291,7 +329,7 @@ export class OpenideCliChangesService extends Disposable {
 			return;
 		}
 		entry.typing = typing;
-		this._onDidChange.fire(sessionId);
+		this.fireChange(sessionId);
 	}
 
 	private async applyBoundary(sessionId: string, boundary: 'begin' | 'end'): Promise<void> {
@@ -299,13 +337,15 @@ export class OpenideCliChangesService extends Disposable {
 		if (!entry) {
 			return;
 		}
-		// Opening needs no git at all: the turn starts empty and the watcher fills it.
+		// Opening needs no git at all: the turn starts empty and the watcher fills it. A failed
+		// status at the close is passed through as such: the log then falls back to the watcher's
+		// own verdicts rather than reporting a turn that changed nothing.
 		const paths = boundary === 'end' ? entry.log.touchedPaths() : [];
-		const records = paths.length ? await this.gitStatus(entry.cwd, paths) : [];
+		const [records, ignored] = paths.length ? await Promise.all([this.gitStatus(entry.cwd, paths), this.gitIgnored(entry.cwd, paths)]) : [[], undefined];
 		if (boundary === 'begin') {
 			entry.log.begin(Date.now(), entry.hooked);
 		} else {
-			const closed = entry.log.end(records, Date.now());
+			const closed = entry.log.end(records, Date.now(), ignored);
 			if (closed) {
 				this._onDidFinishTurn.fire({
 					sessionId,
@@ -316,14 +356,13 @@ export class OpenideCliChangesService extends Disposable {
 				});
 			}
 		}
-		this._onDidChange.fire(sessionId);
+		this.fireChange(sessionId);
 	}
 
 	/**
-	 * Opens a file's change as a real side-by-side diff: HEAD on the left, the working tree on
-	 * the right.
+	 * Opens a file's change for review in the editor.
 	 *
-	 * The left side is the SESSION baseline, not HEAD. That is the whole difference between "this
+	 * The "before" is the SESSION baseline, not HEAD. That is the whole difference between "this
 	 * reply changed one line" and "this whole file is new": a file the conversation edited but did
 	 * not create has a real before, and comparing against HEAD threw it away and painted the
 	 * entire file green.
@@ -336,17 +375,18 @@ export class OpenideCliChangesService extends Disposable {
 		if (!entry) {
 			return;
 		}
-		const resource = URI.file(`${entry.cwd}/${file.path}`);
 		if (file.status === 'deleted') {
 			await this.editorService.openEditor({ resource: this.baselineUri(sessionId, file.path), options: { pinned: true } });
 			return;
 		}
-		await this.editorService.openEditor({
-			original: { resource: this.baselineUri(sessionId, file.path) },
-			modified: { resource },
-			label: `${file.path} · ${t('cliChanges.diffLabel')}`,
-			options: { pinned: true },
-		});
+		// The harness's own inline review — the file in the NORMAL editor with the blocks painted
+		// and Undo/Keep — not the side-by-side diff editor: one way of reading a change, whether
+		// the local agent or a hosted CLI made it. The session's baseline is what it compares
+		// against; without one (the capture is still in flight, or never happened) the review
+		// falls back to HEAD on its own.
+		await entry.capturing.get(file.path);
+		const baseline = entry.baselines.get(file.path);
+		await this.agentService.reviewExternalChange(`${entry.cwd}/${file.path}`, baseline ? { content: baseline.content, existed: baseline.existed } : undefined);
 	}
 
 	/** The URI our content provider answers with the session's baseline for that path. */
@@ -384,13 +424,58 @@ export class OpenideCliChangesService extends Disposable {
 		return this.modelService.createModel(content, this.languageService.createByFilepathOrFirstLine(URI.file(path)), resource);
 	}
 
-	/**
-	 * Status for a bounded set of paths. An empty answer is a real answer — every path ended the
-	 * turn matching HEAD — so a failure and a clean tree must not look the same to the caller.
-	 */
 	/** The baseline for a path, if the session has one. */
 	baselineOf(sessionId: string, path: string): IOpenideSessionBaseline | undefined {
 		return this.tracked.get(sessionId)?.baselines.get(path);
+	}
+
+	/**
+	 * The inline diff of one changed file, as the view mounts it under the row.
+	 *
+	 * `undefined` when there is nothing to compare against — the session is gone, or the file
+	 * cannot be read right now. The row then keeps its status letter and says so, instead of
+	 * showing an empty block that reads as "no change".
+	 */
+	preview(sessionId: string, file: IOpenideTurnFile): Promise<IOpenideCliChangePreview | undefined> {
+		const key = `${sessionId}\0${file.path}`;
+		let pending = this.previews.get(key);
+		if (!pending) {
+			pending = this.computePreview(sessionId, file).catch(error => {
+				this.logService.warn('[openide-changes] preview failed', error);
+				return undefined;
+			});
+			this.previews.set(key, pending);
+		}
+		return pending;
+	}
+
+	private async computePreview(sessionId: string, file: IOpenideTurnFile): Promise<IOpenideCliChangePreview | undefined> {
+		const entry = this.tracked.get(sessionId);
+		if (!entry) {
+			return undefined;
+		}
+		// The baseline capture is fire-and-forget off the watcher; a preview asked for in the same
+		// tick would otherwise diff against nothing and paint the whole file green.
+		await entry.capturing.get(file.path);
+		const baseline = entry.baselines.get(file.path);
+		let before = baseline?.content ?? '';
+		let after = '';
+		if (file.status !== 'deleted') {
+			try {
+				after = (await this.fileService.readFile(URI.file(`${entry.cwd}/${file.path}`))).value.toString();
+			} catch {
+				return undefined;
+			}
+		}
+		if (baseline && !baseline.exact && before === after) {
+			// Same call as `provideTextContent`: our own snapshot landed after the only write there
+			// was, so "all of this" is at least true where "nothing changed" is not.
+			before = '';
+		}
+		const counts = countDiff(before, after);
+		// The sidebar has no 120-line cap to honour — that one keeps a persisted transcript small.
+		// Still bounded: a generated file of thousands of lines is scrolled in the editor, not here.
+		return { lines: buildDiffPreview(before, after, 400), added: counts.added, removed: counts.removed, created: baseline ? !baseline.existed : false };
 	}
 
 	/** Every session that has a baseline for this absolute file path, newest first. */
@@ -467,14 +552,17 @@ export class OpenideCliChangesService extends Disposable {
 				entry.baselines.set(path, { content: fromHead.stdout, existed: true, exact: true });
 				return;
 			}
-			const wasThere = (await entry.dirtyAtStart)?.has(path) === true;
-			if (!wasThere) {
+			const dirtyAtStart = await entry.dirtyAtStart;
+			if (dirtyAtStart && !dirtyAtStart.has(path)) {
 				// Not in HEAD and not in the tree when the conversation began: the session made it,
 				// so an empty baseline is exactly right.
 				entry.baselines.set(path, { content: '', existed: false, exact: true });
 				return;
 			}
-			// Git has no record of it. Our own snapshot is the only "before" that will ever exist.
+			// Either git has no record of it, or git could not say what the tree looked like when
+			// the conversation began. In both cases our own snapshot is the only "before" there
+			// is, and it is marked inexact: the undo restores it instead of deleting the file,
+			// because "the session created this" is not something we can claim.
 			const content = await snapshot;
 			entry.baselines.set(path, content !== undefined
 				? { content, existed: true, exact: false }
@@ -483,14 +571,51 @@ export class OpenideCliChangesService extends Disposable {
 		entry.capturing.set(path, work);
 	}
 
-	private async gitStatus(cwd: string, paths: readonly string[]): Promise<IPorcelainRecord[]> {
-		const result = await this.host.runGit(cwd, statusArgs(paths)).catch(() => undefined);
-		if (!result?.ok) {
-			this.logService.trace('[openide-changes] git status failed; the turn keeps whatever it had');
-			return [];
+	/**
+	 * The touched paths the repo ignores, by `git check-ignore`. It answers for a path that no
+	 * longer exists too, which `status` never does — and a rebuilt `.next/` is mostly deletions.
+	 * Exit code 1 means "none of these", so a failed call and an empty answer both come back as
+	 * an empty set: an ignored path shown is a nuisance, a real change hidden would be a lie.
+	 */
+	private async gitIgnored(cwd: string, paths: readonly string[]): Promise<ReadonlySet<string>> {
+		const ignored = new Set<string>();
+		for (const batch of pathspecBatches(paths)) {
+			// `-z` needs `--stdin`, which the host does not offer; `core.quotePath=false` keeps a path
+			// with a non-ASCII byte from coming back escaped and never matching the one asked about.
+			const result = await this.host.runGit(cwd, ['-c', 'core.quotePath=false', 'check-ignore', '--no-index', '--', ...batch]).catch(() => undefined);
+			if (!result?.ok) {
+				continue;
+			}
+			for (const path of result.stdout.split('\n')) {
+				if (path) {
+					ignored.add(path);
+				}
+			}
 		}
-		return parsePorcelainZ(result.stdout);
+		return ignored;
 	}
+
+	/**
+	 * Status for a bounded set of paths. An empty answer is a real answer — every path ended the
+	 * turn matching HEAD — and a failure is `undefined`, so the two never look the same to a caller.
+	 */
+	private async gitStatus(cwd: string, paths: readonly string[]): Promise<IPorcelainRecord[] | undefined> {
+		// In batches: the host caps a git call at 64 argv entries, and one call per touched path
+		// would be as wrong the other way. All-or-nothing across the batches, for the same reason
+		// a truncated status is refused — half a list reads as the whole list.
+		const batches = paths.length ? pathspecBatches(paths) : [[]];
+		const records: IPorcelainRecord[] = [];
+		for (const batch of batches) {
+			const result = await this.host.runGit(cwd, statusArgs(batch)).catch(() => undefined);
+			if (!result?.ok) {
+				this.logService.warn(`[openide-changes] git status failed in ${cwd} (${paths.length} path(s), batch of ${batch.length}); the tree state is unknown`);
+				return undefined;
+			}
+			records.push(...parsePorcelainZ(result.stdout));
+		}
+		return records;
+	}
+
 
 	/**
 	 * The workspace watcher reporting a write. Routed to every session with an OPEN turn: two
@@ -520,10 +645,19 @@ export class OpenideCliChangesService extends Disposable {
 					continue;
 				}
 				for (const [sessionId, entry] of this.tracked) {
+					// Only a session with an OPEN turn is working: a baseline captured for an idle one
+					// would credit it with a file it never touched, and the undo control would then
+					// name the wrong conversation.
+					if (!entry.log.isOpen) {
+						continue;
+					}
 					const relative = this.relativeTo(entry.cwd, resource);
 					if (relative) {
 						entry.log.touch(relative, kind);
 						this.captureBaseline(sessionId, relative);
+						// The file just changed under an expanded row: its preview is stale now,
+						// not at the next turn boundary.
+						this.previews.delete(`${sessionId}\0${relative}`);
 					}
 				}
 			}

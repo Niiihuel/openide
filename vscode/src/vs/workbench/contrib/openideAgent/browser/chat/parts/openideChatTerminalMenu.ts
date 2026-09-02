@@ -13,7 +13,7 @@ import { menuRow, menuSection, menuSeparator, OpenideChatMenuPopover } from '../
 
 /**
  * The ⋯ popover of the embedded terminal card — item for item `buildTermMenu`
- * (openideChatHtml.ts:2974-3005): copy the command, send the terminal to the IDE panel, then the
+ *: copy the command, send the terminal to the IDE panel, then the
  * Auto-Run section with the three permission modes and a check on the active one.
  *
  * "Enviar al panel" is pinned by test/common/openideTerminalInteractive.test.ts, which asserts the
@@ -21,7 +21,7 @@ import { menuRow, menuSection, menuSeparator, OpenideChatMenuPopover } from '../
  * intent through `revealAgentTerminalToPanel` instead of a postMessage.
  */
 
-/** `PERMISSIONS` (openideChatHtml.ts:5275-5279): id, row label, codicon, tooltip. */
+/** `PERMISSIONS` (the removed chat webview): id, row label, codicon, tooltip. */
 const PERMISSIONS: readonly (readonly [string, string, string, string])[] = [
 	['ask', 'Preguntar siempre', 'shield', 'Cada edición y comando pide aprobación (lo más seguro).'],
 	['auto-edit', 'Auto-aprobar ediciones', 'edit', 'Las ediciones de archivo se aplican solas; la terminal sigue preguntando.'],

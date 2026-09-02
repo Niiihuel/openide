@@ -8,9 +8,8 @@
  *
  *  The roster shows one row per subscription, so it has to be able to tell that the ChatGPT account
  *  connected inside OpenIDE and the one the Codex CLI wrote to `~/.codex/auth.json` are the same
- *  account. Orca answers this with a module per provider (refs/orca/src/main/codex-accounts/
- *  codex-auth-identity.ts, claude-accounts/claude-duplicate-account.ts), each one reading the claims
- *  that provider happens to publish.
+ *  account. Orca answers this with one module per provider — a Codex identity reader, a Claude
+ *  duplicate-account reader — each one reading the claims that provider happens to publish.
  *
  *  This does the same job from ONE rule, because OAuth already standardised the answer: an access
  *  token that is a JWT carries who issued it (`iss`) and who it is about (`sub`, or a

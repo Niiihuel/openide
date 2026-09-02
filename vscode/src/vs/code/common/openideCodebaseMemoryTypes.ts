@@ -4,15 +4,15 @@
  *--------------------------------------------------------------------------------------------*/
 
 /*
- *  OpenIDE — tipos de la MEMORIA del codebase (grafo integrado). Modelo extendido con evidencia,
- *  confianza, versionado y preservación de relaciones. Puro: lo consumen indexer, storage,
- *  providers, servicios renderer y tools del agente. Mantiene compatibilidad con el formato
- *  anterior (openideMemoryTypes.ts) que usa el editor visual legacy.
+ *  OpenIDE — the types of the codebase MEMORY (the integrated graph). The model carries evidence,
+ *  confidence, versioning and preserved relations. Pure: the indexer, the storage, the providers,
+ *  the renderer services and the agent's tools all read it. It stays compatible with the older
+ *  format (openideMemoryTypes.ts) the legacy visual editor uses.
  *--------------------------------------------------------------------------------------------*/
 
 import { URI } from '../../base/common/uri.js';
 
-/** Taxonomía extendida de nodos del codebase. Compatible con MemoryNodeLabel legacy. */
+/** The extended node taxonomy of the codebase. Compatible with the legacy MemoryNodeLabel. */
 export type CodebaseMemoryNodeKind =
 	| 'workspace' | 'folder' | 'file' | 'module' | 'namespace' | 'package'
 	| 'class' | 'interface' | 'trait' | 'enum' | 'type'
@@ -40,7 +40,7 @@ export type CodebaseMemoryRelationType =
 	/** A note is about this entity. Only ever emitted from an unambiguous, explicit mention. */
 	| 'ANNOTATES';
 
-/** Procedencia de un nodo o relación. Determina el nivel de confianza. */
+/** Where a node or relation came from. It decides the confidence level. */
 export type CodebaseMemoryProvider =
 	| 'languageServer' | 'workspaceSymbols' | 'documentSymbols'
 	| 'callHierarchy' | 'typeHierarchy' | 'references'
@@ -54,10 +54,10 @@ export type CodebaseMemoryProvider =
 	 */
 	| 'authored';
 
-/** Evidencia de cómo se extrajo/verificó una entidad del grafo. */
+/** Evidence of how an entity of the graph was extracted or verified. */
 export interface ICodebaseMemoryEvidence {
 	readonly provider: CodebaseMemoryProvider;
-	/** 0..1 — confianza según provider. */
+	/** 0..1 — confidence, by provider. */
 	readonly confidence: number;
 	/** Validado por language server / compiler (true) o inferido (false). */
 	readonly verified: boolean;
@@ -66,7 +66,7 @@ export interface ICodebaseMemoryEvidence {
 
 /** Nodo del grafo de memoria. Extiende IMemoryNode (id/label/name/path/line/degree). */
 export interface ICodebaseMemoryNode {
-	/** Id determinístico: `workspace + uri + kind + qualifiedName + (línea|firma)`. */
+	/** Deterministic id: `workspace + uri + kind + qualifiedName + (line|signature)`. */
 	readonly id: string;
 	readonly kind: CodebaseMemoryNodeKind;
 	readonly name: string;
@@ -79,7 +79,7 @@ export interface ICodebaseMemoryNode {
 	readonly documentation?: string;
 	readonly exported?: boolean;
 	readonly deprecated?: boolean;
-	/** Hash del archivo en el momento de la indexación (para detectar stale). */
+	/** The file's hash at indexing time (this is what detects staleness). */
 	readonly hash?: string;
 	readonly evidence: ICodebaseMemoryEvidence;
 	readonly degree: number;
@@ -94,7 +94,7 @@ export interface ICodebaseMemoryEdge {
 	readonly evidence: ICodebaseMemoryEvidence;
 }
 
-/** Versión del índice; incrementa en cada actualización atómica. */
+/** The index's version; it increments on every atomic update. */
 export interface ICodebaseIndexVersion {
 	readonly version: number;
 	readonly workspaceKey: string;
@@ -104,7 +104,7 @@ export interface ICodebaseIndexVersion {
 	readonly edgeCount: number;
 }
 
-/** Resultado de una consulta con marca de frescura y procedencia. */
+/** A query result, stamped with its freshness and its provenance. */
 export interface ICodebaseMemoryQueryResult<T> {
 	readonly data: T;
 	readonly indexVersion: number;
@@ -113,7 +113,7 @@ export interface ICodebaseMemoryQueryResult<T> {
 	readonly providers: readonly CodebaseMemoryProvider[];
 }
 
-/** Snapshot inmutable del grafo completo (o de una región). Lo consumen query/context/editor. */
+/** An immutable snapshot of the whole graph (or a region). Read by query/context/editor. */
 export interface ICodebaseMemorySnapshot {
 	readonly version: ICodebaseIndexVersion;
 	readonly nodes: readonly ICodebaseMemoryNode[];
@@ -121,7 +121,7 @@ export interface ICodebaseMemorySnapshot {
 	readonly dirtyUris: ReadonlySet<string>;
 }
 
-/** Archivo indexado con su hash y metadatos. */
+/** An indexed file with its hash and metadata. */
 export interface ICodebaseIndexedFile {
 	readonly uri: string;
 	readonly hash: string;
@@ -131,7 +131,7 @@ export interface ICodebaseIndexedFile {
 	readonly status: 'indexed' | 'stale' | 'error';
 }
 
-/** Confianza por defecto según el provider. */
+/** Default confidence, by provider. */
 export const PROVIDER_CONFIDENCE: Readonly<Record<CodebaseMemoryProvider, number>> = Object.freeze({
 	languageServer: 1.0,
 	workspaceSymbols: 0.95,
@@ -146,7 +146,7 @@ export const PROVIDER_CONFIDENCE: Readonly<Record<CodebaseMemoryProvider, number
 	authored: 1.0,
 });
 
-/** True si el provider es considerado verificado por compiler/language server. */
+/** True when the provider counts as verified by a compiler or language server. */
 export function isVerifiedProvider(provider: CodebaseMemoryProvider): boolean {
 	// `authored` counts as verified for the same reason a language server does: nothing was
 	// inferred. A person wrote it down.
@@ -158,19 +158,19 @@ export function makeEvidence(provider: CodebaseMemoryProvider, indexedAt: number
 	return Object.freeze({ provider, confidence: PROVIDER_CONFIDENCE[provider] ?? 0.3, verified: isVerifiedProvider(provider), indexedAt });
 }
 
-/** ID determinístico para un nodo. Estable ante renombrados si (uri, kind, qualifiedName, línea) no cambian. */
+/** Deterministic id for a node. Stable across renames while (uri, kind, qualifiedName, line) hold. */
 export function makeNodeId(workspaceKey: string, uri: string, kind: CodebaseMemoryNodeKind, qualifiedName: string, line?: number): string {
 	const parts = [workspaceKey, uri, kind, qualifiedName];
 	if (Number.isFinite(line) && line! > 0) { parts.push(String(line)); }
 	return parts.join('::');
 }
 
-/** ID determinístico para una arista. Deduplica `(source, type, target)`. */
+/** Deterministic id for an edge. It deduplicates `(source, type, target)`. */
 export function makeEdgeId(source: string, type: CodebaseMemoryRelationType, target: string): string {
 	return `${source}::${type}::${target}`;
 }
 
-/** Clona y congela un nodo (defensa contra mutación externa). */
+/** Clones and freezes a node (a guard against outside mutation). */
 export function cloneNode(node: ICodebaseMemoryNode): ICodebaseMemoryNode {
 	return Object.freeze({
 		...node,
@@ -185,7 +185,7 @@ export function cloneEdge(edge: ICodebaseMemoryEdge): ICodebaseMemoryEdge {
 	return Object.freeze({ ...edge, evidence: Object.freeze({ ...edge.evidence }) });
 }
 
-/** Normaliza un URI a path relativo al workspace (para mostrar en UI). */
+/** Normalizes a URI to a workspace-relative path (what the UI shows). */
 export function uriToRelativePath(uri: string, workspaceFolders: readonly URI[]): string {
 	try {
 		const parsed = URI.parse(uri);
@@ -199,7 +199,7 @@ export function uriToRelativePath(uri: string, workspaceFolders: readonly URI[])
 	} catch { return uri; }
 }
 
-/** True si una URI corresponde a un archivo del workspace (no remoto/virtual). */
+/** True when a URI is a file of the workspace (not remote, not virtual). */
 export function isLocalWorkspaceUri(uri: string): boolean {
 	return uri.startsWith('file:') || uri.startsWith('vscode-userdata:');
 }

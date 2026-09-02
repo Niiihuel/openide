@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 /*
- *  OpenIDE — protocolo puro entre el renderer y el shared process para memoria del codebase.
+ *  OpenIDE — the pure protocol between the renderer and the shared process for codebase memory.
  *--------------------------------------------------------------------------------------------*/
 
 import { DEFAULT_NOTE_LINKING, NoteLinkingMode } from './openideCodebaseNotes.js';
@@ -18,23 +18,30 @@ export interface ICodebaseIndexProgress {
 	readonly processed: number;
 	readonly total: number;
 	readonly current?: string;
-	/** Contadores del último scan ("el silencio se lee como ausencia"): qué quedó afuera y por qué. */
+	/** Counters of the last scan ("silence reads as absence"): what was left out, and why. */
 	readonly excludedByUser?: number;
 	readonly excludedTests?: number;
 	readonly skippedTooLarge?: number;
-	/** Advertencia no bloqueante (ej. el índice nuevo es drásticamente más chico que el previo). */
+	/** A non-blocking warning (e.g. the new index is drastically smaller than the previous one). */
 	readonly warning?: string;
 }
 
-/** Opciones de indexado que viajan del renderer (dueño de la configuración real, con defaults
- *  del schema) al shared process — el ConfigurationService del shared process NO conoce los
- *  defaults de openide.memory.* y no ve el workspace, así que nunca se consulta allá. */
+/** The indexing options travelling from the renderer — which owns the real configuration, with
+ *  the schema's defaults — to the shared process: the shared process's ConfigurationService does
+ *  NOT know the openide.memory.* defaults and cannot see the workspace, so it is never asked. */
 export interface ICodebaseMemoryIndexOptions {
 	readonly exclude: readonly string[];
 	readonly include: readonly string[];
 	readonly indexTests: boolean;
 	readonly enableRegexFallback: boolean;
 	readonly persistIndex: boolean;
+	/**
+	 * Folder the persisted indexes go under, as a file URI string — the IDE's own storage, never
+	 * the workspace. The index used to be written to `<workspace>/.openide/memory-indexes/`: 273
+	 * JSON files and 74 MB inside the user's repo, untracked in git, listed by the explorer,
+	 * matched by search and fed back to every watcher. Absent (an older client) ⇒ the old spot.
+	 */
+	readonly storageRoot?: string;
 	/** Index `.openide/MEMORY.md` into the graph as `note` nodes. */
 	readonly indexNotes: boolean;
 	/** How hard to try connecting a note to the entities it talks about. */
@@ -51,7 +58,7 @@ export interface ICodebaseMemorySnapshotDto {
 	readonly nodes: ICodebaseMemoryNode[];
 	readonly edges: ICodebaseMemoryEdge[];
 	readonly dirtyUris: string[];
-	/** Comunidades a nivel archivo (members = URIs); vacío hasta el primer rebuild completo. */
+	/** Communities at file level (members = URIs); empty until the first full rebuild. */
 	readonly communities?: ICodebaseCommunity[];
 }
 
@@ -66,8 +73,8 @@ export const CODEBASE_MEMORY_MAX_CHANGE_BYTES = 500 * 1024;
 export const CODEBASE_MEMORY_MAX_EXTRACTION_NODES = 5000;
 export const CODEBASE_MEMORY_MAX_EXTRACTION_EDGES = 10000;
 
-/** IServerChannel/ProxyChannel usa estos métodos de forma remota. Todas las operaciones están
- * aisladas por workspaceKey para que varias ventanas no compartan estado accidentalmente. */
+/** IServerChannel/ProxyChannel calls these methods remotely. Every operation is isolated by
+ * workspaceKey so several windows never share state by accident. */
 export interface ICodebaseMemoryChannel {
 	initialize(workspaceFolders: string[], trusted: boolean, options?: ICodebaseMemoryIndexOptions): Promise<string>;
 	setTrusted(workspaceKey: string, trusted: boolean): Promise<void>;

@@ -49,6 +49,16 @@ export interface IOpenideChatContentPart extends IDisposable {
 	 */
 	tryUpdate?(other: IOpenideChatContent, element: IOpenideChatItem): boolean;
 
+	/**
+	 * Tells the part whether it is the step currently IN FLIGHT of a turn that has not finished.
+	 *
+	 * A live step is not drawn in the transcript: the turn's status line is showing it, swapping it
+	 * in place with the step before it. The part hides itself and comes back the moment it settles
+	 * or something else lands after it, which is when it becomes the record instead of the news.
+	 * Only parts that have a live state implement it; for everyone else there is nothing to say.
+	 */
+	setLive?(live: boolean): void;
+
 	/** Called when the row is re-attached after the list virtualized it away. */
 	onDidRemount?(): void;
 

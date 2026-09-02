@@ -1,0 +1,49 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — the switch of a boolean setting (openideSettingsToggle.ts). One element owns the
+ *  track, the knob and the focus ring; nothing around it draws a second border.
+ *--------------------------------------------------------------------------------------------*/
+.openide-settings-toggle {
+	position: relative;
+	flex: 0 0 auto;
+	display: inline-block;
+	width: 36px;
+	height: 20px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: var(--oi-radius-circle);
+	background: var(--oi-tint-3);
+	cursor: pointer;
+	vertical-align: middle;
+}
+.openide-settings-toggle.checked { background: var(--vscode-button-background); }
+.openide-settings-toggle:disabled { cursor: default; opacity: 0.5; }
+/* The knob moves with `transform` only: it is the one property that animates without repainting
+   the track, and 120ms is the same beat every row hover on this surface uses. */
+.openide-settings-toggle-knob {
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	background: var(--vscode-foreground);
+	transform: translateX(0);
+	transition: transform 120ms ease;
+}
+.openide-settings-toggle.checked .openide-settings-toggle-knob {
+	background: var(--vscode-button-foreground, var(--vscode-foreground));
+	transform: translateX(16px);
+}
+/* The workbench's inset ring (openideSettings.css, `button:focus-visible`) is drawn for square
+   controls; a pill takes the focus colour as an outline that follows its own shape. */
+.openide-settings .openide-settings-toggle:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+	box-shadow: none;
+}
+.monaco-workbench.hc-black .openide-settings-toggle,
+.monaco-workbench.hc-light .openide-settings-toggle { outline: 1px solid var(--vscode-contrastBorder); outline-offset: -1px; }
+@media (prefers-reduced-motion: reduce) {
+	.openide-settings-toggle-knob { transition: none; }
+}

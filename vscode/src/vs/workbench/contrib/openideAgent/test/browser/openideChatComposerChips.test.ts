@@ -6,6 +6,7 @@
 import assert from 'assert';
 import { $ } from '../../../../../base/browser/dom.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { NullHoverService } from '../../../../../platform/hover/test/browser/nullHoverService.js';
 import {
 	capabilityText, composerPayload, extractComposerLinks, linkLabel, normalizeComposerLink,
 	OpenideChatComposerChips, REFERENCE_LIMIT,
@@ -54,7 +55,7 @@ suite('OpenIDE ChatComposerChips', () => {
 		const host = $('div');
 		const changes: number[] = [];
 		const focuses: number[] = [];
-		const chips = store.add(new OpenideChatComposerChips(host, () => changes.push(1), () => focuses.push(1)));
+		const chips = store.add(new OpenideChatComposerChips(host, NullHoverService, () => changes.push(1), () => focuses.push(1)));
 		return { host, chips, changes, focuses };
 	}
 

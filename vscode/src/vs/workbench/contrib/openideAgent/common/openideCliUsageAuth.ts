@@ -5,8 +5,8 @@
 
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — the CLI subscriptions' credential stores, transcribed from Orca's rate-limit
- *  fetchers (refs/orca/src/main/rate-limits/{claude-fetcher,codex-auth-presence,
- *  gemini-oauth-sources,grok-auth}.ts). Orca's roster is not limited to the accounts connected
+ *  fetchers (one per provider: Claude, Codex, Gemini, Grok). Orca's roster is not limited to the
+ *  accounts connected
  *  inside the app: any agent CLI the user signed into on this machine (Claude Code, Codex,
  *  Gemini CLI, Grok) counts as an account, read from that CLI's own credential file. This module
  *  is only the PARSING — where each CLI keeps its token and what the JSON looks like — so it can

@@ -12,7 +12,7 @@ export const SVG_NAMESPACE = SVG_NS;
  * Node builders shared by every diagram and chart renderer.
  *
  * The webview builds these SVGs by concatenating markup and handing it to `innerHTML`
- * (openideChatHtml.ts:1794-2192). That route is closed in the workbench: the Trusted Types policy
+ *. That route is closed in the workbench: the Trusted Types policy
  * rejects `innerHTML` and `DOMParser.parseFromString`, and taking it once already took the whole
  * chat view down ("Fail to render view workbench.view.openideChat.view" — see the note in
  * openideChatEffortPicker.ts). So the geometry is ported number for number and only the last mile,

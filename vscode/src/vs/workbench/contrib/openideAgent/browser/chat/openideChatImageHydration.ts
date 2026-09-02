@@ -25,25 +25,45 @@ import { IChatImage, IChatMessage } from '../../common/openideAgentTypes.js';
 export async function hydrateOpenideChatImages(fileService: IFileService, messages: readonly IChatMessage[]): Promise<boolean> {
 	let hydrated = false;
 	for (const message of messages) {
-		if (!message.images?.some(image => !image.data && !!image.assetUri)) {
+		if (!needsChatImageHydration(message.images)) {
 			continue;
 		}
-		message.images = await Promise.all(message.images.map(async image => {
-			if (image.data || !image.assetUri) {
-				return image;
-			}
-			try {
-				const file = await fileService.readFile(URI.parse(image.assetUri));
-				hydrated = true;
-				return { ...image, data: encodeBase64(file.value) };
-			} catch {
-				// A deleted or unreadable asset must not take the whole transcript down: the message
-				// still restores, just without its thumbnail.
-				return image;
-			}
-		}));
+		const images = await hydrateChatImages(fileService, message.images!);
+		// Only a read that actually landed is worth a repaint: when the assets are gone every
+		// image comes back untouched and rebuilding the transcript would paint the same thing.
+		hydrated ||= images.some((image, index) => image !== message.images![index]);
+		message.images = images;
 	}
 	return hydrated;
+}
+
+/** True when at least one image lost its base64 to `persist` and can be read back from its asset. */
+export function needsChatImageHydration(images: readonly IChatImage[] | undefined): boolean {
+	return !!images?.some(image => !image.data && !!image.assetUri);
+}
+
+/**
+ * Reads the assets of ONE list of images, returning a new array.
+ *
+ * Split out of `hydrateOpenideChatImages` because the transcript is no longer the only consumer:
+ * the composer restores attachments straight from a transcript item (editing a turn, a rollback,
+ * a rejected send) and those carry `data: ''` just the same. An image whose asset cannot be read
+ * comes back unchanged, so the caller decides whether to keep it or drop it.
+ */
+export async function hydrateChatImages(fileService: IFileService, images: readonly IChatImage[]): Promise<IChatImage[]> {
+	return Promise.all(images.map(async image => {
+		if (image.data || !image.assetUri) {
+			return image;
+		}
+		try {
+			const file = await fileService.readFile(URI.parse(image.assetUri));
+			return { ...image, data: encodeBase64(file.value) };
+		} catch {
+			// A deleted or unreadable asset must not take the whole transcript down: the message
+			// still restores, just without its thumbnail.
+			return image;
+		}
+	}));
 }
 
 /**

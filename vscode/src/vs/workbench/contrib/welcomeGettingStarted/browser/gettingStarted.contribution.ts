@@ -29,13 +29,12 @@ import { IExtensionManagementServerService } from '../../../services/extensionMa
 import { IExtensionService } from '../../../services/extensions/common/extensions.js';
 import { StartupPageEditorResolverContribution, StartupPageRunnerContribution } from './startupPage.js';
 import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
-import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
-import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
+import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { AccessibleViewRegistry } from '../../../../platform/accessibility/browser/accessibleViewRegistry.js';
 import { GettingStartedAccessibleView } from './gettingStartedAccessibleView.js';
 import { AgentSessionsWelcomePage } from '../../welcomeAgentSessions/browser/agentSessionsWelcome.js';
 import { IChatEntitlementService } from '../../../services/chat/common/chatEntitlementService.js';
-// OpenIDE: imports para los comandos de bienvenida (GitHub + importar de VS Code)
+// OpenIDE: imports for the welcome commands (GitHub + import from VS Code)
 import { IAuthenticationService } from '../../../services/authentication/common/authentication.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IFileService, FileOperationResult, toFileOperationResult } from '../../../../platform/files/common/files.js';
@@ -47,7 +46,7 @@ import { IExtensionGalleryService, IExtensionInfo } from '../../../../platform/e
 import { IWorkbenchExtensionManagementService } from '../../../services/extensionManagement/common/extensionManagement.js';
 import { dirname, joinPath } from '../../../../base/common/resources.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
-// OpenIDE: imports para el overlay de bienvenida a pantalla completa
+// OpenIDE: imports for the full-screen welcome overlay
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { ILifecycleService, LifecyclePhase } from '../../../services/lifecycle/common/lifecycle.js';
 import { mainWindow } from '../../../../base/browser/window.js';
@@ -55,7 +54,7 @@ import { $, append, addDisposableListener } from '../../../../base/browser/dom.j
 
 export * as icons from './gettingStartedIcons.js';
 
-// OpenIDE: comando del step "Conectá con GitHub" del walkthrough de bienvenida.
+// OpenIDE: the command behind the welcome walkthrough's GitHub sign-in step.
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -78,8 +77,8 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// OpenIDE: editores soportados para importar. Todos son forks de VS Code, asi que
-// comparten el formato de settings/extensiones; solo cambia la carpeta de datos.
+// OpenIDE: editors we can import from. All of them are VS Code forks, so they share the
+// settings/extensions format; only the data folder differs.
 interface OpenIDEEditor { id: string; name: string; appDir: string; extDir: string; logo: string }
 const OPENIDE_EDITORS: ReadonlyArray<OpenIDEEditor> = [
 	{ id: 'vscode', name: 'VS Code', appDir: 'Code', extDir: '.vscode', logo: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxLjAxZW0iIGhlaWdodD0iMWVtIiB2aWV3Qm94PSIwIDAgMjU2IDI1NCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJTVkc2UTV3TWJOUSIgeDE9IjUwJSIgeDI9IjUwJSIgeTE9IjAlIiB5Mj0iMTAwJSI+PHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iI2ZmZiIvPjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI2ZmZiIgc3RvcC1vcGFjaXR5PSIwIi8+PC9saW5lYXJHcmFkaWVudD48cGF0aCBpZD0iU1ZHV2haMTJkamsiIGQ9Ik0xODAuODI4IDI1Mi42MDVhMTUuODcgMTUuODcgMCAwIDAgMTIuNjUtLjQ4Nmw1Mi41MDEtMjUuMjYyYTE1Ljk0IDE1Ljk0IDAgMCAwIDkuMDI1LTE0LjM2NFY0MS4xOTdhMTUuOTQgMTUuOTQgMCAwIDAtOS4wMjUtMTQuMzYzbC01Mi41LTI1LjI2M2ExNS44OCAxNS44OCAwIDAgMC0xOC4xMTUgMy4wODRMNzQuODU3IDk2LjM1bC00My43OC0zMy4yMzJhMTAuNjE0IDEwLjYxNCAwIDAgMC0xMy41Ni42MDNMMy40NzYgNzYuNDk0Yy00LjYzIDQuMjExLTQuNjM1IDExLjQ5NS0uMDEyIDE1LjcxM2wzNy45NjcgMzQuNjM4bC0zNy45NjcgMzQuNjM3Yy00LjYyMyA0LjIxOS00LjYxOCAxMS41MDIuMDEyIDE1LjcxNGwxNC4wNDEgMTIuNzcyYTEwLjYxNCAxMC42MTQgMCAwIDAgMTMuNTYuNjA0bDQzLjc4LTMzLjIzM2wxMDAuNTA3IDkxLjY5NWExNS44NSAxNS44NSAwIDAgMCA1LjQ2NCAzLjU3MW0xMC40NjQtMTgzLjY0OWwtNzYuMjYyIDU3Ljg4OWw3Ni4yNjIgNTcuODg4eiIvPjwvZGVmcz48bWFzayBpZD0iU1ZHU0FRNThIMmYiIGZpbGw9IiNmZmYiPjx1c2UgaHJlZj0iI1NWR1doWjEyZGprIi8+PC9tYXNrPjxwYXRoIGZpbGw9IiMwMDY1YTkiIGQ9Ik0yNDYuMTM1IDI2Ljg3M0wxOTMuNTkzIDEuNTc1YTE1Ljg4NSAxNS44ODUgMCAwIDAtMTguMTIzIDMuMDhMMy40NjYgMTYxLjQ4MmMtNC42MjYgNC4yMTktNC42MiAxMS41MDIuMDEyIDE1LjcxNGwxNC4wNSAxMi43NzJhMTAuNjI1IDEwLjYyNSAwIDAgMCAxMy41NjkuNjA0TDIzOC4yMjkgMzMuNDM2YzYuOTQ5LTUuMjcxIDE2LjkzLS4zMTUgMTYuOTMgOC40MDd2LS42MWExNS45NCAxNS45NCAwIDAgMC05LjAyNC0xNC4zNiIgbWFzaz0idXJsKCNTVkdTQVE1OEgyZikiLz48cGF0aCBmaWxsPSIjMDA3YWNjIiBkPSJtMjQ2LjEzNSAyMjYuODE2bC01Mi41NDIgMjUuMjk4YTE1Ljg5IDE1Ljg5IDAgMCAxLTE4LjEyMy0zLjA4TDMuNDY2IDkyLjIwN2MtNC42MjYtNC4yMTgtNC42Mi0xMS41MDIuMDEyLTE1LjcxM2wxNC4wNS0xMi43NzNhMTAuNjI1IDEwLjYyNSAwIDAgMSAxMy41NjktLjYwM2wyMDcuMTMyIDE1Ny4xMzVjNi45NDkgNS4yNzEgMTYuOTMuMzE1IDE2LjkzLTguNDA4di42MTFhMTUuOTQgMTUuOTQgMCAwIDEtOS4wMjQgMTQuMzYiIG1hc2s9InVybCgjU1ZHU0FRNThIMmYpIi8+PHBhdGggZmlsbD0iIzFmOWNmMCIgZD0iTTE5My40MjggMjUyLjEzNGExNS44OSAxNS44OSAwIDAgMS0xOC4xMjUtMy4wODNjNS44ODEgNS44OCAxNS45MzggMS43MTUgMTUuOTM4LTYuNjAzVjExLjI3M2MwLTguMzE4LTEwLjA1Ny0xMi40ODMtMTUuOTM4LTYuNjAyYTE1Ljg5IDE1Ljg5IDAgMCAxIDE4LjEyNS0zLjA4NGw1Mi41MzMgMjUuMjYzYTE1Ljk0IDE1Ljk0IDAgMCAxIDkuMDMgMTQuMzYzVjIxMi41MWMwIDYuMTI1LTMuNTEgMTEuNzA5LTkuMDMgMTQuMzYzeiIgbWFzaz0idXJsKCNTVkdTQVE1OEgyZikiLz48cGF0aCBmaWxsPSJ1cmwoI1NWRzZRNXdNYk5RKSIgZmlsbC1vcGFjaXR5PSIuMjUiIGQ9Ik0xODAuODI4IDI1Mi42MDVhMTUuODcgMTUuODcgMCAwIDAgMTIuNjUtLjQ4Nmw1Mi41LTI1LjI2M2ExNS45NCAxNS45NCAwIDAgMCA5LjAyNi0xNC4zNjNWNDEuMTk3YTE1Ljk0IDE1Ljk0IDAgMCAwLTkuMDI1LTE0LjM2M0wxOTMuNDc3IDEuNTdhMTUuODggMTUuODggMCAwIDAtMTguMTE0IDMuMDg0TDc0Ljg1NyA5Ni4zNWwtNDMuNzgtMzMuMjMyYTEwLjYxNCAxMC42MTQgMCAwIDAtMTMuNTYuNjAzTDMuNDc2IDc2LjQ5NGMtNC42MyA0LjIxMS00LjYzNSAxMS40OTUtLjAxMiAxNS43MTNsMzcuOTY3IDM0LjYzOGwtMzcuOTY3IDM0LjYzN2MtNC42MjMgNC4yMTktNC42MTggMTEuNTAyLjAxMiAxNS43MTRsMTQuMDQxIDEyLjc3MmExMC42MTQgMTAuNjE0IDAgMCAwIDEzLjU2LjYwNGw0My43OC0zMy4yMzNsMTAwLjUwNiA5MS42OTVhMTUuOSAxNS45IDAgMCAwIDUuNDY1IDMuNTcxbTEwLjQ2NC0xODMuNjVsLTc2LjI2MiA1Ny44OWw3Ni4yNjIgNTcuODg4eiIgbWFzaz0idXJsKCNTVkdTQVE1OEgyZikiLz48L3N2Zz4=' },
@@ -91,7 +90,7 @@ const OPENIDE_EDITORS: ReadonlyArray<OpenIDEEditor> = [
 // advertise the build system it originally derived from as a user-facing editor choice.
 ].filter(editor => editor.id !== 'vscodium');
 
-// OpenIDE: previews de tema (mock con la paleta real de cada tema OpenIDE).
+// OpenIDE: theme previews (a mock drawn with each OpenIDE theme's real palette).
 interface OpenIDETheme { id: string; label: string; bg: string; sidebar: string; topbar: string; lines: string[] }
 const OPENIDE_THEMES: ReadonlyArray<OpenIDETheme> = [
 	{ id: 'OpenIDE Dark', label: 'Oscuro nativo', bg: '#141414', sidebar: '#171717', topbar: '#1f1f1f', lines: ['#5a5a5a', '#8a8a8a', '#6e6e6e', '#9a9a9a', '#7a7a7a'] },
@@ -109,9 +108,9 @@ async function importFromEditor(accessor: ServicesAccessor, editor: OpenIDEEdito
 	const galleryService = accessor.get(IExtensionGalleryService);
 	const extensionManagementService = accessor.get(IWorkbenchExtensionManagementService);
 
-	// La carpeta del editor de origen comparte el directorio de configuración con
-	// OpenIDE; solo cambia el nombre del producto. Derivamos su ruta desde la nuestra
-	// para que funcione en Linux/macOS/Windows.
+	// The source editor's folder shares its configuration directory with OpenIDE; only the
+	// product name differs. We derive its path from our own so this works on Linux, macOS
+	// and Windows alike.
 	const configDir = dirname(dirname(environmentService.userRoamingDataHome));
 	const stockUserDir = joinPath(configDir, editor.appDir, 'User');
 	const userHome = pathService.userHome({ preferLocal: true });
@@ -189,7 +188,7 @@ async function importFromEditor(accessor: ServicesAccessor, editor: OpenIDEEdito
 	);
 }
 
-// OpenIDE: comando del step "Importá desde otro editor". Acepta el id del editor (default VS Code).
+// OpenIDE: the command behind the "import from another editor" step. Takes the editor id (VS Code by default).
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
@@ -503,8 +502,8 @@ configurationRegistry.registerConfiguration({
 				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.terminal' }, "Open a new terminal in the editor area."),
 				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.agentSessionsWelcomePage' }, "Open the Agent Sessions Welcome page. Will override the workbench secondary side bar visibility settings."),
 			],
-			// OpenIDE muestra su portada únicamente cuando no hay una carpeta/workspace. En
-			// proyectos reales no roba foco ni reemplaza el estado vacío normal del editor.
+			// OpenIDE shows its cover page only when there is no folder/workspace. In real projects it
+			// neither steals focus nor replaces the editor's normal empty state.
 			'default': 'none',
 			'description': localize('workbench.startupEditor', "Controls which editor is shown at startup, if none are restored from the previous session."),
 			'experiment': { mode: 'auto' },
@@ -536,10 +535,10 @@ registerWorkbenchContribution2(StartupPageRunnerContribution.ID, StartupPageRunn
 
 AccessibleViewRegistry.register(new GettingStartedAccessibleView());
 
-// OpenIDE: inyecta un SVG (data URI base64) como nodo inline, de forma segura
-// (sin innerHTML/Trusted Types). Asi los iconos monocromos heredan el color del tema.
-// OpenIDE: pinta el logo de un editor. El de VS Code es a color (<img>); los
-// monocromos usan mask-image para tomar el color del texto/tema actual.
+// OpenIDE: injects an SVG (base64 data URI) as an inline node, safely -- no innerHTML and
+// no Trusted Types. That is how the monochrome icons inherit the theme's colour.
+// OpenIDE: paints an editor's logo. VS Code's is in colour (<img>); the monochrome ones
+// use mask-image to take the current text/theme colour.
 function openideAppendLogo(parent: HTMLElement, editor: OpenIDEEditor, size: number): void {
 	if (editor.id === 'vscode') {
 		const img = append(parent, $('img')) as HTMLImageElement;
@@ -552,23 +551,28 @@ function openideAppendLogo(parent: HTMLElement, editor: OpenIDEEditor, size: num
 }
 
 // OpenIDE: overlay de bienvenida a pantalla completa, como WIZARD de 3 pasos
-// (un paso visible a la vez), con puntos al centro y Anterior/Siguiente a los lados.
+// (one step visible at a time), with the dots centred and Previous/Next on either side.
 function showOpenIDEWelcomeOverlay(commandService: ICommandService, configurationService: IConfigurationService, authenticationService: IAuthenticationService): void {
-	// Evitar duplicados si ya hay un overlay abierto.
+	// Avoid duplicates when an overlay is already open.
 	if (mainWindow.document.querySelector('.openide-welcome-overlay')) {
 		return;
 	}
 
 	const store = new DisposableStore();
 	let current = 0;
-	// Montar dentro de .monaco-workbench para que las variables --vscode-* (colores del
-	// tema) cascadeen al overlay y se actualicen en vivo al cambiar de tema.
+	// Mounted inside .monaco-workbench so the --vscode-* variables (the theme's colours)
+	// cascade into the overlay and update live when the theme changes.
 	const overlayHost = (mainWindow.document.querySelector('.monaco-workbench') as HTMLElement) ?? mainWindow.document.body;
 	const overlay = append(overlayHost, $('.openide-welcome-overlay'));
 	const dismiss = () => { store.dispose(); overlay.remove(); };
 
+	// The overlay sits at the modal-editor rung of the workbench's z-index ladder: above the title
+	// bar (2500) so it covers every part, and BELOW notifications (2545), quick input (2550) and
+	// dialogs (2575). That last one is load-bearing, not tidiness: step 2 starts a GitHub sign-in,
+	// and GitHub's device flow shows its one-time code in a modal dialog. Painted over the top of
+	// the stack, the overlay hid that dialog and the code never reached the screen.
 	overlay.style.cssText = [
-		'position:fixed', 'inset:0', 'z-index:2147483646',
+		'position:fixed', 'inset:0', 'z-index:2540',
 		'display:flex', 'flex-direction:column',
 		'background:var(--vscode-editor-background, #1e1e1e)',
 		'color:var(--vscode-foreground, #cccccc)',
@@ -594,7 +598,7 @@ function showOpenIDEWelcomeOverlay(commandService: ICommandService, configuratio
 	title.style.cssText = 'margin:10px 0 0;font-size:27px;font-weight:600;text-align:center;';
 	title.textContent = localize('openide.overlay.title', "Bienvenido a OpenIDE");
 
-	// Area donde se dibuja el paso activo
+	// Where the active step is drawn
 	const stepArea = append(inner, $('div'));
 	stepArea.style.cssText = 'width:100%;margin-top:30px;min-height:300px;display:flex;flex-direction:column;align-items:center;';
 
@@ -661,7 +665,7 @@ function showOpenIDEWelcomeOverlay(commandService: ICommandService, configuratio
 					connected = sessions[0].account.label;
 				}
 			} catch {
-				// el proveedor puede no estar listo
+				// the provider may not be ready yet
 			}
 			if (connected) {
 				const ok = append(status, $('span.codicon.codicon-check'));
@@ -691,13 +695,13 @@ function showOpenIDEWelcomeOverlay(commandService: ICommandService, configuratio
 		render();
 	};
 
-	// ---- Paso 3: importar desde otro editor (grid de logos) ----
+	// ---- Step 3: import from another editor (a grid of logos) ----
 	const renderImportStep = (host: HTMLElement) => {
 		stepHeader(host, localize('openide.overlay.step3.title', "Importá desde otro editor"), localize('openide.overlay.step3.desc', "Traé tus configuraciones, atajos y extensiones. Elegí desde qué editor."));
 		const grid = append(host, $('div'));
 		grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:16px;justify-content:center;';
 
-		// Boton "Importar" (debajo del grid), deshabilitado hasta elegir un editor.
+		// The "Import" button below the grid, disabled until an editor is picked.
 		const actions = append(host, $('div'));
 		actions.style.cssText = 'margin-top:24px;display:flex;justify-content:center;';
 		const importBtn = append(actions, $('button')) as HTMLButtonElement;
@@ -796,7 +800,7 @@ function showOpenIDEWelcomeOverlay(commandService: ICommandService, configuratio
 	overlay.focus();
 }
 
-// OpenIDE: muestra el overlay de bienvenida en el primer arranque (instalacion nueva).
+// OpenIDE: shows the welcome overlay on the very first launch (a fresh installation).
 class OpenIDEWelcomeOverlayContribution extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'workbench.contrib.openideWelcomeOverlay';
@@ -822,7 +826,7 @@ class OpenIDEWelcomeOverlayContribution extends Disposable implements IWorkbench
 		if (this.storageService.getBoolean(OpenIDEWelcomeOverlayContribution.STORAGE_KEY, StorageScope.APPLICATION, false)) {
 			return;
 		}
-		// Solo en una instalacion nueva (primer arranque real).
+		// A fresh installation only (a real first launch).
 		if (!this.storageService.isNew(StorageScope.APPLICATION)) {
 			this.storageService.store(OpenIDEWelcomeOverlayContribution.STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
 			return;
@@ -849,94 +853,3 @@ registerAction2(class extends Action2 {
 		showOpenIDEWelcomeOverlay(accessor.get(ICommandService), accessor.get(IConfigurationService), accessor.get(IAuthenticationService));
 	}
 });
-
-
-// OpenIDE: ajustes de layout estilo "islas flotantes".
-// Las superficies salen de colores de producto registrados en el theme service. Así no
-// heredamos tintes incompatibles de sideBar/panel ni mezclamos el theme con colores fijos.
-const OPENIDE_LAYOUT_CSS = `
-.monaco-workbench {
-	--openide-island-gap: 5px;
-	--openide-island-radius: 12px;
-	--openide-island-outer-radius: 17px;
-}
-.monaco-workbench .part.activitybar,
-.monaco-workbench .part.titlebar {
-	background-color: transparent !important;
-	border: none !important;
-	box-shadow: none !important;
-}
-/* la status bar (footer) se funde con el fondo pero conserva su linea superior */
-.monaco-workbench .part.statusbar {
-	background-color: transparent !important;
-}
-/* matar la linea vertical del activity bar (borde ::before) */
-.monaco-workbench .activitybar.bordered::before {
-	border: none !important;
-}
-/* El fondo entre islas sigue el theme mediante un color semántico de OpenIDE. */
-.monaco-workbench {
-	background-color: var(--vscode-openide-workbenchBackground, var(--vscode-activityBar-background)) !important;
-}
-.monaco-workbench .part.sidebar,
-.monaco-workbench .part.panel,
-.monaco-workbench .part.auxiliarybar,
-.monaco-workbench .part.editor {
-	border: var(--openide-island-gap) solid transparent !important;
-	border-radius: var(--openide-island-outer-radius) !important;
-	background-clip: padding-box !important;
-	overflow: hidden !important;
-	box-shadow: none !important; /* SIN líneas (pedido explícito): las islas se leen solo por tonalidad contra el void */
-}
-/* Todas las islas comparten una superficie; el contenido conserva sus tokens de texto,
-   selección, inputs y estados propios del theme. */
-.monaco-workbench .part.editor,
-.monaco-workbench .part.sidebar,
-.monaco-workbench .part.auxiliarybar,
-.monaco-workbench .part.panel,
-.monaco-workbench .part.sidebar > .title,
-.monaco-workbench .part.auxiliarybar > .title {
-	background-color: var(--vscode-openide-islandBackground, var(--vscode-editor-background)) !important;
-}
-/* Los hijos del editor también se recortan. Esto cubre Monaco y evita que una capa de
-   contenido rectangular vuelva a pintar las esquinas inferiores de la isla. */
-.monaco-workbench .part.editor:not(.modal-editor-part) > .content {
-	border-radius: var(--openide-island-radius) !important;
-	overflow: hidden !important;
-}
-/* quitar lineas internas de headers/secciones de los docks */
-.monaco-workbench .part.sidebar .composite.title,
-.monaco-workbench .part.auxiliarybar .composite.title,
-.monaco-workbench .part.panel .composite.title,
-.monaco-workbench .pane-header,
-.monaco-workbench .pane .pane-header,
-.monaco-workbench .split-view-view > .pane > .pane-header {
-	border: none !important;
-	box-shadow: none !important;
-}
-/* tabs del editor sin borde inferior (header integrado) */
-.monaco-workbench .part.editor > .content .editor-group-container > .title {
-	border-bottom: none !important;
-	box-shadow: none !important;
-}
-`;
-
-class OpenIDELayoutContribution extends Disposable implements IWorkbenchContribution {
-
-	static readonly ID = 'workbench.contrib.openideLayout';
-
-	constructor(
-		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
-	) {
-		super();
-		const style = mainWindow.document.createElement('style');
-		style.id = 'openide-layout';
-		style.textContent = OPENIDE_LAYOUT_CSS;
-		mainWindow.document.head.appendChild(style);
-		this._register(toDisposable(() => style.remove()));
-		// Forzar un relayout para que las action bars recalculen su overflow con el
-		// ancho reducido por los gaps de las islas (si no, recortan iconos como "Collapse Folders").
-		this.layoutService.layout();
-	}
-}
-registerWorkbenchContribution2(OpenIDELayoutContribution.ID, OpenIDELayoutContribution, WorkbenchPhase.AfterRestored);

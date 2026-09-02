@@ -7,6 +7,7 @@ import assert from 'assert';
 import { $ } from '../../../../../base/browser/dom.js';
 import { Emitter } from '../../../../../base/common/event.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { NullHoverService } from '../../../../../platform/hover/test/browser/nullHoverService.js';
 import { IBrowserPickResult } from '../../../../../platform/openideBrowser/common/openideBrowserAutomation.js';
 import { OpenideChatComposerPick } from '../../browser/chat/openideChatComposerPick.js';
 import { IOpenideAgentService } from '../../browser/openideAgentService.js';
@@ -37,7 +38,7 @@ suite('OpenIDE ChatComposerPick', () => {
 		const changes: number[] = [];
 		const picks: number[] = [];
 		const pick = store.add(new OpenideChatComposerPick(
-			strip, service,
+			strip, service, NullHoverService,
 			() => changes.push(1),
 			() => picks.push(1),
 		));
@@ -133,7 +134,7 @@ suite('OpenIDE ChatComposerPick', () => {
 		const strip = $('div');
 		const emitter = store.add(new Emitter<IBrowserPickResult>());
 		const service = { onDidPickElement: emitter.event } as unknown as IOpenideAgentService;
-		const pick = new OpenideChatComposerPick(strip, service, () => { }, () => { });
+		const pick = new OpenideChatComposerPick(strip, service, NullHoverService, () => { }, () => { });
 		pick.dispose();
 		emitter.fire(PICK);
 		assert.strictEqual(pick.isEmpty, true);

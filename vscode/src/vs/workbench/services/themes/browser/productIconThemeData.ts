@@ -8,7 +8,7 @@ import * as nls from '../../../../nls.js';
 import * as Paths from '../../../../base/common/path.js';
 import * as resources from '../../../../base/common/resources.js';
 import * as Json from '../../../../base/common/json.js';
-import { ExtensionData, IThemeExtensionPoint, IWorkbenchProductIconTheme, ThemeSettingDefaults } from '../common/workbenchThemeService.js';
+import { ExtensionData, IThemeExtensionPoint, IWorkbenchProductIconTheme } from '../common/workbenchThemeService.js';
 import { getParseErrorMessage } from '../../../../base/common/jsonErrorMessages.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { isObject, isString } from '../../../../base/common/types.js';
@@ -96,7 +96,11 @@ export class ProductIconThemeData implements IWorkbenchProductIconTheme {
 	static get defaultTheme(): ProductIconThemeData {
 		let themeData = ProductIconThemeData._defaultProductIconTheme;
 		if (!themeData) {
-			themeData = ProductIconThemeData._defaultProductIconTheme = new ProductIconThemeData(DEFAULT_PRODUCT_ICON_THEME_ID, nls.localize('defaultTheme', 'Default'), ThemeSettingDefaults.PRODUCT_ICON_THEME);
+			// Literal 'Default', NOT ThemeSettingDefaults.PRODUCT_ICON_THEME: the fork points that
+			// setting default at the openide-bootstrap extension theme, and reusing it here would
+			// hand the stock codicon theme the same settings id — the setting would then resolve to
+			// this built-in instead of the product's icon font.
+			themeData = ProductIconThemeData._defaultProductIconTheme = new ProductIconThemeData(DEFAULT_PRODUCT_ICON_THEME_ID, nls.localize('defaultTheme', 'Default'), 'Default');
 			themeData.isLoaded = true;
 			themeData.extensionData = undefined;
 			themeData.watch = false;

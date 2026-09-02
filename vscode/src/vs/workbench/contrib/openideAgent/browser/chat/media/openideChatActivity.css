@@ -1,17 +1,17 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — native chat: thinking card, tool rows and the collapsible "Exploring" block.
  *
- *  SOURCE OF TRUTH: browser/openideChatHtml.ts. Every value below is transcribed from that file's
- *  <style>, with the rule it maps to named in the comment. Nothing here is designed: the webview
- *  already decided what this family looks like, and the native transcript has to be the same
- *  surface rather than a second interpretation of it.
+ *  TRANSCRIBED, NOT DESIGNED: every value below comes from the chat webview this replaced (its
+ *  `<style>` block; the webview itself was removed when the chat became native), with the rule it
+ *  maps to named in the comment. The webview had already decided what this family looks like, and
+ *  the native transcript has to be that surface rather than a second interpretation of it.
  *
  *  ONE DELIBERATE DEVIATION, marked in place: the webview hides `.part-icon` on every tool row
- *  (openideChatHtml.ts:306), which is why a tool call reads as a bare verb with a bullet. The icon
+ *, which is why a tool call reads as a bare verb with a bullet. The icon
  *  is shown here. That was the reported defect, and the catalog has always carried the codicon.
  *--------------------------------------------------------------------------------------------*/
 
-/* openideChatHtml.ts:265-272 (`.shimmer`). A gradient swept across the TEXT itself via
+/* the removed chat webview (`.shimmer`). A gradient swept across the TEXT itself via
    `background-clip: text` — not an opacity pulse of the row. The distinction is the whole effect:
    a pulsing row reads as something blinking in alarm, a swept label reads as one that is alive.
    The `openide-chat-shimmer-sweep` keyframe is declared once in openideChatNative.css. */
@@ -29,15 +29,59 @@
 	-webkit-text-fill-color: transparent;
 	color: transparent;
 	animation: openide-chat-shimmer-sweep 2s linear infinite;
-	will-change: background-position;
+	/* No `will-change: background-position`. It is not a compositable property, so the hint buys
+	   nothing to composite and still promotes the element to a layer whose texture is re-uploaded
+	   on every frame. Measured on the running IDE with one label shimmering: 35% of a core with the
+	   hint, 25% without it, 11% with the shimmer off — the same picture, ten points cheaper. */
 }
 
 @media (prefers-reduced-motion: reduce) {
 	.openide-chat-shimmer { animation: none; }
 }
 
+/* ---- Skeleton -----------------------------------------------------------------------------
+   Bars standing in for content that is still being written. Lives here, beside the shimmer,
+   because the plan card and the edit card both show one and two copies drift.
+
+   Its own keyframes and not the shimmer's: that sweep travels 120% → -120% because it is sized
+   for a 400% gradient clipped to glyphs, and against these 200% bands the same numbers leave the
+   highlight off the bar for most of the cycle — which reads as a few frames a second.
+
+   The rule that matters more than the CSS: a skeleton must be built ONCE and left alone. Anything
+   that rebuilds it on every streamed delta restarts the animation from frame zero, and no sweep
+   ever finishes. */
+.openide-chat-sk {
+	display: flex;
+	flex-direction: column;
+	gap: 9px;
+}
+
+.openide-chat-sk-line {
+	height: 10px;
+	border-radius: var(--oi-radius-sm);
+	background: linear-gradient(90deg,
+			var(--oi-border-soft) 25%,
+			var(--oi-border-strong) 37%,
+			var(--oi-border-soft) 63%);
+	background-size: 200% 100%;
+	animation: openide-chat-sk-sweep 1.6s linear infinite;
+}
+
+.openide-chat-sk-w90 { width: 90%; }
+.openide-chat-sk-w76 { width: 76%; }
+.openide-chat-sk-w55 { width: 55%; }
+
+@keyframes openide-chat-sk-sweep {
+	from { background-position: 100% 0; }
+	to { background-position: -100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-sk-line { animation: none; }
+}
+
 /* ====================== reasoning / thinking =============================
-   openideChatHtml.ts:241-251. Flat and integrated: no card, no border, no background. */
+   the removed chat webview. Flat and integrated: no card, no border, no background. */
 
 .openide-chat-reasoning {
 	display: flex;
@@ -90,7 +134,8 @@
 }
 
 /* Collapsed it keeps a faded two-line peek instead of disappearing: the card then reads as folded
-   rather than as gone, which is what stops users from re-opening it to check it is still there. */
+   rather than as gone, which is what stops users from re-opening it to check it is still there.
+   (Reasoning only. The explore group below used to do the same and no longer does — see there.) */
 .openide-chat-reasoning:not([open]) .openide-chat-think {
 	display: block;
 	max-height: 66px;
@@ -102,7 +147,7 @@
 }
 
 /* ====================== "Exploring" group =================================
-   openideChatHtml.ts:253-259 (`.activity-group`). */
+   the removed chat webview (`.activity-group`). */
 
 .openide-chat-activity-group {
 	margin: 1px 0;
@@ -141,18 +186,25 @@
 	min-width: 0;
 }
 
+/* A folded phase is ONE line and nothing else. It used to keep the same 68px faded peek the
+   reasoning card does, which meant every settled phase left a stack of half-visible rows hanging
+   under it — the "tree view" the user asked to be rid of. The reasoning card keeps its peek
+   because there the peek is the content (the model's own words); here the content is a list of
+   files, and a list of files that is neither readable nor clickable is just texture. */
 .openide-chat-activity-group:not([open]) > .openide-chat-activity-body {
-	display: flex;
-	max-height: 68px;
-	overflow: hidden;
-	opacity: 0.48;
-	pointer-events: none;
-	-webkit-mask-image: linear-gradient(#000 20%, transparent);
-	mask-image: linear-gradient(#000 20%, transparent);
+	display: none;
+}
+
+/* The step IN FLIGHT is not drawn in the transcript: the turn's status line is showing it, one
+   line, swapped in place with a shimmer (browser/chat/openideChatStatusLine.ts). The row is still
+   built and still holds its state — it is simply not on screen until it settles, which is when it
+   stops being the news and becomes the record. */
+.openide-chat-part-live {
+	display: none;
 }
 
 /* ====================== tool rows =========================================
-   openideChatHtml.ts:301-336. */
+   the removed chat webview. */
 
 .openide-chat-part {
 	min-width: 0;
@@ -171,7 +223,7 @@
 	gap: 6px;
 }
 
-/* openideChatHtml.ts:306 hides `.part-icon` here too. THE DEVIATION: the icon stays. Everything
+/* the removed chat webview hides `.part-icon` here too. THE DEVIATION: the icon stays. Everything
    else on that line keeps hiding — the chevron and the raw arguments are still noise on a row
    whose job is to say, in one sentence, what the agent is doing. */
 .openide-chat-tool-activity .openide-chat-part-chevron,
@@ -193,8 +245,30 @@
 	font-size: 12.5px;
 }
 
+.openide-chat-tool-activity.openide-chat-part-error .openide-chat-part-icon {
+	color: var(--openide-red);
+}
+/* The muted note after the verb on a failed or cancelled call (openideChatToolPart.ts
+   `_paintNote`): the first line the tool answered, in the caption tone, one line, ellipsized. */
+.openide-chat-part-note {
+	flex: 1 1 auto;
+	min-width: 0;
+	margin-left: 8px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}
+.openide-chat-part-note.hidden { display: none; }
 .openide-chat-tool-activity.openide-chat-part-error .openide-chat-part-verb {
-	color: var(--vscode-errorForeground);
+	color: var(--vscode-foreground);
+}
+/* On a failed or cancelled row the verb never shrinks: the note beside it is the part that
+   ellipsizes, the verb is what names the row. */
+.openide-chat-tool-activity.openide-chat-part-error .openide-chat-part-verb,
+.openide-chat-tool-activity.openide-chat-part-cancelled .openide-chat-part-verb {
+	flex: 0 0 auto;
 }
 
 /* A cancelled call is not a failure: muted, never red. */
@@ -412,8 +486,8 @@
 	max-width: 100%;
 	vertical-align: middle;
 	padding: 0 5px 0 3px;
-	border: 1px solid var(--vscode-chat-requestBorder, rgba(128, 128, 128, 0.28));
-	border-radius: var(--vscode-cornerRadius-small, 4px);
+	border: 1px solid var(--vscode-chat-requestBorder, var(--oi-border));
+	border-radius: var(--oi-radius-sm);
 	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
 	color: var(--vscode-foreground);
 	font-size: 12px;

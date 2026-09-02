@@ -3,21 +3,21 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, append, clearNode } from '../../../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, clearNode, getWindow, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { DisposableStore, toDisposable } from '../../../../../../base/common/lifecycle.js';
-import { isMacintosh } from '../../../../../../base/common/platform.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IOpenideChatContent, IOpenideChatModeSuggestionContent, isOpenideChatContentOfKind } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
 import { AgentMode } from '../../../common/openideAgentTypes.js';
 import { IOpenideAgentService } from '../../openideAgentService.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
+import { setupChatTooltip } from '../openideChatHover.js';
+import { appendKbd, PRIMARY_ENTER_HINT } from '../openideChatKbd.js';
 import '../media/openideChatModeSuggestion.css';
 
 export const OPENIDE_CHAT_SUGGEST_WRAP_CLASS = 'openide-chat-suggest-wrap';
 
-/** Same hint the webview prints on the accept button (openideChatHtml.ts:3968). */
-const ACCEPT_SHORTCUT = isMacintosh ? '⌘↩' : 'Ctrl+↩';
 
 interface ISuggestMeta {
 	readonly icon: string;
@@ -25,7 +25,7 @@ interface ISuggestMeta {
 	readonly verb: string;
 }
 
-/** `SUGGEST_META`, transcribed verbatim (openideChatHtml.ts:3936-3942). */
+/** `SUGGEST_META`, transcribed verbatim (the removed chat webview). */
 const SUGGEST_META: Readonly<Record<string, ISuggestMeta>> = {
 	agent: { icon: 'openide-mode-agent', label: 'Agent', verb: 'Cambiar a modo Agent' },
 	plan: { icon: 'openide-mode-plan', label: 'Plan', verb: 'Cambiar a modo Plan' },
@@ -60,7 +60,7 @@ export const onDidAcceptOpenideChatModeSuggestion: Event<IOpenideChatModeSuggest
 /**
  * The mode suggestion card: complexity triage proposing plan/debug/fork.
  *
- * Transcribed from `renderSuggestMode` (openideChatHtml.ts:3944-3990) and `armSuggestAutoAccept`
+ * Transcribed from `renderSuggestMode` (the removed chat webview) and `armSuggestAutoAccept`
  * (:3992-4030). It is a BLOCKING card: `suggest_mode` parks the run on a deferred promise
  * (openideAgentService.ts:3465-3471) and nothing moves until this part answers, which is why the
  * actions are removed rather than disabled once answered — a card that can be answered twice leaves
@@ -93,6 +93,7 @@ export class OpenideChatModeSuggestionPart extends OpenideChatContentPart {
 		content: IOpenideChatModeSuggestionContent,
 		_context: IOpenideChatContentPartContext,
 		@IOpenideAgentService private readonly _agentService: IOpenideAgentService,
+		@IHoverService hoverService: IHoverService,
 	) {
 		super();
 
@@ -104,6 +105,8 @@ export class OpenideChatModeSuggestionPart extends OpenideChatContentPart {
 		const head = append(card, $('div.openide-chat-suggest-head'));
 		this._icon = append(head, $('span.codicon'));
 		this._title = append(head, $('span.openide-chat-suggest-title'));
+		// The head elides before the kicker does; the hover only restores the same label.
+		this._register(setupChatTooltip(hoverService, this._title, () => this._title.textContent ?? '', { aria: false }));
 		const kicker = append(head, $('span.openide-chat-suggest-kicker'));
 		kicker.textContent = 'Modo recomendado';
 
@@ -120,7 +123,6 @@ export class OpenideChatModeSuggestionPart extends OpenideChatContentPart {
 		const meta = SUGGEST_META[this._content.mode] ?? SUGGEST_META.agent;
 		this._icon.className = `codicon codicon-${meta.icon}`;
 		this._title.textContent = meta.label;
-		this._title.title = meta.label;
 		this._body.textContent = this._content.reason;
 		this._renderActions(meta);
 	}
@@ -146,7 +148,7 @@ export class OpenideChatModeSuggestionPart extends OpenideChatContentPart {
 		accept.setAttribute('type', 'button');
 		append(accept, $(`span.codicon.codicon-${meta.icon}`));
 		append(accept, $('span')).textContent = meta.verb;
-		append(accept, $('span.openide-chat-suggest-kbd')).textContent = ACCEPT_SHORTCUT;
+		appendKbd(accept, PRIMARY_ENTER_HINT);
 		this._actionStore.add(addDisposableListener(accept, 'click', () => this._resolve(true)));
 
 		this._armAutoAccept(accept);
@@ -170,6 +172,13 @@ export class OpenideChatModeSuggestionPart extends OpenideChatContentPart {
 		const bar = append(accept, $('span.openide-chat-suggest-timer'));
 		const count = append(accept, $('span.openide-chat-suggest-count'));
 		const endsAt = Date.now() + seconds * 1000;
+		count.textContent = `${seconds}s`;
+
+		// The bar is a CSS transition on `transform` (openideChatModeSuggestion.css): JS only sets
+		// the duration and starts it one frame later, so the initial `scaleX(0)` has been painted
+		// and there is something to transition from. The count is text and moves once a second.
+		bar.style.setProperty('--openide-chat-suggest-seconds', `${seconds}s`);
+		const start = scheduleAtNextAnimationFrame(getWindow(bar), () => bar.classList.add('running'));
 
 		const handle = setInterval(() => {
 			const left = endsAt - Date.now();
@@ -182,11 +191,11 @@ export class OpenideChatModeSuggestionPart extends OpenideChatContentPart {
 				}
 				return;
 			}
-			bar.style.width = `${100 - (left / (seconds * 1000)) * 100}%`;
 			count.textContent = `${Math.ceil(left / 1000)}s`;
-		}, 100);
+		}, 250);
 
 		this._timerStore.add(toDisposable(() => {
+			start.dispose();
 			clearInterval(handle);
 			bar.remove();
 			count.remove();

@@ -4,10 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 /*
- *  OpenIDE — detección de comunidades (módulos) del grafo del codebase. Louvain determinista
- *  en TS puro, con los post-pasos de Graphify: hubs excluidos y reinsertados por voto, split de
- *  comunidades gigantes o de baja cohesión, reindexado con orden total e IDs estables entre
- *  corridas vía remapeo greedy contra la partición anterior. Sin aleatoriedad: mismo grafo →
+ *  OpenIDE — community (module) detection over the codebase graph. A deterministic Louvain in pure
+ *  TS, with Graphify's post-passes: hubs excluded and reinserted by vote, giant or low-cohesion
+ *  communities split, reindexed with a total order, and IDs kept stable across runs by greedily
+ *  remapping against the previous partition. No randomness: same graph →
  *  misma salida, byte a byte.
  *--------------------------------------------------------------------------------------------*/
 
@@ -29,7 +29,7 @@ interface IWorkGraph {
 const IMPROVEMENT_THRESHOLD = 1e-4;
 const MAX_PASSES = 10;
 
-/** Grafo de trabajo no dirigido con pesos agregados; nodos y aristas en orden determinista. */
+/** The undirected working graph with aggregated weights; nodes and edges in a deterministic order. */
 function buildWorkGraph(nodeIds: readonly string[], edges: readonly ICommunityGraphEdge[]): IWorkGraph {
 	const nodes = [...new Set(nodeIds)].sort();
 	const nodeSet = new Set(nodes);
@@ -55,9 +55,9 @@ function buildWorkGraph(nodeIds: readonly string[], edges: readonly ICommunityGr
 	return { nodes, neighbors, degree, totalWeight };
 }
 
-/** Una pasada de Louvain (fase local + agregación), determinista por recorrido en orden fijo. */
+/** One Louvain pass (local phase + aggregation), deterministic because the walk order is fixed. */
 function louvain(graph: IWorkGraph): Map<string, number> {
-	// Sin aristas: cada nodo es su propia comunidad.
+	// With no edges, every node is its own community.
 	if (!graph.totalWeight) {
 		return new Map(graph.nodes.map((id, index) => [id, index] as const));
 	}
@@ -83,7 +83,7 @@ function louvain(graph: IWorkGraph): Map<string, number> {
 			for (const node of level.nodes) {
 				const nodeDegree = level.degree.get(node) ?? 0;
 				const currentCommunity = community.get(node)!;
-				// Peso hacia cada comunidad vecina (orden determinista por clave).
+				// Weight towards each neighbouring community (deterministic order, by key).
 				const weights = new Map<string, number>();
 				for (const [neighbor, weight] of level.neighbors.get(node)!) {
 					const neighborCommunity = community.get(neighbor)!;
@@ -101,7 +101,7 @@ function louvain(graph: IWorkGraph): Map<string, number> {
 			}
 		}
 		if (!improvedTotal) { break; }
-		// --- fase 2: agregación en supernodos ---
+		// --- phase 2: aggregation into supernodes ---
 		const groups = new Map<string, string[]>();
 		for (const node of level.nodes) {
 			const c = community.get(node)!;
@@ -136,7 +136,7 @@ function louvain(graph: IWorkGraph): Map<string, number> {
 			for (const weight of newNeighbors.get(id)!.values()) { sum += weight; }
 			newDegree.set(id, sum);
 		}
-		// Actualizar la membresía de nodos originales al supernodo nuevo.
+		// Move the original nodes' membership to the new supernode.
 		const superIndex = new Map(newNodes.map((id, index) => [id, index] as const));
 		memberOf = new Map();
 		for (const superId of newNodes) {
@@ -176,8 +176,8 @@ function percentile(sortedAscending: readonly number[], fraction: number): numbe
 }
 
 /**
- * Particiona el grafo en comunidades. `degreeById` es el grado REAL en el grafo completo (para
- * etiquetas y exclusión de hubs). `previous` permite mantener IDs estables entre corridas.
+ * Partitions the graph into communities. `degreeById` is the REAL degree in the full graph (for
+ * labels and hub exclusion). `previous` is what keeps the IDs stable across runs.
  */
 export function detectCommunities(
 	nodeIds: readonly string[],
@@ -189,7 +189,7 @@ export function detectCommunities(
 	const allNodes = [...new Set(nodeIds)].sort();
 	if (!allNodes.length) { return []; }
 
-	// --- exclusión de hubs p99 (reinsertados después por voto mayoritario de vecinos) ---
+	// --- p99 hub exclusion (they are reinserted later by their neighbours' majority vote) ---
 	const degreesSorted = allNodes.map(id => degreeById.get(id) ?? 0).sort((a, b) => a - b);
 	const hubThreshold = Math.max(50, percentile(degreesSorted, 0.99));
 	const hubs = allNodes.filter(id => (degreeById.get(id) ?? 0) >= hubThreshold);
@@ -201,7 +201,7 @@ export function detectCommunities(
 	const memberOf = louvain(graph);
 	let groups = groupByCommunity(memberOf);
 
-	// --- splits: comunidades gigantes o de baja cohesión se re-particionan ---
+	// --- splits: giant or low-cohesion communities are partitioned again ---
 	const maxSize = Math.max(10, Math.floor(coreNodes.length * 0.25));
 	const splitOnce = (members: string[]): string[][] => {
 		const memberSet = new Set(members);
@@ -214,7 +214,7 @@ export function detectCommunities(
 	groups = groups.flatMap(group => group.length > maxSize ? splitOnce(group) : [group]);
 	groups = groups.flatMap(group => (group.length >= 50 && cohesion(group, graph.neighbors) < 0.05) ? splitOnce(group) : [group]);
 
-	// --- reinserción de hubs por voto mayoritario de sus vecinos (desempate por id menor) ---
+	// --- hubs reinserted by their neighbours' majority vote (ties broken by the smaller id) ---
 	const communityOf = new Map<string, number>();
 	groups.forEach((group, index) => { for (const id of group) { communityOf.set(id, index); } });
 	const neighborsAll = new Map<string, string[]>();
@@ -243,11 +243,11 @@ export function detectCommunities(
 		}
 	}
 
-	// --- reindexado con ORDEN TOTAL: (-tamaño, tupla de miembros ordenados) ---
+	// --- reindexed with a TOTAL ORDER: (-size, the sorted tuple of members) ---
 	groups = groups.filter(group => group.length > 0);
 	groups.sort((a, b) => b.length - a.length || a.join(' ').localeCompare(b.join(' ')));
 
-	// --- etiquetado por hub: el miembro de mayor grado nombra la comunidad ---
+	// --- labelled by hub: the member with the highest degree names the community ---
 	const label = (members: readonly string[]): string => {
 		const top = [...members].sort((a, b) => (degreeById.get(b) ?? 0) - (degreeById.get(a) ?? 0) || a.localeCompare(b))[0];
 		return nameById(top).replace(/\(\)$/, '') || 'módulo';

@@ -15,7 +15,6 @@
 import { addDisposableListener, getWindow } from '../../../../base/browser/dom.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { MutableDisposable } from '../../../../base/common/lifecycle.js';
-import { ThemeColor } from '../../../../base/common/themables.js';
 import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
@@ -33,8 +32,9 @@ import { IViewDescriptorService } from '../../../common/views.js';
 import { IHostService } from '../../../services/host/browser/host.js';
 import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import { OpenideChatWidget } from './chat/openideChatWidget.js';
+import { IComposerSnippet } from '../common/chat/openideChatSnippet.js';
 import { IOpenideAgentService } from './openideAgentService.js';
-import { IChatSessionUsage, OpenideChatSessions } from './openideChatSessions.js';
+import { OpenideChatSessions } from './openideChatSessions.js';
 import { applyProviderIcon, createProviderIcon } from './openideProviderIcons.js';
 import { getOpenideCli } from '../common/openideAgentCliCatalog.js';
 import { IOpenideCliChangesService, IOpenideCliTurnFinished, OpenideCliChangesService } from './openideCliChangesService.js';
@@ -49,11 +49,12 @@ export class OpenideChatViewPane extends ViewPane {
 	/** Store de conversaciones (tabs + historial), persistido. */
 	private _sessions: OpenideChatSessions | undefined;
 
-	// Footer (status bar): estado │ modelo │ usage │ ████░░░░░░ 45K/200K. It lives here and not in
-	// the dock — the user wants it next to the notifications.
+	// Footer (status bar): the provider call to action and the account quota, and nothing else. The
+	// conversation's context used to have a `# 84K` entry here too; it moved out because the dock
+	// already carries that number twice (the composer's ring, and its Session Info popover), and of
+	// the three the status bar was the one detached from the conversation it was describing.
 	private readonly _statusEntry = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
 	private readonly _usageEntry = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
-	private readonly _ctxEntry = this._register(new MutableDisposable<IStatusbarEntryAccessor>());
 	private readonly _usagePopover: OpenideUsagePopover;
 	private _statusBrandIcon: HTMLElement | undefined;
 	private _usageBrandIcon: HTMLElement | undefined;
@@ -64,7 +65,6 @@ export class OpenideChatViewPane extends ViewPane {
 	private _statusProviderId = '';
 	private _statusConnected = false;
 	private _statusGeneration = 0;
-	private _ctx: IChatSessionUsage = { input: 0, output: 0, used: 0, limit: 0 };
 
 	constructor(
 		options: IViewPaneOptions,
@@ -122,17 +122,19 @@ export class OpenideChatViewPane extends ViewPane {
 			this.updateStatusbar();
 		}));
 		this._register(this.cliChanges.onDidFinishTurn(event => void this.notifyCliTurnComplete(event)));
-		this._register(widget.onDidFinishRun(({ hadError }) => {
+		this._register(widget.onDidFinishRun(({ hadError, conversationId }) => {
 			// The provider just counted a turn: the quota windows moved (Orca ingests the
 			// statusline on every turn; we refetch right after).
 			this.usageMonitor.notifyTurnFinished(this._statusProviderId);
-			this.notifyTaskComplete(hadError).catch(() => { /* best-effort */ });
+			// A run no longer belongs to whatever conversation is on screen: it finishes where it
+			// was started. When that is not the one being read, the toast says WHICH one — the same
+			// wording a hosted CLI already uses, for the same reason.
+			const sessions = this.sessions();
+			const title = conversationId === sessions.activeSessionId()
+				? undefined
+				: sessions.metaOf(conversationId)?.title;
+			this.notifyTaskComplete(hadError, title ? t('cliChanges.finished', title) : undefined).catch(() => { /* best-effort */ });
 		}));
-		this._register(widget.onDidChangeUsage(usage => {
-			this._ctx = { ...usage, limit: usage.limit || this._ctx.limit };
-			this.updateStatusbar();
-		}));
-		this._ctx = { ...widget.usage, limit: widget.usage.limit || this._ctx.limit };
 		this.updateStatusbar();
 	}
 
@@ -179,6 +181,17 @@ export class OpenideChatViewPane extends ViewPane {
 		this._widget.value?.injectCanvasPrompt(text, false);
 	}
 
+	/** The editor selection, as a chip in the composer. Focus follows so the user can just type. */
+	attachSnippet(snippet: IComposerSnippet): void {
+		this._widget.value?.attachSnippet(snippet);
+		this.focus();
+	}
+
+	/** "Ask the agent" from the Project Map: a new conversation, already asking. */
+	askInNewChat(prompt: string): void {
+		this._widget.value?.askInNewSession(prompt);
+	}
+
 	/** Fork of the active conversation (an independent branch with the inherited context). */
 	forkChat(): void {
 		this._widget.value?.forkActiveSession();
@@ -216,21 +229,11 @@ export class OpenideChatViewPane extends ViewPane {
 		this._statusProviderId = id;
 		this._statusModel = model;
 		this._statusConnected = connected;
-		const usage = this._widget.value?.usage;
-		this._ctx = { ...(usage ?? this._ctx), limit: this.agentService.getContextLimit() };
 		this._usageSummary = this.usageMonitor.getStatusSummary(id);
 		this.updateStatusbar();
 	}
 
-	/** Compact, like the tray badges: 840 · 8.4K · 84K · 1.2M. */
-	private static formatTokens(n: number): string {
-		if (n >= 1_000_000) { return `${Math.round(n / 100_000) / 10}M`; }
-		if (n >= 10_000) { return `${Math.round(n / 1000)}K`; }
-		if (n >= 1000) { return `${Math.round(n / 100) / 10}K`; }
-		return String(n || 0);
-	}
-
-	/** Native footer: status/model, account quota and conversation context are separate indicators. */
+	/** Native footer: the "connect a provider" call to action and the account quota. */
 	private updateStatusbar(): void {
 		const model = this._statusModel || this._statusProvider || '—';
 		const statusDocument = this._container ? getWindow(this._container).document : document;
@@ -294,37 +297,12 @@ export class OpenideChatViewPane extends ViewPane {
 			this._usageEntry.clear();
 		}
 
-		// With no provider connected there is NO context bar: showing "0/1050K" for a model that
-		// cannot answer is noise. The limit is recomputed on connect/model change.
-		if (!this._statusConnected && !this._busy) {
-			this._ctxEntry.clear();
-			return;
-		}
-
-		const total = this._ctx.used || (this._ctx.input + this._ctx.output);
-		const limit = this._ctx.limit;
-		const pct = limit ? Math.min(100, Math.round(total / limit * 100)) : 0;
-		// `# 84K`: the number alone; limit, percentage and the caveat go to the tooltip.
-		const label = OpenideChatViewPane.formatTokens(total);
-		const color: ThemeColor = pct >= 95 ? { id: 'errorForeground' }
-			: pct > 80 ? { id: 'editorError.foreground' }
-				: pct >= 50 ? { id: 'editorWarning.foreground' }
-					: { id: 'charts.green' };
-		const ctx: IStatusbarEntry = {
-			name: 'OpenIDE Agent: contexto',
-			text: `$(symbol-numeric) ${label}`,
-			ariaLabel: 'Uso de contexto del agente',
-			tooltip: limit
-				? `Contexto: ${total.toLocaleString()} / ${limit.toLocaleString()} tokens (${pct}%)`
-				: `Contexto usado: ${total.toLocaleString()} tokens. El proveedor no publica un límite verificable para este modelo.`,
-			command: 'openide.agent.showContext',
-			color: limit && pct >= 50 ? color : undefined,
-		};
-		if (this._ctxEntry.value) {
-			this._ctxEntry.value.update(ctx);
-		} else {
-			this._ctxEntry.value = this.statusbarService.addEntry(ctx, 'openide.agent.context', StatusbarAlignment.RIGHT, 100.5);
-		}
+		// There is no context indicator down here any more. The dock says the same thing better:
+		// the composer's ring shows the percentage where you are typing, and its Session Info
+		// popover breaks it down into cost, window and "Compact conversation" — a `# 84K` in the
+		// far corner of the window was the third place the same number appeared, and the only one
+		// detached from the conversation it belongs to. `openide.agent.showContext` still opens
+		// that popover, so the command and its keybinding keep working.
 	}
 
 

@@ -114,6 +114,10 @@ export class OverlayWebview extends Disposable implements IOverlayWebview {
 			this._overlayLayout = new OverlayLayoutElement();
 			this._overlayLayout.content.style.visibility = 'hidden';
 
+			// Marker used by floating panels (Modern UI) CSS to round the overlay content (and
+			// the iframe it directly hosts) to the card's rounded corners. See `floatingPanels.css`.
+			this._overlayLayout.content.classList.add('webview-overlay-content');
+
 			// Webviews cannot be reparented in the dom as it will destroy their contents.
 			// Mount them to a high level node to avoid this depending on the active container.
 			const root = this._layoutService.getContainer(this.window);
@@ -201,7 +205,7 @@ export class OverlayWebview extends Disposable implements IOverlayWebview {
 		// Clip their lower corners explicitly so previews cannot repaint the island square.
 		const isMainEditorOverlay = clippingContainer?.classList.contains('editor') && !clippingContainer.classList.contains('modal-editor-part');
 		this.overlayLayout.content.style.borderRadius = isMainEditorOverlay
-			? '0 0 var(--openide-island-radius, 12px) var(--openide-island-radius, 12px)'
+			? '0 0 var(--vscode-cornerRadius-large, 8px) var(--vscode-cornerRadius-large, 8px)'
 			: '';
 	}
 

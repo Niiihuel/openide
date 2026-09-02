@@ -22,7 +22,7 @@
 
 	.modal-editor-shadow {
 		box-shadow: var(--vscode-shadow-xl);
-		border-radius: 8px;
+		border-radius: var(--vscode-cornerRadius-large);
 		overflow: hidden;
 		width: 100%;
 		height: 100%;
@@ -37,8 +37,10 @@
 	width: 100%;
 	height: 100%;
 	background-color: var(--vscode-editor-background);
-	border: 1px solid var(--vscode-editorWidget-border, var(--vscode-contrastBorder));
-	border-radius: 8px;
+	/* OpenIDE divergence: the modal is one more floating card, so it takes the card recipe of
+	 * workbench/browser/media/floatingPanels.css: the surface border and the large radius. */
+	border: 1px solid var(--vscode-surface-border, var(--oi-border));
+	border-radius: var(--vscode-cornerRadius-large);
 	overflow: hidden;
 	position: relative;
 
@@ -71,8 +73,9 @@
 	overflow: hidden;
 	box-sizing: border-box;
 	padding: 8px;
+	/* OpenIDE divergence: no rule between the sidebar and the content. The sidebar's own
+	 * background is what tells the two regions apart (docs/theming-surfaces.md, rule 7). */
 	background-color: var(--vscode-sideBar-background, var(--vscode-editor-background));
-	border-right: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-editorWidget-border, transparent));
 }
 
 .monaco-modal-editor-block .modal-editor-sidebar .monaco-tl-twistie.force-no-twistie {
@@ -91,8 +94,9 @@
 	min-height: 32px;
 	padding: 0 8px 0 10px;
 	color: var(--vscode-titleBar-activeForeground);
-	background-color: var(--vscode-titleBar-activeBackground);
-	border-bottom: 1px solid var(--vscode-titleBar-border, transparent);
+	/* OpenIDE divergence: no rule under the header, and no band either — header and body share the
+	   island surface, so the modal reads as one card (rule 7). */
+	background-color: var(--vscode-openide-islandBackground, var(--vscode-editor-background));
 
 	&.dragging {
 		cursor: grabbing;

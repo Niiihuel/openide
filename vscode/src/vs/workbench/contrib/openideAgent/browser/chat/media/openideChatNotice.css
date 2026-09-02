@@ -4,32 +4,48 @@
  *--------------------------------------------------------------------------------------------*/
 
 /* Transcribed from the webview, which is the visual source of truth for the native chat:
-   `.flatrow.notice` and `.flatrow.err` at openideChatHtml.ts:528-550, `.decision-line` at :1070. */
+   `.flatrow.notice` and `.flatrow.err` at the removed chat webview, `.decision-line` at :1070. */
 
+/* The severity lives in the ICON, and nowhere else.
+   The row used to be a tinted plate — coloured text over a coloured background inside a coloured
+   border — so a rate limit, which is the provider being busy and nothing being broken, arrived as
+   a red wall. The surface itself is not decided here: `openideChatNative.css` already gives every
+   card the shared background and then takes the border off the notice, because a notice is a LINE,
+   not a box. What is left for this file is the text colour (plain foreground, like any other row)
+   and the one coloured glyph, which is exactly how upstream draws the same widget
+   (`chat/browser/widget/media/chat.css`: neutral `.chat-notification-widget`, colour only on
+   `.chat-error-codicon` / `.chat-warning-codicon` / `.chat-info-codicon`). */
 .openide-chat-notice-row {
 	display: flex;
 	align-items: flex-start;
 	gap: 9px;
 	min-width: 0;
 	padding: 9px 11px;
-	border-radius: 8px;
-	color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #d7ba7d));
-	border: 1px solid color-mix(in srgb, var(--vscode-editorWarning-foreground, #d7ba7d) 30%, transparent);
-	background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #d7ba7d) 6%, transparent);
+	color: var(--vscode-foreground);
 }
 
-.openide-chat-notice-row.openide-chat-notice-error {
+/* Scoped through `.openide-chat-native` to outrank the workbench's own `.monaco-workbench .codicon`
+   (style.css), which otherwise paints every glyph with the generic icon colour — upstream has to
+   force the same override for the same reason. */
+.openide-chat-native .openide-chat-notice-row.openide-chat-notice-error > .codicon {
 	color: var(--vscode-errorForeground);
-	border-color: color-mix(in srgb, var(--vscode-errorForeground) 28%, transparent);
-	background: color-mix(in srgb, var(--vscode-errorForeground) 6%, transparent);
 }
 
-/* Its own optical box: the glyph does not align by its typographic baseline but with the first
-   line of the title, or the triangle looks like it is falling to the left. */
+.openide-chat-native .openide-chat-notice-row.openide-chat-notice-info > .codicon {
+	color: var(--vscode-notificationsInfoIcon-foreground, var(--vscode-charts-blue));
+}
+
+/* Its own optical box: the glyph aligns with the first LINE of text, not with its typographic
+   baseline. The nudge is vertical only — the -2px to the left dated from when the row had no
+   horizontal padding, and once the card got its padding back it pushed the triangle out over the
+   edge of the fill. */
+.openide-chat-native .openide-chat-notice-row > .codicon,
 .openide-chat-notice-row > .codicon {
+	/* The one coloured pixel of the row. */
+	color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #d7ba7d));
 	width: 18px;
 	height: 18px;
-	margin: -1px 0 0 -2px;
+	margin-top: 1px;
 	flex: 0 0 18px;
 	display: inline-flex;
 	align-items: center;
@@ -46,12 +62,16 @@
 	gap: 2px;
 }
 
+/* Sentence case, not the shouty tracked-out caps: what is left of the title is information
+   ("Turno incompleto"), not a severity label the icon already carries. */
 .openide-chat-notice-title {
 	font-weight: 600;
-	font-size: 10.5px;
-	letter-spacing: 0.6px;
-	text-transform: uppercase;
-	opacity: 0.9;
+	font-size: 12px;
+	color: var(--vscode-foreground);
+}
+
+.openide-chat-notice-title.hidden {
+	display: none;
 }
 
 .openide-chat-notice-msg {
@@ -60,7 +80,20 @@
 	font-size: 12.5px;
 	line-height: 1.5;
 	overflow-wrap: anywhere;
-	white-space: pre-wrap;
+}
+
+/* Rendered markdown inside the card: paragraphs carry the line structure, so they need spacing
+   between them and none around the block (upstream does the same with `.rendered-markdown p`). */
+.openide-chat-notice-msg p {
+	margin: 0;
+}
+
+.openide-chat-notice-msg p + p {
+	margin-top: 6px;
+}
+
+.openide-chat-notice-msg a {
+	color: var(--vscode-textLink-foreground);
 }
 
 .openide-chat-notice-count {
@@ -95,7 +128,7 @@
 	opacity: 0.85;
 }
 
-/* The one-click fix under the message: the webview's `.err-connect` (openideChatHtml.ts:575). */
+/* The one-click fix under the message: the webview's `.err-connect`. */
 .openide-chat-notice-action {
 	display: inline-flex;
 	align-items: center;
@@ -103,7 +136,7 @@
 	margin-top: 6px;
 	padding: 3px 10px;
 	border: 1px solid var(--vscode-button-border, transparent);
-	border-radius: 4px;
+	border-radius: var(--oi-radius-sm);
 	background: var(--vscode-button-secondaryBackground);
 	color: var(--vscode-button-secondaryForeground);
 	font-size: 12px;
@@ -112,3 +145,45 @@
 .openide-chat-notice-action:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .openide-chat-notice-action .codicon { font-size: 13px; }
 .openide-chat-notice-action.hidden { display: none; }
+
+/* The widget's own notice, over the transcript under the pinned message: the transcript's
+   notice card (same paddings, glyph and hairline), plus a close button. An overlay above the
+   pinned band's fade, so the fade never runs over it. Hidden when there is nothing to say. */
+.openide-chat-notice {
+	position: absolute;
+	left: 10px;
+	right: 18px;
+	z-index: 6;
+	display: flex;
+	align-items: flex-start;
+	gap: 9px;
+	padding: 9px 11px;
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
+	border-radius: var(--oi-chat-card-radius);
+	background: var(--oi-surface);
+	color: var(--vscode-foreground);
+	font-size: var(--openide-chat-font-size, 13px);
+	line-height: 1.45;
+	box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+}
+.openide-chat-notice.hidden { display: none; }
+.openide-chat-native .openide-chat-notice > .codicon { flex: 0 0 auto; margin-top: 2px; color: var(--vscode-notificationsInfoIcon-foreground, var(--vscode-charts-blue)); }
+.openide-chat-native .openide-chat-notice.openide-chat-notice-warning > .codicon { color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow)); }
+.openide-chat-native .openide-chat-notice.openide-chat-notice-error > .codicon { color: var(--vscode-errorForeground); }
+.openide-chat-notice-text { flex: 1 1 auto; min-width: 0; }
+.openide-chat-notice-close {
+	flex: 0 0 auto;
+	width: 20px;
+	height: 20px;
+	margin: -2px -4px 0 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: none;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	padding: 0;
+}
+.openide-chat-notice-close:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }

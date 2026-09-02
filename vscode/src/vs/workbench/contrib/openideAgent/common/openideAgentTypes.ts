@@ -7,6 +7,7 @@
  *  OpenIDE — base types for the agentic chat engine.
  *--------------------------------------------------------------------------------------------*/
 
+import type { IComposerSnippet } from './chat/openideChatSnippet.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { URI } from '../../../../base/common/uri.js';
 
@@ -45,6 +46,23 @@ export interface IChatCapabilityMention {
 /** The slash menu is an explicit user surface: skills/context and commands only, never operational tools. */
 export function isSlashVisibleCapability(kind: IChatCapabilityMention['kind']): boolean { return kind === 'skill' || kind === 'command'; }
 
+/** What the user sends back from an `ask_user` card: the answer, plus any pictures with it. */
+export interface IOpenideAskAnswer {
+	readonly text: string;
+	readonly images?: readonly IChatImage[];
+}
+
+/**
+ * `image-1`, `image-2`, … — the names the answer text uses to refer to the pictures.
+ *
+ * One numbering per turn and not per question, so the model reading "image-2" in the second answer
+ * finds the second picture of the batch and not the second of that answer. The UI renders the very
+ * same names on its chips, which is why this lives beside the types instead of in either surface.
+ */
+export function openideAskImageNames(count: number, alreadyAttached: number): string[] {
+	return Array.from({ length: count }, (_, index) => `image-${alreadyAttached + index + 1}`);
+}
+
 export interface IChatMessage {
 	role: ChatRole;
 	content: string;
@@ -72,6 +90,8 @@ export interface IChatMessage {
 	/** Only on 'user' messages born from a /command: what was TYPED ("/slug args"). The UI,
 	 *  titles and memory show this; the model sees the content (the expanded body). */
 	displayText?: string;
+	/** Editor selections attached to the turn, for the bubble; their text travels in `context`. */
+	snippets?: IComposerSnippet[];
 	/** Only on 'user' messages: `/` chips explicitly selected in the composer. */
 	capabilities?: IChatCapabilityMention[];
 	/** Only on 'tool' messages from write_file/edit_file: the persisted diff of that edit, used to
@@ -250,6 +270,13 @@ export type AgentMode = 'agent' | 'plan' | 'ask' | 'debug';
 /** Options for an agent run. */
 export interface IAgentRunOptions {
 	readonly mode?: AgentMode;
+	/**
+	 * The conversation this run belongs to. It is what lets two conversations work at the same
+	 * time: the runs are serialized per conversation instead of globally, and every tool call
+	 * carries it so the agent terminal, the interactive prompt and the output streaming into the
+	 * chat card belong to one conversation each.
+	 */
+	readonly conversationId?: string;
 	/** Ephemeral interpretation used to resume the same turn when a suggested mode is accepted. Never persisted nor rendered as a message. */
 	readonly modeInstruction?: string;
 	/** Stable id of the user message that owns every structured edit in this run. */
@@ -264,8 +291,27 @@ export interface IAgentRunOptions {
 	readonly triedProviders?: readonly string[];
 	/** provider/model steps already tried; allows several models of the same provider without loops. */
 	readonly triedFallbackSteps?: readonly string[];
+	/**
+	 * The target the user actually chose, carried through every reroute.
+	 *
+	 * It is what makes the chip honest: `providerOverride`/`modelOverride` say where this attempt
+	 * runs, and this says where it was MEANT to run, so the composer can show one arriving at the
+	 * other instead of quietly claiming the reroute was the choice. Upstream keeps the same
+	 * distinction in `IIntendedModelSelection` (`chat/common/modelSelection.ts`): the model a
+	 * conversation is meant to run on is owned separately from what the catalog can serve now.
+	 */
+	readonly intendedTarget?: { readonly providerId: string; readonly model: string };
+	/** Why this attempt is not on `intendedTarget`: it was cooling down, or the previous hop failed. */
+	readonly rerouteReason?: 'cooldown' | 'failover';
+	/** For a cooldown reroute, when the intended target is expected back. */
+	readonly rerouteUntil?: number;
 	/** OAuth providers that already got a forced refresh during this run. */
 	readonly refreshedOAuthProviders?: readonly string[];
+	/**
+	 * This run already moved to another account of the provider. One retry, never a walk down the
+	 * whole account list: the second failure means the quota is not what is wrong.
+	 */
+	readonly accountSwitched?: boolean;
 	/** Internal execution of the /compact command: prepares the runtime and compacts, without asking for a response. */
 	readonly compactOnly?: boolean;
 }
@@ -274,6 +320,8 @@ export interface IAgentRunOptions {
 export interface IAskQuestion {
 	readonly question: string;
 	readonly options?: string[];
+	/** Several options may apply at once: the UI lets the user toggle many and joins the labels. */
+	readonly allowMultiple?: boolean;
 }
 
 /** Estimated breakdown of the context in use, for the UI context panel (integrated:
@@ -330,6 +378,11 @@ export type AgentLoopEvent =
 	| { type: 'reasoning'; delta: string }
 	| { type: 'agentLocation'; location: IAgentLocation }
 	| { type: 'toolStart'; id: string; name: string; argumentsJson: string }
+	/**
+	 * The call is queued behind another conversation holding the file. `holder` is that
+	 * conversation's title while it waits, and absent once the file is finally its own.
+	 */
+	| { type: 'toolWaiting'; id: string; holder?: string }
 	| { type: 'toolResult'; id: string; name: string; result: string; isError: boolean }
 	// Incremental output of the in-flight run_command (plain text, no ANSI): feeds the
 	// chat's embedded terminal. id = id of the tool call it belongs to.
@@ -348,6 +401,9 @@ export type AgentLoopEvent =
 	// INLINE approval request: the UI shows a card in the chat box with the options
 	// (allow/session/always/reject) and answers with resolveApproval(id, decision).
 	| { type: 'approvalRequest'; id: string; tool: string; title: string; detail?: string; command?: string; risk: ToolRisk; sensitive?: boolean }
+	// The active account is spent and several could take over: the UI shows the choice and answers
+	// with resolveAccountChoice(id, accountId | 'stop').
+	| { type: 'accountChoiceRequest'; id: string; spentLabel: string; candidates: readonly { accountId: string; label: string; paid?: boolean }[] }
 	| { type: 'info'; message: string }
 	| {
 		type: 'compaction';
@@ -383,8 +439,29 @@ export type AgentLoopEvent =
 	// 'fork' is NOT an AgentMode → the literal goes inline here.
 	| { type: 'suggestMode'; id: string; mode: AgentMode | 'fork'; reason: string; prompt?: string; autoAcceptSeconds?: number }
 	| { type: 'done'; reason?: string }
+	| {
+		/**
+		 * This turn is running somewhere other than the model the user picked, and why. Host-only:
+		 * it is not transcript content — the transcript already carries the `info` line — it is what
+		 * the composer needs in order to stop displaying a model that is not the one answering.
+		 */
+		type: 'modelRoute';
+		providerId: string; model: string;
+		intendedProviderId: string; intendedModel: string;
+		reason: 'cooldown' | 'failover';
+		/** When the intended target is expected back, for a cooldown. */
+		until?: number;
+	}
 	// action 'connect' → the UI offers the "Connect provider…" button (credential error).
-	| { type: 'error'; message: string; action?: 'connect' | 'continue' };
+	| {
+		type: 'error'; message: string; action?: 'connect' | 'continue' | 'account-back';
+		/**
+		 * How loud the card should be. A rate limit is a failed turn but NOT a broken IDE: upstream
+		 * reports it as `ChatErrorLevel.Info` for the same reason (`chat/common/chatErrorMessages.ts`),
+		 * and painting the provider's busy signal in red teaches users to distrust the red.
+		 */
+		severity?: 'warning' | 'error';
+	};
 
 /** Event from a background terminal (run_command background). Emitted outside the run loop. */
 export interface IBackgroundTerminalEvent {

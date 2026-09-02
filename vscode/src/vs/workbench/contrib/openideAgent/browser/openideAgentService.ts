@@ -17,11 +17,13 @@ import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, IDisposable } from '../../../../base/common/lifecycle.js';
 import { isLinux, isMacintosh, isWindows, language } from '../../../../base/common/platform.js';
 import { formatContextTokens, formatCostPerMillion, humanizeModelId } from '../common/openideModelDisplay.js';
+import { repairOpenideChatToolPairs } from '../common/openideChatHistoryRepair.js';
 import { mergeVisibleOrder, moveBeside, toggleMembership } from '../common/openidePickerOrder.js';
 import { basename, joinPath, relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { linesDiffComputers } from '../../../../editor/common/diff/linesDiffComputers.js';
+import { buildDiffPreview, countDiff, textLines } from '../common/openideDiffPreview.js';
 import { ITextModelService } from '../../../../editor/common/services/resolverService.js';
 import { DEFAULT_EDITOR_ASSOCIATION } from '../../../common/editor.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
@@ -55,7 +57,31 @@ import { OpenideApprovalManager } from './openideApproval.js';
 import { IOAuthInteraction, OpenideOAuthManager, SECRET_OAUTH_PREFIX } from './openideOAuth.js';
 import { IProviderAccountMeta, isPlaceholderAccountLabel, OpenideProviderAccountsService } from './openideProviderAccounts.js';
 import { DiagramResult, parseDiagramSource } from '../common/diagrams/openideDiagramEngine.js';
-import { AgentLoopEvent, AgentMode, AgentStreamEvent, IAgentLocation, IAgentRunOptions, IAskQuestion, IBackgroundTerminalEvent, IChatMessage, ICredential, IFileRollbackCheckpoint, ILLMProvider, IMessageChangeSet, IMessageRollbackResult, IPersistedFileDiff, IProviderRequest, IProviderResult, IToolApprovalRequest, IToolDefinition, ITodoItem, ToolApprovalDecision } from '../common/openideAgentTypes.js';
+import {
+	AgentLoopEvent,
+	AgentMode,
+	AgentStreamEvent,
+	IAgentLocation,
+	IAgentRunOptions,
+	IAskQuestion,
+	IBackgroundTerminalEvent,
+	IChatImage,
+	IChatMessage,
+	ICredential,
+	IFileRollbackCheckpoint,
+	ILLMProvider,
+	IMessageChangeSet,
+	IMessageRollbackResult,
+	IOpenideAskAnswer,
+	IPersistedFileDiff,
+	IProviderRequest,
+	IProviderResult,
+	ITodoItem,
+	IToolApprovalRequest,
+	IToolDefinition,
+	openideAskImageNames,
+	ToolApprovalDecision,
+} from '../common/openideAgentTypes.js';
 import { findProvider, IProviderEntry, resolveProviders } from '../common/openideProviderCatalog.js';
 import { sealOrphanToolCalls } from '../common/openideToolPairing.js';
 import { IPlanTarget, resolvePlanTarget } from '../common/openidePlanTarget.js';
@@ -63,11 +89,13 @@ import { planSlug, readPlanDraft } from '../common/openidePlanDraft.js';
 import { breakdownTotal, computeContextBreakdown, estimateConversationTokens, estimateTextTokens, estimateToolsTokens } from '../common/openideTokens.js';
 import { compactAgentToolResult, resolveRetrievedContextBudget, shouldCompressMcpTools } from '../common/openideAgentEfficiency.js';
 import { modelIdsFromProviderResponse } from '../common/openideProviderCapabilities.js';
-import { classifyProviderError } from '../common/openideErrorClassifier.js';
+import { classifyProviderError, humanizeProviderError, IClassifiedProviderError } from '../common/openideErrorClassifier.js';
 import { buildCompactionTranscript, buildDeterministicFallbackSummary, buildStructuredSummaryMessage, compactionSavingsRatio, normalizeCompactionOptions, planContextCompaction, shouldCompactContext } from '../common/openideContextCompaction.js';
 import { OpenideToolCallGuard, repairToolArgumentsJson, validateToolArguments } from '../common/openideToolGuardrails.js';
 import { resolveStreamStaleTimeoutSeconds } from '../common/openideReasoningTimeouts.js';
 import { fallbackStepKey, parseFallbackChain, parseProviderModelTarget } from '../common/openideFallback.js';
+import { describeCooldown, IModelTarget, isModelCoolingDown, isModelHealthSignal, planModelRun } from '../common/openideModelHealth.js';
+import { t } from '../common/openideStrings.js';
 import { normalizeModelForProvider } from '../common/openideModelNormalize.js';
 import { OpenideRunSequencer } from '../common/openideRunSequencer.js';
 import { isOutputLimitStopReason, MAX_OUTPUT_CONTINUATIONS, resolveAgentIterationLimit } from '../common/openideRunLimits.js';
@@ -83,6 +111,7 @@ import { ISkillInfo, OpenideAgentSkills } from './openideAgentSkills.js';
 import { OpenideAgentRules, RuleScope } from './openideAgentRules.js';
 import { IOpenideCanvasService } from './openideCanvasService.js';
 import { IOpenideUsageService } from './openideUsageService.js';
+import { decideOpenideAccountFailover, OpenideAccountFailoverMode } from '../common/openideAccountFailover.js';
 import { IProviderRateLimits, providerSupportsUsage, usageUnavailableReason } from '../common/openideUsage.js';
 import { OpenideAuthManager, SECRET_APIKEY_PREFIX } from './openideAuth.js';
 import { IGitProposal, OpenideGitFlow, shq } from './openideGitFlow.js';
@@ -98,6 +127,10 @@ import { ICodebaseMemoryService } from './openideCodebaseMemoryService.js';
 import { IOpenideCodebasePriorities } from './openideCodebasePriorities.js';
 import { buildExecutableProbe, parseExecutableProbe } from '../common/openideAgentCliCatalog.js';
 import { IAgentTool, IAgentToolContext, OpenideToolRegistry } from './openideTools.js';
+import {
+	IConversationMessage, OpenideConversationFileClaims, OpenideConversationMailbox,
+	renderFileClaimTimeout, renderFileClaimWaited,
+} from '../common/openideConversationCoordination.js';
 import { constrainExternalToolArgs, externalToolDescription, externalToolName, internalToolName, isExposedToExternalAgents } from '../common/openideIdeExposure.js';
 import { OpenideMessageChangeSetService } from './openideMessageChangeSetService.js';
 import { ISubagentExecutionService, ISubagentExecutionRequest } from './openideSubagentExecutionService.js';
@@ -157,6 +190,43 @@ export interface IComposerCapability {
 }
 
 /** Plan the model is drafting, as seen from outside while it arrives. */
+/** A conversation open in the dock, as the model sees it through `list_conversations`. */
+export interface IOpenideConversationPeer {
+	readonly id: string;
+	readonly title: string;
+	/** It has a turn in flight right now. */
+	readonly busy: boolean;
+}
+
+/**
+ * The dock, seen from the engine: who else is open, and how to hand a message to one of them.
+ *
+ * The service owns the mailbox and the guards; it does not own the conversations — the chat does.
+ * Whoever mounts the chat registers this (`setConversationHost`), and a window with no chat mounted
+ * simply has no peers, which is the honest answer.
+ */
+export interface IOpenideConversationHost {
+	peers(): readonly IOpenideConversationPeer[];
+	/** Delivers a message into its conversation. False when it could not be handed over. */
+	deliver(message: IConversationMessage, fromTitle: string): boolean;
+}
+
+/**
+ * How long a write waits for the conversation holding the file. Long enough for an ordinary turn to
+ * finish, short enough that the model is not stuck behind a run that went on for minutes.
+ */
+const FILE_CLAIM_WAIT_MS = 120_000;
+
+/** Why a message did not leave, told to the model that tried to send it. */
+const MESSAGE_REFUSALS: Record<string, string> = {
+	self: 'Error: esa es esta misma conversación.',
+	empty: 'Error: el mensaje está vacío.',
+	'too-large': 'Error: el mensaje es demasiado largo. Resumilo: la otra conversación no necesita el detalle, necesita la conclusión.',
+	duplicate: 'Error: ya le mandaste ese mismo mensaje hace un momento. No lo repitas; si no contestó, seguí con tu trabajo.',
+	'rate-limited': 'Error: le mandaste demasiados mensajes seguidos a esa conversación. Juntá lo que falta en uno solo más adelante.',
+	'queue-full': 'Error: esa conversación tiene demasiados mensajes sin leer. Esperá a que los procese.',
+};
+
 export interface IPlanDraftState {
 	/** FINAL uri of the .md — the same one savePlan will write, so the editor does not move. */
 	readonly resource: URI;
@@ -167,6 +237,11 @@ export interface IPlanDraftState {
 	readonly markdown: string;
 	/** true once the model finished writing it (or the run was cut): no more waiting needed. */
 	readonly done: boolean;
+	/**
+	 * The conversation drafting it. With two conversations running at once, "the one that emitted
+	 * last" is not good enough to decide whose transcript the card belongs to.
+	 */
+	readonly conversationId?: string;
 }
 
 export interface IOpenideAgentService {
@@ -184,6 +259,14 @@ export interface IOpenideAgentService {
 	/** Reasoning levels the given model publishes, so a picker offers only what it accepts.
 	 *  `undefined` = unknown (the registry is cold or silent) — offer the full list. */
 	getModelReasoning(providerId?: string, model?: string): IModelReasoning | undefined;
+	/**
+	 * Loads the model registry if it is not loaded yet. Every SYNCHRONOUS reader of registry facts
+	 * (`getModelReasoning`, `describeModel`) answers "unknown" while it is cold, and a surface that
+	 * only ever paints once — the composer's control row — then keeps that first, uninformed answer
+	 * for the rest of the session. Awaiting this before reading is what makes those answers mean
+	 * what they say. Cheap and idempotent once warm.
+	 */
+	ensureModelCatalog(): Promise<void>;
 	getPermissionMode(): string;
 	/**
 	 * The tools OpenIDE offers to an EXTERNAL agent (the CLIs in the dock), and a way to run one.
@@ -218,6 +301,8 @@ export interface IOpenideAgentService {
 	getActiveAccountId(providerId: string): Promise<string | undefined>;
 	ensureAccountTracked(providerId: string): Promise<void>;
 	snapshotAccount(providerId: string, opts: { id?: string; label?: string }): Promise<void>;
+	/** Undoes the last automatic account switch, for the button the failover notice shows. */
+	undoAccountFailover(): Promise<boolean>;
 	switchAccount(providerId: string, accountId: string): Promise<boolean>;
 	removeAccount(providerId: string, accountId: string): Promise<void>;
 	/**
@@ -263,11 +348,26 @@ export interface IOpenideAgentService {
 	getVoiceCapability(): Promise<IVoiceCapability>;
 	/** Voice dictation: transcribes a WAV with the target pinned when recording started. */
 	transcribeAudio(wavBase64: string, providerId?: string, model?: string): Promise<string>;
+	/**
+	 * ONE short call to a model, no tools, no session, no transcript: the primitive behind the
+	 * autocomplete and the quick edit. Same engine the agent runs on (`streamWithRetry`: stale
+	 * timeout, transient retries, credential resolution), pointed at the active provider and
+	 * model unless `target` names another as `provider/model`. Resolves to the full text; the
+	 * deltas stream through `onDelta` for a caller that wants to show them as they land.
+	 */
+	completeText(request: IOpenideTextCompletionRequest, token: CancellationToken): Promise<string>;
 	runAgent(prompt: string, onEvent: (e: AgentLoopEvent) => void, token?: CancellationToken): Promise<void>;
 	/** Like runAgent but with full history (multi-turn): the loop appends to the same array. */
 	runMessages(messages: IChatMessage[], onEvent: (e: AgentLoopEvent) => void, token?: CancellationToken, options?: IAgentRunOptions): Promise<void>;
-	/** Manual history compaction (/compact), serialized with the normal runs. */
-	compactConversation(messages: IChatMessage[], onEvent: (e: AgentLoopEvent) => void, token?: CancellationToken): Promise<void>;
+	/**
+	 * Registers the dock as the source of "which conversations are open" and the delivery point for
+	 * messages between them. Called by whoever mounts the chat.
+	 */
+	setConversationHost(host: IOpenideConversationHost | undefined): void;
+	/** Frees the files a conversation's run had claimed, and forgets its inbox. */
+	releaseConversationResources(conversationId: string): void;
+	/** Manual history compaction (/compact), serialized with the conversation's own runs. */
+	compactConversation(messages: IChatMessage[], onEvent: (e: AgentLoopEvent) => void, token?: CancellationToken, conversationId?: string): Promise<void>;
 	cancelSubagent(id: string): void;
 	/** Context limit (tokens) of the active model — config override or per-model catalog. */
 	getContextLimit(): number;
@@ -288,6 +388,13 @@ export interface IOpenideAgentService {
 	/** Opens the inline (integrated) REVIEW of a file edited by the agent: the file in the normal
 	 *  editor with the blocks painted + Undo/Keep per block and per file. */
 	openDiff(path: string): Promise<void>;
+	/**
+	 * The same inline review, for a change the agent did NOT make through its own tools — a
+	 * hosted CLI's write, whose "before" the Agent Changes view captured. The baseline is seeded
+	 * into the review's snapshot (first writer wins: a file the local agent is also editing keeps
+	 * its own) and the file opens with the blocks painted and Undo/Keep, exactly like a card's.
+	 */
+	reviewExternalChange(path: string, baseline?: { readonly content: string; readonly existed: boolean }): Promise<void>;
 	/** Discards the agent's edits to a file: restores the snapshot (or deletes the created file). */
 	revertEdit(path: string): Promise<void>;
 	/** Legacy: restores full snapshots; not used for per-message rollback. */
@@ -307,7 +414,7 @@ export interface IOpenideAgentService {
 	reviewAction(action: ReviewAction): void;
 	/** PLAN MODE: the plan_save tool stored a plan in .openide/plans — the chat shows the
 	 *  review/approval card. path is RELATIVE to the workspace (e.g. '.openide/plans/x.md'). */
-	readonly onDidCreatePlan: Event<{ path: string; title: string; markdown: string; external?: boolean }>;
+	readonly onDidCreatePlan: Event<{ path: string; title: string; markdown: string; external?: boolean; conversationId?: string }>;
 	/** PLAN MODE, while the model is STILL writing: the plan arrives as tool-call deltas, so the
 	 *  editor can open with a skeleton and fill in live instead of waiting minutes. */
 	readonly onDidChangePlanDraft: Event<IPlanDraftState>;
@@ -338,9 +445,11 @@ export interface IOpenideAgentService {
 	setPlanExecutionModel(resource: URI, model: string, providerId?: string): Promise<void>;
 	updatePlanTasks(resource: URI, tasks: readonly { text?: unknown; done?: unknown }[]): Promise<void>;
 	/** Resolves a pending agent question (ask_user) with the user's answer. */
-	resolveAsk(id: string, answer: string): void;
+	resolveAsk(id: string, answer: string, images?: readonly IChatImage[]): void;
 	resolveModeSuggestion(id: string, accepted: boolean): void;
 	resolveApproval(id: string, decision: string): void;
+	/** Answer to the account-choice card: an account id, or `stop`. */
+	resolveAccountChoice(id: string, decision: string): void;
 	/** Diagram engine (single backend): parses a mermaid source into a spec (+layout for graphs).
 	 *  The chat ALWAYS calls it (the webview only renders); extension chats use it over MCP. */
 	parseDiagram(source: string): DiagramResult | undefined;
@@ -409,38 +518,34 @@ function normalizeAskQuestions(a: any): IAskQuestion[] {
 			if (typeof q === 'string' && q) {
 				out.push({ question: q });
 			} else if (q && typeof q.question === 'string' && q.question) {
-				out.push({ question: q.question, options: Array.isArray(q.options) ? q.options.map((o: any) => String(o?.label ?? o)) : undefined });
+				out.push({
+					question: q.question,
+					options: Array.isArray(q.options) ? q.options.map((o: any) => String(o?.label ?? o)) : undefined,
+					allowMultiple: q.allow_multiple === true || q.allowMultiple === true || undefined,
+				});
 			}
 		}
 	}
 	if (!out.length && typeof a?.question === 'string' && a.question) {
-		out.push({ question: a.question, options: Array.isArray(a.options) ? a.options.map(String) : undefined });
+		out.push({
+			question: a.question,
+			options: Array.isArray(a.options) ? a.options.map(String) : undefined,
+			allowMultiple: a.allow_multiple === true || undefined,
+		});
 	}
 	return out;
-}
-
-/** Counts added/removed lines between two texts (same computation as VS Code chat-editing). */
-function countDiff(oldStr: string, newStr: string): { added: number; removed: number } {
-	const result = linesDiffComputers.getDefault().computeDiff(
-		oldStr.split(/\r\n|\r|\n/),
-		newStr.split(/\r\n|\r|\n/),
-		{ ignoreTrimWhitespace: false, maxComputationTimeMs: 3000, computeMoves: false },
-	);
-	let added = 0;
-	let removed = 0;
-	for (const change of result.changes) {
-		added += change.modified.length;
-		removed += change.original.length;
-	}
-	return { added, removed };
 }
 
 /** Envelope of changed lines on the NEW side. The review uses it to follow only the write just
  *  applied (a pure deletion anchors on the preceding line). */
 function changedLineRange(oldStr: string, newStr: string): { startLine: number; endLine: number } {
+	if (!oldStr) {
+		// A creation changed the whole file; anchoring on line 1 is what the review follows.
+		return { startLine: 1, endLine: Math.max(1, textLines(newStr).length) };
+	}
 	const changes = linesDiffComputers.getDefault().computeDiff(
-		oldStr.split(/\r\n|\r|\n/),
-		newStr.split(/\r\n|\r|\n/),
+		textLines(oldStr),
+		textLines(newStr),
 		{ ignoreTrimWhitespace: false, maxComputationTimeMs: 3000, computeMoves: false },
 	).changes;
 	if (!changes.length) {
@@ -455,38 +560,6 @@ function changedLineRange(oldStr: string, newStr: string): { startLine: number; 
 		endLine = Math.max(endLine, end);
 	}
 	return { startLine, endLine };
-}
-
-/** COMPACT unified diff of ONE edit for the chat card:
- *  hunks with 2 context lines, gaps between hunks, and caps on lines and width. */
-function buildDiffPreview(oldStr: string, newStr: string, maxLines = 120): { t: 'add' | 'del' | 'ctx' | 'gap'; x: string }[] {
-	const o = oldStr.split(/\r\n|\r|\n/);
-	const n = newStr.split(/\r\n|\r|\n/);
-	const changes = linesDiffComputers.getDefault().computeDiff(o, n, { ignoreTrimWhitespace: false, maxComputationTimeMs: 3000, computeMoves: false }).changes;
-	const out: { t: 'add' | 'del' | 'ctx' | 'gap'; x: string }[] = [];
-	const cap = (s: string) => s.length > 240 ? s.slice(0, 240) + '…' : s;
-	let lastShown = 0; // última línea (lado nuevo) ya emitida
-	for (const c of changes) {
-		if (out.length >= maxLines) {
-			out.push({ t: 'gap', x: '⋯' });
-			break;
-		}
-		const ctxFrom = Math.max(Math.max(1, c.modified.startLineNumber - 2), lastShown + 1);
-		if (lastShown && ctxFrom > lastShown + 1) {
-			out.push({ t: 'gap', x: '⋯' });
-		}
-		for (let l = ctxFrom; l < c.modified.startLineNumber; l++) {
-			out.push({ t: 'ctx', x: cap(n[l - 1] ?? '') });
-		}
-		for (let l = c.original.startLineNumber; l < c.original.endLineNumberExclusive; l++) {
-			out.push({ t: 'del', x: cap(o[l - 1] ?? '') });
-		}
-		for (let l = c.modified.startLineNumber; l < c.modified.endLineNumberExclusive; l++) {
-			out.push({ t: 'add', x: cap(n[l - 1] ?? '') });
-		}
-		lastShown = Math.max(lastShown, c.modified.endLineNumberExclusive - 1, c.modified.startLineNumber - 1);
-	}
-	return out.slice(0, maxLines);
 }
 
 /** Rewrites (or adds) a key in a plan's YAML frontmatter (.openide/plans/*.md).
@@ -533,7 +606,13 @@ Tenés herramientas para trabajar sobre el workspace real (usalas en vez de inve
 
 write_file, edit_file y run_command piden aprobación al usuario antes de ejecutarse; si el usuario rechaza, recibís un resultado de error y debés adaptarte (no reintentar lo mismo). Antes de editar un archivo, leelo. Respondé en el idioma del usuario.
 
-Cuando ayude a explicar una arquitectura o un flujo, podés incluir un diagrama con un fence \`\`\`mermaid usando flowchart/graph (TD o LR); el chat lo renderiza.`;
+DIAGRAMAS — cuando un dibujo explica mejor que la prosa, elegí el tipo por lo que se cuenta e incluilo con su fence; el chat renderiza los cuatro con la misma piel de grafo de nodos (layout automático y determinista, no hay posiciones que autorear):
+- Componentes, servicios, límites e infraestructura → \`\`\`archmap: {"type":"archmap","title"?,"nodes":[{"id","label","kind":"frontend|backend|database|cloud|security|messagebus|external","sublabel"?,"group"?,"emphasis"?}],"edges":[{"from","to","label"?,"dashed"?}]}. Flujo izquierda→derecha, límites por group, color por kind, anillo en los emphasis.
+- Procesos, pipelines, decisiones, CI/CD → \`\`\`flowmap: la MISMA forma, con "kind":"start|step|decision|tool|end|failure" y group como carril.
+- Estados, reintentos, ciclos de vida → \`\`\`lifemap: la MISMA forma, con "kind":"initial|active|waiting|terminal|failure"; los ciclos (reintentos) están permitidos.
+- Llamadas API, traces, request/response en el tiempo → \`\`\`seqmap: {"type":"seqmap","title"?,"actors":[{"id","label","kind" como archmap,"sublabel"?}],"steps":[{"from","to","label","reply"?,"dashed"?}]}. El orden de steps ES el tiempo; label del paso obligatorio; "reply" marca la respuesta (punteada).
+Mantenelos enfocados: ≤ 12 nodos primarios, un camino principal claro, ids estables y labels cortos (el detalle va en sublabel); un JSON inválido se muestra como código, no como diagrama. \`\`\`mermaid (flowchart/sequenceDiagram/stateDiagram) sigue soportado. Para explicar la arquitectura de ESTE proyecto, consultá primero project_map_query y dibujá el archmap con los módulos reales que devuelve.
+La arquitectura de ESTE proyecto no se dibuja a mano: la genera la IDE desde su índice (comando «Arquitectura del proyecto»), así que si te la piden, mandalos ahí en vez de inventar un archmap que va a quedar viejo.`;
 
 /** System prompt suffix per mode (plan/ask are read-only). */
 const MODE_PROMPTS: Record<AgentMode, string> = {
@@ -556,6 +635,15 @@ const REVIEW_CHANGES_TOOL_DEF: IToolDefinition = {
 		required: ['files'],
 	},
 };
+
+export interface IOpenideTextCompletionRequest {
+	readonly system?: string;
+	readonly prompt: string;
+	readonly maxTokens?: number;
+	/** `provider/model`, as the compaction and fallback settings spell it. Empty ⇒ active. */
+	readonly target?: string;
+	readonly onDelta?: (delta: string) => void;
+}
 
 interface ISubAgentContext {
 	readonly adapter: ILLMProvider;
@@ -624,13 +712,51 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	private readonly diffSnapshot: OpenideDiffSnapshotProvider;
 	private readonly catalog: OpenideModelCatalog;
 	/** Preguntas (ask_user) en vuelo, esperando respuesta del usuario. */
-	private readonly _pendingAsks = new Map<string, DeferredPromise<string>>();
+	private readonly _pendingAsks = new Map<string, DeferredPromise<IOpenideAskAnswer>>();
 	private readonly _pendingModeSuggestions = new Map<string, DeferredPromise<boolean>>();
 	private readonly _pendingApprovals = new Map<string, DeferredPromise<ToolApprovalDecision>>();
+	/** Account-choice cards waiting for an answer, keyed the same way approvals are. */
+	private readonly _pendingAccountChoices = new Map<string, DeferredPromise<string>>();
 	private readonly subagentRuns = new Map<string, CancellationTokenSource>();
+	/**
+	 * Turns in flight per provider.
+	 *
+	 * Activating an account rewrites the provider's active credential in secret storage, and the run
+	 * that is streaming resolved its credential ONCE, at the top of the turn. Switching under it does
+	 * not corrupt that run — it keeps the token it captured — but it does silently keep burning the
+	 * account we just declared spent, and the next turn of that conversation would land somewhere its
+	 * user never chose. The counter is what lets the failover say "not now" instead.
+	 */
+	private readonly runsInFlightByProvider = new Map<string, number>();
 	private readonly compactionState = new WeakMap<IChatMessage[], { failures: number; lowSavings: number; cooldownUntil: number }>();
-	/** Serializes the runs that share the service's tools, terminal and interaction maps. */
-	private readonly runSequencer = new OpenideRunSequencer();
+	/**
+	 * ONE SEQUENCER PER CONVERSATION. It used to be a single global one, which is what made two
+	 * conversations take turns instead of working at the same time: everything it was guarding —
+	 * the agent terminal, the interactive session, the output that streams into the chat card — is
+	 * keyed by conversation now (`IAgentToolContext.conversationId`), so the only thing left to
+	 * serialize is a conversation against ITSELF (a second turn admitted while the first is still
+	 * running).
+	 *
+	 * What is still shared across conversations is the file system, and that is serialized where it
+	 * belongs: `writeSequencer` around the tools that mutate files.
+	 */
+	private readonly runSequencers = new Map<string, OpenideRunSequencer>();
+	/**
+	 * Every file mutation, from whichever conversation, in one queue. Two runs editing the SAME file
+	 * at the same time is the one way parallel conversations can corrupt something: the change sets
+	 * (`messageChanges`) and the review baselines (`diffSnapshot`) are keyed by path and are written
+	 * around the edit itself, so an interleaving there leaves a baseline describing another run's
+	 * content. Writes are short, so a single queue costs nothing and removes the window.
+	 */
+	private readonly writeSequencer = new OpenideRunSequencer();
+	/**
+	 * Who owns which file while several conversations work at once, and the mailboxes they use to
+	 * talk to each other. Both are pure (`common/openideConversationCoordination.ts`); what lives
+	 * here is the wiring: claiming on a write, releasing when the run ends, and the two tools.
+	 */
+	private readonly fileClaims = new OpenideConversationFileClaims();
+	private readonly conversationMailbox = new OpenideConversationMailbox();
+	private conversationHost: IOpenideConversationHost | undefined;
 
 	private readonly _onDidChange = this._register(new Emitter<void>());
 	readonly onDidChange: Event<void> = this._onDidChange.event;
@@ -644,11 +770,17 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 
 	// PLAN MODE: plan_save wrote the document (the chat's review card) / the user approved it
 	// (the chat launches the execution run).
-	private readonly _onDidCreatePlan = this._register(new Emitter<{ path: string; title: string; markdown: string; external?: boolean }>());
-	readonly onDidCreatePlan: Event<{ path: string; title: string; markdown: string; external?: boolean }> = this._onDidCreatePlan.event;
+	private readonly _onDidCreatePlan = this._register(new Emitter<{ path: string; title: string; markdown: string; external?: boolean; conversationId?: string }>());
+	readonly onDidCreatePlan: Event<{ path: string; title: string; markdown: string; external?: boolean; conversationId?: string }> = this._onDidCreatePlan.event;
 	private readonly _onDidChangePlanDraft = this._register(new Emitter<IPlanDraftState>());
 	readonly onDidChangePlanDraft: Event<IPlanDraftState> = this._onDidChangePlanDraft.event;
-	/** Plan the model is drafting RIGHT NOW (one at a time: plan_save is called once). */
+	/**
+	 * The plan being drafted RIGHT NOW. ONE slot, because `plan_save` is called once per turn — but
+	 * conversations run in parallel now, so two of them drafting at the same moment share it and the
+	 * second draft replaces the first one's live card. The document each one writes is still correct
+	 * (the card carries `conversationId`, and `savePlan` writes the file); only the streaming
+	 * skeleton is single-slot.
+	 */
 	private planDraft: (IPlanDraftState & { callId: string }) | undefined;
 	/** The uri resolves asynchronously (slug collision); meanwhile it need not be resolved again. */
 	private planDraftResolving: string | undefined;
@@ -749,6 +881,8 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		this.tools.registerTool(this.subagentSaveTool());
 		this.tools.registerTool(this.ruleManageTool());
 		this.tools.registerTool(this.planSaveTool());
+		this.tools.registerTool(this.listConversationsTool());
+		this.tools.registerTool(this.messageConversationTool());
 		this.tools.registerTool(this.canvasWriteTool());
 		this.tools.registerTool(this.canvasReadTool());
 		this.tools.registerTool(this.canvasListTool());
@@ -913,6 +1047,10 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		const entry = this.findProvider(providerId);
 		const target = model || this.getModel() || entry?.defaultModel || '';
 		return target ? this.catalog.reasoningFor(target, providerId) : undefined;
+	}
+
+	ensureModelCatalog(): Promise<void> {
+		return this.catalog.ensureFresh();
 	}
 
 	// ---- picker state (favorites, recents, provider order, collapsed sections) ----
@@ -1110,8 +1248,8 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	 *  re-authentication flow. */
 	async ensureAccountTracked(providerId: string): Promise<void> {
 		const baseKey = this.accountBaseKey(providerId);
-		if (baseKey) {
-			await this.accounts.ensureActiveTracked(providerId, baseKey);
+		if (baseKey && await this.accounts.ensureActiveTracked(providerId, baseKey)) {
+			this._onDidChange.fire();
 		}
 	}
 
@@ -1122,7 +1260,9 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		const baseKey = this.accountBaseKey(providerId);
 		if (baseKey) {
 			const label = opts.label || await this.oauth.identity(providerId).catch(() => undefined);
-			await this.accounts.snapshot(providerId, baseKey, { ...opts, label });
+			if (await this.accounts.snapshot(providerId, baseKey, { ...opts, label })) {
+				this._onDidChange.fire();
+			}
 		}
 	}
 
@@ -1149,8 +1289,106 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		await this.accounts.remove(providerId, baseKey, accountId);
 		if (wasActive) {
 			this.resetProviderRuntime(providerId);
-			this._onDidChange.fire();
 		}
+		this._onDidChange.fire();
+	}
+
+	/**
+	 * Continues a spent turn on another account of the same provider, if the user asked for that.
+	 *
+	 * Returns whether it switched. The decision itself is pure and lives in
+	 * `common/openideAccountFailover.ts`; everything here is the part that touches the world.
+	 *
+	 * The usage of a NON-active account is deliberately not fetched: the roster keeps one row per
+	 * provider and reads it with the active credential, so asking about the other account would mean
+	 * loading its token and poisoning that shared cache. They go in as "unknown", which the decision
+	 * already ranks last — a candidate worth trying rather than a promise about its quota.
+	 */
+	private async tryAccountFailover(
+		providerId: string,
+		cls: IClassifiedProviderError,
+		onEvent: (e: AgentLoopEvent) => void,
+		options: IAgentRunOptions | undefined,
+		token: CancellationToken,
+	): Promise<boolean> {
+		// A saturated shared pool is the same for every account, and an expired credential needs a
+		// login, not a different payer. Only a limit that is THIS account's own can be answered here.
+		const exhausted = (cls.kind === 'rate-limit' && !cls.sharedPool) || cls.reason === 'billing';
+		const mode = this.configurationService.getValue<OpenideAccountFailoverMode>('openide.agent.accountFailover');
+		const accounts = await this.listAccounts(providerId).catch(() => []);
+		const decision = decideOpenideAccountFailover({
+			mode: mode === 'auto' || mode === 'ask' ? mode : 'off',
+			exhausted,
+			activeAccountId: await this.getActiveAccountId(providerId).catch(() => undefined),
+			accounts: accounts.map(account => ({ accountId: account.id, label: account.label })),
+			// Itself included: this very turn is one of them, so anything above one is somebody else.
+			providerBusy: (this.runsInFlightByProvider.get(providerId) ?? 0) > 1,
+			alreadySwitched: options?.accountSwitched === true,
+		});
+		if (decision.kind === 'stop') {
+			return false;
+		}
+		const previous = await this.getActiveAccountId(providerId).catch(() => undefined);
+		const spentLabel = accounts.find(account => account.id === previous)?.label ?? previous;
+		const chosen = decision.kind === 'switch'
+			? decision.to.accountId
+			: await this.askAccountChoice(decision.candidates, spentLabel, onEvent, token);
+		if (!chosen) {
+			return false;
+		}
+		if (!await this.switchAccount(providerId, chosen)) {
+			return false;
+		}
+		const label = decision.kind === 'switch' ? decision.to.label
+			: decision.candidates.find(candidate => candidate.accountId === chosen)?.label ?? chosen;
+		// The roster still holds the spent account's numbers under this provider's single row.
+		this.usageService.invalidate(providerId);
+		onEvent({
+			type: 'error',
+			severity: 'warning',
+			message: t('agent.accountFailover', label),
+			// The undo button only makes sense for a switch the engine decided. When the user picked
+			// the account themselves, offering to undo their own answer is noise.
+			action: previous && decision.kind === 'switch' ? 'account-back' : undefined,
+		});
+		this.lastAccountFailover = previous ? { providerId, accountId: previous } : undefined;
+		return true;
+	}
+
+	/**
+	 * Parks the turn on a card and waits for the user to name the account.
+	 *
+	 * Returns the account id, or undefined when they chose to stop — and also when the run is
+	 * cancelled while the card is up, which is the same answer as far as this turn is concerned.
+	 */
+	private askAccountChoice(
+		candidates: readonly { accountId: string; label: string; paid?: boolean }[],
+		spentAccountId: string | undefined,
+		onEvent: (e: AgentLoopEvent) => void,
+		token: CancellationToken,
+	): Promise<string | undefined> {
+		const id = generateUuid();
+		const deferred = new DeferredPromise<string>();
+		this._pendingAccountChoices.set(id, deferred);
+		const sub = token.onCancellationRequested(() => { if (!deferred.isSettled) { deferred.complete('stop'); } });
+		onEvent({
+			type: 'accountChoiceRequest', id,
+			spentLabel: spentAccountId ?? '',
+			candidates: candidates.map(candidate => ({ accountId: candidate.accountId, label: candidate.label, paid: candidate.paid })),
+		});
+		return deferred.p
+			.finally(() => { sub.dispose(); this._pendingAccountChoices.delete(id); })
+			.then(answer => answer === 'stop' ? undefined : answer);
+	}
+
+	/** What "go back to the previous account" undoes, for the button on the notice. */
+	private lastAccountFailover: { providerId: string; accountId: string } | undefined;
+
+	async undoAccountFailover(): Promise<boolean> {
+		const last = this.lastAccountFailover;
+		if (!last) { return false; }
+		this.lastAccountFailover = undefined;
+		return this.switchAccount(last.providerId, last.accountId);
 	}
 
 	private resetProviderRuntime(providerId: string): void {
@@ -1461,16 +1699,21 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		return groups;
 	}
 
-	resolveAsk(id: string, answer: string): void {
+	resolveAsk(id: string, answer: string, images?: readonly IChatImage[]): void {
 		const deferred = this._pendingAsks.get(id);
 		if (deferred && !deferred.isSettled) {
-			deferred.complete(answer);
+			deferred.complete({ text: answer, images });
 		}
 	}
 
 	resolveModeSuggestion(id: string, accepted: boolean): void {
 		const deferred = this._pendingModeSuggestions.get(id);
 		if (deferred && !deferred.isSettled) { deferred.complete(accepted); }
+	}
+
+	resolveAccountChoice(id: string, decision: string): void {
+		const deferred = this._pendingAccountChoices.get(id);
+		if (deferred && !deferred.isSettled) { deferred.complete(decision); }
 	}
 
 	resolveApproval(id: string, decision: string): void {
@@ -1708,6 +1951,13 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		await this.editReview.openReview(path);
 	}
 
+	async reviewExternalChange(path: string, baseline?: { readonly content: string; readonly existed: boolean }): Promise<void> {
+		if (baseline) {
+			this.diffSnapshot.setBaselineOnce(path, baseline.content, baseline.existed);
+		}
+		await this.editReview.openReview(path);
+	}
+
 	pendingFileDiffs(): readonly { path: string; added: number; removed: number }[] {
 		return this.diffSnapshot.pendingDiffs();
 	}
@@ -1918,7 +2168,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				const input = args?.arguments && typeof args.arguments === 'object' && !Array.isArray(args.arguments) ? args.arguments : {};
 				const errors = validateToolArguments(target.def.parameters, input);
 				if (errors.length) { return `Error: argumentos inválidos para ${name}: ${errors.join('; ')}.`; }
-				return this.tools.invoke(name, JSON.stringify(input), token, context?.messageId, context?.workspaceRoot);
+				return this.tools.invoke(name, JSON.stringify(input), token, context);
 			},
 		};
 	}
@@ -1966,7 +2216,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				if (invalid) { return `Error: operación ${invalid.index + 1} (${invalid.name || 'sin nombre'}): ${invalid.error}.`; }
 				const results = await Promise.all(prepared.map(async operation => ({
 					...operation,
-					output: await this.tools.invoke(operation.name, JSON.stringify(operation.input), token, context?.messageId, context?.workspaceRoot),
+					output: await this.tools.invoke(operation.name, JSON.stringify(operation.input), token, context),
 				})));
 				const joined = results.map(result => `## ${result.index + 1}. ${result.name}\n${compactAgentToolResult(result.name, result.output, 50_000)}`).join('\n\n');
 				return compactAgentToolResult('batch_read', joined, 200_000);
@@ -2126,6 +2376,92 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		return Number.isFinite(value) && value > 0 ? Math.min(120, Math.floor(value)) : 0;
 	}
 
+	/**
+	 * `list_conversations`: who else is working in this window.
+	 *
+	 * It exists so the model can decide FOR ITSELF whether there is someone to coordinate with,
+	 * which is the whole point of the pair: a file it cannot write, or a finding the other
+	 * conversation is going to need. Same shape as Claude Code's `ListAgents`: a name to address
+	 * and whether that agent is busy — never the other conversation's transcript.
+	 */
+	private listConversationsTool(): IAgentTool {
+		return {
+			risk: 'safe' as const,
+			def: {
+				name: 'list_conversations',
+				description: 'Lista las OTRAS conversaciones abiertas en este workspace (id corto, título y si están trabajando). Usala cuando necesites coordinar: un archivo que no podés escribir porque lo tiene otra, o algo que la otra conversación necesita saber.',
+				parameters: { type: 'object', properties: {} },
+			},
+			invoke: async (_args: any, _token: CancellationToken, context?: IAgentToolContext) => {
+				const peers = this.conversationPeers(context?.conversationId);
+				if (!peers.length) {
+					return 'Sos la única conversación abierta en este workspace.';
+				}
+				const rows = peers.map(peer => `- ${this.conversationHandle(peer.id)} · "${peer.title}"${peer.busy ? ' (trabajando ahora)' : ' (inactiva)'}`);
+				return `Conversaciones abiertas además de la tuya:\n${rows.join('\n')}\n\nPara escribirle a una: message_conversation con to = su id corto o su título exacto.`;
+			},
+		};
+	}
+
+	/**
+	 * `message_conversation`: says something to another conversation of this workspace.
+	 *
+	 * Plain text and nothing else — never this conversation's history or its files — and it arrives
+	 * there labelled as coming from another agent, so it authorises nothing (that wording lives in
+	 * `renderIncomingConversationMessage`). The refusals are the sender's: an identical repeat, a
+	 * burst, an oversized message and a full inbox all come back HERE, as a result the model reads,
+	 * because a message that vanishes silently is what turns into a loop.
+	 *
+	 * `risk: 'safe'`: it touches no file and runs no command. What it can do — make another
+	 * conversation act — is gated where it belongs, on that conversation's own approval prompts.
+	 */
+	private messageConversationTool(): IAgentTool {
+		return {
+			risk: 'safe' as const,
+			def: {
+				name: 'message_conversation',
+				description: 'Le manda un mensaje de texto a OTRA conversación abierta de este workspace (lo lee su agente, no el usuario). Usala para avisar de un cambio que la afecta, pedirle que libere un archivo, o pasarle algo que averiguaste. No autoriza nada del otro lado.',
+				parameters: {
+					type: 'object',
+					properties: {
+						to: { type: 'string', description: 'Id corto o título exacto de la conversación destino (list_conversations los lista)' },
+						message: { type: 'string', description: 'Texto del mensaje. Concreto y auto-contenido: la otra conversación no ve tu historial.' },
+					},
+					required: ['to', 'message'],
+				},
+			},
+			invoke: async (args: any, _token: CancellationToken, context?: IAgentToolContext) => {
+				const from = context?.conversationId;
+				if (!from) {
+					return 'Error: esta ejecución no pertenece a una conversación del dock, no puede mandar mensajes.';
+				}
+				const peers = this.conversationPeers(from);
+				const wanted = String(args.to ?? '').trim();
+				const matches = peers.filter(peer => this.conversationHandle(peer.id) === wanted || peer.id === wanted || peer.title.toLowerCase() === wanted.toLowerCase());
+				if (!matches.length) {
+					return peers.length
+						? `Error: no encuentro la conversación "${wanted}". Abiertas: ${peers.map(peer => `${this.conversationHandle(peer.id)} ("${peer.title}")`).join(', ')}.`
+						: 'Error: no hay otra conversación abierta a la que escribirle.';
+				}
+				if (matches.length > 1) {
+					return `Error: "${wanted}" es ambiguo. Usá el id corto: ${matches.map(peer => this.conversationHandle(peer.id)).join(', ')}.`;
+				}
+				const target = matches[0];
+				const posted = this.conversationMailbox.post(from, target.id, String(args.message ?? ''), Date.now());
+				if (!posted.ok) {
+					return MESSAGE_REFUSALS[posted.reason];
+				}
+				const fromTitle = this.conversationHost?.peers().find(peer => peer.id === from)?.title ?? 'otra conversación';
+				if (!this.conversationHost?.deliver(posted.message, fromTitle)) {
+					this.conversationMailbox.drain(target.id);
+					return `Error: no se pudo entregar el mensaje a "${target.title}" (¿se cerró?).`;
+				}
+				this.conversationMailbox.drain(target.id);
+				return `OK: mensaje entregado a "${target.title}". Lo va a leer entre sus próximos pasos si está trabajando, o al abrirla si estaba inactiva. No esperes respuesta inmediata ni la reenvíes: si necesita contestarte, te va a escribir.`;
+			},
+		};
+	}
+
 	/** plan_save: THE CLOSING of plan mode — risk 'safe' (it only writes its own document). */
 	private planSaveTool() {
 		return {
@@ -2142,7 +2478,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 					required: ['title', 'markdown'],
 				},
 			},
-			invoke: (args: any, _token: CancellationToken, context?: IAgentToolContext) => this.savePlan(String(args.title ?? ''), String(args.markdown ?? ''), context?.external === true),
+			invoke: (args: any, _token: CancellationToken, context?: IAgentToolContext) => this.savePlan(String(args.title ?? ''), String(args.markdown ?? ''), context?.external === true, context?.conversationId),
 		};
 	}
 
@@ -2374,7 +2710,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	 * its own name, the editor opened with the skeleton might not be the file that gets written
 	 * afterwards.
 	 */
-	private onPlanDraftDelta(callId: string, argumentsJson: string): void {
+	private onPlanDraftDelta(callId: string, argumentsJson: string, conversationId?: string): void {
 		const draft = readPlanDraft(argumentsJson);
 		if (!draft.titleComplete || !draft.title.trim()) {
 			return; // sin título cerrado no se puede nombrar el archivo: todavía no hay borrador
@@ -2396,7 +2732,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			if (!reserved) {
 				return;
 			}
-			this.planDraft = { callId, resource: reserved.uri, path: reserved.path, title: draft.title, markdown: draft.markdown, done: false };
+			this.planDraft = { callId, conversationId, resource: reserved.uri, path: reserved.path, title: draft.title, markdown: draft.markdown, done: false };
 			this._onDidChangePlanDraft.fire(this.planDraft);
 			// The editor opens NOW, empty: it is the one that will show the skeleton while writing.
 			this.commandService.executeCommand('openide.plan.open', reserved.uri).then(undefined, () => { /* sin editor, la card del chat alcanza */ });
@@ -2431,7 +2767,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 
 	/** Writes the plan document (frontmatter + markdown), fires the chat's review card
 	 *  (onDidCreatePlan) and opens the native markdown preview beside it. */
-	private async savePlan(title: string, markdown: string, external = false): Promise<string> {
+	private async savePlan(title: string, markdown: string, external = false, conversationId?: string): Promise<string> {
 		if (!title.trim()) {
 			return 'Error: title vacío.';
 		}
@@ -2470,7 +2806,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		// frontmatter, without the tasks section and without Build — until the whole run finished.
 		this.closePlanDraft();
 		const rel = `.openide/plans/${slug}.md`;
-		this._onDidCreatePlan.fire({ path: rel, title: title.trim(), markdown, external });
+		this._onDidCreatePlan.fire({ path: rel, title: title.trim(), markdown, external, conversationId });
 		// editor de plan PROPIO (openidePlanEditor): markdown lindo + toolbar (modelo / Build) +
 		// interactive tasks — replaces the native preview. The chat card stays in parallel.
 		this.commandService.executeCommand('openide.plan.open', uri).then(undefined, () => { /* el editor no cargó: la card alcanza */ });
@@ -2966,6 +3302,33 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		return this.modelForProvider(e?.id ?? this.getActiveProviderId()) || e?.defaultModel || '';
 	}
 
+	/**
+	 * The configured chain as CONCRETE targets.
+	 *
+	 * Health is keyed by (provider, model), so a step that only names a provider has to be resolved
+	 * to the model it would actually run — the same rule the run itself applies to a failover step:
+	 * the provider's default. A step whose provider is not connected is dropped here rather than
+	 * discovered one wasted turn later.
+	 */
+	private fallbackTargets(): IModelTarget[] {
+		const chain = parseFallbackChain(
+			this.configurationService.getValue<unknown>('openide.agent.fallbackChain'),
+			this.configurationService.getValue<unknown>('openide.agent.fallbackProviders'),
+		);
+		const targets: IModelTarget[] = [];
+		for (const step of chain) {
+			const entry = this.findProvider(step.providerId);
+			if (!entry) {
+				continue;
+			}
+			const model = normalizeModelForProvider(step.model || entry.defaultModel || this.activeModel(entry), entry);
+			if (model) {
+				targets.push({ providerId: step.providerId, model });
+			}
+		}
+		return targets;
+	}
+
 	private resolveKnownContextLimit(model: string, entry?: IProviderEntry): number | undefined {
 		const cfg = this.configurationService.getValue<number>('openide.agent.contextTokens');
 		if (typeof cfg === 'number' && cfg > 0) {
@@ -3200,25 +3563,168 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	}
 
 	runMessages(messages: IChatMessage[], onEvent: (e: AgentLoopEvent) => void, token: CancellationToken = CancellationToken.None, options?: IAgentRunOptions): Promise<void> {
-		return this.runSequencer.queue(async () => {
-			if (!token.isCancellationRequested) {
+		return this.sequencerFor(options?.conversationId).queue(async () => {
+			if (token.isCancellationRequested) {
+				return;
+			}
+			try {
 				await this.runMessagesInternal(messages, onEvent, token, options);
+			} finally {
+				// The files this turn claimed are free again the moment it settles, however it
+				// settled: a cancelled run that kept its claims would lock a file forever.
+				if (options?.conversationId) {
+					this.fileClaims.releaseAll(options.conversationId);
+				}
 			}
 		});
 	}
 
-	compactConversation(messages: IChatMessage[], onEvent: (e: AgentLoopEvent) => void, token: CancellationToken = CancellationToken.None): Promise<void> {
-		return this.runMessages(messages, onEvent, token, { compactOnly: true });
+	/**
+	 * Invokes a tool, and if it MUTATES FILES, does it in the one write queue.
+	 *
+	 * This is the outermost invocation only: a tool that calls another tool from inside its own
+	 * `invoke` (`mcp_call`, `batch_read`) goes straight to the registry, or it would be waiting on a
+	 * queue it is already holding.
+	 */
+	private async invokeSerializingWrites(name: string, argumentsJson: string, token: CancellationToken, context: IAgentToolContext, report?: (holder: string | undefined) => void): Promise<string> {
+		const tool = this.tools.getTool(name);
+		const invoke = () => this.tools.invoke(name, argumentsJson, token, context);
+		if (tool?.risk !== 'write') {
+			return invoke();
+		}
+		// Queueing for the file happens OUTSIDE the write queue on purpose: waiting inside it would
+		// hold back the writes of the very conversation we are waiting for.
+		const claim = await this.claimTargetFile(tool, argumentsJson, context.conversationId, token, report);
+		if (claim.refusal) {
+			return claim.refusal;
+		}
+		const result = await this.writeSequencer.queue(invoke);
+		return claim.waited ? `${claim.waited}\n${result}` : result;
+	}
+
+	/**
+	 * Claims the file a write is about to touch, WAITING for whoever holds it.
+	 *
+	 * Waiting is the point: a lock that turns the second writer away makes the model spend a turn
+	 * deciding to retry, when the queue can hand it the file the moment the other conversation
+	 * finishes. Patience is bounded, and when it runs out the model is told who has it, so it can do
+	 * something else instead of hanging on a turn that may run for minutes.
+	 *
+	 * The path comes from the tool's own `approvalInfo`, which is the same thing the approval card
+	 * shows the user — no second parser that could disagree with it about what is being written.
+	 */
+	private async claimTargetFile(tool: IAgentTool, argumentsJson: string, conversationId: string | undefined, token: CancellationToken, report?: (holder: string | undefined) => void): Promise<{ refusal?: string; waited?: string }> {
+		if (!conversationId) {
+			return {}; // no conversation behind it: an external agent, a git helper
+		}
+		let args: any = {};
+		try { args = JSON.parse(argumentsJson || '{}'); } catch { return {}; }
+		const path = tool.approvalInfo?.(args)?.path;
+		if (!path) {
+			return {}; // a write that names no file (a memory entry, a skill): nothing to own
+		}
+		const immediate = this.fileClaims.claim(path, conversationId, Date.now());
+		if (immediate.ok) {
+			return {};
+		}
+		const startedAt = Date.now();
+		const titleOf = (id: string) => this.conversationHost?.peers().find(peer => peer.id === id)?.title ?? 'otra conversación';
+		// The card says who it is waiting for while it waits: a write parked for up to two minutes
+		// with a shimmering filename and nothing else reads as the agent having frozen.
+		report?.(titleOf(immediate.heldBy));
+		const patience = this.patience(FILE_CLAIM_WAIT_MS, token);
+		let outcome;
+		try {
+			outcome = await this.fileClaims.claimWhenFree(path, conversationId, () => Date.now(), patience.promise);
+		} finally {
+			patience.dispose();
+			report?.(undefined);
+		}
+		const waitedSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+		return outcome.ok
+			? { waited: renderFileClaimWaited(path, titleOf(immediate.heldBy), waitedSeconds) }
+			: { refusal: renderFileClaimTimeout(path, titleOf(outcome.heldBy), waitedSeconds) };
+	}
+
+	/** Settles after `ms`, or as soon as the run is cancelled. Disposed by whoever awaited it. */
+	private patience(ms: number, token: CancellationToken): { promise: Promise<void>; dispose(): void } {
+		let settle: (() => void) | undefined;
+		const promise = new Promise<void>(resolve => { settle = resolve; });
+		const timer = setTimeout(() => settle?.(), ms);
+		const subscription = token.onCancellationRequested(() => settle?.());
+		return {
+			promise,
+			dispose: () => { clearTimeout(timer); subscription.dispose(); settle?.(); },
+		};
+	}
+
+	setConversationHost(host: IOpenideConversationHost | undefined): void {
+		this.conversationHost = host;
+	}
+
+	releaseConversationResources(conversationId: string): void {
+		this.fileClaims.releaseAll(conversationId);
+		this.conversationMailbox.forget(conversationId);
+	}
+
+	/** Everything open except the caller, which is the only list worth giving the model. */
+	private conversationPeers(conversationId: string | undefined): readonly IOpenideConversationPeer[] {
+		return (this.conversationHost?.peers() ?? []).filter(peer => peer.id !== conversationId);
+	}
+
+	/** Short handle the model uses to address a conversation: `metaOf` ids are uuids. */
+	private conversationHandle(id: string): string {
+		return id.slice(0, 8);
+	}
+
+	/**
+	 * The queue a run waits in. Per conversation, so a turn in one conversation never waits for a
+	 * turn in another; runs with no conversation behind them (the git helpers' own calls, an
+	 * external agent) share one queue, which is what they did before.
+	 */
+	private sequencerFor(conversationId: string | undefined): OpenideRunSequencer {
+		const key = conversationId ?? '';
+		let sequencer = this.runSequencers.get(key);
+		if (!sequencer) {
+			sequencer = new OpenideRunSequencer();
+			this.runSequencers.set(key, sequencer);
+		}
+		return sequencer;
+	}
+
+	compactConversation(messages: IChatMessage[], onEvent: (e: AgentLoopEvent) => void, token: CancellationToken = CancellationToken.None, conversationId?: string): Promise<void> {
+		return this.runMessages(messages, onEvent, token, { compactOnly: true, conversationId });
 	}
 
 	private async runMessagesInternal(messages: IChatMessage[], onEvent: (e: AgentLoopEvent) => void, token: CancellationToken, options?: IAgentRunOptions): Promise<void> {
+		// A history written by an older build can carry broken tool pairing (an orphan tool message,
+		// a call with no result) and the provider then rejects EVERY turn of that conversation with
+		// HTTP 400. Healed in place, so the next save persists the repair.
+		const repairs = repairOpenideChatToolPairs(messages);
+		if (repairs > 0) {
+			this.logService.warn(`[openide.agent] repaired ${repairs} broken tool message pair(s) in the stored conversation before sending`);
+		}
+		// Whose run this is. Every tool call carries it, so the shell, the interactive prompt and the
+		// output streaming into the chat card belong to ONE conversation even while another one runs.
+		const conversationId = options?.conversationId;
+		const shellKey = conversationId ?? '';
 		// Failover: when the provider fails outright (auth/billing/rate-limit) BEFORE emitting
 		// content, we retry with the next entry of openide.agent.fallbackProviders.
 		const providerId = options?.providerOverride ?? this.getActiveProviderId();
+		this.runsInFlightByProvider.set(providerId, (this.runsInFlightByProvider.get(providerId) ?? 0) + 1);
 		const rawOnEvent = onEvent;
 		let emittedContent = false;
+		// The target this turn ENDED UP on, known only once the model is resolved below. It is what
+		// the health map is keyed by: a provider is not healthy or unhealthy on its own, a model
+		// served by it is.
+		let runTarget: IModelTarget | undefined;
 		onEvent = ev => {
 			if (ev.type === 'text' || ev.type === 'reasoning' || ev.type === 'toolStart' || ev.type === 'subagentStart') {
+				// The first sign of an answer is the proof the target is alive: it clears the cooldown
+				// and the failure streak, so a model that recovers is trusted again immediately.
+				if (!emittedContent && runTarget) {
+					this.subagentRouting.recordSuccess(runTarget);
+				}
 				emittedContent = true;
 			}
 			rawOnEvent(ev);
@@ -3317,6 +3823,48 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 					const previous = model;
 					model = [entry.defaultModel, ...this.catalog.modelsFor(entry.id)].find(candidate => !!candidate && available.includes(candidate)) ?? available[0];
 					onEvent({ type: 'info', message: `El modelo ${previous} ya no está disponible en ${entry.label}; usando ${model}.` });
+				}
+			}
+			// The model is final here, so this is where the turn can still be spared a trip it already
+			// knows will fail. Nothing is reassigned: the intended model stays selected, only THIS
+			// turn runs elsewhere.
+			//
+			// The guard is the chain history, NOT the presence of an override: every turn sent from
+			// the composer already carries `providerOverride`/`modelOverride` — they are the model in
+			// the chip, not a mark of having been rerouted (`openideChatController.launchRun`). An
+			// empty `triedFallbackSteps` is what actually says "this turn has not been redirected
+			// yet", and it caps the redirect at one so two cooling targets cannot ping-pong.
+			runTarget = { providerId: entry.id, model };
+			const intended = options?.intendedTarget;
+			if (intended && (intended.providerId !== entry.id || intended.model !== model)) {
+				onEvent({
+					type: 'modelRoute',
+					providerId: entry.id, model,
+					intendedProviderId: intended.providerId, intendedModel: intended.model,
+					reason: options?.rerouteReason ?? 'failover',
+					...(options?.rerouteUntil ? { until: options.rerouteUntil } : {}),
+				});
+			}
+			if (!options?.triedFallbackSteps?.length) {
+				const plan = planModelRun(runTarget, this.fallbackTargets(), target => this.subagentRouting.healthFor(target), Date.now());
+				if (plan.redirectedFrom) {
+					onEvent({
+						type: 'info',
+						message: t('agent.cooldownRedirect', model, describeCooldown(plan.redirectedFrom.until, Date.now()), plan.target.model),
+					});
+					editSub.dispose();
+					return this.runMessagesInternal(messages, rawOnEvent, token, {
+						...options,
+						providerOverride: plan.target.providerId,
+						modelOverride: plan.target.model,
+						// The chosen target survives every hop: whatever this run ends up on, the
+						// composer must keep naming what the user picked.
+						intendedTarget: options?.intendedTarget ?? runTarget,
+						rerouteReason: 'cooldown',
+						rerouteUntil: plan.redirectedFrom.until,
+						triedProviders: [...(options?.triedProviders ?? []), entry.id],
+						triedFallbackSteps: [...(options?.triedFallbackSteps ?? []), fallbackStepKey({ providerId: entry.id, model })],
+					});
 				}
 			}
 			const baseUrl = entry.baseUrl;
@@ -3465,7 +4013,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 							} else if (ev.type === 'toolCallDelta' && ev.name === 'plan_save') {
 								// The plan is shown while it is being written. plan_save only: the rest of the
 								// tools gain nothing from seeing their arguments half-written.
-								this.onPlanDraftDelta(ev.id, ev.argumentsJson);
+								this.onPlanDraftDelta(ev.id, ev.argumentsJson, conversationId);
 							}
 						},
 						token,
@@ -3535,6 +4083,11 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 					return;
 				}
 
+				// Images the user attached to an `ask_user` answer during THIS batch of tool calls.
+				// They are held back deliberately: every tool result has to follow its assistant
+				// message immediately, so a user message injected mid-batch would orphan the calls
+				// that come after it and the provider rejects the whole request.
+				const askImages: { image: IChatImage; name: string }[] = [];
 				for (const rawCall of calls) {
 					const repairedArguments = repairToolArgumentsJson(rawCall.argumentsJson);
 					const call = repairedArguments === undefined ? rawCall : { ...rawCall, argumentsJson: repairedArguments };
@@ -3566,8 +4119,20 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 							if (!owner || !parsed.agent || !parsed.task) { output = 'Error: agent, task y parent message son obligatorios.'; }
 							else if (readonlyOnly && this.subagentRegistry.get(String(parsed.agent))?.readonly === false) { output = `Error: el modo ${mode} sólo puede delegar a subagentes de lectura.`; }
 							else {
-								const run = await this.subagentOrchestration.delegate({ agent: String(parsed.agent), task: String(parsed.task), context: parsed.context, background: parsed.background, model: parsed.model, parentConversationId: this.hookSessionId(messages), parentMessageId: owner });
-								onEvent({ type: 'subagentRun', run }); output = run.background ? `Subagente iniciado en background. runId=${run.runId}` : JSON.stringify(run.result ?? { status: run.status, runId: run.runId });
+								// `conversationId` and NOT `hookSessionId(messages)`: the latter is a uuid minted per
+								// message-array identity for the hook system, so every run ever delegated was
+								// filed under a parent nobody could look up. That broke two things at once —
+								// `getRunsForParent` never matched, so a reload could not find the run behind a
+								// card, and `deliverSubagentRun` resolved the parent conversation to nothing, so
+								// a background specialist finishing late delivered its result into the void.
+								const run = await this.subagentOrchestration.delegate({ agent: String(parsed.agent), task: String(parsed.task), context: parsed.context, background: parsed.background, model: parsed.model, parentConversationId: conversationId ?? this.hookSessionId(messages), parentMessageId: owner });
+								onEvent({ type: 'subagentRun', run });
+								// The runId goes in either branch. A foreground run used to report `run.result`
+								// alone, and an ISubagentResult carries no id, so the successful case — the common
+								// one — left the transcript with no way back to the run it described.
+								output = run.background
+									? `Subagente iniciado en background. runId=${run.runId}`
+									: JSON.stringify({ runId: run.runId, status: run.status, ...(run.result ?? {}) });
 							}
 						} else {
 							const runId = String(parsed.runId ?? ''); const run = this.subagentOrchestration.get(runId);
@@ -3621,6 +4186,16 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 							? `El usuario aceptó cambiar al modo ${target}. La UI reenviará el pedido en ese modo; no continúes este turno.`
 							: `El usuario rechazó cambiar al modo ${target}. Continuá en el modo actual y resolvé el pedido si es seguro hacerlo.`;
 						onEvent({ type: 'toolResult', id: call.id, name: call.name, result: ack, isError: false });
+						if (accepted && target !== 'fork') {
+							// No ack in `messages`: accepting fired `resumeInMode` synchronously (the part
+							// resolves this deferred FIRST, so its continuation — this line — runs after the
+							// emitter), and the rewind already spliced the assistant(suggest_mode) turn away.
+							// Appending the ack here would land an orphan tool message right after the rewound
+							// user turn, and the resumed run's first request dies with HTTP 400 "No tool call
+							// found for function call output". Fork keeps the push: it never rewinds.
+							onEvent({ type: 'done', reason: 'mode-switch' });
+							return;
+						}
 						messages.push({ role: 'tool', toolCallId: call.id, content: ack });
 						if (accepted) { onEvent({ type: 'done', reason: 'mode-switch' }); return; }
 						continue;
@@ -3645,15 +4220,21 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 							continue;
 						}
 						const askId = generateUuid();
-						const deferred = new DeferredPromise<string>();
+						const deferred = new DeferredPromise<IOpenideAskAnswer>();
 						this._pendingAsks.set(askId, deferred);
-						const sub = token.onCancellationRequested(() => { if (!deferred.isSettled) { deferred.complete('(el usuario canceló)'); } });
+						const sub = token.onCancellationRequested(() => { if (!deferred.isSettled) { deferred.complete({ text: '(el usuario canceló)' }); } });
 						onEvent({ type: 'ask', id: askId, questions, allowFreeText: a.allow_free_text !== false });
 						const answer = await deferred.p;
 						sub.dispose();
 						this._pendingAsks.delete(askId);
-						onEvent({ type: 'toolResult', id: call.id, name: 'ask_user', result: answer, isError: false });
-						messages.push({ role: 'tool', toolCallId: call.id, content: answer });
+						// A tool result is text in every provider's schema, so the images cannot ride
+						// in it. The result NAMES them and the pictures themselves follow the batch as
+						// one user message, which is the only shape every adapter already accepts.
+						const names = openideAskImageNames(answer.images?.length ?? 0, askImages.length);
+						const resultText = names.length ? `${answer.text}\n(imágenes adjuntas: ${names.join(', ')})` : answer.text;
+						if (answer.images?.length) { askImages.push(...answer.images.map((image, i) => ({ image, name: names[i] }))); }
+						onEvent({ type: 'toolResult', id: call.id, name: 'ask_user', result: resultText, isError: false });
+						messages.push({ role: 'tool', toolCallId: call.id, content: resultText });
 						continue;
 				}
 				// terminal_send: writes ONLY when there is an awaiting-input session (gated in tools).
@@ -3697,7 +4278,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 							messages.push({ role: 'tool', toolCallId: call.id, content: denied });
 							continue;
 						}
-						const result = await this.tools.sendToAgentTerminalInteractive(text, token, 30_000);
+						const result = await this.tools.sendToAgentTerminalInteractive(text, token, 30_000, shellKey);
 						if (!result) {
 							const noTerm = 'Error: la sesión interactiva se cerró. Reintentá con run_command.';
 							onEvent({ type: 'toolResult', id: call.id, name: 'terminal_send', result: noTerm, isError: true });
@@ -3788,12 +4369,19 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 					// (we subscribe only here so the git flow noise is not dragged along).
 					let shellSub: IDisposable | undefined;
 					if (call.name === 'run_command') {
-						shellSub = this.tools.onDidShellData(data => onEvent({ type: 'terminalData', id: call.id, data }));
+						// Only OUR conversation's shell: with another conversation running its own command
+						// at the same time, both streams would land in this card.
+						shellSub = this.tools.onDidShellData(event => {
+							if (event.conversationId === shellKey) { onEvent({ type: 'terminalData', id: call.id, data: event.data }); }
+						});
 					}
 					lastEditDiff = undefined; // el editSub lo setea si esta tool edita un archivo
 					let out: string;
 					try {
-						out = await this.tools.invoke(call.name, call.argumentsJson, token, ownerMessageId);
+						out = await this.invokeSerializingWrites(
+							call.name, call.argumentsJson, token, { messageId: ownerMessageId, conversationId },
+							holder => onEvent({ type: 'toolWaiting', id: call.id, holder }),
+						);
 					} finally {
 						shellSub?.dispose();
 					}
@@ -3829,6 +4417,17 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 						onEvent({ type: 'done', reason: 'plan-saved' });
 						return;
 					}
+				}
+				// The pictures, now that every tool result of the batch is in place. One message for the
+				// whole batch, named exactly as the results referred to them, and hidden: the card in the
+				// transcript already shows them, so a second copy would be the same image twice.
+				if (askImages.length) {
+					messages.push({
+						role: 'user',
+						content: `Imágenes adjuntas por el usuario al responder: ${askImages.map(entry => entry.name).join(', ')}.`,
+						images: askImages.map(entry => entry.image),
+						hidden: true,
+					});
 				}
 			}
 			this.hooks.dispatchObserved('stop', { sessionId: this.hookSessionId(messages) });
@@ -3869,6 +4468,12 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			// como compatibilidad para perfiles existentes.
 			const currentStep = { providerId, ...(options?.modelOverride ? { model: options.modelOverride } : {}) };
 			const triedSteps = [...(options?.triedFallbackSteps ?? []), fallbackStepKey(currentStep)];
+			// What this failure teaches about the target, so the NEXT turn does not have to learn it
+			// again. Only before any content: a provider that answered and then broke mid-stream is
+			// not an unhealthy provider, and its success was already recorded.
+			if (runTarget && !emittedContent && isModelHealthSignal(cls)) {
+				this.subagentRouting.recordFailure(runTarget, cls);
+			}
 			const fallbackChain = parseFallbackChain(
 				this.configurationService.getValue<unknown>('openide.agent.fallbackChain'),
 				this.configurationService.getValue<unknown>('openide.agent.fallbackProviders'),
@@ -3882,24 +4487,57 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				|| cls.reason === 'model-retired'
 				|| cls.reason === 'provider-unavailable'
 				|| cls.reason === 'project-not-found';
+			// Another ACCOUNT of the same provider comes before another provider: it is the same model
+			// and the same behaviour, only a different subscription paying for it. Walking the provider
+			// chain first would silently downgrade the user's model over a billing problem.
+			if (canFailover && !emittedContent && !token.isCancellationRequested) {
+				const switched = await this.tryAccountFailover(providerId, cls, rawOnEvent, options, token);
+				if (switched) {
+					editSub.dispose();
+					// NOT `triedFallbackSteps`: the provider and the model did not change, so the
+					// provider chain must stay exactly as available as it was.
+					return this.runMessagesInternal(messages, rawOnEvent, token, { ...options, accountSwitched: true });
+				}
+			}
+			// Two passes on purpose: a step known to be cooling down is a wasted turn, but it is still
+			// better than giving up, so it stays as the last resort. Health is a preference here,
+			// never a veto — the same reason `planModelRun` runs the intended target when the whole
+			// chain is out.
+			const untried = fallbackChain.filter(step => !triedSteps.includes(fallbackStepKey(step)) && !!this.findProvider(step.providerId));
+			const isCool = (step: { providerId: string; model?: string }) => {
+				const entryForStep = this.findProvider(step.providerId);
+				const stepModel = step.model || entryForStep?.defaultModel || '';
+				return !!stepModel && isModelCoolingDown(this.subagentRouting.healthFor({ providerId: step.providerId, model: stepModel }), Date.now());
+			};
 			const next = canFailover && !emittedContent
-				? fallbackChain.find(step => !triedSteps.includes(fallbackStepKey(step)) && !!this.findProvider(step.providerId))
+				? (untried.find(step => !isCool(step)) ?? untried[0])
 				: undefined;
 			if (next && !token.isCancellationRequested) {
 				const target = next.model ? `${next.providerId}/${next.model}` : next.providerId;
-				onEvent({ type: 'info', message: `El proveedor "${providerId}" falló (${cls.reason}); probando con "${target}"…` });
+				onEvent({ type: 'info', message: t('agent.failover', providerId, cls.reason, target) });
 				editSub.dispose();
 				return this.runMessagesInternal(messages, rawOnEvent, token, {
 					...options,
 					providerOverride: next.providerId,
 					modelOverride: next.model,
+					intendedTarget: options?.intendedTarget ?? runTarget,
+					rerouteReason: 'failover',
+					rerouteUntil: undefined,
 					triedProviders: [...(options?.triedProviders ?? []), providerId],
 					triedFallbackSteps: triedSteps,
 				});
 			}
-			const errorMessage = cls.hint ? `${msg}\n${cls.hint}` : msg;
-			onEvent({ type: 'error', message: errorMessage + refreshHint, action: cls.kind === 'auth' || cls.kind === 'billing' ? 'connect' : undefined });
+			const human = humanizeProviderError(msg);
+			const errorMessage = cls.hint ? `${human}\n${cls.hint}` : human;
+			onEvent({
+				type: 'error',
+				message: errorMessage + refreshHint,
+				action: cls.kind === 'auth' || cls.kind === 'billing' ? 'connect' : undefined,
+				severity: cls.kind === 'rate-limit' || cls.reason === 'overloaded' ? 'warning' : 'error',
+			});
 		} finally {
+			const inFlight = (this.runsInFlightByProvider.get(providerId) ?? 1) - 1;
+			if (inFlight > 0) { this.runsInFlightByProvider.set(providerId, inFlight); } else { this.runsInFlightByProvider.delete(providerId); }
 			editSub.dispose();
 			// The turn ended: if a plan was left half-written (cancellation, provider error, token
 			// limit), the skeleton must stop pulsing all the same. Without this the tab would keep
@@ -4075,7 +4713,8 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 					continue;
 				}
 				wrap({ type: 'toolStart', id: call.id, name: call.name, argumentsJson: call.argumentsJson });
-				const out = await this.tools.invoke(call.name, call.argumentsJson, token, undefined, workspaceRoot);
+				// A specialist gets a shell of its own: it runs while its parent conversation is running too.
+				const out = await this.invokeSerializingWrites(call.name, call.argumentsJson, token, { workspaceRoot, conversationId: `subagent:${subId}` });
 				wrap({ type: 'toolResult', id: call.id, name: call.name, result: out.slice(0, 400), isError: out.startsWith('Error') });
 				const modelOutput = out.length > budget.toolResultChars ? `${out.slice(0, budget.toolResultChars)}\n\n[Resultado truncado por el presupuesto del subagente]` : out;
 				messages.push({ role: 'tool', toolCallId: call.id, content: modelOutput });
@@ -4161,6 +4800,34 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				result.set(subagentTargetKey(target), { connected, knownModels, capabilities: this.catalog.lookup(target.model, entry.id) });
 		}));
 		return result;
+	}
+
+	async completeText(request: IOpenideTextCompletionRequest, token: CancellationToken): Promise<string> {
+		const target = parseProviderModelTarget(request.target);
+		const targetEntry = target ? this.findProvider(target.providerId) : undefined;
+		const modelOverride = target?.model && targetEntry ? normalizeModelForProvider(target.model, targetEntry) : target?.model;
+		const context = await this.resolveSubagentContext(modelOverride, target?.providerId);
+		const result = await this.streamWithRetry(
+			context.adapter,
+			{
+				credential: context.credential,
+				baseUrl: context.baseUrl,
+				model: context.model,
+				extraHeaders: context.entry.extraHeaders,
+				cloudCodeMetadata: context.entry.cloudCodeMetadata,
+				system: request.system,
+				messages: [{ role: 'user', content: request.prompt }],
+				maxTokens: request.maxTokens ?? context.maxTokens,
+			},
+			event => {
+				if (event.type === 'text' && request.onDelta) {
+					request.onDelta(event.delta);
+				}
+			},
+			token,
+			() => { },
+		);
+		return result.message.content ?? '';
 	}
 
 	private async resolveSubagentContext(modelOverride?: string, providerOverride?: string): Promise<ISubAgentContext> {

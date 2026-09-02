@@ -13,7 +13,7 @@
  *  agent service. The model chip and the run button live in the breadcrumb
  *  (openidePlanBreadcrumbActions.ts); the document only keeps the "follow the agent" strip.
  *
- *  It replaces the webview of the same name (openidePlanHtml.ts): every feature of that HTML is
+ *  It replaces the webview of the same name (removed with it): every feature of that HTML is
  *  here, ported to DOM builders — no `innerHTML`, no message bus, no second scrollbar.
  *--------------------------------------------------------------------------------------------*/
 
@@ -138,7 +138,7 @@ export function diffPlanTasks(previous: readonly IPlanTask[] | undefined, next: 
 	return changes;
 }
 
-const DIAGRAM_LANGS = new Set(['mermaid', 'flowchart', 'diagram', 'openide-diagram']);
+const DIAGRAM_LANGS = new Set(['mermaid', 'flowchart', 'diagram', 'openide-diagram', 'archmap', 'flowmap', 'lifemap', 'seqmap']);
 
 type PlanSegment = { kind: 'markdown'; text: string } | { kind: 'diagram'; source: string };
 

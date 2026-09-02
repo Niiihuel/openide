@@ -37,7 +37,7 @@ suite('OpenIDE chat tool catalog', () => {
 	test('the catalog still covers the whole built-in surface', () => {
 		// A dropped entry degrades that tool to a nameless generic row, which is the exact symptom
 		// this file exists to prevent. The count is the cheapest tripwire.
-		assert.strictEqual(Object.keys(OPENIDE_TOOL_META).length, 40);
+		assert.strictEqual(Object.keys(OPENIDE_TOOL_META).length, 61);
 		assert.strictEqual(OPENIDE_TOOL_META['read_file'].icon, 'file');
 		assert.strictEqual(OPENIDE_TOOL_META['run_command'].icon, 'terminal');
 		assert.strictEqual(OPENIDE_TOOL_META['delegate_task'].icon, 'run-all');
@@ -47,6 +47,48 @@ suite('OpenIDE chat tool catalog', () => {
 			assert.notStrictEqual(OPENIDE_TOOL_META[name], undefined, `${name} is missing from the catalog`);
 			assert.notStrictEqual(OPENIDE_TOOL_META[name].verb, name, `${name} still falls back to its raw name`);
 		}
+	});
+
+	test('the tools the registry adds at runtime are in it too', () => {
+		// These are registered in browser/openideAgentService.ts rather than declared next to the
+		// file tools, which is exactly why they were all missing: nothing ever walked that list.
+		// A tool that is not here renders its raw snake_case name beside the generic wrench — the
+		// `batch_read` row the user reported.
+		const runtime = [
+			'batch_read', 'mcp_call', 'skill_view', 'skill_save', 'subagent_save', 'rule_manage',
+			'plan_save', 'list_conversations', 'message_conversation', 'canvas_write', 'canvas_read',
+			'canvas_list', 'canvas_open', 'codebase_search', 'codebase_explore', 'codebase_callers',
+			'memory_graph_status', 'project_map_query', 'memory_graph_impact', 'memory_graph_path',
+			'memory_graph_related_tests', 'codebase_save_priority', 'git_status', 'git_preflight',
+			'git_commit', 'git_checkpoint', 'workflow_configure', 'git_configure', 'browser_open',
+			'await_subagent', 'cancel_subagent', 'suggest_mode', 'memory', 'review_changes',
+		];
+		for (const name of runtime) {
+			assert.notStrictEqual(OPENIDE_TOOL_META[name], undefined, `${name} is missing from the catalog`);
+			assert.notStrictEqual(OPENIDE_TOOL_META[name].verb, name, `${name} still falls back to its raw name`);
+		}
+	});
+
+	test('a read-only lookup folds into the phase; anything that acts keeps its row', () => {
+		// This is the classification the live line depends on: an explore tool is spoken by the
+		// turn's single animated line and lands in the counted group, while a tool that changes
+		// something stays a row of the record.
+		for (const name of ['batch_read', 'project_map_query', 'memory_graph_impact', 'canvas_read', 'list_conversations']) {
+			assert.strictEqual(routeToolCall(name, '{}'), 'explore', `${name} should fold into the phase`);
+		}
+		for (const name of ['canvas_write', 'rule_manage', 'mcp_call', 'subagent_save', 'git_configure']) {
+			assert.strictEqual(routeToolCall(name, '{}'), 'tool', `${name} should keep its own row`);
+		}
+	});
+
+	test('an array argument is a list of names, or a count — never [object Object]', () => {
+		// `String([{...}])` is `[object Object]`, and that is what a batched read used to be labelled
+		// with the moment the catalog gained a key for it.
+		const batch = JSON.stringify({ operations: [{ tool: 'read_file', arguments: {} }, { tool: 'search_text', arguments: {} }, { tool: 'read_file', arguments: {} }] });
+		assert.strictEqual(toolDetailFor(OPENIDE_TOOL_META['batch_read'], batch), '3 files');
+		const targets = JSON.stringify({ targets: ['src/a.ts', 'src/b.ts'] });
+		assert.strictEqual(toolDetailFor(OPENIDE_TOOL_META['memory_graph_impact'], targets), 'src/a.ts, src/b.ts');
+		assert.strictEqual(toolDetailFor(OPENIDE_TOOL_META['batch_read'], JSON.stringify({ operations: [] })), '');
 	});
 
 	test('terminal_send never names what was typed', () => {

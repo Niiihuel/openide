@@ -24,12 +24,16 @@ suite('OpenIDE ChatComposerSuggest', () => {
 		assert.strictEqual(slashTokenAt('a/b', 3), undefined);
 	});
 
-	test('compactSlashDescription trims to one sentence and ~62 chars', () => {
+	test('compactSlashDescription trims to one sentence, and only caps a paragraph', () => {
 		assert.strictEqual(compactSlashDescription(''), '');
 		assert.strictEqual(compactSlashDescription('Prepara un commit atómico. Luego hace push.'), 'Prepara un commit atómico.');
-		const long = compactSlashDescription('x'.repeat(30) + ' ' + 'y'.repeat(40));
-		assert.ok(long.endsWith('…'));
-		assert.ok(long.length <= 63);
+		// A description that fits on the row's second line is handed over whole: the truncation is
+		// CSS's now, so the text grows with the panel instead of stopping at a fixed count.
+		const line = 'x'.repeat(30) + ' ' + 'y'.repeat(40);
+		assert.strictEqual(compactSlashDescription(line), line);
+		const paragraph = compactSlashDescription('z'.repeat(90) + ' ' + 'w'.repeat(90));
+		assert.ok(paragraph.endsWith('…'));
+		assert.ok(paragraph.length <= 141);
 	});
 
 	test('slash suggestions: skills, natives + compact, then markdown commands; tools hidden', () => {

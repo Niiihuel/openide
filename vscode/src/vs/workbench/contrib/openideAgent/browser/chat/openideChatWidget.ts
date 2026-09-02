@@ -3,10 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append, getTotalHeight, reset } from '../../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, reset } from '../../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { FuzzyScore } from '../../../../../base/common/filters.js';
-import { Disposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable, toDisposable, MutableDisposable } from '../../../../../base/common/lifecycle.js';
 import { AgentMode } from '../../common/openideAgentTypes.js';
 import { onDidAcceptOpenideChatModeSuggestion } from './parts/openideChatModeSuggestionPart.js';
 import { onDidRequestOpenideChatSubagentAction } from './parts/openideChatSubagentPart.js';
@@ -18,6 +18,8 @@ import { IConfigurationService } from '../../../../../platform/configuration/com
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { IOpenideChatItem, IOpenideChatRequestItem } from '../../common/chat/openideChatItem.js';
+import { IOpenideChatAskContent } from '../../common/chat/openideChatContent.js';
+import { OpenideChatQuestionsCard } from './openideChatQuestionsCard.js';
 import { IOpenideAgentService } from '../openideAgentService.js';
 import { IOpenideProjectMapLearningService } from '../openideProjectMapLearningService.js';
 import { IChatSessionUsage, OpenideChatSessions } from '../openideChatSessions.js';
@@ -25,6 +27,10 @@ import { IOpenideCliChangesService, OpenideCliChangesService } from '../openideC
 import { applyOpenideSurfaceCss } from '../openideSurfaceStyle.js';
 import { IOpenideChatNotice, OpenideChatController } from './openideChatController.js';
 import { IOpenideComposerSubmit, OpenideChatComposer } from './openideChatComposer.js';
+import { IComposerSnippet } from '../../common/chat/openideChatSnippet.js';
+
+/** Whether a selection sent while a hosted CLI's tab is active goes into that CLI's prompt. */
+export const OPENIDE_SELECTION_TO_CLI_KEY = 'openide.chat.selectionToCli';
 import { IOpenideChatCapabilityCounts, OPENIDE_CHAT_EMPTY_CAPABILITIES } from '../../common/chat/openideChatContextBreakdown.js';
 import { buildOpenideChatSlashSuggestions, IOpenideChatSuggestSources } from '../../common/chat/openideChatSlashCommands.js';
 import {
@@ -39,6 +45,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { OpenideChatHeader } from './openideChatHeader.js';
 import { OpenideChatListWidget } from './openideChatListWidget.js';
 import { OpenideChatRequestRenderer } from './openideChatRequestRenderer.js';
+import { OpenideChatPinnedRequest } from './openideChatPinnedRequest.js';
 import { OpenideChatResponseRenderer } from './openideChatResponseRenderer.js';
 import { OPENIDE_CHAT_TRANSCRIPT_COPIED, OPENIDE_CHAT_TRANSCRIPT_EMPTY, openideChatTranscriptToMarkdown } from './openideChatTranscriptExport.js';
 import { creditOpenideChatFileOutcome } from './parts/openideChatEditLearning.js';
@@ -54,7 +61,7 @@ import './media/openideChatNative.css';
 import './media/openideChatRequest.css';
 
 /**
- * Same sentence the webview shows when the turn has no `messageId` yet (openideChatHtml.ts:2728):
+ * Same sentence the webview shows when the turn has no `messageId` yet:
  * the transaction is keyed by that id, so with no id there is nothing to revert — and staying
  * silent would read as a dead button.
  */
@@ -80,16 +87,24 @@ export class OpenideChatWidget extends Disposable {
 	private readonly _root: HTMLElement;
 	private readonly _listHost: HTMLElement;
 	private readonly _notice: HTMLElement;
+	/** The close button's listener, rebuilt with every notice. */
+	private readonly _noticeStore = this._register(new MutableDisposable());
 
 	private readonly _header: OpenideChatHeader;
 	private readonly _list: OpenideChatListWidget;
 	private readonly _filesTray: OpenideChatFilesTray;
+	private readonly _questionsCard: OpenideChatQuestionsCard;
 	private readonly _terminalsTray: OpenideChatTerminalsTray;
 	private readonly _composer: OpenideChatComposer;
 	private readonly _terminalPane: OpenideChatAgentTerminalPane;
 	private readonly _sessionsPane: OpenideChatSessionsPane;
 	private readonly _hooks: OpenideClaudeHooks;
 	private _cliActive = false;
+	/** The request held at the top of the transcript, and the host of the inline editor. */
+	private readonly _pinned: OpenideChatPinnedRequest;
+	/** The second composer, mounted in the pinned overlay on the first edit. */
+	private _editComposer: OpenideChatComposer | undefined;
+	private readonly _instantiationService: IInstantiationService;
 	/** No conversation on screen: the Sessions panel is the body (upstream's stacked control). */
 	private _listMode = false;
 	private _capabilityCounts: IOpenideChatCapabilityCounts = OPENIDE_CHAT_EMPTY_CAPABILITIES;
@@ -121,6 +136,7 @@ export class OpenideChatWidget extends Disposable {
 		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
 	) {
 		super();
+		this._instantiationService = instantiationService;
 
 		// The `--oi-*` tokens the stylesheet is written against live in a TypeScript string that
 		// the webviews inline; on native DOM somebody has to install it, and it is idempotent.
@@ -140,8 +156,9 @@ export class OpenideChatWidget extends Disposable {
 		const responseRenderer = this._register(instantiationService.createInstance(
 			OpenideChatResponseRenderer, this._currentWidth, this._onDidChangeVisibility.event,
 		));
-		const requestRenderer = this._register(new OpenideChatRequestRenderer({
+		const requestRenderer = this._register(instantiationService.createInstance(OpenideChatRequestRenderer, {
 			rollbackTo: element => this._rollbackTo(element),
+			edit: element => this._beginEdit(element),
 			clampLines: () => resolveChatClampLines(this.configurationService.getValue(OPENIDE_CHAT_CLAMP_LINES_KEY)),
 		}));
 		const renderers: ITreeRenderer<IOpenideChatItem, FuzzyScore, unknown>[] = [
@@ -150,18 +167,33 @@ export class OpenideChatWidget extends Disposable {
 		];
 
 		this._list = this._register(instantiationService.createInstance(OpenideChatListWidget, this._listHost, { renderers }));
+		// Over the list, inside its host: the request whose turn is on screen, and the inline editor.
+		this._pinned = this._register(instantiationService.createInstance(OpenideChatPinnedRequest, this._listHost, {
+			rollbackTo: (element: IOpenideChatRequestItem) => this._rollbackTo(element),
+			edit: (element: IOpenideChatRequestItem) => this._beginEdit(element),
+			clampLines: () => resolveChatClampLines(this.configurationService.getValue(OPENIDE_CHAT_CLAMP_LINES_KEY)),
+			canEdit: () => !this._controller.isBusy,
+		}));
+		this._register(this._pinned.onDidCancelEdit(() => this._endEdit()));
+		this._register(this._list.onDidScroll(() => this._syncPinnedRequest()));
 		// The live terminal of an external agent session takes the transcript's place (and the
 		// composer's: the TUI has its own prompt) while such a session is the active tab.
 		this._terminalPane = this._register(instantiationService.createInstance(OpenideChatAgentTerminalPane, this._root));
-		this._notice = append(this._root, $('.openide-chat-notice.hidden'));
+		// Over the transcript, under the pinned message: an answer to something the user just did
+		// up there (a click on the pinned turn, a rejected attachment) shows where they are
+		// looking, not down by the composer. It is an overlay, so it takes no room from the list.
+		this._notice = append(this._listHost, $('.openide-chat-notice.hidden'));
 		// Between the transcript and the composer, which is where the webview's dock puts it: the
 		// pending changes are the thing you decide on BEFORE writing the next message.
 		// Composer first: the tray mounts inside it, so its host has to exist already. Mounting the
 		// tray on the root instead left it outside the dock, whose fade gradient then painted over it.
 		this._composer = this._register(instantiationService.createInstance(OpenideChatComposer, this._root, this._suggestSources()));
+		// Docked ON the composer, not in the transcript: the run is parked on the answer, so the
+		// card belongs where the user is already looking. The transcript keeps a shimmer line.
+		this._questionsCard = this._register(instantiationService.createInstance(OpenideChatQuestionsCard, this._composer.questionsHost));
 		this._filesTray = this._register(instantiationService.createInstance(OpenideChatFilesTray, this._composer.trayHost));
-		// Stacked UNDER the changed files, which is the webview's order too (openideChatHtml.ts's
-		// #filesStack appends `terms` after `files`): the files are a decision waiting for the user,
+		// Stacked UNDER the changed files, which is the order the webview had too (its `#filesStack`
+		// appended `terms` after `files`): the files are a decision waiting for the user,
 		// the terminals are just running — the thing to act on sits closest to the composer.
 		this._terminalsTray = this._register(instantiationService.createInstance(OpenideChatTerminalsTray, this._composer.trayHost));
 		this._controller = this._register(instantiationService.createInstance(OpenideChatController, sessions));
@@ -172,7 +204,12 @@ export class OpenideChatWidget extends Disposable {
 
 		this._register(responseRenderer.onDidChangeItemHeight(event => this._list.updateItemHeight(event.element, event.height)));
 		this._register(requestRenderer.onDidChangeItemHeight(event => this._list.updateItemHeight(event.element, event.height)));
-		this._register(this._controller.onDidChangeItems(() => this._list.setItems(this._controller.items)));
+		this._register(this._controller.onDidChangeItems(() => {
+			this._list.setItems(this._controller.items);
+			this._syncQuestionsCard();
+			this._syncPinnedRequest();
+		}));
+		this._register(this._questionsCard.onDidChangeHeight(() => this._composer.remeasure()));
 		// Both trays live INSIDE the composer's dock, so their height is the composer's height: they
 		// ask it to re-measure and the autorun below re-lays out the list. Laying out the list here
 		// instead would run it against a `composer.height` that has not seen the tray yet.
@@ -191,6 +228,8 @@ export class OpenideChatWidget extends Disposable {
 		this._register(this._controller.onDidChangeBusy(busy => {
 			this._composer.setBusy(busy);
 			this._filesTray.setBusy(busy);
+			// An abort can end the run without a toolResult ever settling the ask content.
+			this._syncQuestionsCard();
 			// `autoScroll: always` re-arms the tail on every turn boundary: the user who scrolled up
 			// to re-read still lands on the fresh reply the moment the run settles.
 			if (!busy && resolveChatAutoScroll(this.configurationService.getValue(OPENIDE_CHAT_AUTO_SCROLL_KEY)) === 'always') {
@@ -223,11 +262,16 @@ export class OpenideChatWidget extends Disposable {
 				return;
 			}
 			const sessionId = this._controller.subagentSessionOf(runId);
-			if (sessionId) {
-				this.sessions.activate(sessionId);
-				this._header.render();
-				this._switchSession(sessionId);
+			if (!sessionId) {
+				// The mirror lives in a Map that does not survive a reload, and the durable path
+				// never opened one to begin with, so this is reachable today. Saying so beats a row
+				// that looks clickable and does nothing.
+				this._showNotice({ severity: 'info', message: t('chat.part.subagentNoSession') });
+				return;
 			}
+			this.sessions.activate(sessionId);
+			this._header.render();
+			this._switchSession(sessionId);
 		}));
 		this._register(onDidRequestOpenideChatContinue(() => {
 			if (this._controller.isBusy) { return; }
@@ -240,6 +284,7 @@ export class OpenideChatWidget extends Disposable {
 		this._register(this._composer.onDidReject(message => this._showNotice({ severity: 'info', message })));
 		this._register(this._composer.onDidFailVoice(message => this._showNotice({ severity: 'warning', message })));
 		this._register(this._controller.onDidChangeUsage(usage => this._composer.setUsage(usage, this._capabilityCounts)));
+		this._register(this._controller.onDidChangeModelRoute(route => this._composer.setModelRoute(route)));
 
 		this._register(autorun(reader => {
 			this._composer.height.read(reader);
@@ -280,6 +325,7 @@ export class OpenideChatWidget extends Disposable {
 	 */
 	showContextPanel(): void {
 		this._composer.setUsage(this._controller.usage, this._capabilityCounts);
+		this._composer.setModelRoute(this._controller.modelRoute);
 		this._composer.toggleSessionInfo();
 		void this._refreshCapabilityCounts();
 	}
@@ -297,10 +343,54 @@ export class OpenideChatWidget extends Disposable {
 		}
 	}
 
+	/**
+	 * An editor selection sent to the chat. Nothing is sent by it.
+	 *
+	 * On a hosted CLI's tab it is pasted into that CLI's prompt, when `openide.chat.selectionToCli`
+	 * allows it (it does by default). Everywhere else it lands in a LOCAL conversation as a chip
+	 * — the one on screen, or a new one when what is on screen has no composer (the sessions
+	 * list, a CLI with the paste turned off): the user asked to add to the chat, not to open one.
+	 */
+	attachSnippet(snippet: IComposerSnippet): void {
+		const active = this.sessions.activeSessionId();
+		const meta = active ? this.sessions.metaOf(active) : undefined;
+		if (active && meta?.kind === 'cli' && !this._listMode
+			&& this.configurationService.getValue(OPENIDE_SELECTION_TO_CLI_KEY) !== false
+			&& this._terminalPane.sendSnippet(active, snippet)) {
+			return;
+		}
+		if (this._listMode || !active || meta?.kind !== 'native') {
+			this._header.newSession();
+		}
+		this._composer.addSnippet(snippet);
+		this._composer.focus();
+	}
+
 	/** A Canvas choice: lands in the composer and waits for the user. Never sends on its own. */
 	injectCanvasChoice(label: string): void {
 		this._composer.value = label;
 		this._composer.focus();
+	}
+
+	/**
+	 * A question from ANOTHER surface — the Project Map's "Ask the agent" — gets its own
+	 * conversation and is sent.
+	 *
+	 * A new tab rather than the one on screen because the question arrives out of nowhere from the
+	 * conversation's point of view: dropping "analyse this module" into a chat that was halfway
+	 * through something else poisons that context and loses the answer in a thread about another
+	 * subject. A tab is cheap, and this way the answer is a real conversation — the model picker,
+	 * the tools, the history — instead of a one-shot stream in a card that dies with the selection.
+	 *
+	 * Ordering matters and is safe: `newSession` fires the header's active-session event, and every
+	 * hop from there (`_switchSession` → `_restoreTranscript`) is synchronous, so by the time this
+	 * returns the composer and the controller are already on the new conversation.
+	 */
+	askInNewSession(prompt: string): void {
+		this.newSession();
+		this._composer.value = prompt;
+		this._composer.focus();
+		this._composer.submit();
 	}
 
 	/** A Canvas button's prompt: fills the composer and, unless told otherwise, sends it. */
@@ -318,7 +408,7 @@ export class OpenideChatWidget extends Disposable {
 		void this._controller.compact();
 	}
 
-	get onDidFinishRun(): Event<{ readonly hadError: boolean }> {
+	get onDidFinishRun(): Event<{ readonly hadError: boolean; readonly conversationId: string }> {
 		return this._controller.onDidFinishRun;
 	}
 
@@ -355,12 +445,50 @@ export class OpenideChatWidget extends Disposable {
 	 * replaced — a late delta would otherwise stream into the reply of a different conversation.
 	 * The composer is cleared for the same reason a half-typed message does not follow a tab switch.
 	 */
+	/**
+	 * Changes which conversation is on screen. It does NOT stop the one being left.
+	 *
+	 * It used to `abort()` here, which meant "the turn belongs to the tab you are looking at": send
+	 * a request, go read another conversation, and the first one was cancelled where it stood — with
+	 * two conversations going, neither of them finished. A run belongs to its CONVERSATION (the
+	 * controller keeps one record per id, and the agent service serializes them), so leaving it is
+	 * just leaving: it keeps working, its tab shows the in-progress dot, and coming back finds the
+	 * transcript where the run left it. Stopping a turn is the composer's Stop button, which the
+	 * user presses on purpose.
+	 */
 	private _switchSession(id: string): void {
 		this._leaveListMode();
-		this._controller.abort();
 		this._hideNotice();
 		this._composer.value = '';
 		this._restoreTranscript(id);
+	}
+
+	/**
+	 * Docks or hides the questions card after every repaint: the card exists exactly while the
+	 * VISIBLE conversation has an ask the run is still parked on. Busy gates it because an aborted
+	 * run leaves the content pending forever with nothing left to resolve.
+	 */
+	private _syncQuestionsCard(): void {
+		let pending: IOpenideChatAskContent | undefined;
+		if (this._controller.isBusy) {
+			// Only the LAST response can hold a pending ask: an ask blocks the run, so nothing gets
+			// appended after it until it is answered. This runs on every repaint of a streamed
+			// turn, and walking the whole transcript for it scaled with the conversation's length.
+			const items = this._controller.items;
+			for (let i = items.length - 1; i >= 0; i--) {
+				const item = items[i];
+				if (item.kind !== 'response') { continue; }
+				for (const content of item.content) {
+					if (content.kind === 'ask' && !content.isComplete) { pending = content; }
+				}
+				break;
+			}
+		}
+		if (pending) {
+			this._questionsCard.show(pending);
+		} else {
+			this._questionsCard.hide();
+		}
 	}
 
 	// ---- Sessions panel + external agents (VS Code Agent Sessions, Orca's hosted TUIs)
@@ -399,11 +527,26 @@ export class OpenideChatWidget extends Disposable {
 			this._reconcileTerminals();
 		}));
 		this._register(this._header.onDidChangeActiveSession(() => this._reconcileTerminals()));
-		this._register(this._header.onDidCloseTab(() => this._reconcileTerminals()));
+		// The dock is what the engine asks "who else is open" and hands a message to. It is registered
+		// from here because the widget is what owns a controller and a session store at once.
+		this.agentService.setConversationHost(this._controller.conversationHost());
+		this._register(toDisposable(() => this.agentService.setConversationHost(undefined)));
+		this._register(this._header.onDidCloseTab(id => {
+			// A run outlives a tab CHANGE, not the tab itself: with the conversation off the strip
+			// there is nowhere for its reply to land and nobody to stop it.
+			this._controller.abort(id);
+			// A conversation that left the strip owns no files and has no inbox any more.
+			this.agentService.releaseConversationResources(id);
+			this._reconcileTerminals();
+		}));
 		// Nothing to show yet: open on the sessions overview, as VS Code does.
 		if (!this.sessions.activeSessionId()) {
 			this._enterListMode();
 		}
+		// A deleted conversation leaves the Changes view too: the service indexes sessions by id
+		// and nothing else ever told it a session was gone, so a deleted CLI chat kept its
+		// section — and a new chat with the same title showed as a second one.
+		this._register(this.sessions.onDidDelete(id => this._cliChanges.forget(id)));
 		this._register(this._terminalPane.onDidChangeStatus(({ sessionId, status }) => {
 			// The Changes view reads the SAME transition the status dot does, so the two can never
 			// disagree about whether the agent is working — which is what makes a turn's file list
@@ -432,17 +575,11 @@ export class OpenideChatWidget extends Disposable {
 		}));
 		this._register(this._hooks.onDidInstall(() => this.notificationService.info(t('sessions.cli.hooksInstalled'))));
 		this._register(this._hooks.onDidReceive(payload => {
-			// Match by the CLI's own session id when we already know it, else by cwd — and learn
-			// the id on the way, which is what `--resume` needs later.
-			const cwd = payload.cwd.replace(/\/+$/, '');
-			// Any Claude session of the store, hosted or not: a payload that lands before the PTY
-			// is registered (or after a reload) still carries the id `--resume` will need.
-			const claude = this.sessions.listAll().filter(session => session.kind === 'cli' && session.cliId === 'claude');
-			// Learning the id matches by cwd alone (a session that has never carried one, newest
-			// first) so a reopened session recovers its `--resume` id; driving the live status also
-			// needs a hosted PTY.
-			const known = claude.find(session => session.providerSessionId === payload.sessionId);
-			const target = known ?? claude.filter(session => !session.providerSessionId && (session.cwd ?? '').replace(/\/+$/, '') === cwd).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+			// Matched by the dock session id the launch environment stamped on the PTY — never by
+			// cwd: a payload that cannot name its session is not ours (`parseClaudeHookDrop`
+			// already dropped it), and one that can names exactly one. The Claude session id is
+			// learned on the way, which is what `--resume` needs later.
+			const target = this.sessions.listAll().find(session => session.id === payload.openideSessionId && session.kind === 'cli' && session.cliId === 'claude');
 			if (!target) {
 				return;
 			}
@@ -541,12 +678,16 @@ export class OpenideChatWidget extends Disposable {
 	 * in the middle of its own history.
 	 */
 	private _restoreTranscript(id?: string): void {
-		this._syncCliMode(id ?? this.sessions.activeSessionId());
+		const conversationId = id ?? this.sessions.activeSessionId();
+		this._syncCliMode(conversationId);
 		this._list.setFollowTail(true);
-		this._controller.restore(id);
 		// The queue of messages typed while a run was busy is per conversation: the composer swaps
-		// it together with the transcript.
-		this._composer.setConversation(this._controller.activeConversationId);
+		// it together with the transcript, and it swaps FIRST — `restore` publishes the busy state
+		// of the conversation being entered, and an idle one drains the queue on the spot. With the
+		// composer still pointing at the queue of the conversation being left, that drain would send
+		// its message into the wrong conversation.
+		this._composer.setConversation(conversationId);
+		this._controller.restore(id);
 		// So does the context: `usage` is per conversation (`usageOf(activeId)`), but nothing pushed
 		// it on a switch — the ring kept showing the PREVIOUS conversation's percentage until that
 		// one's next turn produced a `usage` event, which on an idle conversation is never.
@@ -601,6 +742,7 @@ export class OpenideChatWidget extends Disposable {
 			pick: request.pick,
 			capabilities: request.capabilities?.length ? request.capabilities : undefined,
 			references: request.references?.length ? request.references : undefined,
+			snippets: request.snippets?.length ? request.snippets : undefined,
 			mode: request.mode,
 			providerId: request.providerId,
 			modelId: request.modelId,
@@ -666,7 +808,15 @@ export class OpenideChatWidget extends Disposable {
 	}
 
 	private _showNotice(notice: IOpenideChatNotice): void {
-		reset(this._notice, notice.message);
+		// The same anatomy as a notice card in the transcript (openideChatNotice.css): one
+		// coloured glyph and the text. It used to be bare text between the list and the composer.
+		const icon = notice.severity === 'error' ? 'error' : notice.severity === 'warning' ? 'warning' : 'info';
+		const close = $('button.openide-chat-notice-close', { type: 'button', title: t('chat.notice.close') });
+		append(close, $('span.codicon.codicon-close'));
+		this._noticeStore.value = addDisposableListener(close, 'click', () => this._hideNotice());
+		reset(this._notice, $(`span.codicon.codicon-${icon}`), $('span.openide-chat-notice-text', undefined, notice.message), close);
+		// Just under the pinned message when there is one, else at the top of the transcript.
+		this._notice.style.top = `${(this._pinned.domNode.classList.contains('visible') ? this._pinned.domNode.offsetHeight : 0) + 6}px`;
 		this._notice.classList.remove('hidden');
 		this._notice.classList.toggle('openide-chat-notice-error', notice.severity === 'error');
 		this._notice.classList.toggle('openide-chat-notice-warning', notice.severity === 'warning');
@@ -678,6 +828,7 @@ export class OpenideChatWidget extends Disposable {
 		if (this._notice.classList.contains('hidden')) {
 			return;
 		}
+		this._noticeStore.clear();
 		this._notice.classList.add('hidden');
 		this._layoutList();
 	}
@@ -718,8 +869,9 @@ export class OpenideChatWidget extends Disposable {
 		// Beside the panel the transcript, notice and composer give up its 300px column.
 		const contentWidth = side ? Math.max(0, width - SESSIONS_SIDE_WIDTH) : width;
 		this._composer.layout(contentWidth);
+		this._header.layout();
 		const belowHeader = Math.max(0, height - this._header.height);
-		const composerBlock = this._composer.height.get() + getTotalHeight(this._notice);
+		const composerBlock = this._composer.height.get();
 		this._sessionsPane.layout(width, this._header.height, this._listMode ? composerBlock : 0);
 		if (this._cliActive && !this._listMode) {
 			this._terminalPane.layout(contentWidth, belowHeader);
@@ -730,6 +882,119 @@ export class OpenideChatWidget extends Disposable {
 		if (!this._listMode) {
 			this._list.layout(listHeight, contentWidth);
 		}
+		this._editComposer?.layout(contentWidth);
+		this._syncPinnedRequest();
+	}
+
+	/**
+	 * Keeps the pinned request in step with the scroll position: the request row that has just
+	 * scrolled past the top edge is the one whose turn is on screen, and it gets held there.
+	 * Nothing to do while the overlay is the editor's.
+	 */
+	private _syncPinnedRequest(): void {
+		if (this._pinned.isEditing) {
+			return;
+		}
+		if (this._listMode || this._cliActive) {
+			this._pinned.hide();
+			return;
+		}
+		const element = this._list.findScrolledPastRequest();
+		if (element) {
+			this._pinned.show(element);
+		} else {
+			this._pinned.hide();
+		}
+	}
+
+	/**
+	 * Edit and resend from a turn (Cursor: click the message). The editor is the pinned overlay
+	 * with a full composer in it, so the user gets the same mode, model and attachment controls as
+	 * below; the row is scrolled to the top first so the editor stands where the bubble was.
+	 */
+	private _beginEdit(element: IOpenideChatRequestItem): void {
+		if (!element.messageId) {
+			this._showNotice({ severity: 'info', message: ROLLBACK_UNREGISTERED });
+			return;
+		}
+		// Rolling back under a live run would race it for the files; the queue is not an option
+		// here either, because the edited turn has to REPLACE what follows, not follow it.
+		if (this._controller.isBusy) {
+			this._showNotice({ severity: 'info', message: t('chat.request.editBusy') });
+			return;
+		}
+		this._hideNotice();
+		this._list.reveal(element, 0);
+		const composer = this._ensureEditComposer();
+		const text = element.displayText ?? element.text;
+		composer.restore({
+			text,
+			inputText: text,
+			images: element.images ?? [],
+			references: [],
+			capabilities: element.capabilities ?? [],
+			mode: (element.mode ?? 'agent') as AgentMode,
+			providerId: element.providerId ?? '',
+			modelId: element.modelId ?? '',
+		});
+		if (element.mode) { composer.setMode(element.mode); }
+		this._pinned.beginEdit(element);
+		if (this._dimension) {
+			composer.layout(this._dimension.width);
+		}
+		composer.focus();
+	}
+
+	private _ensureEditComposer(): OpenideChatComposer {
+		if (!this._editComposer) {
+			this._editComposer = this._register(this._instantiationService.createInstance(OpenideChatComposer, this._pinned.editHost, this._suggestSources()));
+			this._register(this._editComposer.onDidSubmit(request => void this._resendEdited(request)));
+			this._register(this._editComposer.onDidReject(message => this._showNotice({ severity: 'info', message })));
+			this._register(this._editComposer.onDidFailVoice(message => this._showNotice({ severity: 'warning', message })));
+		}
+		return this._editComposer;
+	}
+
+	/**
+	 * The edited turn goes out through the same rollback the row's button runs, then the same
+	 * `_send` the main composer uses — the transcript is truncated to the turn, its files reverted,
+	 * and the new message is the next request. The mode and model of the ORIGINAL turn stand in
+	 * for anything the editor did not set: resending from a different mode than the one the turn
+	 * was written in silently changes what the model is allowed to do.
+	 */
+	private async _resendEdited(request: IOpenideComposerSubmit): Promise<void> {
+		const element = this._pinned.element;
+		this._endEdit();
+		if (!element?.messageId) {
+			return;
+		}
+		const outcome = await this._controller.rollbackToUserMessage(element.messageId, false);
+		if (!outcome.committed) {
+			this._showNotice({ severity: 'error', message: outcome.warning ?? ROLLBACK_UNREGISTERED });
+			// Handed back whole to the main composer, so the edit is not lost with the rollback.
+			this._composer.restore(request);
+			return;
+		}
+		if (outcome.removedMessageIds.length) {
+			this.learningService.recordOutcome(outcome.removedMessageIds, 'rollback');
+		}
+		if (outcome.warning) {
+			this._showNotice({ severity: 'warning', message: outcome.warning });
+		}
+		this._send({
+			...request,
+			mode: request.mode ?? element.mode,
+			providerId: request.providerId || element.providerId || '',
+			modelId: request.modelId || element.modelId || '',
+		});
+	}
+
+	private _endEdit(): void {
+		if (!this._pinned.isEditing) {
+			return;
+		}
+		this._pinned.endEdit();
+		this._syncPinnedRequest();
 	}
 
 	layout(height: number, width: number): void {

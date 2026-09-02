@@ -33,6 +33,7 @@ suite('OpenIDE chat content', () => {
 	/** One minimal sample per kind. The Record type breaks the build if a kind is missing. */
 	const samples: Record<OpenideChatContentKind, IOpenideChatContent> = {
 		markdown: { kind: 'markdown', value: md('hola') },
+		accountChoice: { kind: 'accountChoice', requestId: 'q1', spentLabel: 'a@x.com', candidates: [{ accountId: 'b', label: 'b@x.com' }] },
 		thinking: { kind: 'thinking', text: 'pensando', isComplete: false },
 		tool: { kind: 'tool', callId: 'c1', name: 'read_file', argumentsJson: '{}', state: 'running' },
 		explore: { kind: 'explore', id: 'e1', entries: [], isComplete: false },

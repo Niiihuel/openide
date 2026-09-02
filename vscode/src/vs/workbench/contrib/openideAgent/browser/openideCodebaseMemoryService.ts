@@ -8,6 +8,8 @@
  *  channel and keeps only bounded caches/snapshots for the UI and the agent.
  *--------------------------------------------------------------------------------------------*/
 
+import { joinPath } from '../../../../base/common/resources.js';
+import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { raceTimeout } from '../../../../base/common/async.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
@@ -70,6 +72,7 @@ export class CodebaseMemoryService extends Disposable implements ICodebaseMemory
 
 
 	constructor(
+		@IEnvironmentService private readonly environmentService: IEnvironmentService,
 		@ISharedProcessService sharedProcessService: ISharedProcessService,
 		@IWorkspaceContextService contextService: IWorkspaceContextService,
 		@IWorkspaceTrustManagementService private readonly workspaceTrust: IWorkspaceTrustManagementService,
@@ -132,6 +135,8 @@ export class CodebaseMemoryService extends Disposable implements ICodebaseMemory
 			indexTests: this.configurationService.getValue('openide.memory.indexTests') !== false,
 			enableRegexFallback: this.configurationService.getValue('openide.memory.enableRegexFallback') !== false,
 			persistIndex: this.configurationService.getValue('openide.memory.persistIndex') !== false,
+			// The IDE's own storage, so the index never sits in the user's repo.
+			storageRoot: joinPath(this.environmentService.userRoamingDataHome, 'openideAgent', 'memory-indexes').toString(),
 			indexNotes: this.configurationService.getValue(CODEBASE_NOTES_ENABLED_SETTING) !== false,
 			noteLinking: noteLinkingFromSetting(this.configurationService.getValue(CODEBASE_NOTES_LINKING_SETTING)),
 		};

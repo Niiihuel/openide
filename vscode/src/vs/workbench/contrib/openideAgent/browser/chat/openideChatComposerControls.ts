@@ -8,14 +8,19 @@ import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../nls.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { AgentMode } from '../../common/openideAgentTypes.js';
 import { IOpenideAgentService } from '../openideAgentService.js';
 import { applyProviderIcon } from '../openideProviderIcons.js';
 import { createThinkingGlyph, OpenideChatEffortPicker, reasoningControlVisible, reasoningEffortLabel } from './openideChatEffortPicker.js';
 import { OpenideChatModePicker, agentModeEntry } from './openideChatModePicker.js';
 import { OpenideChatModelPicker } from './openideChatModelPicker.js';
+import { IOpenideChatModelRoute } from './openideChatController.js';
+import { describeCooldown } from '../../common/openideModelHealth.js';
 import { OpenideChatComposerVoice, VoiceState } from './openideChatComposerVoice.js';
+import { IOpenideChatTooltip, setupChatTooltip } from './openideChatHover.js';
 import { createCodicon } from './openideComposerMenu.js';
+import { createArrowUpIcon, createPaperclipIcon } from './openideChatIcons.js';
 import { t } from '../../common/openideStrings.js';
 
 export type VoiceMode = 'toggle' | 'holdToTalk';
@@ -38,14 +43,16 @@ function createTrigger(parent: HTMLElement, className: string, shrink = false): 
 	return { anchor, button, label };
 }
 
-function createUtilButton(parent: HTMLElement, className: string, icon: string, tooltip: string): HTMLButtonElement {
+/**
+ * A control-row icon. It carries no `title=`: the tip is the workbench hover, and it reads the
+ * button's accessible name when shown, so repainting a label only rewrites `aria-label`.
+ */
+function createUtilButton(hoverService: IHoverService, parent: HTMLElement, className: string, icon: string, tooltip: () => string): { readonly button: HTMLButtonElement; readonly tooltip: IOpenideChatTooltip } {
 	const button = append(parent, parent.ownerDocument.createElement('button'));
 	button.type = 'button';
 	button.className = `openide-composer-util ${className}`;
-	button.title = tooltip;
-	button.setAttribute('aria-label', tooltip);
 	button.appendChild(createCodicon(parent.ownerDocument, icon));
-	return button;
+	return { button, tooltip: setupChatTooltip(hoverService, button, tooltip) };
 }
 
 /**
@@ -60,7 +67,11 @@ export class OpenideChatComposerControls extends Disposable {
 
 	private readonly _modePicker: OpenideChatModePicker;
 	private readonly _modelPicker: OpenideChatModelPicker;
+	/** Set while a turn of the VISIBLE conversation runs somewhere other than the chosen model. */
+	private _modelRoute: IOpenideChatModelRoute | undefined;
 	private readonly _effortPicker: OpenideChatEffortPicker;
+	/** See `_warmModelCatalog`. */
+	private _catalogWarmed = false;
 
 	private readonly _modeButton: HTMLButtonElement;
 	private readonly _modeIcon: HTMLElement;
@@ -74,10 +85,20 @@ export class OpenideChatComposerControls extends Disposable {
 	private readonly _followButton: HTMLButtonElement;
 	private readonly _micButton: HTMLButtonElement;
 	private readonly _sendButton: HTMLButtonElement;
+	/**
+	 * The tips whose text depends on state, kept so a repaint can re-read them. The hover itself
+	 * always resolves late; these only exist to keep the accessible name on the same string.
+	 */
+	private readonly _modeTooltip: IOpenideChatTooltip;
+	private readonly _effortTooltip: IOpenideChatTooltip;
+	private readonly _followTooltip: IOpenideChatTooltip;
+	private readonly _micTooltip: IOpenideChatTooltip;
+	private readonly _sendTooltip: IOpenideChatTooltip;
 
 	private _busy = false;
 	private _hasContent = false;
 	private _voiceMode: VoiceMode = 'toggle';
+	private _voiceState: VoiceState = 'idle';
 	private _holding = false;
 	/** Guards the async parts of a repaint against a newer one that started meanwhile. */
 	private _refreshGeneration = 0;
@@ -89,6 +110,7 @@ export class OpenideChatComposerControls extends Disposable {
 		private readonly agentService: IOpenideAgentService,
 		contextViewService: IContextViewService,
 		commandService: ICommandService,
+		hoverService: IHoverService,
 		private readonly voice: OpenideChatComposerVoice,
 		private readonly actions: IComposerActions,
 	) {
@@ -104,12 +126,13 @@ export class OpenideChatComposerControls extends Disposable {
 		this._modeIcon = append(mode.button, createCodicon(document, 'openide-mode-agent', 'codicon-filled'));
 		this._modeLabel = append(mode.button, mode.label);
 		mode.button.appendChild(createCodicon(document, 'chevron-down', 'openide-composer-chevron'));
+		this._modeTooltip = this._register(setupChatTooltip(hoverService, this._modeButton, () => t('chat.tip.mode', agentModeEntry(this._modePicker.mode).label)));
 		this._register(addDisposableListener(mode.button, 'click', () => this._modePicker.toggle(mode.button)));
 
 		const model = createTrigger(row, 'openide-composer-model', true);
 		this._modelButton = model.button;
 		this._modelButton.classList.add('unset');
-		this._modelButton.title = localize('openide.chat.model.tip', "Modelo / proveedor");
+		this._register(setupChatTooltip(hoverService, this._modelButton, () => this._modelRouteTooltip() ?? t('chat.tip.model')));
 		this._modelIcon = append(model.button, document.createElement('span'));
 		this._modelIcon.className = 'openide-composer-provider-icon';
 		this._modelIcon.hidden = true;
@@ -124,23 +147,34 @@ export class OpenideChatComposerControls extends Disposable {
 		this._effortButton = effort.button;
 		this._effortButton.appendChild(createThinkingGlyph(document));
 		this._effortLabel = append(effort.button, effort.label);
+		this._effortTooltip = this._register(setupChatTooltip(hoverService, this._effortButton, () => t('chat.tip.effort', this._effortPicker.options.length)));
 		this._register(addDisposableListener(effort.button, 'click', () => this._effortPicker.toggle(effort.button)));
 
 		const spacer = append(row, document.createElement('span'));
 		spacer.className = 'openide-composer-spacer';
 
-		this._followButton = createUtilButton(row, 'openide-composer-follow', 'target', localize('openide.chat.follow', "Seguir al agente"));
+		// "Zen mode", not the sentence this used to carry: it is a toggle the user reaches for
+		// constantly, and a tip that takes a second to read is a tip that gets in the way.
+		const follow = createUtilButton(hoverService, row, 'openide-composer-follow', 'target', () => t(this.agentService.isPlanFollowEnabled() ? 'chat.tip.zenOff' : 'chat.tip.zen'));
+		this._followButton = follow.button;
+		this._followTooltip = this._register(follow.tooltip);
 		this._register(addDisposableListener(this._followButton, 'click', () => {
 			this.agentService.setPlanFollowEnabled(!this.agentService.isPlanFollowEnabled());
 			this._paintFollow();
 		}));
 		this._register(this.agentService.onDidChangePlanFollow(() => this._paintFollow()));
 
-		const attach = createUtilButton(row, 'openide-composer-attach', 'attach', localize('openide.chat.attach', "Adjuntar imagen (o pegala con Ctrl+V)"));
-		this._register(addDisposableListener(attach, 'click', () => this.actions.attach()));
+		const attach = createUtilButton(hoverService, row, 'openide-composer-attach', 'attach', () => t('chat.tip.attach'));
+		// Cursor's paperclip, not the codicon: the glyph is the one thing on this row the user
+		// compares with the other editor side by side.
+		attach.button.replaceChildren(createPaperclipIcon(document));
+		this._register(attach.tooltip);
+		this._register(addDisposableListener(attach.button, 'click', () => this.actions.attach()));
 
-		this._micButton = createUtilButton(row, 'openide-composer-mic', 'mic-filled', localize('openide.chat.voice.action', "Dictado por voz"));
-		// Toggle vs hold-to-talk (openideChatHtml.ts:6017-6036): the click only counts in toggle mode,
+		const mic = createUtilButton(hoverService, row, 'openide-composer-mic', 'mic-filled', () => this._voiceLabel());
+		this._micButton = mic.button;
+		this._micTooltip = this._register(mic.tooltip);
+		// Toggle vs hold-to-talk (the removed chat webview): the click only counts in toggle mode,
 		// and the pointer pair only in hold mode, so a setting change mid-session never double-fires.
 		this._register(addDisposableListener(this._micButton, 'click', () => {
 			if (this._voiceMode === 'toggle') { this.voice.toggle(); }
@@ -162,8 +196,8 @@ export class OpenideChatComposerControls extends Disposable {
 		this._sendButton = append(row, document.createElement('button'));
 		this._sendButton.type = 'button';
 		this._sendButton.className = 'openide-composer-send';
-		this._sendButton.title = localize('openide.chat.send', "Send (Enter)");
-		this._sendButton.appendChild(createCodicon(document, 'arrow-up'));
+		this._sendTooltip = this._register(setupChatTooltip(hoverService, this._sendButton, () => t(this._busy ? 'chat.tip.stop' : 'chat.tip.send')));
+		this._sendButton.appendChild(createArrowUpIcon(document));
 		this._register(addDisposableListener(this._sendButton, 'click', () => {
 			if (this._busy) { this.actions.stop(); } else { this.actions.send(); }
 		}));
@@ -205,7 +239,7 @@ export class OpenideChatComposerControls extends Disposable {
 		if (this._voiceMode === mode) { return; }
 		if (this._holding) { this._holding = false; this.voice.endHold(); }
 		this._voiceMode = mode;
-		this._paintMicTooltip(this.voice.state);
+		this._micTooltip.update();
 	}
 
 	closeMenus(): void {
@@ -216,24 +250,65 @@ export class OpenideChatComposerControls extends Disposable {
 
 	/** Repaints the mic from the recorder's own state machine. */
 	applyVoiceState(state: VoiceState): void {
+		this._voiceState = state;
 		this._micButton.classList.toggle('rec', state === 'recording');
 		this._micButton.classList.toggle('busy', state === 'busy' || state === 'starting');
-		this._paintMicTooltip(state);
+		this._micTooltip.update();
 		this._updateSlot();
 	}
 
-	private _paintMicTooltip(state: VoiceState): void {
-		const label = state === 'recording' ? (this._voiceMode === 'holdToTalk' ? t('chat.voice.release') : localize('openide.chat.voice.stop', "Parar y transcribir"))
-			: state === 'busy' ? localize('openide.chat.voice.transcribing', "Transcribiendo…")
-				: state === 'starting' ? t('chat.voice.preparing')
+	/** What the microphone is doing right now, in the language the IDE is in right now. */
+	private _voiceLabel(): string {
+		return this._voiceState === 'recording' ? (this._voiceMode === 'holdToTalk' ? t('chat.voice.release') : t('chat.voice.stop'))
+			: this._voiceState === 'busy' ? t('chat.voice.transcribing')
+				: this._voiceState === 'starting' ? t('chat.voice.preparing')
 					: this._voiceMode === 'holdToTalk' ? t('chat.voice.hold')
-						: localize('openide.chat.voice.action', "Dictado por voz");
-		this._micButton.title = label;
-		this._micButton.setAttribute('aria-label', label);
+						: t('chat.voice.dictate');
+	}
+
+	/**
+	 * The turn in flight is not running on the model the chip names.
+	 *
+	 * The chip keeps saying what the user chose — the choice did not change, and it comes back on
+	 * its own when the cooldown expires — with the model actually answering after an arrow. Upstream
+	 * draws the same distinction in state rather than pixels (`IIntendedModelSelection`); here it
+	 * has to be visible, because a chip that names a model which is not answering is a lie the user
+	 * acts on.
+	 */
+	setModelRoute(route: IOpenideChatModelRoute | undefined): void {
+		if (this._modelRoute?.model === route?.model && this._modelRoute?.reason === route?.reason) {
+			return;
+		}
+		this._modelRoute = route;
+		this.refresh();
 	}
 
 	refresh(): void {
 		void this._refreshAsync();
+		this._warmModelCatalog();
+	}
+
+	/**
+	 * The model registry is loaded lazily, and until it answers, `getModelReasoning` says "unknown"
+	 * — which `reasoningControlVisible` reads as "no reasoning control". The row paints once when
+	 * the dock mounts, so on a cold registry the thinking chip simply never appeared: the only way
+	 * to get it was to OPEN the model picker, because `getConnectedModelGroups` awaits the registry
+	 * and the pick repaints the row afterwards. That is the bug — the chip depended on having gone
+	 * shopping for a model. Warm it once and repaint with the answer.
+	 *
+	 * One-shot: `_refreshAsync` is what calls `refresh`'s siblings, so without the flag the repaint
+	 * would warm again and recurse.
+	 */
+	private _warmModelCatalog(): void {
+		if (this._catalogWarmed) {
+			return;
+		}
+		this._catalogWarmed = true;
+		void this.agentService.ensureModelCatalog().then(() => {
+			if (!this._store.isDisposed) {
+				void this._refreshAsync();
+			}
+		}, () => { /* no registry (cold cache, no network): the row keeps its fallbacks */ });
 	}
 
 	private async _refreshAsync(): Promise<void> {
@@ -253,9 +328,13 @@ export class OpenideChatComposerControls extends Disposable {
 		}
 		// The composer shows the same friendly name as the picker, never the raw id.
 		const described = model ? this.agentService.describeModel(providerId, model) : undefined;
-		this._modelLabel.textContent = connected
+		const chosen = connected
 			? (described?.name || model || entry?.label || localize('openide.chat.model.fallback', "Modelo"))
 			: localize('openide.chat.model.unset', "Seleccionar modelo");
+		const route = this._modelRoute;
+		const running = route ? (this.agentService.describeModel(route.providerId, route.model)?.name || route.model) : undefined;
+		this._modelLabel.textContent = running ? `${chosen} → ${running}` : chosen;
+		this._modelButton.classList.toggle('rerouted', !!running);
 		this._modelButton.classList.toggle('unset', !connected);
 		this._modelIcon.hidden = !connected;
 		applyProviderIcon(this._modelIcon, providerId, entry?.label ?? '');
@@ -268,9 +347,21 @@ export class OpenideChatComposerControls extends Disposable {
 			const effort = this.agentService.getReasoningEffort() || '';
 			this._effortLabel.textContent = reasoningEffortLabel(effort);
 			this._effortButton.classList.toggle('unset', !effort);
-			this._effortButton.title = `${localize('openide.chat.effort.section', "Razonamiento")} · ${this._effortPicker.options.length} ${localize('openide.chat.effort.levels', "niveles disponibles")}`;
+			this._effortTooltip.update();
 		}
 		this._updateSlot();
+	}
+
+	/** Why the chip shows two models: which one is out, and until when. */
+	private _modelRouteTooltip(): string | undefined {
+		const route = this._modelRoute;
+		if (!route) {
+			return undefined;
+		}
+		const intended = this.agentService.describeModel(route.intendedProviderId, route.intendedModel)?.name || route.intendedModel;
+		return route.reason === 'cooldown' && route.until
+			? t('chat.tip.modelCooldown', intended, describeCooldown(route.until, Date.now()))
+			: t('chat.tip.modelFailover', intended);
 	}
 
 	private _paintMode(): void {
@@ -279,18 +370,14 @@ export class OpenideChatComposerControls extends Disposable {
 		// wholesale because the previous mode's glyph class has to go with it.
 		this._modeIcon.className = `codicon codicon-filled codicon-${entry.icon}`;
 		this._modeLabel.textContent = entry.label;
-		this._modeButton.title = `${entry.label} mode`;
+		this._modeTooltip.update();
 	}
 
 	private _paintFollow(): void {
 		const enabled = this.agentService.isPlanFollowEnabled();
 		this._followButton.classList.toggle('active', enabled);
 		this._followButton.setAttribute('aria-pressed', String(enabled));
-		const label = enabled
-			? localize('openide.chat.follow.off', "Dejar de seguir al agente")
-			: localize('openide.chat.follow.on', "Seguir al agente — muestra archivos, ediciones, terminal y browser mientras trabaja");
-		this._followButton.title = label;
-		this._followButton.setAttribute('aria-label', label);
+		this._followTooltip.update();
 	}
 
 	private _paintSend(): void {
@@ -300,11 +387,10 @@ export class OpenideChatComposerControls extends Disposable {
 		if (this._busy) {
 			const square = append(this._sendButton, document.createElement('span'));
 			square.className = 'openide-stop-square';
-			this._sendButton.title = localize('openide.chat.stop', "Stop");
 		} else {
-			this._sendButton.appendChild(createCodicon(document, 'arrow-up'));
-			this._sendButton.title = localize('openide.chat.send', "Send (Enter)");
+			this._sendButton.appendChild(createArrowUpIcon(document));
 		}
+		this._sendTooltip.update();
 	}
 
 	/**
@@ -320,6 +406,9 @@ export class OpenideChatComposerControls extends Disposable {
 		}
 		this._sendButton.hidden = !showSend;
 		this._sendButton.disabled = !this._busy && !this._hasContent;
-		this._micButton.hidden = showSend || (!this.voice.capability.available && voiceState === 'idle');
+		// The microphone keeps its place whether or not dictation is available (Cursor shows it
+		// always); without a voice provider it is dimmed and its tooltip says what is missing.
+		this._micButton.hidden = showSend;
+		this._micButton.classList.toggle('unavailable', !this.voice.capability.available && voiceState === 'idle');
 	}
 }

@@ -5,10 +5,13 @@
 
 import { $, addDisposableListener, append, clearNode } from '../../../../../../base/browser/dom.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IOpenideChatContent, IOpenideChatDiagramContent, isOpenideChatContentOfKind } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
 import { renderOpenideDiagram } from '../../diagrams/openideDiagramRender.js';
+import { t } from '../../../common/openideStrings.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
+import { setupChatTooltip } from '../openideChatHover.js';
 import '../media/openideChatDiagram.css';
 
 export const OPENIDE_CHAT_DIAGRAM_CLASS = 'openide-chat-diagram';
@@ -17,7 +20,7 @@ export const OPENIDE_CHAT_DIAGRAM_CLASS = 'openide-chat-diagram';
  * A ```mermaid fence, drawn.
  *
  * Ported from the webview's `buildDiagramOrCodeHtml` / `renderDiagramResult`
- * (openideChatHtml.ts:2281-2300). Everything that makes the picture lives in browser/diagrams/ —
+ *. Everything that makes the picture lives in browser/diagrams/ —
  * this part is only the row: the frame, the full-screen button and the code fallback.
  *
  * The one thing it does NOT copy is the webview's round trip. There, parsing runs in the extension
@@ -35,6 +38,7 @@ export class OpenideChatDiagramPart extends OpenideChatContentPart {
 		content: IOpenideChatDiagramContent,
 		_context: IOpenideChatContentPartContext,
 		@ICommandService private readonly _commandService: ICommandService,
+		@IHoverService private readonly _hoverService: IHoverService,
 	) {
 		super();
 
@@ -65,8 +69,8 @@ export class OpenideChatDiagramPart extends OpenideChatContentPart {
 		const source = this._content.source;
 		const button = $('button.openide-diagram-full') as HTMLButtonElement;
 		button.type = 'button';
-		button.title = 'Pantalla completa (modal con zoom)';
-		button.setAttribute('aria-label', 'Pantalla completa');
+		// Late disposable, like the click listener: the button is rebuilt with the picture.
+		this.addDisposable(setupChatTooltip(this._hoverService, button, () => t('plan.diagram.fullscreen')));
 		append(button, $('span.codicon.codicon-screen-full'));
 		// Prepended, not appended: it is absolutely positioned and must not be the last child of the
 		// scroll box, or it would count towards the scrolled width.

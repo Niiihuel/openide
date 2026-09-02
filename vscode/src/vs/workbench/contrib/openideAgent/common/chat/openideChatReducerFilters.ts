@@ -102,5 +102,5 @@ export function isOpenideChatModeHandoff(ev: AgentLoopEvent): boolean {
 /** True when the event carries no renderable content by design (it feeds panels or storage). */
 export function isOpenideChatHostOnlyEvent(ev: AgentLoopEvent): boolean {
 	const inner = unwrapSubagentEvent(ev).event;
-	return inner.type === 'fileCheckpoint' || inner.type === 'messageChangeSet';
+	return inner.type === 'fileCheckpoint' || inner.type === 'messageChangeSet' || inner.type === 'modelRoute';
 }

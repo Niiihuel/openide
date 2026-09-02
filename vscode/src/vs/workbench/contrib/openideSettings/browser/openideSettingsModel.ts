@@ -71,6 +71,7 @@ const OPENIDE_NAV_LABELS = {
 	'openideAgent/notifications': 'settings.nav.agent.notifications',
 	'openideAgent/browser': 'settings.nav.agent.browser',
 	'openideAgent/advanced': 'settings.nav.agent.advanced',
+	'openideAgent/import': 'settings.nav.agent.import',
 } as Readonly<Record<string, OpenideStringKey | undefined>>;
 
 export class OpenideSettingsModel {
@@ -137,15 +138,16 @@ export class OpenideSettingsModel {
 	}
 
 	findNavigationEntry(id: string): IOpenideSettingsNavigationEntry | undefined {
-		const visit = (entries: readonly IOpenideSettingsNavigationEntry[]): IOpenideSettingsNavigationEntry | undefined => {
-			for (const entry of entries) {
-				if (entry.id === id) { return entry; }
-				const child = entry.children && visit(entry.children);
-				if (child) { return child; }
-			}
-			return undefined;
-		};
-		return visit(this.navigation);
+		return this.findNavigationEntryIn(this.navigation, id);
+	}
+
+	private findNavigationEntryIn(entries: readonly IOpenideSettingsNavigationEntry[], id: string): IOpenideSettingsNavigationEntry | undefined {
+		for (const entry of entries) {
+			if (entry.id === id) { return entry; }
+			const child = entry.children && this.findNavigationEntryIn(entry.children, id);
+			if (child) { return child; }
+		}
+		return undefined;
 	}
 
 	get activeNavigationLabel(): string { return this.findNavigationEntry(this.state.category)?.label ?? t('settings.nav.all'); }
@@ -170,6 +172,43 @@ export class OpenideSettingsModel {
 
 	items(): IOpenideSettingItem[] {
 		return this.filteredItems(false);
+	}
+
+	/**
+	 * `items` split into the cards of the current page, in the order the rows arrive.
+	 *
+	 * The layout has no "group" of its own below a page: a page is a TOC entry, and its rows are
+	 * whatever its patterns (and its children's) match. So the grouping reuses the TOC one level
+	 * down: on "Text Editor" the rows that belong to "Cursor" share a card captioned "Cursor", the
+	 * rows only the page itself claims are captioned with the page's label, and on "All settings"
+	 * the top-level entries play the same role. A row no entry claims — an extension's key on the
+	 * home page, a search hit outside the TOC — falls back to the first segment of its key
+	 * ("files.autoSave" → "Files"), which is how upstream names a section it has no label for.
+	 *
+	 * Resolved once per call, not per row: `navigation` rebuilds the TOC (and inspects every
+	 * setting for the extensions node) each time it is read.
+	 */
+	groupItems(items: readonly IOpenideSettingItem[]): { readonly label: string; readonly items: IOpenideSettingItem[] }[] {
+		const category = this.state.category;
+		const navigation = this.navigation;
+		const page = category === 'home' ? undefined : this.findNavigationEntryIn(navigation, category);
+		const children = page ? page.children ?? [] : navigation.filter(entry => entry.id !== 'home' && entry.id !== 'commonlyUsed');
+		const groups = new Map<string, IOpenideSettingItem[]>();
+		for (const item of items) {
+			const child = children.find(entry => this.entryMatchesItem(entry, item, true));
+			let label: string;
+			if (child) {
+				label = child.label;
+			} else if (page && (page.id === 'commonlyUsed' || this.entryMatchesItem(page, item, false))) {
+				label = page.label;
+			} else {
+				const root = item.key.split('.')[0] || item.key;
+				label = root.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, value => value.toUpperCase());
+			}
+			const bucket = groups.get(label);
+			if (bucket) { bucket.push(item); } else { groups.set(label, [item]); }
+		}
+		return [...groups].map(([label, rows]) => ({ label, items: rows }));
 	}
 
 	/**

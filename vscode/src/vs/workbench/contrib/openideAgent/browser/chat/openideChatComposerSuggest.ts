@@ -8,11 +8,14 @@ import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent
 import { KeyCode } from '../../../../../base/common/keyCodes.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../nls.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IOpenideChatFileSuggestion, IOpenideChatSlashSuggestion, IOpenideChatSuggestSources } from '../../common/chat/openideChatSlashCommands.js';
+import { HoverPosition } from '../../../../../base/browser/ui/hover/hoverWidget.js';
+import { setupChatTooltip } from './openideChatHover.js';
 import { createCodicon, createMenuContent, OpenideComposerPopover } from './openideComposerMenu.js';
 
-/** Same debounce as the webview's `updateMentionMenu` / `updateSlashMenu` (openideChatHtml.ts:5862, 5975). */
+/** Same debounce as the webview's `updateMentionMenu` / `updateSlashMenu` (the removed chat webview, 5975). */
 const QUERY_DEBOUNCE_MS = 120;
 
 export interface ICaretToken {
@@ -23,7 +26,7 @@ export interface ICaretToken {
 	readonly end: number;
 }
 
-/** `mentionTokenAtCaret` (openideChatHtml.ts:5794): an `@` at the start or after whitespace. */
+/** `mentionTokenAtCaret` (the removed chat webview): an `@` at the start or after whitespace. */
 export function mentionTokenAt(value: string, caret: number): ICaretToken | undefined {
 	const before = value.slice(0, caret);
 	const m = before.match(/(^|\s)@([^\s@]*)$/);
@@ -32,7 +35,7 @@ export function mentionTokenAt(value: string, caret: number): ICaretToken | unde
 }
 
 /**
- * `slashTokenAtCaret` (openideChatHtml.ts:5888): a `/` at the start or after any whitespace, so a
+ * `slashTokenAtCaret` (the removed chat webview): a `/` at the start or after any whitespace, so a
  * previous selection does not block the picker and skills can be chained.
  */
 export function slashTokenAt(value: string, caret: number): ICaretToken | undefined {
@@ -42,7 +45,15 @@ export function slashTokenAt(value: string, caret: number): ICaretToken | undefi
 	return { q: m[2], start: caret - m[2].length - 1, end: caret };
 }
 
-/** `compactSlashDescription` (openideChatHtml.ts:5874): one sentence, ~62 chars, for the row's detail. */
+/**
+ * `compactSlashDescription` (the removed chat webview): the first sentence of a description, for
+ * the second line of a row.
+ *
+ * The character cap sits far above what a dock-width row can show, on purpose. The description now
+ * owns a whole line, so CSS decides where it ends and the text grows with the panel; cutting at 62
+ * put an ellipsis in the middle of a line that still had room. The cap is only a guard against a
+ * description that is really a paragraph.
+ */
 export function compactSlashDescription(value: string): string {
 	let text = String(value || '').replace(/\s+/g, ' ').trim();
 	if (!text) { return ''; }
@@ -50,9 +61,9 @@ export function compactSlashDescription(value: string): string {
 	if (sentence > 18) { text = text.slice(0, sentence + 1); }
 	const parenthesis = text.indexOf(' (');
 	if (parenthesis > 24) { text = text.slice(0, parenthesis); }
-	if (text.length <= 62) { return text; }
-	const cut = text.slice(0, 59).lastIndexOf(' ');
-	return text.slice(0, cut > 34 ? cut : 59).replace(/[,:;\s]+$/, '') + '…';
+	if (text.length <= 140) { return text; }
+	const cut = text.slice(0, 137).lastIndexOf(' ');
+	return text.slice(0, cut > 90 ? cut : 137).replace(/[,:;\s]+$/, '') + '…';
 }
 
 const SLASH_GROUPS: readonly { kind: IOpenideChatSlashSuggestion['kind']; label: string; icon: string }[] = [
@@ -72,7 +83,7 @@ export interface ISuggestHandlers {
 /**
  * The `@` and `/` autocomplete of the composer: one popover above the card, two pipelines.
  *
- * Transcribed from the webview's mention menu (openideChatHtml.ts:5794-5866) and slash menu
+ * Transcribed from the webview's mention menu and slash menu
  * (:5868-5980): token at the caret, 120 ms debounce, a generation guard so a slow answer to an
  * older query never paints over a newer one, keyboard navigation, and after accepting a command
  * with an argument hint the hint stays as a ghost row until the user types again.
@@ -100,6 +111,7 @@ export class OpenideChatComposerSuggest extends Disposable {
 		private readonly anchor: HTMLElement,
 		private readonly sources: IOpenideChatSuggestSources,
 		contextViewService: IContextViewService,
+		private readonly hoverService: IHoverService,
 		private readonly handlers: ISuggestHandlers,
 	) {
 		super();
@@ -108,7 +120,7 @@ export class OpenideChatComposerSuggest extends Disposable {
 
 	/** Called on every `input`: decides which menu (if any) the caret is in and queries it. */
 	update(): void {
-		// Typing anything retires the ghost hint (updateSlashMenu, openideChatHtml.ts:5968).
+		// Typing anything retires the ghost hint (updateSlashMenu, the removed chat webview).
 		if (this._ghost) {
 			this._ghost = undefined;
 			this._popover.close();
@@ -201,7 +213,7 @@ export class OpenideChatComposerSuggest extends Disposable {
 		}
 	}
 
-	/** Removes the token from the text (`acceptMention`, openideChatHtml.ts:5846) and hands over the path. */
+	/** Removes the token from the text (`acceptMention`, the removed chat webview) and hands over the path. */
 	private _acceptFile(item: IOpenideChatFileSuggestion): void {
 		this._spliceToken();
 		this.close();
@@ -209,7 +221,7 @@ export class OpenideChatComposerSuggest extends Disposable {
 		this.prompt.focus();
 	}
 
-	/** `acceptSlash` (openideChatHtml.ts:5925): the token goes, the chip comes, the hint ghosts. */
+	/** `acceptSlash` (the removed chat webview): the token goes, the chip comes, the hint ghosts. */
 	private _acceptSlash(item: IOpenideChatSlashSuggestion): void {
 		this._spliceToken();
 		const hint = item.hint;
@@ -246,6 +258,7 @@ export class OpenideChatComposerSuggest extends Disposable {
 			const content = append(container, createMenuContent(container.ownerDocument));
 			this._content = content;
 			if (this._kind === 'mention') { this._paintFiles(content); } else { this._paintSlash(content); }
+			this._paintScrollShadow(container, content);
 		};
 		if (this._popover.isOpen && this._popover.container) {
 			paint(this._popover.container);
@@ -260,6 +273,21 @@ export class OpenideChatComposerSuggest extends Disposable {
 			},
 			onHide: () => { this._content = undefined; },
 		});
+	}
+
+	/**
+	 * The workbench's own answer to content scrolled out of view: `ScrollableElement`'s `useShadows`
+	 * (scrollableElement.ts), an inset shadow at the top edge that appears once the list has moved.
+	 *
+	 * It replaces a sticky group heading, which pinned the label but left Chromium painting rows
+	 * outside the panel's rounded clip.
+	 */
+	private _paintScrollShadow(container: HTMLElement, content: HTMLElement): void {
+		const shadow = append(container, container.ownerDocument.createElement('div'));
+		shadow.className = 'openide-chat-suggest-shadow';
+		const sync = () => shadow.classList.toggle('visible', content.scrollTop > 0);
+		this._register(addDisposableListener(content, 'scroll', sync));
+		sync();
 	}
 
 	private _paintFiles(content: HTMLElement): void {
@@ -283,7 +311,11 @@ export class OpenideChatComposerSuggest extends Disposable {
 				dir.className = 'openide-chat-suggest-file-dir';
 				dir.textContent = item.path.slice(0, slash);
 			}
-			row.title = item.path;
+			this._register(setupChatTooltip(this.hoverService, row, () => item.path, {
+				// LEFT: the dock is pinned to the window's edge, so there is never room on the other side.
+					position: HoverPosition.LEFT,
+				aria: false,
+			}));
 			this._register(addDisposableListener(row, 'click', () => this._acceptFile(item)));
 		});
 	}
@@ -298,26 +330,72 @@ export class OpenideChatComposerSuggest extends Disposable {
 			const title = append(section, document.createElement('div'));
 			title.className = 'openide-menu-section';
 			title.textContent = group.label;
+			// Two lines per row: the name with its signature on the first, the description on the
+			// second. Sharing one line meant name, signature and description all competed for the
+			// dock's ~330px, so each of them ended in an ellipsis and none of them was legible --
+			// what makes a command scannable is the break between what you type and what it does,
+			// not how few pixels tall the row is.
 			for (const { item, index } of entries) {
 				const row = this._row(section, index);
 				const slot = append(row, document.createElement('span'));
 				slot.className = 'openide-menu-row-icon';
 				slot.appendChild(createCodicon(document, group.icon));
-				const copy = append(row, document.createElement('span'));
-				copy.className = 'openide-chat-suggest-copy';
-				const label = append(copy, document.createElement('span'));
-				label.className = 'openide-menu-label';
-				label.textContent = `/${item.name}${item.hint ? ` ${item.hint}` : ''}`;
-				const detail = append(copy, document.createElement('span'));
-				detail.className = 'openide-menu-detail';
+				const text = append(row, document.createElement('span'));
+				text.className = 'openide-chat-suggest-text';
+				// Name and signature are separate spans so they give way in the right order: the
+				// name never shrinks and the signature truncates before it. Sharing one span made
+				// "/openide-canvas" collapse to "/openide-…" while its hint still had room.
+				const title = append(text, document.createElement('span'));
+				title.className = 'openide-chat-suggest-title';
+				const name = append(title, document.createElement('span'));
+				name.className = 'openide-chat-suggest-name';
+				this._paintSlashLabel(name, `/${item.name}`);
+				if (item.hint) {
+					const hint = append(title, document.createElement('span'));
+					hint.className = 'openide-chat-suggest-hint';
+					// No leading space in the text: the title is a flex row, and a space at the
+					// start of a flex item is collapsed away. The gap belongs to the layout.
+					hint.textContent = item.hint;
+				}
+				// Only painted when there is something to warn about. An always-present empty span
+				// still ate the row's gap, which pushed the signature into truncating early.
+				if (item.risk === 'exec' || item.risk === 'write') {
+					const risk = append(title, document.createElement('span'));
+					risk.className = `openide-chat-suggest-risk ${item.risk}`;
+					risk.textContent = item.risk;
+				}
+				const detail = append(text, document.createElement('span'));
+				detail.className = 'openide-chat-suggest-desc';
 				detail.textContent = compactSlashDescription(item.description);
-				const risk = append(row, document.createElement('span'));
-				risk.className = `openide-chat-suggest-risk${item.risk === 'exec' || item.risk === 'write' ? ` ${item.risk}` : ''}`;
-				risk.textContent = item.risk === 'exec' ? 'exec' : item.risk === 'write' ? 'write' : '';
-				row.title = item.description || `/${item.name}`;
+				// The workbench hover, not `title=`: a bare title attribute draws the OPERATING
+				// SYSTEM's tip -- another font, another delay, outside the window -- which is the
+				// unstyled grey box that was covering the rows underneath it.
+				this._register(setupChatTooltip(this.hoverService, row, () => item.description || `/${item.name}`, {
+					position: HoverPosition.LEFT,
+					aria: false,
+				}));
 				this._register(addDisposableListener(row, 'click', () => this._acceptSlash(item)));
 			}
 		}
+	}
+
+	/**
+	 * Writes the label with the typed characters marked, as the suggest widget does with
+	 * `.monaco-highlighted-label .highlight`: bold, in `editorSuggestWidget.highlightForeground`.
+	 * It is the only feedback that says WHY a row is in the list at all.
+	 */
+	private _paintSlashLabel(label: HTMLElement, text: string): void {
+		const query = (this._token?.q ?? '').toLowerCase();
+		const at = query ? text.toLowerCase().indexOf(query) : -1;
+		if (at < 0) {
+			label.append(label.ownerDocument.createTextNode(text));
+			return;
+		}
+		label.append(label.ownerDocument.createTextNode(text.slice(0, at)));
+		const hit = append(label, label.ownerDocument.createElement('span'));
+		hit.className = 'openide-chat-suggest-hit';
+		hit.textContent = text.slice(at, at + query.length);
+		label.append(label.ownerDocument.createTextNode(text.slice(at + query.length)));
 	}
 
 	private _row(parent: HTMLElement, index: number): HTMLButtonElement {
@@ -341,7 +419,7 @@ export class OpenideChatComposerSuggest extends Disposable {
 		container.classList.add('show-file-icons');
 	}
 
-	/** `renderSlashGhost` (openideChatHtml.ts:5956): the accepted command and its argument hint. */
+	/** `renderSlashGhost` (the removed chat webview): the accepted command and its argument hint. */
 	private _renderGhost(): void {
 		const ghost = this._ghost;
 		if (!ghost) { return; }
@@ -356,13 +434,13 @@ export class OpenideChatComposerSuggest extends Disposable {
 				const slot = append(row, container.ownerDocument.createElement('span'));
 				slot.className = 'openide-menu-row-icon';
 				slot.appendChild(createCodicon(container.ownerDocument, 'terminal'));
-				const copy = append(row, container.ownerDocument.createElement('span'));
-				copy.className = 'openide-chat-suggest-copy';
-				const label = append(copy, container.ownerDocument.createElement('span'));
+				// The ghost is one row of the same list, so it lays out like one: name left, hint
+				// right, on a single line. It kept the stacked wrapper the entries used to have.
+				const label = append(row, container.ownerDocument.createElement('span'));
 				label.className = 'openide-menu-label';
 				label.textContent = `/${ghost.slug}`;
-				const hint = append(copy, container.ownerDocument.createElement('span'));
-				hint.className = 'openide-menu-detail openide-chat-suggest-hint';
+				const hint = append(row, container.ownerDocument.createElement('span'));
+				hint.className = 'openide-menu-detail';
 				hint.textContent = ghost.hint;
 				row.setAttribute('aria-label', localize('openide.chat.suggest.hint', "/{0} {1}", ghost.slug, ghost.hint));
 			},

@@ -104,9 +104,9 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 		super(
 			Parts.AUXILIARYBAR_PART,
 			{
-				// OpenIDE: sin título de composite — el chat trae su propia tab bar dentro del
-				// webview. hasTitle:false lo saca del LAYOUT (ocultarlo solo por CSS dejaba un
-				// hueco de 35px abajo: el composite seguía reservando la altura del título).
+				// OpenIDE: no composite title -- the chat carries its own tab bar. hasTitle:false
+				// takes it out of the LAYOUT (hiding it with CSS alone left a 35px hole at the
+				// bottom: the composite went on reserving the title's height).
 				hasTitle: false,
 				trailingSeparator: true,
 				borderWidth: () => (this.getColor(SIDE_BAR_BORDER) || this.getColor(contrastBorder)) ? 1 : 0,

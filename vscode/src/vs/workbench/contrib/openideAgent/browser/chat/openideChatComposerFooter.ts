@@ -7,6 +7,7 @@ import { $, addDisposableListener, append, clearNode } from '../../../../../base
 import { Button } from '../../../../../base/browser/ui/button/button.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { defaultButtonStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
 import {
 	formatOpenideChatTokens, IOpenideChatCapabilityCounts, IOpenideChatContextUsage, OPENIDE_CHAT_EMPTY_CAPABILITIES,
@@ -14,6 +15,7 @@ import {
 } from '../../common/chat/openideChatContextBreakdown.js';
 import { t } from '../../common/openideStrings.js';
 import { IOpenideAgentService } from '../openideAgentService.js';
+import { setupChatTooltip } from './openideChatHover.js';
 import { PERMISSIONS, permissionLabel } from './openideChatModePicker.js';
 import { createCodicon, createMenuContent, createMenuRow, createMenuSection, OpenideComposerPopover } from './openideComposerMenu.js';
 
@@ -54,6 +56,7 @@ export class OpenideChatComposerFooter extends Disposable {
 		parent: HTMLElement,
 		private readonly agentService: IOpenideAgentService,
 		contextViewService: IContextViewService,
+		hoverService: IHoverService,
 		private readonly onCompact: () => void,
 	) {
 		super();
@@ -75,7 +78,7 @@ export class OpenideChatComposerFooter extends Disposable {
 		permission.appendChild(createCodicon(document, 'shield'));
 		this._permissionLabel = append(permission, $('span'));
 		permission.appendChild(createCodicon(document, 'chevron-down', 'openide-composer-chevron'));
-		permission.title = t('chat.footer.approvals.tip');
+		this._register(setupChatTooltip(hoverService, permission, () => t('chat.footer.approvals.tip')));
 		this._register(addDisposableListener(permission, 'click', () => this._permissionPopover.toggle(permission, {
 			className: 'openide-chat-footer-menu',
 			render: (container, store) => this._renderPermissions(container, store),
@@ -104,6 +107,9 @@ export class OpenideChatComposerFooter extends Disposable {
 		svg.appendChild(this._ringArc);
 		this._ringButton.appendChild(svg);
 		this._ringPercent = append(this._ringButton, $('span.openide-chat-ring-percent'));
+		// Registered once, not per repaint: the factory reads the string when the hover is shown, so
+		// it follows `openide.language` without the ring having to touch it.
+		this._register(setupChatTooltip(hoverService, this._ringButton, () => t('chat.footer.context.tip')));
 		this._register(addDisposableListener(this._ringButton, 'click', () => this.toggleSessionInfo()));
 		this._paintRing();
 	}
@@ -141,7 +147,7 @@ export class OpenideChatComposerFooter extends Disposable {
 		content.appendChild(createMenuSection(document, t('chat.footer.approvals')));
 		const current = this.agentService.getPermissionMode() || 'ask';
 		for (const entry of PERMISSIONS) {
-			const row = createMenuRow(document, { icon: entry.id === current ? 'check' : entry.icon, label: entry.label, tooltip: entry.description });
+			const row = createMenuRow(document, { icon: entry.icon, label: entry.label, tooltip: entry.description, active: entry.id === current });
 			store.add(addDisposableListener(row, 'click', () => {
 				this._permissionPopover.close();
 				void this.agentService.setPermissionMode(entry.id);
@@ -157,7 +163,6 @@ export class OpenideChatComposerFooter extends Disposable {
 		this._ringPercent.textContent = `${percent}%`;
 		this._ringButton.classList.toggle('warning', percent >= 80 && percent < 95);
 		this._ringButton.classList.toggle('error', percent >= 95);
-		this._ringButton.title = t('chat.footer.context.tip');
 	}
 
 	/**
@@ -211,7 +216,7 @@ export class OpenideChatComposerFooter extends Disposable {
 		const actions = append(root, $('.openide-chat-si-actions'));
 		const compact = store.add(new Button(actions, { ...defaultButtonStyles, secondary: true }));
 		compact.label = t('chat.session.compact');
-		compact.element.title = t('chat.session.compact.tip');
+		compact.setTitle(t('chat.session.compact.tip'));
 		store.add(compact.onDidClick(() => {
 			this._infoPopover.close();
 			this.onCompact();

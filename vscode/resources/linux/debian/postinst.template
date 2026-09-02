@@ -22,7 +22,10 @@ if hash update-mime-database 2>/dev/null; then
 	update-mime-database /usr/share/mime
 fi
 
-if [ "@@NAME@@" != "codium" ]; then
+# OpenIDE does not register Microsoft's apt repository: this package is not built by them, and
+# adding their repo and signing key to a user's system is not ours to do. The block below is
+# upstream's and stays only so this template keeps applying cleanly against theirs.
+if [ "@@NAME@@" != "openide" ]; then
 	# Remove the legacy bin command if this is the stable build
 	if [ "@@NAME@@" = "code" ]; then
 		rm -f /usr/local/bin/code

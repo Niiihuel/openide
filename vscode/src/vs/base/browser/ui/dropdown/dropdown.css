@@ -28,7 +28,7 @@
 .monaco-dropdown-with-primary {
 	display: flex !important;
 	flex-direction: row;
-	border-radius: 5px;
+	border-radius: var(--vscode-cornerRadius-medium, 6px);
 }
 
 .monaco-dropdown-with-primary > .action-container > .action-label {

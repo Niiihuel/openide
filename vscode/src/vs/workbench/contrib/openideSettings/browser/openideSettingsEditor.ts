@@ -8,7 +8,7 @@
  *  intentionally does not depend on SettingsEditor2 DOM, trees, widgets or CSS.
  *--------------------------------------------------------------------------------------------*/
 
-import { append, clearNode, Dimension, $ } from '../../../../base/browser/dom.js';
+import { $, Dimension, append, clearNode } from '../../../../base/browser/dom.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
@@ -36,13 +36,14 @@ import { openideSettingsSurfaceSearch } from './openideSettingsSurfaceSearch.js'
 import { OpenideSectionRenderer } from './openideSettingsSectionBuilder.js';
 import './media/openideSettings.css';
 import { applyOpenideSurfaceCss } from '../../openideAgent/browser/openideSurfaceStyle.js';
-import { IOpenideSettingsNavigationEntry } from '../common/openideSettingsTypes.js';
+import { IOpenideSettingItem, IOpenideSettingsNavigationEntry } from '../common/openideSettingsTypes.js';
 import { OpenideCommandsSettingsSection } from '../../openideAgent/browser/openideCommandsSettingsSection.js';
 import { OpenideHooksSettingsSection } from '../../openideAgent/browser/openideHooksSettingsSection.js';
 import { OpenideQuickCommandsSettingsSection } from '../../openideAgent/browser/openideQuickCommandsSettingsSection.js';
 import { OpenideMcpSettingsSection } from '../../openideAgent/browser/openideMcpSettingsSection.js';
 import { OpenideProvidersSettingsSection } from '../../openideAgent/browser/openideProvidersSettingsSection.js';
 import { OpenideProjectMapSettingsSection } from '../../openideAgent/browser/openideProjectMapSettingsSection.js';
+import { OpenideImportSettingsSection } from '../../openideAgent/browser/openideImportSettingsSection.js';
 import { OpenideRulesSettingsSection } from '../../openideAgent/browser/openideRulesSettingsSection.js';
 import { OpenideSkillsSettingsSection } from '../../openideAgent/browser/openideSkillsSettingsSection.js';
 import { OpenideSubagentSettingsSection } from '../../openideAgent/browser/openideSubagentSettingsSection.js';
@@ -51,14 +52,28 @@ import { OpenideLanguageSettingsSection } from './openideLanguageSettingsSection
 import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { openideInputBoxStyles } from '../../openideAgent/browser/openideControlStyles.js';
 import { onDidChangeOpenideLanguage, t } from '../../openideAgent/common/openideStrings.js';
+import { localize } from '../../../../nls.js';
+import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
+import { IExtensionService } from '../../../services/extensions/common/extensions.js';
+import { IAuthenticationService } from '../../../services/authentication/common/authentication.js';
 
 const INITIAL_RENDER_LIMIT = 180;
+
+/** The command the search box's shortcut hint names (preferences.contribution.ts binds it to
+ *  Ctrl/Cmd+F while a Settings editor has focus). */
+const SEARCH_COMMAND = 'settings.action.search';
+
+/** The search box's border is the card's soft hairline, one step quieter than the product's
+ *  default input border: it sits in the sidebar's calmer surface, beside rows with no border at
+ *  all. Passed to the widget, which paints it inline — a stylesheet cannot reach it. */
+const searchBoxStyles = { ...openideInputBoxStyles, inputBorder: 'var(--oi-border-soft)' };
 
 /** Categories with native rows plus a DOM section below (what the schema cannot express).
  *  Migration target: workbench DOM, services called directly, shared CSS. */
 const SECTION_FACTORIES: ReadonlyMap<string, new (...args: any[]) => IOpenideSettingsSection> = new Map<string, new (...args: any[]) => IOpenideSettingsSection>([
 	['openideAgent/subagents', OpenideSubagentSettingsSection],
 	['openideAgent/projectMap', OpenideProjectMapSettingsSection],
+	['openideAgent/import', OpenideImportSettingsSection],
 	['openideAgent/skills', OpenideSkillsSettingsSection],
 	['openideAgent/rules', OpenideRulesSettingsSection],
 	['openideAgent/commands', OpenideCommandsSettingsSection],
@@ -77,14 +92,19 @@ export class OpenideSettingsEditor extends EditorPane {
 	private navigation!: HTMLElement;
 	private content!: HTMLElement;
 	private title!: HTMLElement;
-	private pageIcon!: HTMLElement;
 	private breadcrumb!: HTMLElement;
 	private count!: HTMLElement;
 	private _searchClear!: HTMLButtonElement;
+	private _searchHint!: HTMLElement;
+	private profileAvatar!: HTMLElement;
+	private profileName!: HTMLElement;
+	/** Bumped per `renderProfile`, so a slow provider cannot paint over a newer answer. */
+	private profileToken = 0;
+	private profileDetail!: HTMLElement;
 	private readonly modelListeners = this._register(new DisposableStore());
 	/** Hovers of the current page's rows; cleared on every repaint so hints never outlive a row. */
 	private readonly rowHovers = this._register(new DisposableStore());
-	/** Native widgets built per row (InputBox, Checkbox, SelectBox): they own DOM and listeners, so
+	/** Widgets built per row (InputBox, the switch, the dropdown): they own DOM and listeners, so
 	 *  they are disposed with the rows they belong to, not leaked across renders. */
 	private readonly rowWidgets = this._register(new DisposableStore());
 	private readonly settingsModel: OpenideSettingsModel;
@@ -103,18 +123,24 @@ export class OpenideSettingsEditor extends EditorPane {
 		@IStorageService storageService: IStorageService,
 		@IConfigurationService configurationService: IConfigurationService,
 		@IPreferencesService private readonly preferencesService: IPreferencesService,
-		@IUserDataProfileService userDataProfileService: IUserDataProfileService,
+		@IUserDataProfileService private readonly userDataProfileService: IUserDataProfileService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IHoverService private readonly hoverService: IHoverService,
 		@IContextViewService private readonly contextViewService: IContextViewService,
+		@IKeybindingService private readonly keybindingService: IKeybindingService,
+		@IAuthenticationService private readonly authenticationService: IAuthenticationService,
+		@IExtensionService private readonly extensionService: IExtensionService,
 	) {
 		super(OpenideSettingsEditor.ID, group, telemetryService, themeService, storageService);
 		this.settingsModel = new OpenideSettingsModel(configurationService);
 		CONTEXT_SETTINGS_EDITOR.bindTo(contextKeyService).set(true);
 		this._register(configurationService.onDidChangeConfiguration(() => this.scheduleRender(false)));
-		this._register(userDataProfileService.onDidChangeCurrentProfile(() => this.scheduleRender(true)));
+		this._register(userDataProfileService.onDidChangeCurrentProfile(() => { this.renderProfile(); this.scheduleRender(true); }));
+		// Signing in or out anywhere in the workbench changes what the account block says.
+		this._register(authenticationService.onDidChangeSessions(() => this.renderProfile()));
+		this._register(authenticationService.onDidRegisterAuthenticationProvider(() => this.renderProfile()));
 		// `openide.language` repaints the whole shell: nav labels, search, hints, buttons.
 		this._register(onDidChangeOpenideLanguage(() => this.scheduleRender(true)));
 	}
@@ -132,6 +158,17 @@ export class OpenideSettingsEditor extends EditorPane {
 		const body = append(this.root, $('.openide-settings-body'));
 		const sidebar = append(body, $('nav.openide-settings-sidebar', { 'aria-label': t('settings.nav.aria') }));
 
+		// Who the settings belong to, above the map of them: the avatar carries the initial, the
+		// first line the signed-in account (or the product's name when there is none) and the
+		// second the profile these settings are read from. The account comes from the workbench's
+		// own authentication service, so anything an extension signs into shows here.
+		const profile = append(sidebar, $('.openide-settings-profile'));
+		this.profileAvatar = append(profile, $('span.openide-settings-profile-avatar', { 'aria-hidden': 'true' }));
+		const profileCopy = append(profile, $('.openide-settings-profile-copy'));
+		this.profileName = append(profileCopy, $('.openide-settings-profile-name'));
+		this.profileDetail = append(profileCopy, $('.openide-settings-profile-detail'));
+		this.renderProfile();
+
 		const searchBlock = append(sidebar, $('.openide-settings-sidebar-block'));
 		// The native widget, not a hand-rolled div: `InputBox` brings the theme's input background,
 		// border, focus ring and high-contrast handling, which a bordered `<div>` around a bare
@@ -141,10 +178,15 @@ export class OpenideSettingsEditor extends EditorPane {
 		this._searchBox = this._register(new InputBox(searchWrap, undefined, {
 			placeholder: t('settings.search.placeholder'),
 			ariaLabel: t('settings.search.placeholder'),
-			inputBoxStyles: openideInputBoxStyles,
+			inputBoxStyles: searchBoxStyles,
 		}));
 		append(searchWrap, $('span.codicon.codicon-search.openide-settings-search-icon'));
 		this.search = this._searchBox.inputElement;
+		// The shortcut, in the same quiet hint every button with a shortcut carries (`.oi-kbd`). It
+		// rides on the field's right edge and yields that edge to the clear button once there is a
+		// query — the two never show together.
+		this._searchHint = append(searchWrap, $('span.oi-kbd.openide-settings-search-kbd', { 'aria-hidden': 'true' }));
+		this._searchHint.textContent = this.keybindingService.lookupKeybinding(SEARCH_COMMAND)?.getLabel() ?? '';
 		// Inline clear, like every macOS search field: appears only while there is a query.
 		const clear = append(searchWrap, $('button.openide-settings-search-clear.hidden', { type: 'button', title: t('settings.search.clear') })) as HTMLButtonElement;
 		append(clear, $('span.codicon.codicon-close'));
@@ -176,7 +218,7 @@ export class OpenideSettingsEditor extends EditorPane {
 		// A dropdown is anchored to its trigger, not attached to it: scrolling the page left the open
 		// list floating over unrelated rows, still pointing at a control that had moved. Every native
 		// select closes on scroll, so this one does too — the same call the upstream settings tree
-		// makes when its own scroller moves (settingsTree.ts, `cancelSuggesters`).
+		// makes when its own scroller moves (upstream's settingsTree.ts, `cancelSuggesters`).
 		const closeOverlays = () => this.contextViewService.hideContextView();
 		content.addEventListener('scroll', closeOverlays, { passive: true });
 		this.navigation.addEventListener('scroll', closeOverlays, { passive: true });
@@ -184,9 +226,9 @@ export class OpenideSettingsEditor extends EditorPane {
 		const pageHead = append(column, $('.openide-settings-page-head'));
 		const pageTitles = append(pageHead, $('.openide-settings-page-titles'));
 		this.breadcrumb = append(pageTitles, $('nav.openide-settings-breadcrumb', { 'aria-label': t('settings.breadcrumb.aria') }));
-		const titleRow = append(pageTitles, $('.openide-settings-page-title-row'));
-		this.pageIcon = append(titleRow, $('span.openide-settings-page-icon'));
-		this.title = append(titleRow, $('h1.openide-settings-page-title'));
+		// The title alone, no chip beside it: the chip is the sidebar's device for telling fifty
+		// rows apart, and up here it only competed with the words.
+		this.title = append(pageTitles, $('h1.openide-settings-page-title'));
 		this.content = append(column, $('.openide-settings-list'));
 		this.search.addEventListener('input', () => this.applySearch());
 		this.search.addEventListener('focus', () => CONTEXT_SETTINGS_SEARCH_FOCUS.bindTo(this.rootContextKeyService()).set(true));
@@ -227,7 +269,58 @@ export class OpenideSettingsEditor extends EditorPane {
 		const filtersInPlace = SECTION_FACTORIES.has(category);
 		this.settingsModel.setState({ query: normalizeSettingsQuery(this.search.value), category: filtersInPlace ? category : 'home' });
 		this._searchClear?.classList.toggle('hidden', !this.search.value);
+		this._searchHint?.classList.toggle('hidden', !!this.search.value);
 		this.renderAll();
+	}
+
+	/**
+	 * Paints the account block. Synchronous with what is known now, then refined when the
+	 * providers answer: the block must never wait on an extension to draw the sidebar.
+	 *
+	 * GitHub first, and activated on purpose: the user signs into GitHub for the IDE itself (Cursor
+	 * shows that account here), and its authentication extension only registers when something asks
+	 * for it. `onAuthenticationRequest:github` is the activation event the workbench's own account
+	 * menu fires, so this is the same cost the Accounts menu pays. Other providers are asked only if
+	 * already registered. The avatar is GitHub's public image for the login, with the initial as the
+	 * fallback while it loads or if it cannot.
+	 */
+	private renderProfile(): void {
+		// A session or profile event can arrive before the pane has built its DOM.
+		if (!this.profileName) { return; }
+		const profileName = this.userDataProfileService.currentProfile.name;
+		const paint = (name: string, detail: string, avatarUrl?: string) => {
+			this.profileName.textContent = name;
+			this.profileDetail.textContent = detail;
+			clearNode(this.profileAvatar);
+			this.profileAvatar.textContent = (name.trim().charAt(0) || 'O').toUpperCase();
+			if (avatarUrl) {
+				const image = append(this.profileAvatar, $('img.openide-settings-profile-image')) as HTMLImageElement;
+				image.alt = '';
+				image.referrerPolicy = 'no-referrer';
+				image.addEventListener('error', () => image.remove(), { once: true });
+				image.src = avatarUrl;
+			}
+		};
+		paint('OpenIDE', localize('openide.settings.profile', "{0} profile", profileName));
+		const token = ++this.profileToken;
+		void this.extensionService.activateByEvent('onAuthenticationRequest:github').then(async () => {
+			const github = this.authenticationService.declaredProviders.find(provider => provider.id === 'github');
+			const others = this.authenticationService.declaredProviders.filter(provider => provider.id !== 'github' && this.authenticationService.isAuthenticationProviderRegistered(provider.id));
+			const candidates = [...(github && this.authenticationService.isAuthenticationProviderRegistered('github') ? [github] : []), ...others];
+			for (const provider of candidates) {
+				try {
+					const accounts = await this.authenticationService.getAccounts(provider.id);
+					if (!accounts.length) { continue; }
+					if (token !== this.profileToken || this._store.isDisposed) { return; }
+					const login = accounts[0].label;
+					const avatar = provider.id === 'github' ? `https://avatars.githubusercontent.com/${encodeURIComponent(login)}?s=72` : undefined;
+					paint(login, localize('openide.settings.profileWithAccount', "{0} · {1} profile", provider.label, profileName), avatar);
+					return;
+				} catch {
+					// A provider that fails to answer is skipped; the next one may not.
+				}
+			}
+		});
 	}
 	private scheduleRender(reset: boolean): void {
 		if (reset) { this.renderLimit = INITIAL_RENDER_LIMIT; }
@@ -256,18 +349,21 @@ export class OpenideSettingsEditor extends EditorPane {
 		this.renderNavigation(visibleNavigation);
 		this.renderItems();
 	}
-	/** Grouped navigation: top-level categories are HEADINGS and their children the items.
-	 *  The previous collapsible tree required two clicks to reach anything and hid half the map;
-	 *  with groups, everything that exists is visible at once. */
+	/** Flat navigation in blocks: a top-level category is a ROW (its page shows everything under
+	 *  it) followed by its children, and a separator closes the block. No collapsible tree — it
+	 *  cost two clicks to reach anything and hid half the map — and no heading over the block
+	 *  either: the old small-caps label was a dead row that named a page nobody could open. */
 	private renderNavigation(entries: readonly IOpenideSettingsNavigationEntry[]): void {
 		type NavRow =
-			| { readonly kind: 'group'; readonly label: string }
+			| { readonly kind: 'separator' }
 			| { readonly kind: 'item'; readonly entry: IOpenideSettingsNavigationEntry; readonly nested: boolean };
 
 		const rows: NavRow[] = [];
 		for (const entry of entries) {
 			if (!entry.children?.length) { rows.push({ kind: 'item', entry, nested: false }); continue; }
-			rows.push({ kind: 'group', label: entry.label });
+			// One separator before the block and one after, never two in a row and never first.
+			if (rows.length && rows[rows.length - 1].kind !== 'separator') { rows.push({ kind: 'separator' }); }
+			rows.push({ kind: 'item', entry, nested: false });
 			for (const child of entry.children) {
 				rows.push({ kind: 'item', entry: child, nested: false });
 				// Sub-pages a section contributes (one per provider) are drawn indented under it,
@@ -278,14 +374,16 @@ export class OpenideSettingsEditor extends EditorPane {
 					if (!grandchild.hidden) { rows.push({ kind: 'item', entry: grandchild, nested: true }); }
 				}
 			}
+			rows.push({ kind: 'separator' });
 		}
+		if (rows.length && rows[rows.length - 1].kind === 'separator') { rows.pop(); }
 
 		const category = this.settingsModel.viewState.category;
 		// Picking a category re-renders the whole editor, but the sidebar itself almost never
 		// changes — only which row is active. Rebuilding it regardless threw away `scrollTop`, so
 		// every click on a page below the fold snapped the list back to the top. When the rows are
 		// the same list as last time, move the highlight and touch nothing else.
-		const signature = rows.map(row => row.kind === 'group' ? `#${row.label}` : `${row.entry.id}\u0000${row.entry.label}\u0000${row.nested}`).join('\u0001');
+		const signature = rows.map(row => row.kind === 'separator' ? '#' : `${row.entry.id}\u0000${row.entry.label}\u0000${row.nested}`).join('\u0001');
 		if (signature === this.navigationSignature) {
 			for (const button of this.navigation.querySelectorAll<HTMLElement>('.openide-settings-nav-item')) {
 				button.classList.toggle('active', button.dataset.navId === category);
@@ -299,8 +397,10 @@ export class OpenideSettingsEditor extends EditorPane {
 		const scrollTop = this.navigation.scrollTop;
 		clearNode(this.navigation);
 		for (const row of rows) {
-			if (row.kind === 'group') {
-				append(this.navigation, $('.openide-settings-nav-group', undefined, row.label));
+			if (row.kind === 'separator') {
+				// A list separator, not a region rule: it sits between two runs of rows inside one
+				// list, which is the hairline docs/theming-surfaces.md (rule 7) allows.
+				append(this.navigation, $('.openide-settings-nav-separator', { role: 'separator' }));
 				continue;
 			}
 			const { entry, nested } = row;
@@ -314,6 +414,10 @@ export class OpenideSettingsEditor extends EditorPane {
 				appendOpenideSettingsIcon(button, entry.id);
 			}
 			append(button, $('span.openide-settings-nav-label', undefined, entry.label));
+			// An entry that runs a command leaves this editor (a dedicated manager, an external
+			// page), so it carries the outbound mark where a link would. No TOC entry declares one
+			// today; the hook is here for the ones that will.
+			if (entry.command) { append(button, $('span.codicon.codicon-link-external.openide-settings-nav-external')); }
 			button.classList.toggle('active', entry.id === category);
 			button.addEventListener('click', async () => {
 				if (entry.command) { await this.commandService.executeCommand(entry.command); return; }
@@ -370,67 +474,18 @@ export class OpenideSettingsEditor extends EditorPane {
 		const activeQuery = plainSettingsQuery(this.settingsModel.viewState.query).trim() || this.settingsModel.viewState.query.trim();
 		this.count.textContent = activeQuery ? (items.length === 1 ? t('settings.search.oneResult') : t('settings.search.results', items.length)) : '';
 		this.title.textContent = subPageEntry ? subPageEntry.label : this.settingsModel.activeNavigationLabel;
-		clearNode(this.pageIcon);
-		appendOpenideSettingsIcon(this.pageIcon, this.settingsModel.viewState.category, true);
 		this.renderBreadcrumb();
-		// Flat (OpenChamber): no card — the rows sit straight on the page background and the spacing
-		// does the separating. The wrapper only groups them for the gap against the sections.
-		const card = items.length ? append(this.content, $('.openide-settings-group')) : this.content;
-		for (const item of items.slice(0, this.renderLimit)) {
-			const row = append(card, $('.openide-settings-row'));
-			row.classList.toggle('modified', item.value.configured); row.classList.toggle('deprecated', item.deprecated); row.classList.toggle('restricted', item.restricted);
-			const copy = append(row, $('.openide-settings-copy'));
-			const heading = append(copy, $('.openide-settings-setting-title'));
-			append(heading, $('span.openide-settings-setting-name', undefined, item.label));
-			// Apple's rows are quiet: a short line may stay visible as a subtitle; anything longer
-			// goes behind the ⓘ hint so the page reads as a list of decisions, not documentation.
-			const shortDescription = item.description && item.description.length <= 90 && !item.description.includes('\n');
-			const hintParts: string[] = [];
-			if (!shortDescription && item.description) { hintParts.push(item.description); }
-			if (item.value.configured) { hintParts.push(t('settings.item.modified')); }
-			if (item.deprecated) { hintParts.push(t('settings.item.deprecated')); }
-			if (hintParts.length) {
-				appendSettingsInfoHint(this.hoverService, this.rowHovers, heading, hintParts.join('\n\n'));
+		// One card per group: a small caption above it and the rows inside, divided by the card's own
+		// hairlines. The groups are the TOC one level under the page (see `groupItems`); when the
+		// page yields a single group, the caption is dropped — the title above already says it.
+		const groups = this.settingsModel.groupItems(items.slice(0, this.renderLimit));
+		for (const group of groups) {
+			const block = append(this.content, $('.openide-settings-group'));
+			if (groups.length > 1) { append(block, $('.openide-settings-group-caption', undefined, group.label)); }
+			const card = append(block, $('.openide-settings-card'));
+			for (const item of group.items) {
+				this.renderRow(card, item);
 			}
-			// The key rides LAST on the title line, invisible until the row is hovered: it occupies
-			// its space permanently (inline, small) so revealing it never shifts the layout.
-			append(heading, $('span.openide-settings-key', undefined, item.key));
-			if (shortDescription) {
-				append(copy, $('.openide-settings-description', undefined, item.description));
-			}
-			if (item.extensionId) { const owner = append(copy, $('.openide-settings-owner')); owner.textContent = item.extensionId; }
-			// A setting narrower than the selected tab cannot be written there. Saying so up front
-			// beats letting the click through and surfacing the writer's raw refusal
-			// ("does not support the folder resource scope") after the fact.
-			const editableHere = this.settingsModel.isEditableInCurrentScope(item);
-			row.classList.toggle('out-of-scope', !editableHere);
-			if (!editableHere) {
-				const note = append(copy, $('.openide-settings-scope-note'));
-				note.textContent = t('settings.item.onlyIn', this.settingsModel.editableScopeLabel(item));
-			}
-			const actions = append(row, $('.openide-settings-value'));
-			const control = createSettingControl(item, () => this.openJson(item.key), this.rowWidgets, this.contextViewService); actions.appendChild(control.element);
-			control.element.setAttribute('aria-label', item.label);
-			if (!editableHere) {
-				control.element.setAttribute('aria-disabled', 'true');
-				control.setEnabled?.(false);
-			}
-			// Booleans: the whole row toggles (like a macOS row), but the switch stays the only
-			// focusable control — the row's click is delegated to it without stealing focus.
-			if (item.type === SettingValueType.Boolean && editableHere) {
-				row.classList.add('togglable');
-				row.addEventListener('click', event => {
-					if ((event.target as HTMLElement).closest('button, input, select, textarea, a')) { return; }
-					(control.element as HTMLButtonElement).click();
-				});
-			}
-			control.onChange?.(async value => {
-				const validation = item.setting.validator?.(value); if (validation) { control.element.setAttribute('aria-invalid', 'true'); control.element.title = validation; return; }
-				await this.settingsModel.update(item, value); control.element.setAttribute('aria-invalid', 'false');
-			});
-			if (item.value.configured) { const reset = append(actions, $('button.openide-settings-reset')) as HTMLButtonElement; reset.type = 'button'; reset.title = t('settings.item.reset'); append(reset, $('span.codicon.codicon-discard')); reset.addEventListener('click', () => this.settingsModel.reset(item)); }
-			if (item.value.policyValue !== undefined) { row.title = t('settings.item.policy'); }
-			if (item.type === SettingValueType.Complex) { row.classList.add('complex'); }
 		}
 		if (items.length > this.renderLimit) {
 			const more = append(this.content, $('button.openide-settings-more')) as HTMLButtonElement; more.type = 'button'; more.textContent = t('settings.item.showMore', Math.min(INITIAL_RENDER_LIMIT, items.length - this.renderLimit));
@@ -455,6 +510,57 @@ export class OpenideSettingsEditor extends EditorPane {
 		if (query && !this.content.hasChildNodes()) {
 			append(this.content, $('.openide-settings-empty')).textContent = t('settings.search.noMatches');
 		}
+	}
+
+	/** One setting row inside a card: copy on the left, the control on the right. */
+	private renderRow(card: HTMLElement, item: IOpenideSettingItem): void {
+		const row = append(card, $('.openide-settings-row'));
+		row.classList.toggle('modified', item.value.configured); row.classList.toggle('deprecated', item.deprecated); row.classList.toggle('restricted', item.restricted);
+		const copy = append(row, $('.openide-settings-copy'));
+		const heading = append(copy, $('.openide-settings-setting-title'));
+		append(heading, $('span.openide-settings-setting-name', undefined, item.label));
+		// Apple's rows are quiet: a short line may stay visible as a subtitle; anything longer
+		// goes behind the ⓘ hint so the page reads as a list of decisions, not documentation.
+		const shortDescription = item.description && item.description.length <= 90 && !item.description.includes('\n');
+		const hintParts: string[] = [];
+		if (!shortDescription && item.description) { hintParts.push(item.description); }
+		if (item.value.configured) { hintParts.push(t('settings.item.modified')); }
+		if (item.deprecated) { hintParts.push(t('settings.item.deprecated')); }
+		if (hintParts.length) {
+			appendSettingsInfoHint(this.hoverService, this.rowHovers, heading, hintParts.join('\n\n'));
+		}
+		// The key rides LAST on the title line, invisible until the row is hovered: it occupies
+		// its space permanently (inline, small) so revealing it never shifts the layout.
+		append(heading, $('span.openide-settings-key', undefined, item.key));
+		if (shortDescription) {
+			append(copy, $('.openide-settings-description', undefined, item.description));
+		}
+		if (item.extensionId) { const owner = append(copy, $('.openide-settings-owner')); owner.textContent = item.extensionId; }
+		// A setting narrower than the selected tab cannot be written there. Saying so up front
+		// beats letting the click through and surfacing the writer's raw refusal
+		// ("does not support the folder resource scope") after the fact.
+		const editableHere = this.settingsModel.isEditableInCurrentScope(item);
+		row.classList.toggle('out-of-scope', !editableHere);
+		if (!editableHere) {
+			const note = append(copy, $('.openide-settings-scope-note'));
+			note.textContent = t('settings.item.onlyIn', this.settingsModel.editableScopeLabel(item));
+		}
+		const actions = append(row, $('.openide-settings-value'));
+		const control = createSettingControl(item, () => this.openJson(item.key), this.rowWidgets, this.contextViewService); actions.appendChild(control.element);
+		control.element.setAttribute('aria-label', item.label);
+		if (!editableHere) {
+			control.element.setAttribute('aria-disabled', 'true');
+			control.setEnabled?.(false);
+		}
+		// The switch is the only thing that toggles: a row that has no hover of its own must
+		// not answer a click on its text, or the value changes with nothing having lit up.
+		control.onChange?.(async value => {
+			const validation = item.setting.validator?.(value); if (validation) { control.element.setAttribute('aria-invalid', 'true'); control.element.title = validation; return; }
+			await this.settingsModel.update(item, value); control.element.setAttribute('aria-invalid', 'false');
+		});
+		if (item.value.configured) { const reset = append(actions, $('button.openide-settings-reset')) as HTMLButtonElement; reset.type = 'button'; reset.title = t('settings.item.reset'); append(reset, $('span.codicon.codicon-discard')); reset.addEventListener('click', () => this.settingsModel.reset(item)); }
+		if (item.value.policyValue !== undefined) { row.title = t('settings.item.policy'); }
+		if (item.type === SettingValueType.Complex) { row.classList.add('complex'); }
 	}
 
 	/** Lazy, cached instance: the section survives repaints and keeps its draft. */

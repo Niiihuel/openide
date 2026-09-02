@@ -1,6 +1,0 @@
-Template: @@NAME@@/add-microsoft-repo
-Type: boolean
-Default: true
-Description: Add Microsoft apt repository for OpenIDE?
- The installer would like to add the Microsoft repository and signing
- key to update VS Code through apt.

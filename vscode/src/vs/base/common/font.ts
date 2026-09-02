@@ -134,10 +134,10 @@ export function getFontSize(configurationService: IConfigurationService, key: st
 
 export function updateActivityBarSize(size: number): void {
 	FONT.activityBarSize = size;
-	// La variante compacta faltaba: quedaba clavada en su valor inicial de 16, así que subir el
-	// tamaño de la barra de actividad agrandaba los íconos normales y dejaba los compactos chicos.
-	// El coeficiente es 1 por definición (la compacta ES el tamaño base), pero se escribe igual que
-	// las otras para que la lista se lea como lo que es: una tabla completa, no cuatro de cinco.
+	// The compact variant was missing: it stayed pinned at its initial 16, so raising the activity
+	// bar's size grew the normal icons and left the compact ones small.
+	// The coefficient is 1 by definition (compact IS the base size), but it is spelled out like the
+	// others so the list reads as what it is: a complete table, not four rows out of five.
 	FONT.activityBarSize16 = size * ACTIVITY_BAR_COEFF_16;
 	FONT.activityBarSize24 = size * ACTIVITY_BAR_COEFF_24;
 	FONT.activityBarSize32 = size * ACTIVITY_BAR_COEFF_32;

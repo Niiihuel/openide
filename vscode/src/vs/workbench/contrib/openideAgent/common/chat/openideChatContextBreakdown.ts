@@ -8,7 +8,7 @@ import { IContextBreakdown } from '../openideAgentTypes.js';
 /**
  * The arithmetic behind "Uso de contexto".
  *
- * Transcribed from `fillCtxPanel` (openideChatHtml.ts:5381-5433), where it was interleaved with
+ * Transcribed from `fillCtxPanel` (the removed chat webview), where it was interleaved with
  * string concatenation of the panel's HTML — which is why the one thing worth checking about a
  * usage panel (that its numbers are right) could not be checked at all. Everything here is data in,
  * data out; the panel that draws it holds no arithmetic.

@@ -6,9 +6,13 @@
 import { $, addDisposableListener, append, clearNode, reset } from '../../../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../../../base/common/lifecycle.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService } from '../../../../../../platform/notification/common/notification.js';
+import { t } from '../../../common/openideStrings.js';
 import { IOpenideAgentService } from '../../openideAgentService.js';
+import { setupChatTooltip } from '../openideChatHover.js';
+import { appendKbd } from '../openideChatKbd.js';
 import { OpenideChatFileRow } from './openideChatFileRow.js';
 import '../media/openideChatFiles.css';
 
@@ -25,10 +29,10 @@ export interface IOpenideChatFilesResolved {
 	readonly signal: 'keep' | 'revert';
 }
 
-const STOP_KEYBINDING = 'Ctrl+Shift+Backspace';
+const STOP_KEYBINDING = 'Ctrl+Shift+⌫';
 
 /**
- * The turn's changed files: the webview's `files-tray` (openideChatHtml.ts:4406-4483) on workbench
+ * The turn's changed files: the webview's `files-tray` on workbench
  * DOM.
  *
  * It is not a content part and it is not per-turn state, which is the one thing about it that is
@@ -71,6 +75,7 @@ export class OpenideChatFilesTray extends Disposable {
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 		@IOpenideAgentService private readonly _agentService: IOpenideAgentService,
 		@INotificationService private readonly _notificationService: INotificationService,
+		@IHoverService private readonly _hoverService: IHoverService,
 	) {
 		super();
 
@@ -85,11 +90,11 @@ export class OpenideChatFilesTray extends Disposable {
 		append(head, $('span.openide-chat-files-spacer'));
 		const actions = append(head, $('span.openide-chat-files-actions'));
 
-		this._stopButton = this._createTextButton(actions, 'openide-chat-files-stop', 'Stop', 'Stop', () => this._onDidRequestStop.fire());
-		append(this._stopButton, $('span.openide-chat-files-kbd', undefined, STOP_KEYBINDING));
-		this._undoAllButton = this._createTextButton(actions, 'openide-chat-files-bulk', 'Undo All', 'Deshacer todos los cambios', () => this._revertAll());
-		this._keepAllButton = this._createTextButton(actions, 'openide-chat-files-bulk', 'Keep All', 'Conservar todos los cambios', () => this._keepAll());
-		this._createTextButton(actions, 'openide-chat-files-review', 'Review', 'Revisar cambios en el editor', () => this._reviewFirst());
+		this._stopButton = this._createTextButton(actions, 'openide-chat-files-stop', t('chat.files.stop'), () => t('chat.part.filesStop'), () => this._onDidRequestStop.fire());
+		appendKbd(this._stopButton, STOP_KEYBINDING).classList.add('openide-chat-files-kbd');
+		this._undoAllButton = this._createTextButton(actions, 'openide-chat-files-bulk', t('chat.files.undoAll'), () => t('chat.part.filesUndoAll'), () => this._revertAll());
+		this._keepAllButton = this._createTextButton(actions, 'openide-chat-files-bulk', t('chat.files.keepAll'), () => t('chat.part.filesKeepAll'), () => this._keepAll());
+		this._createTextButton(actions, 'openide-chat-files-review', t('chat.files.review'), () => t('chat.part.filesReview'), () => this._reviewFirst());
 
 		this._body = append(this.domNode, $('div.openide-chat-files-body'));
 
@@ -131,7 +136,7 @@ export class OpenideChatFilesTray extends Disposable {
 	/**
 	 * `added === 0 && removed === 0` means the file was resolved somewhere else — per-block Keep or
 	 * Undo in the editor's inline review. The row has to go, or the tray keeps offering actions on a
-	 * file with nothing left to accept (openideChatHtml.ts:4407-4413).
+	 * file with nothing left to accept (the removed chat webview).
 	 */
 	update(diff: IOpenideChatFileDiffSummary): void {
 		if (!diff.added && !diff.removed) {
@@ -148,8 +153,8 @@ export class OpenideChatFilesTray extends Disposable {
 			}));
 			row.setFile(diff.path);
 			row.setActions([
-				{ icon: 'close', tooltip: 'Reject', tone: 'reject', run: () => this._resolve(diff.path, 'revert') },
-				{ icon: 'check', tooltip: 'Accept', tone: 'accept', run: () => this._resolve(diff.path, 'keep') },
+				{ icon: 'close', tooltip: () => t('chat.part.fileRevert'), tone: 'reject', run: () => this._resolve(diff.path, 'revert') },
+				{ icon: 'check', tooltip: () => t('chat.part.fileKeep'), tone: 'accept', run: () => this._resolve(diff.path, 'keep') },
 			]);
 			append(this._body, row.domNode);
 			entry = { row, store };
@@ -159,9 +164,9 @@ export class OpenideChatFilesTray extends Disposable {
 		this._syncVisibility();
 	}
 
-	private _createTextButton(parent: HTMLElement, className: string, label: string, tooltip: string, run: () => void): HTMLButtonElement {
-		const button = append(parent, $<HTMLButtonElement>(`button.${className}`, { type: 'button', title: tooltip }));
-		button.setAttribute('aria-label', tooltip);
+	private _createTextButton(parent: HTMLElement, className: string, label: string, tooltip: () => string, run: () => void): HTMLButtonElement {
+		const button = append(parent, $<HTMLButtonElement>(`button.${className}`, { type: 'button' }));
+		this._register(setupChatTooltip(this._hoverService, button, tooltip));
 		append(button, $('span', undefined, label));
 		this._register(addDisposableListener(button, 'click', (event: MouseEvent) => {
 			event.stopPropagation();
@@ -206,7 +211,7 @@ export class OpenideChatFilesTray extends Disposable {
 	/**
 	 * ONE `keepEdits` call, not N `keepEdit`s: the service deletes the snapshots as a transaction
 	 * and forces the flush before resolving, so a restart in the middle cannot leave half the files
-	 * accepted and half still pending (openideChatHtml.ts:4500-4510 makes the same point).
+	 * accepted and half still pending (the removed chat webview makes the same point).
 	 */
 	private _keepAll(): void {
 		const paths = [...this._rows.keys()];
@@ -241,7 +246,7 @@ export class OpenideChatFilesTray extends Disposable {
 	private _syncVisibility(): void {
 		const empty = this.isEmpty;
 		this.domNode.classList.toggle('hidden', empty);
-		reset(this._count, empty ? '' : `${this._rows.size} ${this._rows.size === 1 ? 'File' : 'Files'}`);
+		reset(this._count, empty ? '' : this._rows.size === 1 ? t('chat.files.one') : t('chat.files.many', this._rows.size));
 		this._syncActions();
 		this._onDidChangeHeight.fire();
 	}

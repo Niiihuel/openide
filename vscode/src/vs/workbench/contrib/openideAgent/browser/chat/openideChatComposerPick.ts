@@ -5,13 +5,16 @@
 
 import { $, addDisposableListener, append, clearNode } from '../../../../../base/browser/dom.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IOpenidePickAttachment, toOpenidePickAttachment } from '../../common/openidePickContext.js';
 import { IOpenideAgentService } from '../openideAgentService.js';
+import { t } from '../../common/openideStrings.js';
+import { setupChatTooltip } from './openideChatHover.js';
 
 /**
  * Pick & Polish in the composer: the chip for the element the user selected in their running app.
  *
- * The webview's `#pickChip` (openideChatHtml.ts:4208-4221) plus the `_pendingPick` slot the host
+ * The webview's `#pickChip` plus the `_pendingPick` slot the host
  * kept beside it (openideChatView.ts:131). Those were two halves of one thing in two files, and
  * splitting them is what made the chip a display of state it did not own: the host could clear the
  * pending pick and the chip only found out because a `postMessage` said so.
@@ -44,6 +47,7 @@ export class OpenideChatComposerPick extends Disposable {
 	constructor(
 		strip: HTMLElement,
 		agentService: IOpenideAgentService,
+		private readonly _hoverService: IHoverService,
 		private readonly _onDidChange: () => void,
 		private readonly _onDidPick: () => void,
 	) {
@@ -97,10 +101,10 @@ export class OpenideChatComposerPick extends Disposable {
 		append(this._strip, $('span.codicon.codicon-inspect'));
 		const selector = append(this._strip, $('span.openide-chat-pick-selector'));
 		selector.textContent = this._pending.selector;
-		selector.title = 'Elemento seleccionado en la app (se adjunta al próximo mensaje)';
+		this._chipStore.add(setupChatTooltip(this._hoverService, selector, () => t('chat.pick.selected'), { aria: false }));
 
-		const remove = append(this._strip, $<HTMLButtonElement>('button.openide-chat-pick-remove', { type: 'button', title: 'Quitar elemento' }));
-		remove.setAttribute('aria-label', 'Quitar elemento seleccionado');
+		const remove = append(this._strip, $<HTMLButtonElement>('button.openide-chat-pick-remove', { type: 'button' }));
+		this._chipStore.add(setupChatTooltip(this._hoverService, remove, () => t('chat.pick.remove')));
 		append(remove, $('span.codicon.codicon-close'));
 		this._chipStore.add(addDisposableListener(remove, 'click', () => this.clear()));
 		this._onDidChange();

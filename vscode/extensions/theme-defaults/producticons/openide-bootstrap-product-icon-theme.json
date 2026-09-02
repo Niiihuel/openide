@@ -234,7 +234,7 @@
 			"fontCharacter": "\\f1dc"
 		},
 		"extensions": {
-			"fontCharacter": "\\f503"
+			"fontCharacter": "\\f1c7"
 		},
 		"account": {
 			"fontCharacter": "\\f4d7"
@@ -315,7 +315,7 @@
 			"fontCharacter": "\\f1dc"
 		},
 		"extensions-view-icon": {
-			"fontCharacter": "\\f503"
+			"fontCharacter": "\\f1c7"
 		},
 		"ports-view-icon": {
 			"fontCharacter": "\\f4f7"
@@ -1886,6 +1886,9 @@
 		"chat-sessions-icon": {
 			"fontCharacter": "\\f264"
 		},
+		"openide-cli-changes": {
+			"fontCharacter": "\\f364"
+		},
 		"comment-discussion-sparkle": {
 			"fontCharacter": "\\f71a"
 		},
@@ -1980,7 +1983,7 @@
 			"fontCharacter": "\\f2cc"
 		},
 		"extensions-large": {
-			"fontCharacter": "\\f503"
+			"fontCharacter": "\\f1c7"
 		},
 		"index-zero": {
 			"fontCharacter": "\\f40a"

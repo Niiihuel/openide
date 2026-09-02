@@ -13,6 +13,9 @@ import {
 	turnBoundaryOf,
 	turnFileStatusOf,
 	turnFilesFromWatch,
+	turnFilesFromWatchOnly,
+	pathspecBatches,
+	GIT_PATHSPEC_BATCH,
 } from '../../common/openideCliTurnChanges.js';
 
 /** `git status --porcelain -z` output: NUL-separated, no trailing newline. */
@@ -132,6 +135,30 @@ suite('OpenIDE — cambios de un CLI, por turno', () => {
 			// a.ts is still dirty, but nobody touched it in THIS turn: it belongs to the first one.
 			assert.deepEqual(second.files.map(f => f.path), ['b.ts']);
 			assert.equal(second.ordinal, 2);
+		});
+
+		test('un archivo que el repo ignora no se lista aunque el watcher lo haya visto', () => {
+			const records = parsePorcelainZ(porcelain('!! .next/BUILD_ID', ' M src/a.ts'));
+			const files = turnFilesFromWatch(new Map<string, OpenideTouchKind>([['.next/BUILD_ID', 'added'], ['src/a.ts', 'updated']]), records);
+			assert.deepEqual(files.map(f => [f.path, f.status]), [['src/a.ts', 'modified']]);
+		});
+
+		test('un archivo ignorado que ya no existe tampoco se lista, con o sin git', () => {
+			const touched = new Map<string, OpenideTouchKind>([['.next/chunk.js', 'deleted'], ['src/a.ts', 'updated']]);
+			const ignored = new Set(['.next/chunk.js']);
+			assert.deepEqual(turnFilesFromWatch(touched, parsePorcelainZ(porcelain(' M src/a.ts')), ignored).map(f => f.path), ['src/a.ts']);
+			assert.deepEqual(turnFilesFromWatchOnly(touched, ignored).map(f => f.path), ['src/a.ts']);
+			assert.deepEqual(turnFilesFromWatch(touched, [], undefined).map(f => f.path), ['.next/chunk.js']);
+		});
+
+		test('los pathspecs van en tandas que caben en el tope de argv del host', () => {
+			const paths = Array.from({ length: 123 }, (_, i) => `f${i}.ts`);
+			const batches = pathspecBatches(paths);
+			assert.strictEqual(batches.length, 3);
+			assert.ok(batches.every(batch => batch.length <= GIT_PATHSPEC_BATCH));
+			assert.ok(GIT_PATHSPEC_BATCH + 6 <= 64, 'la tanda más los argumentos fijos debe caber en 64');
+			assert.deepEqual(batches.flat(), paths);
+			assert.deepEqual(pathspecBatches([]), []);
 		});
 
 		test('un cambio FUERA de un turno se ignora', () => {
@@ -257,5 +284,34 @@ suite('OpenIDE — cambios de un CLI, por turno', () => {
 			log.begin(1000, false);
 			assert.equal(log.all[0].hooked, false);
 		});
+	});
+});
+
+suite('Openide CLI turn changes — sin git', () => {
+
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('el veredicto del watcher se traduce al vocabulario de la vista', () => {
+		const touched = new Map<string, OpenideTouchKind>([['b.ts', 'updated'], ['a.ts', 'added'], ['c.ts', 'deleted']]);
+		assert.deepStrictEqual(turnFilesFromWatchOnly(touched), [
+			{ path: 'a.ts', status: 'untracked' },
+			{ path: 'b.ts', status: 'modified' },
+			{ path: 'c.ts', status: 'deleted' },
+		]);
+	});
+
+	test('cerrar un turno sin respuesta de git NO dice "no cambió nada"', () => {
+		const log = new OpenideCliTurnLog('s');
+		log.begin(1, true);
+		log.touch('src/x.ts', 'updated');
+		const closed = log.end(undefined, 2)!;
+		assert.deepStrictEqual(closed.files, [{ path: 'src/x.ts', status: 'modified' }]);
+	});
+
+	test('con git una respuesta vacía sigue siendo "todo volvió a HEAD"', () => {
+		const log = new OpenideCliTurnLog('s');
+		log.begin(1, true);
+		log.touch('src/x.ts', 'updated');
+		assert.deepStrictEqual(log.end([], 2)!.files, []);
 	});
 });

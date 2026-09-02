@@ -513,17 +513,10 @@ export abstract class CompositePart<T extends Composite, MementoType extends obj
 	}
 
 	override layout(width: number, height: number, top: number, left: number): void {
-		// OpenIDE: los docks (sidebar/panel/auxiliarybar) se dibujan como "islas"
-		// flotantes con un borde transparente (gap) via CSS. El part conserva el tamaño
-		// asignado por el grid; únicamente su contenido debe descontar ese borde.
-		const gap = 5; // debe coincidir con --openide-island-gap del CSS de layout
-		const contentWidth = Math.max(0, width - gap * 2);
-		const contentHeight = Math.max(0, height - gap * 2);
-
 		super.layout(width, height, top, left);
 
 		// Layout contents
-		this.contentAreaSize = Dimension.lift(super.layoutContents(contentWidth, contentHeight).contentSize);
+		this.contentAreaSize = Dimension.lift(super.layoutContents(width, height).contentSize);
 
 		// Layout composite
 		this.activeComposite?.layout(this.contentAreaSize);

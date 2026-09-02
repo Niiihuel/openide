@@ -52,6 +52,8 @@ export interface ISubagentTargetHealth {
 	readonly status: SubagentTargetHealthStatus;
 	readonly reason?: string;
 	readonly until?: number;
+	/** Consecutive failures of this same status; drives the escalating cooldown. */
+	readonly failures?: number;
 	readonly updatedAt: number;
 }
 

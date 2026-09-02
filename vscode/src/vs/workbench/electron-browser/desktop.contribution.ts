@@ -289,7 +289,11 @@ import product from '../../platform/product/common/product.js';
 			'window.dialogStyle': {
 				'type': 'string',
 				'enum': ['native', 'custom'],
-				'default': 'native',
+				// OpenIDE ships `custom`, upstream's `native`. A GTK/Win32 message box cannot be
+				// themed, cannot be captured by the fork's visual checks, and lands in the middle of
+				// a product whose whole point is one visual language; `custom` is the same widget
+				// the Agents window already defaults to. See contrib/openideDialogs.
+				'default': 'custom',
 				'scope': ConfigurationScope.APPLICATION,
 				'description': localize('dialogStyle', "Adjust the appearance of dialogs to be native by the OS or custom."),
 				agentsWindow: { default: 'custom' },

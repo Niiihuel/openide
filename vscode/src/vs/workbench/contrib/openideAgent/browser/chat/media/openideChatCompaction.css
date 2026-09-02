@@ -1,7 +1,7 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — native chat: the context-compaction card.
  *
- *  SOURCE OF TRUTH: browser/openideChatHtml.ts:551-570. Neutral and persistent, with the same
+ *  SOURCE OF TRUTH: the removed chat webview. Neutral and persistent, with the same
  *  vocabulary as a tool card but WITHOUT the side accent: compaction is something the runtime did
  *  to the conversation, not a step the agent took, and the accent is what marks the latter.
  *--------------------------------------------------------------------------------------------*/
@@ -12,9 +12,9 @@
 	gap: 9px;
 	min-width: 0;
 	margin: 6px 0;
-	border: 1px solid rgba(128, 128, 128, 0.26);
-	border-radius: 8px;
-	background: rgba(128, 128, 128, 0.035);
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
+	border-radius: var(--oi-chat-card-radius);
+	background: var(--oi-chat-card-bg, var(--oi-tint-1));
 	padding: 8px 10px;
 	color: var(--vscode-descriptionForeground);
 }
@@ -55,12 +55,12 @@
 .openide-chat-compaction-kind {
 	flex: 0 0 auto;
 	padding: 2px 5px;
-	border-radius: 3px;
+	border-radius: var(--oi-radius-sm);
 	font-size: 9px;
 	font-weight: 650;
 	letter-spacing: 0.035em;
 	text-transform: uppercase;
-	background: rgba(128, 128, 128, 0.14);
+	background: var(--oi-border-soft);
 	color: var(--vscode-descriptionForeground);
 }
 

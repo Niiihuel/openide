@@ -1,9 +1,9 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — native chat: the background terminals tray.
  *
- *  SOURCE OF TRUTH: browser/openideChatHtml.ts. Every literal below is transcribed from that
- *  file's <style>, with the line it comes from, because the native chat has to be
- *  indistinguishable from the webview it replaces.
+ *  TRANSCRIBED from the chat webview this replaced (removed when the chat became native): every
+ *  literal below comes from its `<style>`, because the native chat had to be indistinguishable
+ *  from it.
  *
  *  The dock surface (:896-914), the head (:915-927) and the body (:939-944) are the SAME rules the
  *  files tray already carries in openideChatFiles.css. They are restated here rather than shared
@@ -12,7 +12,7 @@
  *  natively first. When the queue tray lands, these three blocks are what collapse into one.
  *--------------------------------------------------------------------------------------------*/
 
-/* openideChatHtml.ts:896-914 (.terms-tray, sharing the selector list with .files-tray).
+/* the removed chat webview (.terms-tray, sharing the selector list with .files-tray).
    See the long note on `.openide-chat-files-tray`: the width belongs to the tray host and the
    -10px bottom margin is what lets the composer card overlap the tray's lower edge. */
 .openide-chat-terms-tray {
@@ -25,10 +25,10 @@
 	box-sizing: border-box;
 	margin: 0 0 -10px;
 	padding: 3px 7px 14px;
-	border: 1px solid rgba(128, 128, 128, 0.26);
-	border-radius: 6px;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-md);
 	background: var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
-	box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
+	box-shadow: var(--oi-shadow-sm);
 }
 
 .openide-chat-terms-tray.hidden,
@@ -36,7 +36,6 @@
 	display: none !important;
 }
 
-/* openideChatHtml.ts:915-918 */
 .openide-chat-terms-head {
 	display: flex;
 	align-items: center;
@@ -44,7 +43,7 @@
 	min-height: 20px;
 }
 
-/* openideChatHtml.ts:919-922 — `foreground`/500, not the dimmer generic dock toggle: it is a
+/* the removed chat webview — `foreground`/500, not the dimmer generic dock toggle: it is a
    heading. `nowrap` keeps "2 Background Terminals" from breaking across two lines in a narrow
    dock, which would double the head's height. */
 .openide-chat-terms-toggle {
@@ -64,7 +63,6 @@
 	cursor: pointer;
 }
 
-/* openideChatHtml.ts:923-926 */
 .openide-chat-terms-toggle .codicon {
 	flex: 0 0 auto;
 	font-size: 11px;
@@ -79,7 +77,6 @@
    chevron beside it must NOT be swept — it is furniture, not activity — which is why the class
    sits on the count and not on the toggle. */
 
-/* openideChatHtml.ts:939-944 */
 .openide-chat-terms-body {
 	display: flex;
 	flex-direction: column;
@@ -87,7 +84,7 @@
 	padding-top: 1px;
 }
 
-/* openideChatHtml.ts:972-975 (.dock-bg-row) */
+/* the removed chat webview (.dock-bg-row) */
 .openide-chat-terms-row {
 	display: flex;
 	align-items: center;
@@ -95,13 +92,13 @@
 	min-width: 0;
 	padding: 2px 3px;
 	margin: 0 -1px;
-	border-radius: 3px;
+	border-radius: var(--oi-radius-sm);
 	font-size: 11.5px;
 	cursor: pointer;
 }
 
 .openide-chat-terms-row:hover {
-	background: rgba(128, 128, 128, 0.08);
+	background: var(--oi-tint-2);
 }
 
 .openide-chat-terms-row > .codicon {
@@ -110,7 +107,7 @@
 	color: var(--vscode-descriptionForeground);
 }
 
-/* openideChatHtml.ts:975 (.dock-bg-label) — the editor's mono face, because the row's content is
+/* the removed chat webview (.dock-bg-label) — the editor's mono face, because the row's content is
    a shell command and a proportional face makes `npm run dev -- --port 3000` unreadable. */
 .openide-chat-terms-label {
 	flex: 1 1 auto;
@@ -122,7 +119,7 @@
 	font-size: 11px;
 }
 
-/* openideChatHtml.ts:968-971 (.term-stop) — invisible until the row is hovered, so a list of
+/* the removed chat webview (.term-stop) — invisible until the row is hovered, so a list of
    running servers is not a row of red buttons. `:focus-within` is the addition: opacity 0 alone
    makes the button unreachable by keyboard, which the webview simply never handled. */
 .openide-chat-terms-stop {
@@ -134,7 +131,7 @@
 	justify-content: center;
 	padding: 0;
 	border: none;
-	border-radius: 3px;
+	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	cursor: pointer;
@@ -147,7 +144,7 @@
 }
 
 .openide-chat-terms-stop:hover {
-	background: rgba(128, 128, 128, 0.14);
+	background: var(--oi-border-soft);
 	color: var(--vscode-foreground);
 }
 

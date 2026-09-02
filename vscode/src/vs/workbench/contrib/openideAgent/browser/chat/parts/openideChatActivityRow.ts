@@ -10,7 +10,7 @@ import { IOpenideToolMeta } from '../../../common/chat/openideChatToolMeta.js';
  * The `.part` / `.tool-activity` row of the webview, rebuilt node by node.
  *
  * It lives apart from the two parts that use it (tool rows and explore entries) because both build
- * the SAME element — `openideChatHtml.ts:3166-3198` creates one row and only branches on the text
+ * the SAME element — `the removed chat webview` creates one row and only branches on the text
  * it puts inside. Duplicating the builder is how the two drift: the explore row would keep the old
  * gap while the tool row got a new one, and the transcript would show two grammars for one idea.
  */
@@ -25,6 +25,14 @@ export const OPENIDE_CHAT_EXPLORE_ROW_CLASS = 'openide-chat-part-explore';
 export const OPENIDE_CHAT_PART_ERROR_CLASS = 'openide-chat-part-error';
 /** Webview `.part.open`: reveals `.part-body`. */
 export const OPENIDE_CHAT_PART_OPEN_CLASS = 'openide-chat-part-open';
+/**
+ * No webview equivalent: the step IN FLIGHT is drawn by the turn's status line, not by its row.
+ *
+ * The transcript is the record of what already happened; the one thing still happening lives on
+ * the single animated line under it (`openideChatStatusLine.ts`). A row wearing this class is not
+ * gone — it is being shown somewhere else, and it comes back the instant it settles.
+ */
+export const OPENIDE_CHAT_PART_LIVE_CLASS = 'openide-chat-part-live';
 
 /**
  * Webview `.shimmer`: a gradient swept across the TEXT (`background-clip: text`), not an opacity
@@ -62,7 +70,7 @@ export interface IOpenideChatActivityRow {
  * Builds the row.
  *
  * DELIBERATE DEVIATION, and the only one: the webview hides `.part-icon` with
- * `display: none !important` (openideChatHtml.ts:306), so today every tool call is a bare verb.
+ * `display: none !important`, so today every tool call is a bare verb.
  * That is exactly the "a dot instead of an icon" the user reported. The icon node is rendered AND
  * visible here; every other value — 22px min-height, 12.5px verb, 13px icon, the 6px gap, the
  * muted foreground — is transcribed unchanged, so the row still reads as the same family.
@@ -120,7 +128,7 @@ export function setOpenideChatShimmer(element: HTMLElement, active: boolean): vo
 	element.classList.toggle(OPENIDE_CHAT_SHIMMER_CLASS, active);
 }
 
-/** Webview truncation (openideChatHtml.ts:3451): the model keeps the full text, the row does not. */
+/** Webview truncation: the model keeps the full text, the row does not. */
 const RESULT_LIMIT = 6000;
 
 export function truncateOpenideChatResult(result: string): string {
@@ -168,7 +176,7 @@ export function setOpenideChatActivityOpen(row: IOpenideChatActivityRow, open: b
 }
 
 /**
- * The line an explore row shows: `verb + compacted target`, e.g. "Read openideChatHtml.ts L1-40".
+ * The line an explore row shows: `verb + compacted target`, e.g. "Read openideChatWidget.ts L1-40".
  *
  * Split out of the parts because the running row and the settled row must produce the same string
  * from different inputs — otherwise the row visibly rewrites itself on `toolResult` even when the

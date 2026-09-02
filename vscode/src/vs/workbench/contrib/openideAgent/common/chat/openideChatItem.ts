@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import type { IComposerSnippet } from './openideChatSnippet.js';
 import { AgentMode, IChatCapabilityMention, IChatImage } from '../openideAgentTypes.js';
 import { IOpenideChatContent } from './openideChatContent.js';
 
@@ -43,6 +44,7 @@ export interface IOpenideChatRequestItem extends IOpenideChatItemBase {
 	readonly displayText?: string;
 	readonly images?: readonly IChatImage[];
 	readonly capabilities?: readonly IChatCapabilityMention[];
+	readonly snippets?: readonly IComposerSnippet[];
 	/** Captured at accept time: editing and rollback must not follow the current global selector. */
 	readonly mode?: AgentMode;
 	readonly providerId?: string;

@@ -4,9 +4,12 @@ The SVG marks in this directory were retrieved from [SVGL](https://svgl.app/) on
 for the second table, from [models.dev](https://models.dev/) and the vendors' own sites on
 2026-08-25. All of them are cached locally so OpenIDE does not make runtime requests.
 
-They are painted as CSS masks (`openideProviderIcons.ts`), so only the silhouette survives: any
+Most are painted as CSS masks (`openideProviderIcons.ts`), so only the silhouette survives: any
 mark that arrived on a plate — a full-bleed background rect — has that plate stripped, or it would
-render as a solid square.
+render as a solid square. The marks whose colours are the brand (Gemini, Mistral, Cohere,
+DeepSeek, Antigravity, Cerebras, Perplexity) are shown as images instead, unmasked, and a few
+one-colour marks are masked in their brand's own colour (`paint` in
+`common/openideProviderBranding.ts`).
 
 SVGL's application source is MIT licensed. Company and product logos remain trademarks of their
 respective owners and are used only to identify the corresponding provider integration. SVGL
@@ -16,8 +19,10 @@ notes that permission may be required for logo use; do not treat inclusion here 
 | --- | --- |
 | `antigravity.svg` | `antigravity.svg` |
 | `anthropic.svg` | `anthropic_black.svg` |
+| `claude.svg` | not SVGL: the Claude AI symbol from Wikimedia Commons (`File:Claude_AI_symbol.svg`, CC0), monochrome |
+| `cursor.svg` | not SVGL: Cursor's two-cursor mark as published by Simple Icons (CC0), monochrome |
+| `vscode.svg` | not SVGL: the Visual Studio Code mark as published by Simple Icons (CC0), monochrome, tinted with the product's blue |
 | `github-copilot.svg` | `copilot.svg` |
-| `codex.svg` | `codex_light.svg` |
 | `grok.svg` | `grok-light.svg` |
 | `openai.svg` | `openai.svg` |
 | `openrouter.svg` | `openrouter_light.svg` |

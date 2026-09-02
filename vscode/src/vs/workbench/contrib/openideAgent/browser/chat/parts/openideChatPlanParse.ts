@@ -23,7 +23,7 @@ const CHECKBOX = /^\s*[-*+]\s+\[([ xX])\]\s+(.*)$/;
 /**
  * Reduces a plan's markdown to the three things the card shows.
  *
- * Straight port of the webview's `parsePlan` (openideChatHtml.ts:3798-3821), regex for regex. It is
+ * Straight port of the webview's `parsePlan`, regex for regex. It is
  * deliberately NOT a markdown renderer: the card is a summary whose job is to get the user to open
  * the real plan editor, and rendering the whole document inline would put an unbounded, scrolling
  * block inside a row of a `supportDynamicHeights` list.
@@ -78,7 +78,7 @@ export function parseOpenideChatPlan(markdown: string): IOpenideChatParsedPlan {
 	return { title, desc: descLines.join(' '), tasks };
 }
 
-/** Head line of the task box (openideChatHtml.ts:3900-3902). */
+/** Head line of the task box (the removed chat webview). */
 export function pendingTasksLabel(tasks: readonly IOpenideChatPlanTask[]): string {
 	const remaining = tasks.filter(task => !task.done).length;
 	return remaining === 1 ? '1 tarea pendiente' : `${remaining} tareas pendientes`;

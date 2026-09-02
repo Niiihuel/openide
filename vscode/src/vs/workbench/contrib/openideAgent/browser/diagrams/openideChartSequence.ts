@@ -8,7 +8,7 @@ import { CH_AXIS, CH_GRID, CH_MID, CH_MUTED, CH_SOFT, fgA, IOpenideChartRender, 
 import { nextDiagramId, SVG_NAMESPACE, svgNode, svgText } from './openideDiagramDom.js';
 
 /**
- * The sequence diagram, ported from the webview (openideChatHtml.ts:1929-2031).
+ * The sequence diagram, ported from the webview.
  *
  * It gets a file to itself because it is the only chart with STATE while drawing: an activation
  * stack per participant and a block stack for alt/loop/opt. Those two make it as long as the other

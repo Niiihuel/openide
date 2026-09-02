@@ -15,5 +15,9 @@ export interface IConfig {
 // not really a secret... so we allow the client secret in code. It is brought in before we publish VS Code. Reference:
 // https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/best-practices-for-creating-an-oauth-app#client-secrets
 export const Config: IConfig = {
-	gitHubClientId: '01ab8ac9400c4e429b23'
+	// OpenIDE's own OAuth app (https://github.com/settings/developers), so the GitHub
+	// consent screen shows OpenIDE instead of Visual Studio Code. Requires "Enable Device
+	// Flow" on the app: without a client secret the device code flow is the only one left
+	// for an unsupported client. See `getFlows` in ./flows.ts.
+	gitHubClientId: 'Ov23li4DUJIoCYvb0UdZ'
 };

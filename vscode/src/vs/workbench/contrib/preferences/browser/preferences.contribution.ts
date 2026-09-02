@@ -74,9 +74,9 @@ Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane
 		nls.localize('openideSettingsEditor', "Settings")
 	),
 	[
-		// PreferencesService crea el input de producto. Registrar el pane con el
-		// mismo constructor permite que workbench.action.openSettings encuentre
-		// este editor, también al restaurar una ventana.
+		// PreferencesService creates the product input. Registering the pane with the
+		// same constructor lets workbench.action.openSettings find this editor, also
+		// when a window is being restored.
 		new SyncDescriptor(SettingsEditorInput)
 	]
 );

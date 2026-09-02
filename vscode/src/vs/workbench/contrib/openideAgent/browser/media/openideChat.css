@@ -24,6 +24,20 @@
 .monaco-editor .openide-review-modified-line {
 	background: color-mix(in srgb, var(--vscode-editor-background) 78%, var(--openide-green));
 }
+/* The gutter of a line the agent changed and you have not accepted yet: git's own hatch, in AMBER
+   instead of the theme's grey. Nothing about the marker changes but its colour — the pattern, the
+   width and the position are upstream's (`dirtydiffDecorator.css`), and they read the colour out of
+   `--vscode-editorGutter-*`, so redefining those variables on the lines the review owns is the whole
+   change. Scoped through the review's own `linesDecorationsClassName`
+   (`openide-review-change-gutter`, applied by `openideEditReview.ts`), so git's marker keeps its
+   theme colour everywhere the agent has not touched. */
+.monaco-editor .margin-view-overlays > div:has(> .openide-review-change-gutter) .dirty-diff-glyph {
+	--vscode-editorGutter-modifiedBackground: var(--openide-amber);
+	--vscode-editorGutter-modifiedSecondaryBackground: var(--openide-amber);
+	--vscode-editorGutter-addedBackground: var(--openide-amber);
+	--vscode-editorGutter-addedSecondaryBackground: var(--openide-amber);
+}
+
 /* Typewriter visual del agente. El modelo ya contiene el archivo completo: cubrimos las líneas
  * pendientes con el fondo del editor, ocultamos su texto y devolvemos el verde solamente al
  * prefijo revelado. No genera undo stops ni autosaves parciales. */
@@ -96,12 +110,12 @@
 	height: 22px;
 	padding: 0;
 	border: 0;
-	border-radius: var(--vscode-cornerRadius-small, 4px);
+	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: var(--oi-text-muted);
 	cursor: pointer;
 }
-.monaco-workbench .openide-usage-menu .openide-usage-refresh .codicon[class*="codicon-"] { font-size: 14px; color: inherit; }
+.monaco-workbench .openide-usage-menu .openide-usage-refresh .codicon[class*="codicon-"] { font-size: 16px; color: inherit; }
 .openide-usage-refresh:hover { background: var(--oi-hover-strong); color: var(--oi-text); }
 .openide-usage-refresh:focus-visible { outline: 1px solid var(--oi-focus); outline-offset: -1px; }
 .openide-usage-refresh[disabled] { cursor: default; }
@@ -127,7 +141,6 @@
 .openide-usage-account-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
 /* Flat, monochrome brand mark: currentColor through the mask, no chip behind it. */
 .openide-usage-provider-logo { flex: 0 0 16px; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--oi-text); opacity: 0.85; }
-.openide-usage-provider-logo.logo-ready { background-color: currentColor; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
 .openide-usage-provider-logo.monogram { font-size: 9px; font-weight: 600; line-height: 1; }
 .openide-usage-account-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .openide-usage-account-name strong { font-weight: 500; }
@@ -137,7 +150,7 @@
 .openide-usage-windows { display: flex; flex-direction: column; gap: 4px; padding-left: 24px; }
 .openide-usage-metric { display: flex; align-items: center; gap: 8px; }
 .openide-usage-window-label { flex: 0 0 56px; overflow: hidden; color: var(--oi-text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.openide-usage-bar { flex: 1; min-width: 40px; height: 3px; overflow: hidden; border-radius: 999px; background: var(--oi-border); }
+.openide-usage-bar { flex: 1; min-width: 40px; height: 3px; overflow: hidden; border-radius: var(--oi-radius-circle); background: var(--oi-border); }
 .openide-usage-bar-fill { display: block; height: 100%; border-radius: inherit; background: var(--oi-success); transition: width 240ms ease; }
 .openide-usage-bar-fill.warn { background: var(--oi-warn); }
 .openide-usage-bar-fill.danger { background: var(--openide-red); }
@@ -181,7 +194,7 @@
 	flex: 1 0 auto;
 	padding-left: 8px;
 	text-decoration: line-through;
-	text-decoration-color: rgba(194, 76, 101, 0.58);
+	text-decoration-color: color-mix(in srgb, var(--openide-red) 58%, transparent);
 }
 
 /* Fase 1 del seguimiento: el baseline se presenta como código real, todavía neutro. Cada línea
@@ -207,15 +220,15 @@
 }
 .monaco-editor .openide-review-deleted-zone.openide-agent-delete-pending .openide-review-deleted-line.openide-agent-delete-revealed .openide-review-deleted-code {
 	text-decoration: line-through;
-	text-decoration-color: rgba(194, 76, 101, 0.58);
+	text-decoration-color: color-mix(in srgb, var(--openide-red) 58%, transparent);
 }
 
 /* Barra global del review — compacta, cuadrada, integrada (Cursor).
    El selector no depende de .monaco-editor porque, con breadcrumbs activos, el widget
    vive en .breadcrumbs-control (hermano del canvas Monaco). */
 .openide-review-header {
-	--openide-review-keep: color-mix(in srgb, var(--openide-green) 74%, var(--vscode-editor-background));
-	--openide-review-keep-hover: color-mix(in srgb, var(--openide-green) 88%, var(--vscode-editor-background));
+	--openide-review-keep: var(--vscode-button-background);
+	--openide-review-keep-hover: var(--vscode-button-hoverBackground);
 	display: flex;
 	align-items: center;
 	gap: 2px;
@@ -257,7 +270,7 @@
 	width: 1px;
 	height: 14px;
 	align-self: center;
-	background: rgba(128, 128, 128, 0.32);
+	background: var(--oi-border-strong);
 	margin: 0 4px;
 }
 .openide-review-nav,
@@ -270,7 +283,7 @@
 	width: 16px;
 	height: 18px;
 	padding: 0;
-	border-radius: 3px;
+	border-radius: var(--oi-radius-sm);
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -278,7 +291,7 @@
 }
 .openide-review-nav:hover,
 .oreview-chev:hover {
-	background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+	background: var(--vscode-toolbar-hoverBackground, var(--oi-border-soft));
 	color: var(--vscode-foreground);
 }
 .openide-review-nav:disabled {
@@ -292,16 +305,22 @@
 .oreview-chev .codicon {
 	font-size: 11px;
 }
+/* Same fight as the suggest card: `.monaco-workbench .codicon` would paint the glyph with
+   `icon-foreground`, white over the amber primary. */
+.monaco-workbench .openide-review-btn .codicon[class*='codicon-'] {
+	color: inherit;
+}
+
 .openide-review-btn {
 	appearance: none;
-	border: 1px solid rgba(128, 128, 128, 0.28);
+	border: 1px solid var(--oi-border);
 	cursor: pointer;
 	font-size: 11px;
 	font-family: inherit;
 	min-height: 22px;
 	padding: 1px 8px;
-	border-radius: 4px;
-	background: rgba(128, 128, 128, 0.14);
+	border-radius: var(--oi-radius-sm);
+	background: var(--oi-border-soft);
 	color: var(--vscode-foreground);
 	white-space: nowrap;
 	display: inline-flex;
@@ -319,12 +338,12 @@
 	font-family: var(--vscode-font-family);
 }
 .openide-review-btn:hover {
-	background: rgba(128, 128, 128, 0.24);
+	background: var(--oi-border);
 }
 .openide-review-btn.primary {
 	background: var(--openide-review-keep);
 	border-color: var(--openide-review-keep);
-	color: var(--vscode-button-foreground, #ffffff);
+	color: var(--vscode-button-foreground);
 }
 .openide-review-btn.primary:hover {
 	background: var(--openide-review-keep-hover);
@@ -358,7 +377,7 @@
 	height: 18px;
 	padding: 0 6px;
 	font-size: 10px;
-	border-radius: 3px;
+	border-radius: var(--oi-radius-sm);
 }
 .openide-review-header.in-breadcrumbs .oreview-kbd {
 	font-size: 9px;
@@ -413,8 +432,8 @@
  * aunque se desplace al borde derecho, el viewport del editor lo clippea antes del chat. */
 .monaco-editor .openide-review-block,
 .monaco-editor .contentWidgets .openide-review-block {
-	--openide-review-keep: color-mix(in srgb, var(--openide-green) 74%, var(--vscode-editor-background));
-	--openide-review-keep-hover: color-mix(in srgb, var(--openide-green) 88%, var(--vscode-editor-background));
+	--openide-review-keep: var(--vscode-button-background);
+	--openide-review-keep-hover: var(--vscode-button-hoverBackground);
 	/* ContentWidgetManager escribe display:block inline en cada layout. */
 	display: inline-flex !important;
 	align-items: center;
@@ -442,8 +461,8 @@
 	min-height: 0;
 	box-sizing: border-box;
 	padding: 0 2px;
-	border: 1px solid rgba(128, 128, 128, 0.3);
-	border-radius: 6px;
+	border: 1px solid var(--oi-border-strong);
+	border-radius: var(--oi-radius-md);
 	background: var(--vscode-editor-background);
 	box-shadow: none;
 }
@@ -456,13 +475,13 @@
 	height: 20px;
 	padding: 0;
 	border: 0;
-	border-radius: 3px;
+	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	cursor: pointer;
 }
 .oreview-block-chev:hover {
-	background: rgba(128, 128, 128, 0.22);
+	background: var(--oi-border);
 	color: var(--vscode-foreground);
 }
 .oreview-block-chev .codicon {
@@ -484,8 +503,8 @@
 	min-height: 0;
 	box-sizing: border-box;
 	padding: 0 6px;
-	border: 1px solid rgba(128, 128, 128, 0.3);
-	border-radius: 5px;
+	border: 1px solid var(--oi-border-strong);
+	border-radius: var(--oi-radius-md);
 	background: var(--vscode-editor-background);
 	color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
 	cursor: pointer;
@@ -493,7 +512,7 @@
 	box-shadow: none;
 }
 .oreview-block-action:hover {
-	background: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.24));
+	background: var(--vscode-button-secondaryHoverBackground, var(--oi-border));
 }
 .oreview-block-action.primary {
 	border-color: var(--openide-review-keep);
@@ -579,22 +598,15 @@
 	color: var(--vscode-descriptionForeground);
 }
 .monaco-workbench .openide-plan-breadcrumb-actions .openide-composer-provider-icon[hidden] { display: none; }
-/* The mask paints with currentColor; the chat root sets this up for the composer, the
-   breadcrumb row has to say it itself. */
+/* The mask recipe itself is the base rule in openideProviderIcon.css (with the brand tint); the
+   breadcrumb row only has to say which ink it paints with. */
 .monaco-workbench .openide-plan-breadcrumb-actions .openide-provider-icon.logo-ready {
-	background-color: currentColor;
-	-webkit-mask-size: contain;
-	mask-size: contain;
-	-webkit-mask-repeat: no-repeat;
-	mask-repeat: no-repeat;
-	-webkit-mask-position: center;
-	mask-position: center;
 	color: var(--vscode-foreground);
 }
 .monaco-workbench .openide-plan-breadcrumb-actions .openide-composer-provider-icon.monogram {
-	border: 1px solid rgba(128, 128, 128, 0.35);
-	border-radius: var(--vscode-cornerRadius-small, 4px);
-	background: rgba(128, 128, 128, 0.1);
+	border: 1px solid var(--oi-border-strong);
+	border-radius: var(--oi-radius-sm);
+	background: var(--oi-tint-2);
 	font-size: 7px;
 	font-weight: 700;
 }
@@ -611,8 +623,8 @@
 	gap: 2px;
 	/* The review scopes its Keep tint to its own header; the plan's run button is the same
 	   button outside that header, so it carries the tokens itself. */
-	--openide-review-keep: color-mix(in srgb, var(--openide-green) 74%, var(--vscode-editor-background));
-	--openide-review-keep-hover: color-mix(in srgb, var(--openide-green) 88%, var(--vscode-editor-background));
+	--openide-review-keep: var(--vscode-button-background);
+	--openide-review-keep-hover: var(--vscode-button-hoverBackground);
 }
 /* A plan an external agent is parked on: the bar says WHO is waiting before it offers the two
    buttons, because the same row otherwise reads as OpenIDE's own run controls. Muted and
@@ -650,7 +662,7 @@
 	height: 18px;
 	padding: 0 6px;
 	font-size: 10px;
-	border-radius: var(--vscode-cornerRadius-small, 3px);
+	border-radius: var(--oi-radius-sm);
 	margin-left: 2px;
 }
 .monaco-workbench .openide-plan-run .openide-review-btn .codicon {
@@ -659,19 +671,46 @@
 .monaco-workbench .openide-plan-run .openide-review-btn:disabled {
 	cursor: default;
 }
-.monaco-workbench .openide-plan-run .openide-plan-run-btn.running {
-	background: rgba(128, 128, 128, 0.14);
-	border-color: rgba(128, 128, 128, 0.28);
-	color: var(--vscode-foreground);
-}
+/* Running keeps the primary fill. It used to be repainted grey here, which made the same build
+   read as "in progress" in the chat (amber) and as something disabled in the plan's own toolbar.
+   The button is not interactive while it runs, so `disabled` carries no dimming either: this bar
+   is reporting, and a faded report reads as a control the user broke. */
 .monaco-workbench .openide-plan-run .openide-plan-run-btn.completed {
 	opacity: 0.9;
 }
+/* Still worn by the discard and undo buttons of the external-review bar. */
 .monaco-workbench .openide-plan-run .openide-plan-stop-btn {
 	padding: 0 4px;
 }
 .monaco-workbench .openide-plan-run .openide-plan-stop-btn:hover {
 	color: var(--openide-red);
+}
+
+/* The ring spinner, shared with the chat's plan card so one running plan looks the same in both
+   places. `currentColor` ties it to the button's own foreground, which is what keeps it readable
+   on the primary fill instead of staying light against it. */
+.openide-chat-plan-spinner {
+	flex: 0 0 auto;
+	width: 12px;
+	height: 12px;
+	border: 2px solid color-mix(in srgb, currentColor 32%, transparent);
+	border-top-color: currentColor;
+	border-radius: 50%;
+	animation: openide-chat-plan-spin 900ms linear infinite;
+}
+
+@keyframes openide-chat-plan-spin {
+	to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-plan-spinner { animation: none; }
+}
+
+.monaco-workbench .openide-plan-run .openide-chat-plan-spinner {
+	width: 10px;
+	height: 10px;
+	border-width: 1.5px;
 }
 
 /* Usage item without data: the brand mark alone, dimmed (the popover explains why). */
@@ -694,13 +733,23 @@
 	color: currentColor;
 	pointer-events: none;
 }
-.monaco-workbench .statusbar-item .openide-status-provider-icon.logo-ready {
-	background-color: currentColor;
-	-webkit-mask-size: contain;
-	mask-size: contain;
-	-webkit-mask-repeat: no-repeat;
-	mask-repeat: no-repeat;
-	-webkit-mask-position: center;
-	mask-position: center;
-}
 .monaco-workbench .statusbar-item .openide-status-provider-icon.monogram { font-size: 8px; font-weight: 600; line-height: 1; }
+
+/* The Build split in the plan's breadcrumb bar: the shared `.oi-split`, one step smaller than in
+   the chat card — the bar is 28px and its neighbours (the model chip, the crumbs) are set in 12px. */
+.monaco-workbench .openide-plan-run .oi-split { height: 18px; border-radius: var(--oi-radius-sm); }
+.monaco-workbench .openide-plan-run .oi-split > button { padding: 0 6px; font-size: 11px; }
+.monaco-workbench .openide-plan-run .oi-split > .oi-split-more { padding: 0 3px; }
+.monaco-workbench .openide-plan-run .oi-split > .oi-split-more .codicon[class*="codicon-"] { font-size: 10px; }
+.monaco-workbench .openide-plan-run .oi-split .oi-kbd { font-size: 10px; margin-left: 4px; }
+/* Running: the shimmer and the ring take the BUTTON's text colour, not the transcript's. The shared
+   shimmer sweeps descriptionForeground → foreground, which on the amber fill went white. */
+.monaco-workbench .openide-plan-run .oi-split.running .openide-chat-shimmer {
+	background-image: linear-gradient(90deg,
+		color-mix(in srgb, var(--vscode-button-foreground) 55%, transparent) 0%,
+		color-mix(in srgb, var(--vscode-button-foreground) 55%, transparent) 30%,
+		var(--vscode-button-foreground) 50%,
+		color-mix(in srgb, var(--vscode-button-foreground) 55%, transparent) 70%,
+		color-mix(in srgb, var(--vscode-button-foreground) 55%, transparent) 100%);
+}
+.monaco-workbench .openide-plan-run .oi-split.running .openide-chat-plan-spinner { color: var(--vscode-button-foreground); }

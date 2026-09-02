@@ -8,12 +8,13 @@ import './media/activityaction.css';
 import { localize, localize2 } from '../../../../nls.js';
 import { ActionsOrientation } from '../../../../base/browser/ui/actionbar/actionbar.js';
 import { Part } from '../../part.js';
-import { ActivityBarPosition, IWorkbenchLayoutService, LayoutSettings, Parts, Position } from '../../../services/layout/browser/layoutService.js';
+import { mainWindow } from '../../../../base/browser/window.js';
+import { ActivityBarPosition, IWorkbenchLayoutService, LayoutSettings, Parts, Position, FLOATING_PANEL_INNER_MARGIN, FLOATING_PANEL_MARGIN, isFloatingTopEdgeExposed } from '../../../services/layout/browser/layoutService.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { ToggleSidebarPositionAction, ToggleSidebarVisibilityAction } from '../../actions/layoutActions.js';
 import { IThemeService, IColorTheme, registerThemingParticipant } from '../../../../platform/theme/common/themeService.js';
-import { ACTIVITY_BAR_BACKGROUND, ACTIVITY_BAR_BORDER, ACTIVITY_BAR_FOREGROUND, ACTIVITY_BAR_ACTIVE_BORDER, ACTIVITY_BAR_BADGE_BACKGROUND, ACTIVITY_BAR_BADGE_FOREGROUND, ACTIVITY_BAR_INACTIVE_FOREGROUND, ACTIVITY_BAR_ACTIVE_BACKGROUND, ACTIVITY_BAR_DRAG_AND_DROP_BORDER, ACTIVITY_BAR_ACTIVE_FOCUS_BORDER } from '../../../common/theme.js';
+import { ACTIVITY_BAR_BACKGROUND, ACTIVITY_BAR_BORDER, ACTIVITY_BAR_FOREGROUND, ACTIVITY_BAR_ACTIVE_BORDER, ACTIVITY_BAR_BADGE_BACKGROUND, ACTIVITY_BAR_BADGE_FOREGROUND, ACTIVITY_BAR_INACTIVE_FOREGROUND, ACTIVITY_BAR_ACTIVE_BACKGROUND, ACTIVITY_BAR_DRAG_AND_DROP_BORDER, ACTIVITY_BAR_ACTIVE_FOCUS_BORDER, MODERN_ACTIVITY_BAR_BACKGROUND, MODERN_ACTIVITY_BAR_INACTIVE_BACKGROUND } from '../../../common/theme.js';
 import { activeContrastBorder, contrastBorder, focusBorder } from '../../../../platform/theme/common/colorRegistry.js';
 import { addDisposableListener, append, EventType, isAncestor, $, clearNode } from '../../../../base/browser/dom.js';
 import { assertReturnsDefined } from '../../../../base/common/types.js';
@@ -40,6 +41,7 @@ import { IWorkbenchEnvironmentService } from '../../../services/environment/comm
 import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { SwitchCompositeViewAction } from '../compositeBarActions.js';
 import { FONT, getFontSize, updateActivityBarSize } from '../../../../base/common/font.js';
+import { IHostService } from '../../../services/host/browser/host.js';
 
 export class ActivitybarPart extends Part {
 
@@ -51,9 +53,20 @@ export class ActivitybarPart extends Part {
 	static readonly COMPACT_ACTIVITYBAR_WIDTH = 36;
 	static readonly COMPACT_ACTIVITYBAR_WIDTH_RATIO = 36/48;
 
+	/** Narrower dimensions used when the floating panels layout is enabled. */
+	static readonly FLOATING_ACTION_HEIGHT = 36;
+	static readonly FLOATING_ACTIVITYBAR_WIDTH = 36;
+	static readonly FLOATING_COMPACT_ACTIVITYBAR_WIDTH = 28;
+
 	static readonly ICON_SIZE = 24;
 	static readonly COMPACT_ICON_SIZE = 16;
 	static readonly COMPACT_ICON_SIZE_RATIO = 16/24;
+
+	/**
+	 * Base gutter reserved around the activity bar under the floating panels
+	 * layout. Must match the margins applied in `floatingPanels.css`.
+	 */
+	static readonly FLOATING_MARGIN = FLOATING_PANEL_MARGIN;
 
 	static readonly pinnedViewContainersKey = 'workbench.activity.pinnedViewlets2';
 	static readonly placeholderViewContainersKey = 'workbench.activity.placeholderViewlets';
@@ -61,16 +74,52 @@ export class ActivitybarPart extends Part {
 
 	//#region IView
 
-	get minimumWidth(): number { return this._isCompact ? FONT.activityBarSize48 * ActivitybarPart.COMPACT_ACTIVITYBAR_WIDTH_RATIO : FONT.activityBarSize48; }
-	get maximumWidth(): number { return this._isCompact ? FONT.activityBarSize48 * ActivitybarPart.COMPACT_ACTIVITYBAR_WIDTH_RATIO : FONT.activityBarSize48; }
+	get minimumWidth(): number { return this.baseWidth + this.floatingHorizontalGutter; }
+	get maximumWidth(): number { return this.baseWidth + this.floatingHorizontalGutter; }
 	readonly minimumHeight: number = 0;
 	readonly maximumHeight: number = Number.POSITIVE_INFINITY;
 
 	//#endregion
 
+	/**
+	 * OpenIDE scales the activity bar with `workbench.activityBar.experimental.fontSize`
+	 * (see `base/common/font.ts`). The upstream literals below are expressed at the
+	 * default size (16px font, 48px bar) and multiplied by this factor, so a
+	 * default configuration yields exactly the upstream pixel values.
+	 */
+	private get fontScale(): number {
+		return FONT.activityBarSize48 / ActivitybarPart.ACTIVITYBAR_WIDTH;
+	}
+
+	/** The intrinsic activity bar width (excludes any floating gutter). */
+	private get baseWidth(): number {
+		if (this.layoutService.isFloatingPanelsEnabled()) {
+			return (this._isCompact ? ActivitybarPart.FLOATING_COMPACT_ACTIVITYBAR_WIDTH : ActivitybarPart.FLOATING_ACTIVITYBAR_WIDTH) * this.fontScale;
+		}
+		return (this._isCompact ? ActivitybarPart.COMPACT_ACTIVITYBAR_WIDTH : ActivitybarPart.ACTIVITYBAR_WIDTH) * this.fontScale;
+	}
+
+	/** The action (item) height that drives visible item sizing and the composite bar overflow size. */
+	private get actionHeight(): number {
+		if (this._isCompact) {
+			return ActivitybarPart.COMPACT_ACTION_HEIGHT * this.fontScale;
+		}
+		return (this.layoutService.isFloatingPanelsEnabled() ? ActivitybarPart.FLOATING_ACTION_HEIGHT : ActivitybarPart.ACTION_HEIGHT) * this.fontScale;
+	}
+
+	private get floatingHorizontalGutter(): number {
+		if (!this.layoutService.isFloatingPanelsEnabled()) {
+			return 0;
+		}
+
+		return ActivitybarPart.FLOATING_MARGIN * 2
+			+ (this.layoutService.getSideBarPosition() === Position.RIGHT ? FLOATING_PANEL_MARGIN : 0);
+	}
+
 	private readonly compositeBar = this._register(new MutableDisposable<PaneCompositeBar>());
 	private content: HTMLElement | undefined;
 	private _isCompact: boolean;
+	private isInactive: boolean;
 
 	constructor(
 		private readonly location: ViewContainerLocation,
@@ -80,10 +129,12 @@ export class ActivitybarPart extends Part {
 		@IThemeService themeService: IThemeService,
 		@IStorageService storageService: IStorageService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IHostService private readonly hostService: IHostService,
 	) {
 		super(Parts.ACTIVITYBAR_PART, { hasTitle: false }, themeService, storageService, layoutService);
 
 		this._isCompact = this.configurationService.getValue<boolean>(LayoutSettings.ACTIVITY_BAR_COMPACT) ?? false;
+		this.isInactive = !this.hostService.hasFocus;
 
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration(LayoutSettings.ACTIVITY_BAR_COMPACT)) {
@@ -102,13 +153,29 @@ export class ActivitybarPart extends Part {
 				this._onDidChange.fire(undefined); // Signal grid that size constraints changed
 			}
 		}));
+
+		this._register(this.hostService.onDidChangeFocus(focused => this.setInactive(!focused)));
+		this._register(this.hostService.onDidChangeActiveWindow(windowId => this.setInactive(windowId !== mainWindow.vscodeWindowId)));
+	}
+
+	private setInactive(inactive: boolean): void {
+		if (this.isInactive === inactive) {
+			return;
+		}
+
+		this.isInactive = inactive;
+		if (this.element) {
+			this.updateStyles();
+		}
 	}
 
 	private updateCompactStyle(): void {
 		if (this.element) {
 			this.element.classList.toggle('compact', this._isCompact);
-			this.element.style.setProperty('--activity-bar-width', `${this.minimumWidth}px`);
-			this.element.style.setProperty('--activity-bar-action-height', `${this._isCompact ? FONT.activityBarSize32 : FONT.activityBarSize48}px`);
+			// Mirrored on the workbench root for floatingPanels.css
+			this.layoutService.mainContainer.classList.toggle('activitybar-compact', this._isCompact);
+			this.element.style.setProperty('--activity-bar-width', `${this.baseWidth}px`);
+			this.element.style.setProperty('--activity-bar-action-height', `${this.actionHeight}px`);
 			this.element.style.setProperty('--activity-bar-icon-size', `${this._isCompact ? FONT.activityBarSize : FONT.activityBarSize24}px`);
 		}
 	}
@@ -129,7 +196,7 @@ export class ActivitybarPart extends Part {
 	}
 
 	private createCompositeBar(): PaneCompositeBar {
-		const actionHeight = this._isCompact ? ActivitybarPart.COMPACT_ACTION_HEIGHT : ActivitybarPart.ACTION_HEIGHT;
+		const actionHeight = this.actionHeight;
 		const iconSize = this._isCompact ? ActivitybarPart.COMPACT_ICON_SIZE : ActivitybarPart.ICON_SIZE;
 
 		return this.instantiationService.createInstance(ActivityBarCompositeBar, this.location, {
@@ -230,7 +297,11 @@ export class ActivitybarPart extends Part {
 		super.updateStyles();
 
 		const container = assertReturnsDefined(this.getContainer());
-		const background = this.getColor(ACTIVITY_BAR_BACKGROUND) || '';
+		let backgroundColor = ACTIVITY_BAR_BACKGROUND;
+		if (this.layoutService.isFloatingPanelsEnabled()) {
+			backgroundColor = this.isInactive ? MODERN_ACTIVITY_BAR_INACTIVE_BACKGROUND : MODERN_ACTIVITY_BAR_BACKGROUND;
+		}
+		const background = this.getColor(backgroundColor) || '';
 		container.style.backgroundColor = background;
 
 		const borderColor = this.getColor(ACTIVITY_BAR_BORDER) || this.getColor(contrastBorder) || '';
@@ -272,15 +343,34 @@ export class ActivitybarPart extends Part {
 	override layout(width: number, height: number): void {
 		super.layout(width, height, 0, 0);
 
-		if (!this.compositeBar.value) {
-			return;
+		if (!this.content) {
+			return; // not created yet
 		}
 
+		const { top, bottom } = this.getFloatingGutters();
+		const contentWidth = Math.max(0, width - this.floatingHorizontalGutter);
+		const contentHeight = Math.max(0, height - top - bottom);
+
 		// Layout contents
-		const contentAreaSize = super.layoutContents(width, height).contentSize;
+		const contentAreaSize = super.layoutContents(contentWidth, contentHeight).contentSize;
 
 		// Layout composite bar
-		this.compositeBar.value.layout(width, contentAreaSize.height);
+		this.compositeBar.value?.layout(contentWidth, contentAreaSize.height);
+	}
+
+	/**
+	 * Vertical gutters (in pixels) mirroring the margins in `floatingPanels.css`.
+	 * The top is flush with title/banner chrome and doubles only at an exposed window edge.
+	 */
+	private getFloatingGutters(): { top: number; bottom: number } {
+		if (!this.layoutService.isFloatingPanelsEnabled()) {
+			return { top: 0, bottom: 0 };
+		}
+
+		return {
+			top: isFloatingTopEdgeExposed(this.layoutService, mainWindow) ? FLOATING_PANEL_MARGIN * 2 : FLOATING_PANEL_INNER_MARGIN,
+			bottom: this.layoutService.isVisible(Parts.STATUSBAR_PART, mainWindow) ? FLOATING_PANEL_MARGIN : FLOATING_PANEL_MARGIN * 2
+		};
 	}
 
 	toJSON(): object {

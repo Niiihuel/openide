@@ -13,6 +13,7 @@ import {
 	IOpenideChatDraft, IOpenideChatReducerState, OPENIDE_CHAT_NO_INDEX, pushOpenideChatContent,
 } from './openideChatReducerState.js';
 import { applyOpenideChatRestoredToolCall, indexOpenideChatToolResults, IOpenideChatRestoredToolResult } from './openideChatTranscriptTools.js';
+import { ISubagentRun } from '../openideSubagentTypes.js';
 
 /**
  * `IChatMessage[]` → `IOpenideChatItem[]`: the persisted conversation turned back into rows.
@@ -20,7 +21,7 @@ import { applyOpenideChatRestoredToolCall, indexOpenideChatToolResults, IOpenide
  * This is a BUG FIX, not a feature. `OpenideChatSessions` has always persisted the full thread
  * (browser/openideChatSessions.ts:36) and the native chat never read it back, so opening an
  * existing conversation showed an empty transcript and the only way out was to start a new chat.
- * The webview did this all along in `restoreThread` (browser/openideChatHtml.ts:5556-5628); that
+ * The webview did this all along in `restoreThread`; that
  * function is the specification this file implements.
  *
  * The rebuild deliberately runs through the SAME draft primitives and the SAME tool handlers the
@@ -31,10 +32,18 @@ import { applyOpenideChatRestoredToolCall, indexOpenideChatToolResults, IOpenide
 export interface IOpenideChatTranscriptOptions {
 	/** Injected clock, for the durations the draft stamps. Restore never has real timings anyway. */
 	readonly now?: number;
+	/**
+	 * Specialist runs recovered from the run store, by runId.
+	 *
+	 * The transcript persists a sentence, not a run: to rebuild a specialist's row with its model,
+	 * its status and its trace, the restore has to look the run up. Absent means "no store to ask",
+	 * and every card then degrades to what the tool call itself said.
+	 */
+	readonly runs?: ReadonlyMap<string, ISubagentRun>;
 }
 
 /** Compaction rewrote history before the snapshot carried metadata; the summary must not look like
- *  a user's request. Same literal the webview matches on (openideChatHtml.ts:5574). */
+ *  a user's request. Same literal the webview matches on. */
 const LEGACY_COMPACTION_PREFIX = '[Resumen histórico compacto]';
 const LEGACY_COMPACTION_MESSAGE = 'Resumen histórico conservado para continuar la conversación.';
 
@@ -51,6 +60,7 @@ export function buildOpenideChatTranscript(
 ): readonly IOpenideChatItem[] {
 	const now = options.now ?? Date.now();
 	const results = indexOpenideChatToolResults(messages);
+	const runs = options.runs;
 	let state = createOpenideChatReducerState();
 
 	for (const message of messages) {
@@ -67,7 +77,7 @@ export function buildOpenideChatTranscript(
 			state = beginOpenideChatTurn(state, requestItemFor(message, state.items.length));
 			continue;
 		}
-		state = restoreAssistantMessage(state, message, results, now);
+		state = restoreAssistantMessage(state, message, results, now, runs);
 	}
 	return closeTurn(state, now).items;
 }
@@ -91,6 +101,7 @@ function requestItemFor(message: IChatMessage, position: number): IOpenideChatRe
 		displayText: message.displayText,
 		images: message.images,
 		capabilities: message.capabilities,
+		snippets: message.snippets,
 		mode: message.executionMode,
 		providerId: message.providerId,
 		modelId: message.modelId,
@@ -147,6 +158,7 @@ function restoreAssistantMessage(
 	message: IChatMessage,
 	results: ReadonlyMap<string, IOpenideChatRestoredToolResult>,
 	now: number,
+	runs: ReadonlyMap<string, ISubagentRun> | undefined,
 ): IOpenideChatReducerState {
 	const draft = createOpenideChatDraft(state, now);
 	if (message.content) {
@@ -158,7 +170,7 @@ function restoreAssistantMessage(
 		pushOpenideChatMarkdownBlock(draft, message.content);
 	}
 	for (const call of message.toolCalls ?? []) {
-		applyOpenideChatRestoredToolCall(draft, call, results);
+		applyOpenideChatRestoredToolCall(draft, call, results, runs);
 	}
 	return commitOpenideChatDraft(state, draft);
 }

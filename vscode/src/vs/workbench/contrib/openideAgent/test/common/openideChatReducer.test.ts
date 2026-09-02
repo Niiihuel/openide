@@ -79,9 +79,30 @@ suite('OpenIDE chat reducer', () => {
 	});
 
 	test('agentLocation produces no row, only a declared follow effect', () => {
-		const step = run([{ type: 'agentLocation', location: { kind: 'file', path: 'a.ts', activity: 'read' } }]);
+		const step = run([{ type: 'agentLocation', location: { kind: 'file', path: 'a.ts', activity: 'edit' } }]);
 		assert.deepStrictEqual(kinds(step), []);
 		assert.deepStrictEqual(step.sessionEffects.map(effect => effect.type), ['followLocation']);
+	});
+
+	test('a file the agent only READ never moves the editor', () => {
+		// Following reads turns the editor into a slideshow of every file a run greps through.
+		const step = run([{ type: 'agentLocation', location: { kind: 'file', path: 'a.ts', activity: 'read' } }]);
+		assert.deepStrictEqual(kinds(step), []);
+		assert.deepStrictEqual(step.sessionEffects, []);
+	});
+
+	test('every other activity still moves it, terminals and browser included', () => {
+		for (const location of [
+			{ kind: 'file', path: 'a.ts', activity: 'edit' },
+			{ kind: 'file', path: 'a.ts', activity: 'create' },
+			{ kind: 'file', path: 'a.ts', activity: 'write' },
+			{ kind: 'file', path: 'a.ts', activity: 'delete' },
+			{ kind: 'terminal', command: 'ls', background: false },
+			{ kind: 'browser', activity: 'open' },
+		] as const) {
+			const step = run([{ type: 'agentLocation', location }]);
+			assert.deepStrictEqual(step.sessionEffects.map(effect => effect.type), ['followLocation'], JSON.stringify(location));
+		}
 	});
 
 	test('read/search/list fold into a single Exploring group with a counter', () => {
@@ -200,6 +221,26 @@ suite('OpenIDE chat reducer', () => {
 		assert.deepStrictEqual(contentOf(step).map(content => (content as { requestId?: string }).requestId), ['a1', 'q1', 's1']);
 	});
 
+	test('the ask card settles live when ask_user returns, one answer per question', () => {
+		const step = run([
+			{ type: 'ask', id: 'q1', questions: [{ question: '¿color?' }, { question: '¿tema?', allowMultiple: true }], allowFreeText: true },
+			{ type: 'toolResult', id: 't9', name: 'ask_user', result: 'P: ¿color?\nR: Verde\n\nP: ¿tema?\nR: Oscuro, Compacto', isError: false },
+		]);
+		const ask = contentOf(step)[0] as { isComplete: boolean; answers?: readonly string[] };
+		assert.strictEqual(ask.isComplete, true);
+		assert.deepStrictEqual(ask.answers, ['Verde', 'Oscuro, Compacto']);
+	});
+
+	test('a single-question ask settles with the whole result as the answer', () => {
+		const step = run([
+			{ type: 'ask', id: 'q1', questions: [{ question: '¿cual?' }], allowFreeText: true },
+			{ type: 'toolResult', id: 't9', name: 'ask_user', result: 'La segunda', isError: false },
+		]);
+		const ask = contentOf(step)[0] as { isComplete: boolean; answers?: readonly string[] };
+		assert.strictEqual(ask.isComplete, true);
+		assert.deepStrictEqual(ask.answers, ['La segunda']);
+	});
+
 	test('info renders as a warning notice, not as prose', () => {
 		const step = run([{ type: 'info', message: 'ojo' }]);
 		assert.deepStrictEqual(contentOf(step), [{ kind: 'notice', severity: 'warning', message: 'ojo' }]);
@@ -316,5 +357,17 @@ suite('OpenIDE ChatReducer — eager working reply', () => {
 		const last = closed.items.at(-1)!;
 		assert.ok(isOpenideChatResponseItem(last));
 		assert.strictEqual(last.errorMessage, 'boom');
+	});
+
+	test('a write queued behind another conversation says so on its card, and stops saying it', () => {
+		let state = createOpenideChatReducerState();
+		state = applyAgentEvent(state, { type: 'toolStart', id: 'c1', name: 'write_file', argumentsJson: JSON.stringify({ path: 'src/a.ts' }) } as AgentLoopEvent).state;
+		state = applyAgentEvent(state, { type: 'toolWaiting', id: 'c1', holder: 'Migración de schema' } as AgentLoopEvent).state;
+		const waiting = state.items.flatMap(item => item.kind === 'response' ? item.content : []).find(content => content.kind === 'edit');
+		assert.strictEqual(waiting && waiting.kind === 'edit' ? waiting.waitingFor : undefined, 'Migración de schema');
+
+		state = applyAgentEvent(state, { type: 'toolWaiting', id: 'c1', holder: undefined } as AgentLoopEvent).state;
+		const granted = state.items.flatMap(item => item.kind === 'response' ? item.content : []).find(content => content.kind === 'edit');
+		assert.strictEqual(granted && granted.kind === 'edit' ? granted.waitingFor : undefined, undefined);
 	});
 });

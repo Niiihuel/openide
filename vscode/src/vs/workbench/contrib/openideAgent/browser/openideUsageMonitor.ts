@@ -5,7 +5,7 @@
 
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — the account-usage monitor, transcribed from Orca's rate-limit service
- *  (refs/orca/src/main/rate-limits/service.ts). Orca keeps ONE coordinator that owns the
+ *  in its main process. Orca keeps ONE coordinator that owns the
  *  snapshot for every account, polls in the background, refetches on window focus (debounced),
  *  ingests live windows on every agent turn, backs off exponentially on failures and lets the
  *  user's click bypass the throttle. The status bar and the popover only subscribe. Here the

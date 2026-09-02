@@ -102,12 +102,13 @@ export class OpenideChatModePicker extends Disposable {
 		clearNode(content);
 		content.appendChild(createMenuSection(document, localize('openide.chat.mode.section', "Modo")));
 		for (const entry of OPENIDE_AGENT_MODES) {
-			// The check REPLACES the mode glyph on the active row, so the icon slot never carries
-			// two marks; the description travels as the tooltip because narrow docks clipped it.
+			// The active row keeps its own glyph and is marked by the persistent tint instead;
+			// the description travels as the tooltip because narrow docks clipped it.
 			const row = createMenuRow(document, {
-				icon: entry.id === this._mode ? 'check' : entry.icon,
+				icon: entry.icon,
 				label: entry.label,
 				tooltip: entry.description,
+				active: entry.id === this._mode,
 			});
 			store.add(addDisposableListener(row, 'click', () => {
 				this._popover.close();
@@ -144,9 +145,10 @@ export class OpenideChatModePicker extends Disposable {
 		const current = this.agentService.getPermissionMode() || 'ask';
 		for (const entry of PERMISSIONS) {
 			const row = createMenuRow(document, {
-				icon: entry.id === current ? 'check' : entry.icon,
+				icon: entry.icon,
 				label: entry.label,
 				tooltip: entry.description,
+				active: entry.id === current,
 			});
 			store.add(addDisposableListener(row, 'click', () => {
 				this._popover.close();

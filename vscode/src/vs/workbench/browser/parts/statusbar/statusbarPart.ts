@@ -122,12 +122,23 @@ class StatusbarPart extends Part implements IStatusbarEntryContainer {
 
 	static get HEIGHT() { return FONT.statusBarSize22; }
 
+	/**
+	 * Vertical padding reserved around the main status bar under the floating panels
+	 * layout so its items remain centered. The part grows by this amount and
+	 * the matching padding is applied in `floatingPanels.css`.
+	 */
+	static readonly FLOATING_BOTTOM_PADDING = 6;
+
 	//#region IView
+
+	private get floatingBottomPadding(): number {
+		return this.getId() === Parts.STATUSBAR_PART && this.layoutService.isFloatingPanelsEnabled() ? StatusbarPart.FLOATING_BOTTOM_PADDING : 0;
+	}
 
 	readonly minimumWidth: number = 0;
 	readonly maximumWidth: number = Number.POSITIVE_INFINITY;
-	get minimumHeight(): number { return FONT.statusBarSize22; }
-	get maximumHeight(): number { return FONT.statusBarSize22; }
+	get minimumHeight(): number { return FONT.statusBarSize22 + this.floatingBottomPadding; }
+	get maximumHeight(): number { return FONT.statusBarSize22 + this.floatingBottomPadding; }
 
 	//#endregion
 
@@ -686,6 +697,9 @@ class StatusbarPart extends Part implements IStatusbarEntryContainer {
 		// Background / foreground colors
 		const backgroundColor = this.getColor(styleOverride?.background ?? (this.contextService.getWorkbenchState() !== WorkbenchState.EMPTY ? STATUS_BAR_BACKGROUND : STATUS_BAR_NO_FOLDER_BACKGROUND)) || '';
 		container.style.backgroundColor = backgroundColor;
+		container.style.boxShadow = this.getId() === Parts.STATUSBAR_PART && this.layoutService.isFloatingPanelsEnabled() && !isHighContrast(this.theme.type) && backgroundColor
+			? `0 1px 0 ${backgroundColor}`
+			: '';
 		const foregroundColor = this.getColor(styleOverride?.foreground ?? (this.contextService.getWorkbenchState() !== WorkbenchState.EMPTY ? STATUS_BAR_FOREGROUND : STATUS_BAR_NO_FOLDER_FOREGROUND)) || '';
 		container.style.color = foregroundColor;
 		const itemBorderColor = this.getColor(STATUS_BAR_ITEM_FOCUS_BORDER);

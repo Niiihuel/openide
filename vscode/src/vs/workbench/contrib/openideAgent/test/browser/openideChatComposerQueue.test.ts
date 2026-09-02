@@ -6,6 +6,7 @@
 import assert from 'assert';
 import { $ } from '../../../../../base/browser/dom.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { NullHoverService } from '../../../../../platform/hover/test/browser/nullHoverService.js';
 import { InMemoryStorageService } from '../../../../../platform/storage/common/storage.js';
 import { IComposerQueueEntry, OpenideChatComposerQueue, QUEUE_LIMIT } from '../../browser/chat/openideChatComposerQueue.js';
 import { t } from '../../common/openideStrings.js';
@@ -19,7 +20,7 @@ suite('OpenIDE ChatComposerQueue', () => {
 
 	function create(storage = store.add(new InMemoryStorageService())) {
 		const host = $('div');
-		const queue = store.add(new OpenideChatComposerQueue(host, storage));
+		const queue = store.add(new OpenideChatComposerQueue(host, storage, NullHoverService));
 		return { host, queue, storage };
 	}
 

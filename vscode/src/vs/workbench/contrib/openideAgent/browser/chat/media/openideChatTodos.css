@@ -1,137 +1,153 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — native chat: the to-do card.
  *
- *  SOURCE OF TRUTH: browser/openideChatHtml.ts:629-657. The card frame comes from `.todo-update`
- *  (:652-657) and the internals from `.tt-head` / `.tt-toggle` / `.tt-title` / `.tt-prog` /
- *  `.tt-body` / `.tt-row` / `.tt-icon` / `.tt-text` (:636-649). Values are transcribed, not
- *  re-decided.
+ *  One 28px header ("3 de 4 tareas completadas", chevron on the left, the whole strip toggles)
+ *  over a list of 24px rows: glyph, then the task. Done rows are struck through in the
+ *  description colour, the running one spins, pending ones carry an outline circle.
  *
- *  What is deliberately NOT ported: `.turn-todos` (:629-635), the skirt that tucks under the user
- *  bubble with `border-radius: 0 0 8px 8px` and a negative margin. It only makes sense glued to the
- *  composer's turn, and in the native transcript this content is a row of the list like any other.
+ *  The fold is a `grid-template-rows` transition (1fr → 0fr) on `.openide-chat-tt-reveal`, the
+ *  same mechanism as `.openide-chat-questions-reveal`: it is the one way to animate to "auto"
+ *  height without measuring, and the part refires its height on `transitionend`.
+ *
+ *  What is deliberately NOT ported from the webview: `.turn-todos`, the skirt that tucks under
+ *  the user bubble with a negative margin. It only makes sense glued to the composer's turn, and
+ *  in the native transcript this content is a row of the list like any other.
  *--------------------------------------------------------------------------------------------*/
 
 .openide-chat-todos-card {
 	overflow: hidden;
 	min-width: 0;
-	margin: 2px 0;
-	border: 1px solid rgba(128, 128, 128, 0.28);
-	border-radius: 8px;
-	background: rgba(128, 128, 128, 0.035);
+	margin: 6px 0;
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
+	border-radius: var(--oi-chat-card-radius);
+	background: var(--oi-chat-card-bg, var(--oi-tint-1));
 }
 
-/* An empty list removes the panel in the webview (`renderTodos`, :4319-4323); here the row keeps
-   its part but paints nothing, so the virtualized list measures 0 instead of an empty box. */
+/* An empty list removes the panel in the webview (`renderTodos`); here the row keeps its part but
+   paints nothing, so the virtualized list measures 0 instead of an empty box. */
 .openide-chat-todos-card.openide-chat-todos-empty {
 	display: none;
 }
 
-/* `.todo-update .tt-head` overrides the base padding (:656). */
+/* ---- Header: one line, the whole strip is the toggle --------------------------------------- */
+
 .openide-chat-tt-head {
 	display: flex;
 	align-items: center;
-	gap: 5px;
-	min-height: 22px;
-	padding: 5px 9px;
-}
-
-.openide-chat-tt-toggle {
-	display: inline-flex;
-	align-items: center;
-	gap: 5px;
-	flex: 1;
-	min-width: 0;
-	padding: 0;
-	border: none;
-	background: transparent;
+	gap: 8px;
+	box-sizing: border-box;
+	min-height: 28px;
+	padding: 0 10px;
 	color: var(--vscode-descriptionForeground);
-	font-family: inherit;
-	font-size: 11.5px;
-	text-align: left;
+	font-size: 12.5px;
+	line-height: 1;
 	cursor: pointer;
+	user-select: none;
 }
 
-.openide-chat-tt-toggle:hover {
+.openide-chat-tt-head:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.openide-chat-tt-head:hover {
 	color: var(--vscode-foreground);
 }
 
-.openide-chat-tt-toggle .codicon {
+.monaco-workbench .openide-chat-tt-caret {
 	flex: 0 0 auto;
-	font-size: 12px;
+	font-size: 14px;
 }
 
-/* The webview marquees this title when it overflows; here it ellipsizes. A marquee is an animation
-   that never stops inside a virtualized list, and the full text is one hover away via `title`. */
-.openide-chat-tt-title {
+/* Three classes on purpose: `openideChatNative.css` paints every `*-title` in the transcript with
+   the description colour at 12px, and this header is the card's only line of text. */
+.openide-chat-todos-card .openide-chat-tt-head .openide-chat-tt-title {
+	flex: 1;
 	min-width: 0;
 	overflow: hidden;
 	white-space: nowrap;
 	text-overflow: ellipsis;
 	color: var(--vscode-foreground);
+	font-size: 12.5px;
 	font-weight: 500;
-}
-
-.openide-chat-tt-prog {
-	flex: 0 0 auto;
-	font-size: 11px;
-	color: var(--vscode-descriptionForeground);
 	font-variant-numeric: tabular-nums;
 }
 
-/* `.todo-update .tt-body` (:657): its own padding plus the hairline that separates it from the
-   head, which the base `.tt-body` does not have. */
-.openide-chat-tt-body {
-	display: flex;
-	flex-direction: column;
-	gap: 0;
-	padding: 4px 9px 7px;
-	border-top: 1px solid rgba(128, 128, 128, 0.16);
+/* ---- Body (grid-rows fold) ----------------------------------------------------------------- */
+
+.openide-chat-tt-reveal {
+	display: grid;
+	grid-template-rows: 1fr;
+	transition: grid-template-rows 180ms ease;
 }
 
-.openide-chat-tt-body.hidden {
-	display: none;
+.openide-chat-todos-card.openide-chat-todos-collapsed .openide-chat-tt-reveal {
+	grid-template-rows: 0fr;
+}
+
+.openide-chat-tt-body {
+	min-height: 0;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	padding: 0 10px;
+	border-top: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
+	transition: border-top-color 180ms ease;
+}
+
+/* The vertical padding lives on pseudo-elements: real padding on the clipped box would survive the
+   0fr row and hold the collapsed card open by that much. Same trick as the questions card. */
+.openide-chat-tt-body::before { content: ''; height: 4px; flex: 0 0 auto; }
+.openide-chat-tt-body::after { content: ''; height: 6px; flex: 0 0 auto; }
+
+/* Folded, the hairline under the header would still paint as a 1px seam at the bottom of the
+   card; it fades in step with the fold instead. */
+.openide-chat-todos-card.openide-chat-todos-collapsed .openide-chat-tt-body {
+	border-top-color: transparent;
 }
 
 .openide-chat-tt-row {
 	display: flex;
+	/* A task that needs two lines wraps and keeps its air: the fixed 24px row with `line-height: 1`
+	   stacked wrapped lines onto the next item. The icon stays on the first line. */
 	align-items: flex-start;
-	gap: 6px;
+	gap: 8px;
 	min-width: 0;
-	padding: 1px 0;
-	font-size: 11.5px;
-	line-height: 1.4;
+	min-height: 24px;
+	padding: 3px 0;
+	box-sizing: border-box;
+	font-size: 12.5px;
+	line-height: 18px;
 }
+.openide-chat-tt-row .openide-chat-tt-icon { margin-top: 2px; }
 
-.openide-chat-tt-icon {
+.monaco-workbench .openide-chat-tt-icon {
 	flex: 0 0 auto;
-	margin-top: 1px;
-	font-size: 12px;
+	font-size: 14px;
 	color: var(--vscode-descriptionForeground);
 }
 
-/* The task title wraps instead of scrolling: the list runs with `horizontalScrolling: false`, so a
-   long task escaping this row would widen every other row in the transcript. */
+/* One line per task: the list runs with `horizontalScrolling: false`, so the title ellipsizes
+   instead of widening the row; the full text is on the row's `title`. */
 .openide-chat-tt-text {
 	flex: 1;
 	min-width: 0;
-	color: var(--vscode-descriptionForeground);
 	overflow-wrap: anywhere;
+	color: var(--vscode-foreground);
 }
 
-.openide-chat-tt-s-completed .openide-chat-tt-icon {
-	color: var(--openide-green);
-}
-
+/* Done: struck through in the description colour — a colour, not an opacity, so it stays legible
+   in low-contrast themes (docs/theming-surfaces.md §3). */
 .openide-chat-tt-s-completed .openide-chat-tt-text {
-	opacity: 0.55;
+	color: var(--vscode-descriptionForeground);
 	text-decoration: line-through;
 }
 
-.openide-chat-tt-s-in-progress .openide-chat-tt-icon {
+.monaco-workbench .openide-chat-tt-s-in-progress .openide-chat-tt-icon {
 	color: var(--vscode-foreground);
 }
 
-.openide-chat-tt-s-in-progress .openide-chat-tt-text {
-	color: var(--vscode-foreground);
-	font-weight: 600;
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-tt-reveal,
+	.openide-chat-todos-card.openide-chat-todos-collapsed .openide-chat-tt-body { transition: none; }
 }

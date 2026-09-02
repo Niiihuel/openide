@@ -634,9 +634,9 @@ export class BrowserViewModel extends Disposable implements IBrowserViewModel {
 		const targetEnabled = enabled ?? (!this._isElementSelectionActive || this._elementSelectionPurpose !== purpose);
 		const switchingPurpose = targetEnabled && this._isElementSelectionActive && this._elementSelectionPurpose !== purpose;
 		if (switchingPurpose) {
-			// El picker de Chromium es uno solo, pero Chat e Inspector son consumidores distintos.
-			// Reiniciarlo hace observable el cambio de dueño y evita que ambos botones/context keys
-			// queden activos a la vez cuando el usuario cambia de flujo sin cerrar el anterior.
+			// There is a single Chromium picker, but Chat and Inspector are distinct consumers.
+			// Restarting it makes the change of owner observable and stops both buttons/context keys
+			// from being active at once when the user switches flows without closing the previous one.
 			await this.browserViewService.toggleElementSelection(this.id, false);
 			this._elementSelectionPurpose = purpose;
 			return this.browserViewService.toggleElementSelection(this.id, true);

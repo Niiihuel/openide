@@ -44,8 +44,14 @@ result-*
 
 # Estado del agente en el workspace: los índices son derivados y pesados; lo
 # escrito a mano (skills, planes, MEMORY.md) sí se versiona.
-/.openide/memory-indexes/
-/.openide/codegraph/
+#
+# `**/` a propósito, no `/`: el indexador escribe su `.openide/` junto a la
+# carpeta que abrió, y abrir una subcarpeta del repo dejaba 34 MB de índices
+# fuera de estas reglas (`vscode/src/vs/workbench/browser/.openide/`). Un
+# pattern con `/` en el medio ya queda anclado a la raíz por sí solo, así que
+# quitarle el ancla inicial no alcanza: hay que pedir cualquier profundidad.
+**/.openide/memory-indexes/
+**/.openide/codegraph/
 
 # Claves privadas. Una clave de firma commiteada no se "borra" con un commit
 # siguiente: queda en el historial y hay que rotarla. La regla es amplia a

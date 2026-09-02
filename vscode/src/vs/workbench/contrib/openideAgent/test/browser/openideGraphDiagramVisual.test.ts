@@ -9,7 +9,7 @@ import { renderGraphDiagramSvg } from '../../browser/diagrams/openideGraphDiagra
 import { parseDiagramSource } from '../../common/diagrams/openideDiagramEngine.js';
 
 /**
- * The editorial rendering contract (ported from refs/diagram-design): orthogonal rounded
+ * The editorial rendering contract (ported from the diagram-design skill): orthogonal rounded
  * connectors instead of beziers, ONE focal node, card corners, and an in-figure legend that the
  * full-screen viewer inherits because it lives inside the SVG.
  */

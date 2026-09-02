@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append } from '../../../../../../base/browser/dom.js';
+import { $, append, getWindow, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
+import { MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../../nls.js';
 import { IOpenideChatContent, IOpenideChatThinkingContent, isOpenideChatThinkingContent } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
@@ -14,7 +15,7 @@ import '../media/openideChatActivity.css';
 export const OPENIDE_CHAT_REASONING_CLASS = 'openide-chat-reasoning';
 
 /**
- * Wording of the summary line, transcribed from `finalizeReasoning` (openideChatHtml.ts:2814-2821).
+ * Wording of the summary line, transcribed from `finalizeReasoning` (the removed chat webview).
  *
  * The "briefly" branch is not a nicety: reasoning that lasted under two seconds rounds to "1s",
  * and a card announcing it thought for one second reads as a bug rather than as a step.
@@ -56,6 +57,9 @@ export class OpenideChatThinkingPart extends OpenideChatContentPart {
 	/** `openide.chat.thinking.defaultOpen`: the card never auto-collapses and restores open. */
 	private readonly _defaultOpen: boolean;
 
+	/** The pending pin of the scroll box to its last line; at most one per frame. */
+	private readonly _pinToBottom = this._register(new MutableDisposable());
+
 	constructor(content: IOpenideChatThinkingContent, context: IOpenideChatContentPartContext) {
 		super();
 
@@ -95,8 +99,13 @@ export class OpenideChatThinkingPart extends OpenideChatContentPart {
 		this._think.textContent = this._content.text;
 		if (!this._content.isComplete) {
 			// The card is a 320px scroll box; while it streams the user wants the newest line, which
-			// is exactly what the webview does on every reasoning delta.
-			this._think.scrollTop = this._think.scrollHeight;
+			// is exactly what the webview does on every reasoning delta. Read at the next frame, not
+			// here: `scrollHeight` right after a write forces a synchronous layout of everything
+			// dirty, once per delta; by the next frame the layout is done and the read is free.
+			this._pinToBottom.value = scheduleAtNextAnimationFrame(getWindow(this._think), () => {
+				this._pinToBottom.value = undefined;
+				this._think.scrollTop = this._think.scrollHeight;
+			});
 		}
 	}
 

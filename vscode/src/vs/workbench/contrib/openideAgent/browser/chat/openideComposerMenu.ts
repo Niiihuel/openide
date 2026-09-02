@@ -20,6 +20,9 @@ import './media/openideChatMenus.css';
  */
 const MENU_ANCHOR_GAP = 8;
 
+/** Class that plays the 90ms entrance (openideChatMenus.css). Shared with `OpenideChatMenuPopover`. */
+export const MENU_ENTER_CLASS = 'openide-menu-enter';
+
 /** `<span class="codicon codicon-x">`, the one shape every row in these menus is built from. */
 export function createCodicon(document: Document, id: string, extraClass = ''): HTMLElement {
 	const element = document.createElement('span');
@@ -47,24 +50,37 @@ export function createMenuEmpty(document: Document, label: string): HTMLElement 
 	return empty;
 }
 
+/** The trailing check of a row. Always present; CSS shows it only while the row is `.openide-menu-active`. */
+export function createMenuCheck(document: Document): HTMLElement {
+	const check = document.createElement('span');
+	check.className = 'openide-menu-check';
+	check.appendChild(createCodicon(document, 'check'));
+	return check;
+}
+
 export interface IMenuRowOptions {
-	/** Codicon shown in the 21px icon slot. Omitted leaves the slot empty but present, which is
+	/** Codicon shown in the 18px icon slot. Omitted leaves the slot empty but present, which is
 	 *  what keeps the labels of a checked and an unchecked row on the same x. */
 	readonly icon?: string;
 	readonly label: string;
 	/** Right-aligned secondary text (the current value of a submenu row). */
 	readonly detail?: string;
+	/** Right-aligned keybinding hint, rendered after `detail` (e.g. "Ctrl+↵"). */
+	readonly keybinding?: string;
 	readonly tooltip?: string;
 	/** Chevron on the trailing edge: this row opens a submenu instead of choosing something. */
 	readonly submenu?: boolean;
 	readonly muted?: boolean;
+	/** The row holding the CURRENT value. Marked by the trailing check only — never by a tint, so
+	 *  the hover fill stays the one fill in the menu and always reads as the strongest signal. */
+	readonly active?: boolean;
 }
 
 /** A `.menu-row` of the webview, rebuilt as a real button so Enter/Space work without extra code. */
 export function createMenuRow(document: Document, options: IMenuRowOptions): HTMLButtonElement {
 	const row = document.createElement('button');
 	row.type = 'button';
-	row.className = `openide-menu-row${options.muted ? ' openide-menu-muted' : ''}`;
+	row.className = `openide-menu-row${options.muted ? ' openide-menu-muted' : ''}${options.active ? ' openide-menu-active' : ''}`;
 	const icon = document.createElement('span');
 	icon.className = 'openide-menu-row-icon';
 	if (options.icon) {
@@ -81,9 +97,18 @@ export function createMenuRow(document: Document, options: IMenuRowOptions): HTM
 		detail.textContent = options.detail;
 		row.appendChild(detail);
 	}
+	if (options.keybinding) {
+		const keybinding = document.createElement('span');
+		keybinding.className = 'openide-menu-keybinding';
+		keybinding.textContent = options.keybinding;
+		row.appendChild(keybinding);
+	}
 	if (options.submenu) {
 		row.appendChild(createCodicon(document, 'chevron-right', 'openide-menu-submenu-chevron'));
 	}
+	// Appended last and on every row, so a caller that toggles `.openide-menu-active` later
+	// (repaint in place) gets the mark without rebuilding the row.
+	row.appendChild(createMenuCheck(document));
 	if (options.tooltip) {
 		row.title = options.tooltip;
 	}
@@ -143,7 +168,9 @@ export class OpenideComposerPopover extends Disposable {
 		this._open = this.contextViewService.showContextView({
 			getAnchor: () => {
 				const rect = getDomNodePagePosition(anchor);
-				return { x: rect.left, y: rect.top - MENU_ANCHOR_GAP, width: rect.width, height: rect.height + MENU_ANCHOR_GAP };
+				// Grown on BOTH edges: the context view lays the menu flush against the anchor box, and
+				// the gap has to be there whether it opens above (composer) or below (Build, Settings).
+				return { x: rect.left, y: rect.top - MENU_ANCHOR_GAP, width: rect.width, height: rect.height + MENU_ANCHOR_GAP * 2 };
 			},
 			anchorAlignment: options.anchorAlignment ?? AnchorAlignment.LEFT,
 			anchorPosition: options.anchorPosition ?? AnchorPosition.ABOVE,
@@ -163,6 +190,11 @@ export class OpenideComposerPopover extends Disposable {
 				options.onHide?.();
 			},
 		});
+		// The entrance animation goes on AFTER showContextView returned: the context view renders,
+		// measures and places the menu synchronously inside that call, and a fixed-position view
+		// (aux windows) measures the view's own rect — which the animation's translate would shift.
+		// Same task, so nothing has painted yet and the first frame is still the transparent one.
+		this._container?.classList.add(MENU_ENTER_CLASS);
 	}
 
 	private _render(container: HTMLElement, options: IComposerPopoverOptions): IDisposable {
@@ -187,6 +219,9 @@ export class OpenideComposerPopover extends Disposable {
 	/** Re-anchors after the content grew (async model groups): the first layout measured a spinner. */
 	layout(): void {
 		if (this._open) {
+			// A relayout inside the 90ms of the entrance would measure a translated view (see
+			// `show`); dropping the class ends the animation before the measurement.
+			this._container?.classList.remove(MENU_ENTER_CLASS);
 			this.contextViewService.layout();
 		}
 	}

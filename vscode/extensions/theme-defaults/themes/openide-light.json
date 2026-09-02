@@ -27,9 +27,9 @@
 		"textCodeBlock.background": "#f0f0f0",
 		"textSeparator.foreground": "#d6d6d6",
 
-		"button.background": "#2c2c2c",
-		"button.foreground": "#ffffff",
-		"button.hoverBackground": "#3a3a3a",
+		"button.background": "#e8a44f",
+		"button.foreground": "#33250f",
+		"button.hoverBackground": "#dd9840",
 		"button.secondaryBackground": "#e6e6e6",
 		"button.secondaryForeground": "#1f1f1f",
 		"button.secondaryHoverBackground": "#dcdcdc",
@@ -195,7 +195,7 @@
 
 		"menu.background": "#ffffff",
 		"menu.foreground": "#1f1f1f",
-		"menu.selectionBackground": "#e0e0e0",
+		"menu.selectionBackground": "#dadada",
 		"menu.selectionForeground": "#1f1f1f",
 		"menu.border": "#e2e2e2",
 		"menu.separatorBackground": "#e2e2e2",

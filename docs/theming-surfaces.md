@@ -1,6 +1,6 @@
 # Surfaces and themes
 
-How OpenIDE's own UI gets its colours, and the four ways it has gone wrong.
+How OpenIDE's own UI gets its colours and shapes, and the ways it has gone wrong.
 
 Every rule here comes from a bug that shipped. They share one shape: **the surface
 looked correct in the theme it was written against, and fell apart in another
@@ -8,7 +8,7 @@ one.** None of them announced itself as an error — the IDE just looked slightl
 off, which is the most expensive kind of defect to carry, because nobody files it
 and it accumulates for months.
 
-`dev/audit-surface-tokens.mjs` enforces the two invariants that can be checked
+`dev/audit-surface-tokens.mjs` enforces the three invariants that can be checked
 statically. The rest are review rules.
 
 ## 1. Fork tokens are declared where the theme variables live
@@ -84,6 +84,89 @@ debugging sessions.
 Use plain quotes in those comments.
 
 *Audited.* Checked in `auditBackticks`.
+
+## 6. One scale for radii, hairlines and shadows
+
+Nothing here was ever reported as a bug, which is the point. The fork's own
+stylesheets carried eight corner radii (3, 4, 5, 6, 8, 9, 10 and 12px), 26 distinct
+alphas of `rgba(128, 128, 128, α)` and six shadow recipes. Worse, the same upstream
+token had two different fallbacks: `--vscode-cornerRadius-medium` was written as
+`4px` in two places and `6px` in thirteen, so the *same* control took two shapes
+depending on which file drew it and on whether the theme defined the token. Two cards
+side by side never quite matched, and nobody could say which one was right.
+
+Each value is defensible on its own. Together they are a design system nobody chose.
+The rule is that these three families are written **only** through the `--oi-*`
+scale declared in `openideSurfaceCss.ts`; a literal is a decision made in one file
+about something that has to hold across all of them.
+
+| Token | Value | Replaces |
+| --- | --- | --- |
+| `--oi-radius-sm` | `var(--vscode-cornerRadius-small, 4px)` | `3px`, `4px`, `var(--vscode-cornerRadius-small, …)` |
+| `--oi-radius-md` | `var(--vscode-cornerRadius-medium, 6px)` | `5px`, `6px`, `var(--vscode-cornerRadius-medium, …)` |
+| `--oi-radius-lg` | `var(--vscode-cornerRadius-large, 8px)` | `8px`, `9px`, `10px`, `12px`, `var(--vscode-cornerRadius-large, …)` |
+| `--oi-radius-circle` | `var(--vscode-cornerRadius-circle, 9999px)` | `999px`, `9999px` |
+| `--oi-radius` | alias of `--oi-radius-lg` | the Settings cards' literal `10px` (deliberately 10 → 8: one step outside the scale is not a step) |
+| `--oi-chat-card-radius` | alias of `--oi-radius-lg` | its own `var(--vscode-cornerRadius-large, 8px)` |
+| `--oi-tint-1` | `rgba(128, 128, 128, 0.04)` | alphas 0.025 – 0.06 (quiet fills) |
+| `--oi-tint-2` | `rgba(128, 128, 128, 0.08)` | alphas 0.08 – 0.105 (hover fills) |
+| `--oi-tint-3` | `rgba(128, 128, 128, 0.12)` | alpha 0.12 (pressed fills) |
+| `--oi-border-soft` | `rgba(128, 128, 128, 0.14)` | alphas 0.14 – 0.18 (row separators) |
+| `--oi-border` | `rgba(128, 128, 128, 0.24)` | alphas 0.20 – 0.28 (the default outline) |
+| `--oi-border-strong` | `rgba(128, 128, 128, 0.34)` | alphas 0.30 – 0.40 (emphasised outlines) |
+| `--oi-shadow-sm` | `0 1px 1px var(--vscode-widget-shadow, …)` | `0 1px 1px rgba(0, 0, 0, 0.12)` — a card lifted off its surface |
+| `--oi-shadow` | `0 2px 8px var(--vscode-widget-shadow, …)` | `0 2px 8px rgba(0, 0, 0, 0.35)` — popovers, menus |
+| `--oi-shadow-lg` | `0 16px 48px var(--vscode-widget-shadow, …)` | `0 16px 48px rgba(0, 0, 0, 0.42)` — modals |
+
+Radii of 2px and under, `0`, `50%` and `inherit` stay literal: they are not on the
+scale because they are not a corner treatment, they are "square" or "round".
+`var(--vscode-cornerRadius-xSmall, 2px)` is allowed for the same reason. Upstream's
+own `var(--vscode-shadow-*, …)` and `var(--vscode-*-shadow, …)` stay as they are:
+they are theme tokens, not recipes of ours. When a grey appears as the fallback of a
+theme token, the fallback is the `--oi-*` token — `var(--vscode-menu-border,
+var(--oi-border-strong))` is the shape to write.
+
+The scale also declares `--oi-text-xs/sm/md/lg` (11/12/13/14px) and
+`--oi-row-sm/md/lg` (24/28/32px). They are names to reach for; the existing font-size
+and height literals have **not** been migrated onto them yet, and are not audited.
+
+*Audited.* Checked in `auditScaleSource` — rule C, over every own `.css` and both
+CSS-in-TS literals; the token block of `openideSurfaceCss.ts` is the one place the
+raw greys and shadow recipes may appear.
+
+## 7. No loose hairlines
+
+A 1px line that separates two regions — a sidebar from its content, a header from the body
+under it, one row from the next — is the inherited look the fork is moving away from. Every one
+of them looks correct in the theme it was drawn against and reads as "stripes" over a flat
+background in the next one: a theme that defines `titleBar.border` as a strong colour turns the
+rule into a bar, one that leaves it undefined makes the same rule vanish, and a row separator
+over a low-contrast card is a grey smear nobody asked for.
+
+Regions are told apart by **surface and space**, not by a line. The sidebar of Settings sits on
+`--oi-sidebar`, the content on `--oi-surface`; the modal's header has the title bar colour and
+the body the editor's. Rows are separated by their own height, their inset padding and the hover
+box that lights up under the pointer — the popover's recipe (`openideChatMenus.css`): a
+container with 4px of padding and rounded rows inside it, nothing drawn between them.
+
+The rule is "no loose lines", not "no borders": the 1px `--oi-border-soft` **around** a card, an
+input or a callout is the box's own edge and stays. What goes is a line with nothing on one side.
+
+Removed so far:
+
+- `modalEditorPart.css` — the `border-bottom` under the modal header and the `border-right`
+  of the modal sidebar. The modal's outer edge became the floating-card recipe
+  (`floatingPanels.css`): `surface.border` with `--oi-border` as fallback, radius
+  `cornerRadius-large`.
+- `openideSettings.css` — the `border-bottom` of `.openide-settings-status-row`, the inset
+  `::before` hairlines between `.openide-settings-insetrow` and between
+  `.openide-settings-provider-model`, and the dead `border-top: 0` / `border-right: 0`
+  resets that only existed to undo lines drawn elsewhere.
+- Settings' own sidebar and content header never drew one; the modal was the last place a line
+  crossed the Settings surface.
+
+*Review rule.* Not audited: a `border-bottom` is legitimate on a card's own edge, and the audit
+cannot tell the two apart.
 
 ## Verifying a surface
 

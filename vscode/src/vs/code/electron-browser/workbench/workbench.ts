@@ -87,188 +87,57 @@
 			preloadGlobals.webFrame.setZoomLevel(data.zoomLevel);
 		}
 
-		// restore parts if possible (we might not always store layout info)
-		if (data?.layoutInfo) {
-			const { layoutInfo, colorInfo } = data;
-
-			const splash = document.createElement('div');
-			splash.id = 'monaco-parts-splash';
-			splash.className = baseTheme ?? 'vs-dark';
-
-			if (layoutInfo.windowBorder && colorInfo.windowBorder) {
-				const borderElement = document.createElement('div');
-				borderElement.style.position = 'absolute';
-				borderElement.style.width = 'calc(100vw - 2px)';
-				borderElement.style.height = 'calc(100vh - 2px)';
-				borderElement.style.zIndex = '1'; // allow border above other elements
-				borderElement.style.border = `1px solid var(--window-border-color)`;
-				borderElement.style.setProperty('--window-border-color', colorInfo.windowBorder);
-
-				if (layoutInfo.windowBorderRadius) {
-					borderElement.style.borderRadius = layoutInfo.windowBorderRadius;
-				}
-
-				splash.appendChild(borderElement);
-			}
-
-			if (layoutInfo.auxiliaryBarWidth === Number.MAX_SAFE_INTEGER) {
-				// if auxiliary bar is maximized, it goes as wide as the
-				// window width but leaving room for activity bar
-				layoutInfo.auxiliaryBarWidth = window.innerWidth - layoutInfo.activityBarWidth;
-			} else {
-				// otherwise adjust for other parts sizes if not maximized
-				layoutInfo.auxiliaryBarWidth = Math.min(layoutInfo.auxiliaryBarWidth, window.innerWidth - (layoutInfo.activityBarWidth + layoutInfo.editorPartMinWidth + layoutInfo.sideBarWidth));
-			}
-			layoutInfo.sideBarWidth = Math.min(layoutInfo.sideBarWidth, window.innerWidth - (layoutInfo.activityBarWidth + layoutInfo.editorPartMinWidth + layoutInfo.auxiliaryBarWidth));
-
-			// part: title
-			if (layoutInfo.titleBarHeight > 0) {
-				const titleDiv = document.createElement('div');
-				titleDiv.style.position = 'absolute';
-				titleDiv.style.width = '100%';
-				titleDiv.style.height = `${layoutInfo.titleBarHeight}px`;
-				titleDiv.style.left = '0';
-				titleDiv.style.top = '0';
-				titleDiv.style.backgroundColor = `${colorInfo.titleBarBackground}`;
-				(titleDiv.style as CSSStyleDeclaration & { '-webkit-app-region': string })['-webkit-app-region'] = 'drag';
-				splash.appendChild(titleDiv);
-
-				if (colorInfo.titleBarBorder) {
-					const titleBorder = document.createElement('div');
-					titleBorder.style.position = 'absolute';
-					titleBorder.style.width = '100%';
-					titleBorder.style.height = '1px';
-					titleBorder.style.left = '0';
-					titleBorder.style.bottom = '0';
-					titleBorder.style.borderBottom = `1px solid ${colorInfo.titleBarBorder}`;
-					titleDiv.appendChild(titleBorder);
-				}
-			}
-
-			// part: activity bar
-			if (layoutInfo.activityBarWidth > 0) {
-				const activityDiv = document.createElement('div');
-				activityDiv.style.position = 'absolute';
-				activityDiv.style.width = `${layoutInfo.activityBarWidth}px`;
-				activityDiv.style.height = `calc(100% - ${layoutInfo.titleBarHeight + layoutInfo.statusBarHeight}px)`;
-				activityDiv.style.top = `${layoutInfo.titleBarHeight}px`;
-				if (layoutInfo.sideBarSide === 'left') {
-					activityDiv.style.left = '0';
-				} else {
-					activityDiv.style.right = '0';
-				}
-				activityDiv.style.backgroundColor = `${colorInfo.activityBarBackground}`;
-				splash.appendChild(activityDiv);
-
-				if (colorInfo.activityBarBorder) {
-					const activityBorderDiv = document.createElement('div');
-					activityBorderDiv.style.position = 'absolute';
-					activityBorderDiv.style.width = '1px';
-					activityBorderDiv.style.height = '100%';
-					activityBorderDiv.style.top = '0';
-					if (layoutInfo.sideBarSide === 'left') {
-						activityBorderDiv.style.right = '0';
-						activityBorderDiv.style.borderRight = `1px solid ${colorInfo.activityBarBorder}`;
-					} else {
-						activityBorderDiv.style.left = '0';
-						activityBorderDiv.style.borderLeft = `1px solid ${colorInfo.activityBarBorder}`;
-					}
-					activityDiv.appendChild(activityBorderDiv);
-				}
-			}
-
-			// part: side bar
-			if (layoutInfo.sideBarWidth > 0) {
-				const sideDiv = document.createElement('div');
-				sideDiv.style.position = 'absolute';
-				sideDiv.style.width = `${layoutInfo.sideBarWidth}px`;
-				sideDiv.style.height = `calc(100% - ${layoutInfo.titleBarHeight + layoutInfo.statusBarHeight}px)`;
-				sideDiv.style.top = `${layoutInfo.titleBarHeight}px`;
-				if (layoutInfo.sideBarSide === 'left') {
-					sideDiv.style.left = `${layoutInfo.activityBarWidth}px`;
-				} else {
-					sideDiv.style.right = `${layoutInfo.activityBarWidth}px`;
-				}
-				sideDiv.style.backgroundColor = `${colorInfo.sideBarBackground}`;
-				splash.appendChild(sideDiv);
-
-				if (colorInfo.sideBarBorder) {
-					const sideBorderDiv = document.createElement('div');
-					sideBorderDiv.style.position = 'absolute';
-					sideBorderDiv.style.width = '1px';
-					sideBorderDiv.style.height = '100%';
-					sideBorderDiv.style.top = '0';
-					sideBorderDiv.style.right = '0';
-					if (layoutInfo.sideBarSide === 'left') {
-						sideBorderDiv.style.borderRight = `1px solid ${colorInfo.sideBarBorder}`;
-					} else {
-						sideBorderDiv.style.left = '0';
-						sideBorderDiv.style.borderLeft = `1px solid ${colorInfo.sideBarBorder}`;
-					}
-					sideDiv.appendChild(sideBorderDiv);
-				}
-			}
-
-			// part: auxiliary sidebar
-			if (layoutInfo.auxiliaryBarWidth > 0) {
-				const auxSideDiv = document.createElement('div');
-				auxSideDiv.style.position = 'absolute';
-				auxSideDiv.style.width = `${layoutInfo.auxiliaryBarWidth}px`;
-				auxSideDiv.style.height = `calc(100% - ${layoutInfo.titleBarHeight + layoutInfo.statusBarHeight}px)`;
-				auxSideDiv.style.top = `${layoutInfo.titleBarHeight}px`;
-				if (layoutInfo.sideBarSide === 'left') {
-					auxSideDiv.style.right = '0';
-				} else {
-					auxSideDiv.style.left = '0';
-				}
-				auxSideDiv.style.backgroundColor = `${colorInfo.sideBarBackground}`;
-				splash.appendChild(auxSideDiv);
-
-				if (colorInfo.sideBarBorder) {
-					const auxSideBorderDiv = document.createElement('div');
-					auxSideBorderDiv.style.position = 'absolute';
-					auxSideBorderDiv.style.width = '1px';
-					auxSideBorderDiv.style.height = '100%';
-					auxSideBorderDiv.style.top = '0';
-					if (layoutInfo.sideBarSide === 'left') {
-						auxSideBorderDiv.style.left = '0';
-						auxSideBorderDiv.style.borderLeft = `1px solid ${colorInfo.sideBarBorder}`;
-					} else {
-						auxSideBorderDiv.style.right = '0';
-						auxSideBorderDiv.style.borderRight = `1px solid ${colorInfo.sideBarBorder}`;
-					}
-					auxSideDiv.appendChild(auxSideBorderDiv);
-				}
-			}
-
-			// part: statusbar
-			if (layoutInfo.statusBarHeight > 0) {
-				const statusDiv = document.createElement('div');
-				statusDiv.style.position = 'absolute';
-				statusDiv.style.width = '100%';
-				statusDiv.style.height = `${layoutInfo.statusBarHeight}px`;
-				statusDiv.style.bottom = '0';
-				statusDiv.style.left = '0';
-				if (configuration.workspace && colorInfo.statusBarBackground) {
-					statusDiv.style.backgroundColor = colorInfo.statusBarBackground;
-				} else if (!configuration.workspace && colorInfo.statusBarNoFolderBackground) {
-					statusDiv.style.backgroundColor = colorInfo.statusBarNoFolderBackground;
-				}
-				splash.appendChild(statusDiv);
-
-				if (colorInfo.statusBarBorder) {
-					const statusBorderDiv = document.createElement('div');
-					statusBorderDiv.style.position = 'absolute';
-					statusBorderDiv.style.width = '100%';
-					statusBorderDiv.style.height = '1px';
-					statusBorderDiv.style.top = '0';
-					statusBorderDiv.style.borderTop = `1px solid ${colorInfo.statusBarBorder}`;
-					statusDiv.appendChild(statusBorderDiv);
-				}
-			}
-
-			window.document.body.appendChild(splash);
+		// OpenIDE: the product mark centred on the shell colour while the workbench loads, in
+		// place of upstream's rectangles-per-part splash. The window border is kept when the theme
+		// draws one. The element keeps upstream's id so `PartsSplash` hides it the moment the
+		// workbench is up, and the `initialShellColors` style above still paints the ground.
+		const splash = document.createElement('div');
+		splash.id = 'monaco-parts-splash';
+		splash.className = baseTheme ?? 'vs-dark';
+		splash.style.position = 'absolute';
+		splash.style.inset = '0';
+		splash.style.display = 'flex';
+		splash.style.alignItems = 'center';
+		splash.style.justifyContent = 'center';
+		if (shellBackground) {
+			splash.style.backgroundColor = shellBackground;
 		}
+		if (data?.layoutInfo?.windowBorder && data.colorInfo.windowBorder) {
+			const borderElement = document.createElement('div');
+			borderElement.style.position = 'absolute';
+			borderElement.style.width = 'calc(100vw - 2px)';
+			borderElement.style.height = 'calc(100vh - 2px)';
+			borderElement.style.zIndex = '1';
+			borderElement.style.border = `1px solid ${data.colorInfo.windowBorder}`;
+			if (data.layoutInfo.windowBorderRadius) {
+				borderElement.style.borderRadius = data.layoutInfo.windowBorderRadius;
+			}
+			splash.appendChild(borderElement);
+		}
+		if (data?.layoutInfo?.titleBarHeight) {
+			// The custom title bar is the drag region even before the workbench exists: a window
+			// that cannot be moved while it loads reads as frozen.
+			const titleDiv = document.createElement('div');
+			titleDiv.style.position = 'absolute';
+			titleDiv.style.width = '100%';
+			titleDiv.style.height = `${data.layoutInfo.titleBarHeight}px`;
+			titleDiv.style.left = '0';
+			titleDiv.style.top = '0';
+			(titleDiv.style as CSSStyleDeclaration & { '-webkit-app-region': string })['-webkit-app-region'] = 'drag';
+			splash.appendChild(titleDiv);
+		}
+		const mark = document.createElement('img');
+		mark.alt = '';
+		mark.draggable = false;
+		mark.src = `vscode-file://vscode-app${configuration.appRoot.replace(/\\/g, '/').replace(/^([A-Za-z]):/, '/$1:')}/resources/linux/code.svg`;
+		mark.style.width = '96px';
+		mark.style.height = '96px';
+		mark.style.opacity = '0';
+		mark.style.transition = 'opacity 260ms ease-out';
+		mark.style.userSelect = 'none';
+		mark.addEventListener('load', () => { mark.style.opacity = '0.92'; }, { once: true });
+		splash.appendChild(mark);
+		window.document.body.appendChild(splash);
 	}
 
 	//#endregion

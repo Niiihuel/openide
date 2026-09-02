@@ -4,14 +4,17 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, append } from '../../../../../../base/browser/dom.js';
+import { DisposableStore } from '../../../../../../base/common/lifecycle.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { localize } from '../../../../../../nls.js';
 import { getOpenideToolMeta, parseToolArguments, toolDetailFor } from '../../../common/chat/openideChatToolMeta.js';
 import { ISubagentTimelineEvent } from '../../../common/openideSubagentTypes.js';
+import { setupChatTooltip } from '../openideChatHover.js';
 import { setOpenideChatActivityIcon } from './openideChatActivityRow.js';
 
 /**
  * Body of a specialist card: the `.sub-tool` / `.sub-text` rows of `onSubagentEvent`
- * (openideChatHtml.ts:3648-3693), rebuilt against the persisted timeline instead of against a live
+ * (the removed chat webview), rebuilt against the persisted timeline instead of against a live
  * event stream.
  *
  * Separated from the card itself so the card stays a state machine over head/status/collapse and
@@ -19,7 +22,7 @@ import { setOpenideChatActivityIcon } from './openideChatActivityRow.js';
  * file whose two halves change for entirely different reasons.
  */
 
-/** Longest brief argument the webview shows next to a tool name (openideChatHtml.ts:3548). */
+/** Longest brief argument the webview shows next to a tool name. */
 const BRIEF_ARGS_LIMIT = 60;
 
 /**
@@ -51,6 +54,48 @@ export function subagentStatusText(tool: string, argumentsJson: string | undefin
 	return detail ? `${meta.verb} ${detail}` : meta.verb;
 }
 
+/**
+ * The last events that would actually PAINT something, newest last.
+ *
+ * Not `timeline.slice(-limit)`. Most of what a specialist emits leaves no row: a successful
+ * `toolResult` renders nothing at all (its only job is to un-shimmer the call it answers), and a
+ * failing one with a known `toolCallId` only tints the row its call already has. A raw tail is
+ * therefore mostly invisible events, and a card asked for "the last three lines" would show one.
+ *
+ * Kept pure and separate from `appendSubagentTimelineEvent` so the rule can be asserted, but the
+ * two have to agree: anything this keeps, that function must be able to draw.
+ */
+export function lastSubagentTimelineRows(timeline: readonly ISubagentTimelineEvent[], limit: number): readonly ISubagentTimelineEvent[] {
+	const picked: ISubagentTimelineEvent[] = [];
+	// The ids of the calls we are keeping, so a failing result for one of them is recognised as a
+	// tint on a row that is already in the list rather than as a line of its own.
+	const listed = new Set<string>();
+	for (let index = timeline.length - 1; index >= 0 && picked.length < limit; index--) {
+		const event = timeline[index];
+		if (paintsRow(event, listed)) {
+			picked.push(event);
+			if (event.type === 'toolStart' && event.toolCallId) { listed.add(event.toolCallId); }
+		}
+	}
+	return picked.reverse();
+}
+
+function paintsRow(event: ISubagentTimelineEvent, listed: ReadonlySet<string>): boolean {
+	switch (event.type) {
+		case 'toolStart':
+			// Without a name there is no row to draw; it falls through to the text branch below.
+			return !!event.toolName || !!event.message;
+		case 'toolResult':
+			// A success is silent, and a failure whose call is already listed is a tint, not a line.
+			return !!event.isError && !(event.toolCallId && listed.has(event.toolCallId));
+		case 'permissionDenied':
+		case 'error':
+			return true;
+		default:
+			return !!event.message;
+	}
+}
+
 export interface IRenderedTimelineRow {
 	/** Set for `toolStart` rows, so a later failing `toolResult` can find and tint its own row. */
 	readonly toolCallId?: string;
@@ -65,6 +110,9 @@ export function appendSubagentTimelineEvent(
 	body: HTMLElement,
 	rows: Map<string, HTMLElement>,
 	event: ISubagentTimelineEvent,
+	hoverService: IHoverService,
+	/** Owns the row hovers: the body is emptied wholesale when a restore replaces the card. */
+	store: DisposableStore,
 ): IRenderedTimelineRow | undefined {
 	if (event.type === 'toolStart' && event.toolName) {
 		const row = append(body, $('div.openide-chat-sub-tool'));
@@ -75,7 +123,8 @@ export function appendSubagentTimelineEvent(
 		const name = append(row, $('span.openide-chat-sub-tool-name'));
 		const brief = subagentBriefArgs(event.toolName, event.argumentsJson);
 		name.textContent = brief ? `${event.toolName} · ${brief}` : event.toolName;
-		name.title = name.textContent;
+		// The line is elided and the hover only completes it, so it is not a second accessible name.
+		store.add(setupChatTooltip(hoverService, name, () => name.textContent ?? '', { aria: false }));
 		if (event.toolCallId) {
 			rows.set(event.toolCallId, row);
 		}

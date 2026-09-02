@@ -183,8 +183,8 @@ const composerControls = fs.readFileSync(path.join(root, 'src/vs/workbench/contr
 assert.match(composerControls, /codicon-filled/, 'no explicit filled icon consumer');
 assert.match(composerControls, /openide-mode-agent/, 'the mode chip no longer names its own icon');
 
-// El alias público json/bracket comparte glyph interno con symbol-namespace en Codicon. Esta
-// aserción evita que FontForge vuelva a descartar silenciosamente una de las dos llaves.
+// The public json/bracket alias shares its internal glyph with symbol-namespace in Codicon. This
+// assertion keeps FontForge from silently dropping one of the two keys again.
 for (const [label, font] of [['regular', regular], ['filled', filled]]) {
 	const bracesBounds = font.charToGlyph(String.fromCodePoint(60175)).getBoundingBox();
 	assert.ok(bracesBounds.x1 < 80 && bracesBounds.x2 > 220, `${label} braces are not optically symmetric`);

@@ -3,9 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { getActiveWindow, scheduleAtNextAnimationFrame } from '../../../../../base/browser/dom.js';
 import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
-import { Disposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
@@ -24,15 +25,18 @@ import { applyOpenideChatSurfaceEvent, IOpenideChatSurfaceEvent } from '../../co
 import { buildOpenideChatTranscript } from '../../common/chat/openideChatTranscript.js';
 import { AgentLoopEvent, AgentMode, IChatCapabilityMention, IChatImage, IChatMessage } from '../../common/openideAgentTypes.js';
 import { IOpenidePickAttachment } from '../../common/openidePickContext.js';
+import { buildSnippetContext, IComposerSnippet } from '../../common/chat/openideChatSnippet.js';
 import { rewindForSilentModeTransition } from '../../common/openideModeTransition.js';
 import { buildPlanFollowUpPrompt, normalizePlanFollowUpDisposition, PlanFollowUpDisposition } from '../../common/openidePlanFollowUp.js';
 import { COMPACT_COMMAND, NATIVE_WORKFLOW_COMMANDS } from '../../common/chat/openideChatSlashCommands.js';
 import { OpenideAgentCommands } from '../openideAgentCommands.js';
 import { IOpenideProjectMapLearningService } from '../openideProjectMapLearningService.js';
 import { ISubagentOrchestrationService } from '../openideSubagentOrchestrationService.js';
-import { IOpenideAgentService } from '../openideAgentService.js';
+import { ISubagentRun } from '../../common/openideSubagentTypes.js';
+import { IOpenideAgentService, IOpenideConversationHost } from '../openideAgentService.js';
+import { IConversationMessage, renderIncomingConversationMessage } from '../../common/openideConversationCoordination.js';
 import { IChatSessionUsage, OpenideChatSessions } from '../openideChatSessions.js';
-import { hydrateOpenideChatImages, persistOpenideChatImages } from './openideChatImageHydration.js';
+import { hydrateChatImages, hydrateOpenideChatImages, persistOpenideChatImages } from './openideChatImageHydration.js';
 import { OpenideChatRollbackBarrier } from './openideChatRollbackBarrier.js';
 import { IOpenideChatRollbackOutcome, runOpenideChatRollback } from './openideChatRollbackOperation.js';
 import { OpenideChatSessionEffects } from './openideChatSessionEffects.js';
@@ -56,6 +60,8 @@ export interface IOpenideChatSendRequest {
 	readonly planFollowUp?: PlanFollowUpDisposition;
 	/** Pick & Polish selection: extra context plus, usually, a screenshot of the element. */
 	readonly pick?: IOpenidePickAttachment;
+	/** Editor selections sent to the chat; attached as context, never as text. */
+	readonly snippets?: readonly IComposerSnippet[];
 	readonly capabilities?: readonly IChatCapabilityMention[];
 	readonly mode?: AgentMode;
 	readonly providerId?: string;
@@ -101,6 +107,63 @@ function planBuildPrompt(path: string): string {
  * this file is what remains once that is taken out — the run's lifecycle, the rollback barrier and
  * dispatching the effects the reducer declares but refuses to perform.
  */
+/**
+ * Everything that belongs to a CONVERSATION rather than to what is on screen.
+ *
+ * It used to be a set of single fields on the controller — one `_state`, one `_runCts`, one `_busy`
+ * — which is the same as saying "the run belongs to the tab you are looking at": changing tabs had
+ * to abort the turn, and it did. Upstream keeps the run with the SESSION for exactly this reason
+ * (`chatServiceImpl.ts`'s `_pendingRequests` is a map keyed by session, and `ChatWidget.setModel`
+ * changes conversation without cancelling anything), and a `ChatModel` stays alive in the
+ * background precisely while a request of its own is in flight.
+ *
+ * The runs really are parallel: the agent service queues per conversation (`sequencerFor`) and every
+ * tool call carries its conversation, so two turns hold two shells and two streams. What is still
+ * serialized across all of them is the file system — the write queue and the per-file claims in
+ * `common/openideConversationCoordination.ts`.
+ */
+interface IOpenideChatConversation {
+	/** Items plus the reducer's cursors. Replaced whole on every event: the state is immutable. */
+	state: IOpenideChatReducerState;
+	/** True while a run owns the open reply. Guards the image hydration against a live stream. */
+	streaming: boolean;
+	busy: boolean;
+	runCts?: CancellationTokenSource;
+	/** Rollback awaits it after cancelling, so a late tool cannot write over restored files. */
+	runPromise?: Promise<void>;
+	/** The run in flight is a compaction, not a model turn: no "task finished" when it settles. */
+	compacting: boolean;
+	/**
+	 * Where the run in flight actually landed, when that is not the model the user picked. Lives on
+	 * the CONVERSATION and not on the composer because two conversations can be rerouted to
+	 * different places at the same time, and only the visible one may paint.
+	 */
+	modelRoute?: IOpenideChatModelRoute;
+	/** The run ended with `done{reason:'mode-switch'}`: ownership transfers to `resumeInMode`. */
+	modeHandoff: boolean;
+	/**
+	 * The plan whose Build is in flight. Held so the run's outcome can be reported back to the plan
+	 * editor, which parks its own button on `finishPlanBuild` / `failPlanBuild`.
+	 */
+	planBuild?: { readonly resource: URI; readonly owner: string };
+}
+
+/** A turn running somewhere other than the chosen model, as the composer needs to show it. */
+export interface IOpenideChatModelRoute {
+	readonly providerId: string;
+	readonly model: string;
+	readonly intendedProviderId: string;
+	readonly intendedModel: string;
+	readonly reason: 'cooldown' | 'failover';
+	readonly until?: number;
+}
+
+/** What the user sees on the bubble of a message another conversation sent. */
+const INCOMING_MESSAGE_PREFIX = '↩ Mensaje de';
+
+/** The transcript of "no conversation yet". Shared: it is empty and the state is immutable. */
+const EMPTY_ITEMS: readonly IOpenideChatItem[] = [];
+
 export class OpenideChatController extends Disposable {
 
 	private readonly _onDidChangeItems = this._register(new Emitter<void>());
@@ -113,13 +176,17 @@ export class OpenideChatController extends Disposable {
 	private readonly _onDidPublishNotice = this._register(new Emitter<IOpenideChatNotice>());
 	readonly onDidPublishNotice: Event<IOpenideChatNotice> = this._onDidPublishNotice.event;
 
-	private readonly _onDidFinishRun = this._register(new Emitter<{ readonly hadError: boolean }>());
+	private readonly _onDidFinishRun = this._register(new Emitter<{ readonly hadError: boolean; readonly conversationId: string }>());
 	/**
 	 * Fires once per REAL run settling (not compaction, not a manual abort, not a mode handoff):
 	 * the "task finished" toast and the accessibility signal hang off it, and both must fire exactly
 	 * once per busy→idle transition even though `done` and the run promise settle back to back.
 	 */
-	readonly onDidFinishRun: Event<{ readonly hadError: boolean }> = this._onDidFinishRun.event;
+	readonly onDidFinishRun: Event<{ readonly hadError: boolean; readonly conversationId: string }> = this._onDidFinishRun.event;
+
+	private readonly _onDidChangeModelRoute = this._register(new Emitter<IOpenideChatModelRoute | undefined>());
+	/** The visible conversation's reroute, or `undefined` when it runs where it was told to. */
+	readonly onDidChangeModelRoute: Event<IOpenideChatModelRoute | undefined> = this._onDidChangeModelRoute.event;
 
 	private readonly _onDidResumeInMode = this._register(new Emitter<AgentMode>());
 	/** A mode suggestion was accepted and the request is re-running in that mode: the composer's selector follows. */
@@ -131,26 +198,32 @@ export class OpenideChatController extends Disposable {
 
 	private readonly _barrier = new OpenideChatRollbackBarrier();
 	private readonly _effects: OpenideChatSessionEffects;
-	/** Items plus the reducer's cursors. Replaced whole on every event: the state is immutable. */
-	private _state: IOpenideChatReducerState = createOpenideChatReducerState();
-	/** True while a run owns the open reply. Guards the image hydration against a live stream. */
-	private _streaming = false;
-	private _runCts: CancellationTokenSource | undefined;
-	/** Rollback awaits it after cancelling, so a late tool cannot write over restored files. */
-	private _runPromise: Promise<void> | undefined;
+	/** One record per conversation the user has opened in this window. */
+	private readonly _conversations = new Map<string, IOpenideChatConversation>();
+	/** The conversation ON SCREEN. Only repaints and the composer's busy state depend on it. */
 	private _activeId: string | undefined;
-	private _busy = false;
 	/**
-	 * The plan whose Build is in flight. Held so the run's outcome can be reported back to the plan
-	 * editor, which parks its own button on `finishPlanBuild` / `failPlanBuild`.
+	 * The conversation whose run is emitting right now. Plan and canvas rows arrive OUTSIDE the run
+	 * stream (the store reports on its own schedule) with no conversation of their own, and they
+	 * belong to the run that produced them — which, while a background run is going, is not the
+	 * conversation on screen.
 	 */
-	private _planBuild: { readonly resource: URI; readonly owner: string } | undefined;
-	/** The run in flight is a compaction, not a model turn: no "task finished" when it settles. */
-	private _compacting = false;
-	/** The run ended with `done{reason:'mode-switch'}`: ownership transfers to `resumeInMode`, nothing settles. */
-	private _modeHandoff = false;
+	private _streamingId: string | undefined;
+	/**
+	 * Which conversation each delegated specialist's card lives in, plus the last snapshot of the
+	 * fields that card actually shows.
+	 *
+	 * The conversation is NOT read off `run.parentConversationId`: that field is filled with
+	 * `hookSessionId(messages)` (openideAgentService.ts:3961), a UUID minted per message-array
+	 * identity for the hook system, so routing by it would open a conversation record nobody ever
+	 * paints. The id recorded here is the one the run was launched with, which is the same one the
+	 * card was reduced into.
+	 */
+	private readonly _subagentCards = new Map<string, { readonly conversationId: string; snapshot: string }>();
 	/** `/commands` of the workspace (commands/*.md, project + global), created lazily. */
 	private _commands: OpenideAgentCommands | undefined;
+	/** The repaint a streamed delta asked for and the next frame has not painted yet. See `repaintOnNextFrame`. */
+	private _deferredRepaint: IDisposable | undefined;
 
 	constructor(
 		private readonly sessions: OpenideChatSessions,
@@ -171,6 +244,10 @@ export class OpenideChatController extends Disposable {
 		// delivery the webview host performed (openideChatView.ts:603-614).
 		this._register(this.subagentOrchestration.onDidChangeRun(event => {
 			if (event.type === 'timeline') { return; }
+			// Everything short of a terminal state arrives as `changed`, and until now all of it was
+			// dropped — which is why a delegated specialist's card kept the snapshot `delegate()`
+			// returned before routing ran, model `'default'` and all. Fold it back in.
+			this.refreshSubagentCard(event.run);
 			if ((event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled') && event.run.deliveryState === 'pending') {
 				this.deliverSubagentRun(event.run);
 			}
@@ -181,21 +258,83 @@ export class OpenideChatController extends Disposable {
 		// so they are folded through `applyOpenideChatSurfaceEvent` instead of the loop's reducer.
 		this._register(this.agentService.onDidChangePlanDraft(draft => this.applySurface({
 			type: 'planDraft', path: draft.path, title: draft.title, done: draft.done,
-		})));
+		}, draft.conversationId)));
 		this._register(this.agentService.onDidCreatePlan(plan => this.applySurface({
 			type: 'planCard', path: plan.path, title: plan.title, markdown: plan.markdown, external: plan.external,
-		})));
+		}, plan.conversationId)));
 		this._register(this.agentService.onDidChangeCanvas(canvas => this.applySurface({
 			type: 'canvasCard', path: canvas.path, title: canvas.title, created: canvas.created,
 		})));
 		this._register(this.agentService.onDidRequestPlanBuild(request => this.buildPlan(request)));
 		this._register(this.agentService.onDidRequestPlanBuildCancel(resource => {
-			if (this._planBuild?.resource.toString() === resource.toString()) { this.abort(); }
+			// The plan editor cancels a build by its resource, which may belong to a conversation the
+			// user is not looking at any more.
+			for (const [conversationId, conversation] of this._conversations) {
+				if (conversation.planBuild?.resource.toString() === resource.toString()) { this.abort(conversationId); }
+			}
 		}));
+		this._register(toDisposable(() => this.cancelDeferredRepaint()));
+	}
+
+	/** The conversation's record, created on first use. */
+	private conversation(id: string): IOpenideChatConversation {
+		let conversation = this._conversations.get(id);
+		if (!conversation) {
+			conversation = { state: createOpenideChatReducerState(), streaming: false, busy: false, compacting: false, modeHandoff: false };
+			this._conversations.set(id, conversation);
+		}
+		return conversation;
+	}
+
+	/** The record of the conversation on screen, WITHOUT creating one: getters must not mutate. */
+	private peek(id: string | undefined): IOpenideChatConversation | undefined {
+		return id ? this._conversations.get(id) : undefined;
+	}
+
+	/**
+	 * The list only ever shows the visible conversation: a background run repaints nothing.
+	 *
+	 * Synchronous, and it settles whatever `repaintOnNextFrame` still owed: the callers that need
+	 * the list to hold the new items when they return (`restore` is followed by a `scrollToEnd`) go
+	 * through here.
+	 */
+	private repaint(conversationId: string): void {
+		if (conversationId === this._activeId) {
+			this.cancelDeferredRepaint();
+			this._onDidChangeItems.fire();
+		}
+	}
+
+	/**
+	 * The repaint for a streamed delta: at most one per animation frame.
+	 *
+	 * A model turn arrives as a burst of SSE chunks, routinely several per frame, and every one of
+	 * them used to run the full pipeline on its own — the reducer, `setChildren` over the whole
+	 * transcript with a fresh diff identity per row, a complete re-render of the reply's markdown,
+	 * a measurement and a `reveal`. The screen can only show one of those per frame; the others
+	 * were pure heat, and they were what the shimmer and the spinner had to compete with for the
+	 * frame. So a delta only ARMS a repaint, and the frame paints the state as it stands by then.
+	 *
+	 * Upstream's chat does the equivalent with its progressive renderer (`chatListRenderer.ts`
+	 * paces the words it reveals per frame rather than painting per chunk).
+	 */
+	private repaintOnNextFrame(conversationId: string): void {
+		if (conversationId !== this._activeId || this._deferredRepaint) {
+			return;
+		}
+		this._deferredRepaint = scheduleAtNextAnimationFrame(getActiveWindow(), () => {
+			this._deferredRepaint = undefined;
+			this._onDidChangeItems.fire();
+		});
+	}
+
+	private cancelDeferredRepaint(): void {
+		this._deferredRepaint?.dispose();
+		this._deferredRepaint = undefined;
 	}
 
 	get items(): readonly IOpenideChatItem[] {
-		return this._state.items;
+		return this.peek(this._activeId)?.state.items ?? EMPTY_ITEMS;
 	}
 
 	/** The workspace's Markdown `/commands`. Shared with the composer's `/` menu through the widget. */
@@ -206,21 +345,45 @@ export class OpenideChatController extends Disposable {
 		return this._commands;
 	}
 
+	/**
+	 * Repaints a specialist's card when something it SHOWS has moved.
+	 *
+	 * The filter is not an optimisation, it is what makes this safe to subscribe to at all: the
+	 * orchestrator calls `renewLease()` and `append()` for every internal event of the specialist,
+	 * and `append` emits twice, so `changed` fires roughly three times per event — per token, where
+	 * the executor reports deltas. Comparing the fields the row draws collapses that back to the
+	 * handful of moments the row really changes.
+	 */
+	private refreshSubagentCard(run: ISubagentRun): void {
+		const card = this._subagentCards.get(run.runId);
+		if (!card) { return; }
+		const snapshot = [run.model, run.providerId, run.status, run.progress, run.timeline.length, run.result?.summary].join('\u0000');
+		if (snapshot === card.snapshot) { return; }
+		card.snapshot = snapshot;
+		this.applySurface({ type: 'subagentRunUpdate', run }, card.conversationId);
+	}
+
 	private deliverSubagentRun(run: { readonly runId: string; readonly parentConversationId: string; readonly status: string; readonly result?: { readonly summary?: string }; readonly error?: string }): void {
 		const sessionMessages = this.sessions.messagesOf(run.parentConversationId);
 		if (!sessionMessages.some(message => message.subagentRunId === run.runId)) {
 			sessionMessages.push({ role: 'assistant', content: run.result?.summary || run.error || `Subagente ${run.status}.`, subagentRunId: run.runId });
 			this.sessions.save(run.parentConversationId, sessionMessages, run.status === 'failed');
-			if (run.parentConversationId === this._activeId && !this._streaming) {
-				this.rebuildItems(sessionMessages);
+			if (!this.conversation(run.parentConversationId).streaming) {
+				this.rebuildItems(run.parentConversationId, sessionMessages);
 			}
 			this._onDidChangeSessions.fire();
 		}
 		this.subagentOrchestration.markDelivered(run.runId);
 	}
 
+	/** Busy of the conversation ON SCREEN: it is what the composer's Stop button reflects. */
 	get isBusy(): boolean {
-		return this._busy;
+		return this.peek(this._activeId)?.busy ?? false;
+	}
+
+	/** Whether THAT conversation has a run in flight, whoever is on screen. */
+	isConversationBusy(conversationId: string): boolean {
+		return this.peek(conversationId)?.busy ?? false;
 	}
 
 	get activeConversationId(): string | undefined {
@@ -253,8 +416,20 @@ export class OpenideChatController extends Disposable {
 		const id = conversationId ?? this.sessions.ensureActive();
 		this._activeId = id;
 		this._effects.setVisibleConversation(id);
+		this.publishModelRoute(id);
+		const conversation = this.conversation(id);
 		const messages = this.sessions.messagesOf(id);
-		this.rebuildItems(messages);
+		// A conversation whose run KEPT GOING while you were in another tab already holds its
+		// transcript in memory, ahead of what is persisted: rebuilding it from the store would drop
+		// the reply that is still streaming into it. Only a settled conversation is rebuilt.
+		if (conversation.streaming) {
+			this._onDidChangeItems.fire();
+		} else {
+			this.rebuildItems(id, messages);
+		}
+		// The composer follows the conversation it is now attached to: its Stop button, its working
+		// border and its queue all belong to THIS conversation, not to the one just left.
+		this._onDidChangeBusy.fire(conversation.busy);
 		void this.hydrateImages(id, messages);
 	}
 
@@ -264,10 +439,10 @@ export class OpenideChatController extends Disposable {
 		}
 		// Reading the assets is slow enough for the user to have switched tabs or started typing.
 		// Rebuilding then would paint another conversation's thread, or wipe a reply mid-stream.
-		if (this._activeId !== conversationId || this._streaming) {
+		if (this._activeId !== conversationId || this.conversation(conversationId).streaming) {
 			return;
 		}
-		this.rebuildItems(messages);
+		this.rebuildItems(conversationId, messages);
 	}
 
 	/**
@@ -290,16 +465,23 @@ export class OpenideChatController extends Disposable {
 	 * a command), and `commitOpenideChatDraft` creates the reply lazily — so the row lands in the
 	 * open reply when there is one and opens its own when there is not.
 	 */
-	private applySurface(event: IOpenideChatSurfaceEvent): void {
-		const step = applyOpenideChatSurfaceEvent(this._state, event);
-		const changed = step.items !== this._state.items;
+	private applySurface(event: IOpenideChatSurfaceEvent, owner?: string): void {
+		// The run that produced the row owns it. A plan says so itself, because with two
+		// conversations running "whoever emitted last" is not an answer. Outside a run (the canvas
+		// editor saving, a plan written by a command) there is no owner, and then the row belongs to
+		// the conversation on screen.
+		const conversationId = owner ?? this._streamingId ?? this._activeId;
+		if (!conversationId) { return; }
+		const conversation = this.conversation(conversationId);
+		const step = applyOpenideChatSurfaceEvent(conversation.state, event);
+		const changed = step.items !== conversation.state.items;
 		// The state is taken either way — a commit that changed nothing still carries the cursor
 		// forward — but the list is only told when the ITEMS actually moved. `step.state` is a fresh
 		// object on every commit, so comparing states would repaint on every no-op: a plan draft
 		// reports `done` for plans that never opened a card, and each one would rebuild the tree.
-		this._state = step.state;
+		conversation.state = step.state;
 		if (changed) {
-			this._onDidChangeItems.fire();
+			this.repaint(conversationId);
 		}
 	}
 
@@ -312,18 +494,20 @@ export class OpenideChatController extends Disposable {
 	 * turning into "Building", which the card does on its own.
 	 */
 	private buildPlan(request: { readonly path: string; readonly resource: URI; readonly owner: string; readonly providerId: string; readonly model: string }): void {
-		if (this._busy || this._planBuild || this._barrier.isActive) {
+		const conversationId = this.sessions.ensureActive();
+		const conversation = this.conversation(conversationId);
+		if (conversation.busy || conversation.planBuild || this._barrier.isActive) {
 			// The editor's button is parked on this promise; leaving it spinning forever would be
 			// worse than the notification.
 			this.agentService.failPlanBuild(request.resource, request.owner);
 			this.notificationService.warn(PLAN_BUILD_BUSY);
 			return;
 		}
-		this._planBuild = { resource: request.resource, owner: request.owner };
+		conversation.planBuild = { resource: request.resource, owner: request.owner };
 
-		const conversationId = this.sessions.ensureActive();
 		this._activeId = conversationId;
 		this._effects.setVisibleConversation(conversationId);
+		this.publishModelRoute(conversationId);
 		const messages = this.sessions.messagesOf(conversationId);
 		const messageId = generateUuid();
 		messages.push({
@@ -335,9 +519,9 @@ export class OpenideChatController extends Disposable {
 
 		// No request row: the turn is hidden. The reducer still needs a turn armed, or the reply
 		// would be appended to the previous one and the two runs would share a caret.
-		this.finishStream({ isCanceled: true });
-		this._state = openOpenideChatReply(beginOpenideChatHiddenTurn(this._state, messageId));
-		this._streaming = true;
+		this.finishStream(conversationId, { isCanceled: true });
+		conversation.state = openOpenideChatReply(beginOpenideChatHiddenTurn(conversation.state, messageId));
+		conversation.streaming = true;
 		this._onDidChangeItems.fire();
 
 		this.launchRun(conversationId, messages, messageId, 'agent', request.providerId, request.model);
@@ -349,12 +533,13 @@ export class OpenideChatController extends Disposable {
 	 * Idempotent through `_planBuild` being cleared: `launchRun` settles on both edges (the promise
 	 * and the failure handler) and only the first may resolve the editor's pending state.
 	 */
-	private settlePlanBuild(failed: boolean): void {
-		const planBuild = this._planBuild;
+	private settlePlanBuild(conversationId: string, failed: boolean): void {
+		const conversation = this.conversation(conversationId);
+		const planBuild = conversation.planBuild;
 		if (!planBuild) {
 			return;
 		}
-		this._planBuild = undefined;
+		conversation.planBuild = undefined;
 		if (failed) {
 			this.agentService.failPlanBuild(planBuild.resource, planBuild.owner);
 			return;
@@ -362,18 +547,26 @@ export class OpenideChatController extends Disposable {
 		this.agentService.finishPlanBuild(planBuild.resource, planBuild.owner);
 	}
 
-	/** Cancels the visible run. The reply stays in the transcript marked as cancelled. */
-	abort(): void {
-		const run = this._runCts;
-		this._runCts = undefined;
+	/**
+	 * Cancels a conversation's run — by default the one on screen, which is what the composer's Stop
+	 * button and the changed-files tray mean by "stop". The reply stays in the transcript marked as
+	 * cancelled. Changing conversations does NOT come through here any more: a turn is only
+	 * cancelled when somebody asks for it to be.
+	 */
+	abort(conversationId: string | undefined = this._activeId): void {
+		if (!conversationId) { return; }
+		const conversation = this.conversation(conversationId);
+		const run = conversation.runCts;
+		conversation.runCts = undefined;
 		run?.cancel();
-		this.finishStream({ isCanceled: true });
+		this.finishStream(conversationId, { isCanceled: true });
 		// A cancelled build is a failed one as far as the plan editor is concerned: its button has to
 		// come back, and `launchRun`'s handlers bail out on the superseded CTS so they will not.
-		this.settlePlanBuild(true);
-		this._compacting = false;
-		this._modeHandoff = false;
-		this.setBusy(false);
+		this.settlePlanBuild(conversationId, true);
+		conversation.compacting = false;
+		conversation.modeHandoff = false;
+		this.setBusy(conversationId, false);
+		this.sessions.setStatus(conversationId, 'completed');
 	}
 
 	/**
@@ -396,7 +589,8 @@ export class OpenideChatController extends Disposable {
 		const capabilities = request.capabilities ? [...request.capabilities] : [];
 		const references = (request.references ?? []).map(r => r.trim()).filter((r, i, all) => r && all.indexOf(r) === i).slice(0, 8);
 		const text = request.text;
-		if (!text.trim() && !images.length && !references.length && !capabilities.length && !request.pick) {
+		const snippets = request.snippets ?? [];
+		if (!text.trim() && !images.length && !references.length && !capabilities.length && !request.pick && !snippets.length) {
 			return false;
 		}
 		// A composer /command: resolved and expanded HERE, BEFORE assembling the messages.
@@ -419,7 +613,7 @@ export class OpenideChatController extends Disposable {
 				void this.compact();
 				return true; // consumed: the composer must not hand the text back
 			}
-			if (this._busy) {
+			if (this.isBusy) {
 				this.publishNotice('info', COMPACT_BUSY);
 				return false;
 			}
@@ -454,6 +648,7 @@ export class OpenideChatController extends Disposable {
 		const conversationId = this.sessions.ensureActive();
 		this._activeId = conversationId;
 		this._effects.setVisibleConversation(conversationId);
+		this.publishModelRoute(conversationId);
 		const messages = this.sessions.messagesOf(conversationId);
 		await hydrateOpenideChatImages(this.fileService, messages);
 		const messageId = generateUuid();
@@ -469,6 +664,10 @@ export class OpenideChatController extends Disposable {
 				if (attached) { context = context ? `${context}\n\n${attached}` : attached; }
 			} catch { /* a file deleted between picking and sending does not block the turn */ }
 		}
+		// Editor selections: already in hand, nothing to read — the text was captured when the
+		// user pressed the shortcut, so it is what they saw, not what the file says now.
+		const snippetContext = buildSnippetContext(snippets);
+		if (snippetContext) { context = context ? `${context}\n\n${snippetContext}` : snippetContext; }
 		for (const selected of capabilities) {
 			if (selected.kind === 'command') { continue; }
 			try {
@@ -490,7 +689,14 @@ export class OpenideChatController extends Disposable {
 				images.push(request.pick.image);
 			}
 		}
-		const durableImages = await persistOpenideChatImages(this.fileService, this.chatImageFolder(conversationId), messageId, images);
+		// A turn resent from a RESTORED transcript (edit, rollback) carries images whose base64
+		// `persist` stripped, leaving only an `assetUri`. The composer reads them back when it
+		// restores, but sending inside that window would reach the provider with an empty payload:
+		// `persistOpenideChatImages` returns an image that already has an `assetUri` untouched.
+		// One whose asset is gone is dropped — the same call the bubble makes when it filters on
+		// `image.data` — because an attachment with no bytes is an API error, not a thumbnail.
+		const attachments = (await hydrateChatImages(this.fileService, images)).filter(image => !!image.data);
+		const durableImages = await persistOpenideChatImages(this.fileService, this.chatImageFolder(conversationId), messageId, attachments);
 		// The user keeps conversing without having reverted the previous turn: a WEAK positive
 		// signal. Accepting edits is silent, so counting only explicit clicks would skew negative.
 		this.creditPreviousTurnSurvived(messages);
@@ -498,13 +704,73 @@ export class OpenideChatController extends Disposable {
 			role: 'user', content: sendText, messageId, providerId: providerOverride, modelId: modelOverride,
 			executionMode: mode, images: durableImages.length ? durableImages : undefined, context,
 			displayText, capabilities: capabilities.length ? capabilities : undefined,
+			snippets: snippets.length ? [...snippets] : undefined,
 		};
 		messages.push(turn);
 		this.sessions.save(conversationId, messages, false);
-		this.appendItems(messageId, { ...request, text: sendText, displayText: displayText ?? (sendText !== text ? text : undefined), images: durableImages, capabilities }, mode, providerOverride, modelOverride);
+		this.appendItems(conversationId, messageId, { ...request, text: sendText, displayText: displayText ?? (sendText !== text ? text : undefined), images: durableImages, capabilities }, mode, providerOverride, modelOverride);
 		// The run is launched synchronously from here so the preparation window stays open until
 		// `_runPromise` exists — that is exactly what a queued rollback waits for.
 		this.launchRun(conversationId, messages, messageId, mode, providerOverride, modelOverride);
+		return true;
+	}
+
+	/**
+	 * The dock as the ENGINE sees it: who else is open, and where a message to one of them lands.
+	 * `openideAgentService` owns the mailbox and its guards; this is the half that knows what a
+	 * conversation is.
+	 */
+	conversationHost(): IOpenideConversationHost {
+		return {
+			peers: () => this.sessions.openTabs().map(tab => ({
+				id: tab.id,
+				title: tab.title || 'Nuevo chat',
+				busy: this.isConversationBusy(tab.id),
+			})),
+			deliver: (message, fromTitle) => this.deliverConversationMessage(message, fromTitle),
+		};
+	}
+
+	/**
+	 * A message from another conversation, delivered the way Claude Code delivers one between
+	 * sessions: read BETWEEN TOOL CALLS when the target has a turn in flight — the loop re-sends its
+	 * `messages` on every iteration, so pushing it there is exactly that — and, when the target is
+	 * idle, as a turn of its own.
+	 *
+	 * It lands as an ordinary user message so the model keeps it in context, carrying the label that
+	 * says who wrote it and that it authorises nothing. The user sees a short preview
+	 * (`displayText`): the framing is for the model, the preview is for them.
+	 */
+	private deliverConversationMessage(message: IConversationMessage, fromTitle: string): boolean {
+		const conversationId = message.toConversationId;
+		if (!this.sessions.metaOf(conversationId)) {
+			return false;
+		}
+		const conversation = this.conversation(conversationId);
+		const messages = this.sessions.messagesOf(conversationId);
+		const messageId = generateUuid();
+		messages.push({
+			role: 'user',
+			messageId,
+			content: renderIncomingConversationMessage(fromTitle, message.text),
+			displayText: `${INCOMING_MESSAGE_PREFIX} ${fromTitle}: ${message.text}`,
+		});
+		this.sessions.save(conversationId, messages, false);
+		if (conversation.busy) {
+			// The run picks it up on its next step. Repainting a transcript a run owns is the
+			// reducer's business, so the row shows up when the turn closes.
+			if (!conversation.streaming) {
+				this.rebuildItems(conversationId, messages);
+			}
+			this._onDidChangeSessions.fire();
+			return true;
+		}
+		// Idle: the message becomes its turn. Same shape as an ordinary send, without a composer.
+		const providerId = this.agentService.getActiveProviderId();
+		const modelId = this.agentService.getModel();
+		this.appendItems(conversationId, messageId, { text: message.text, displayText: `${INCOMING_MESSAGE_PREFIX} ${fromTitle}` }, 'agent', providerId, modelId);
+		this.launchRun(conversationId, messages, messageId, 'agent', providerId, modelId);
+		this._onDidChangeSessions.fire();
 		return true;
 	}
 
@@ -529,39 +795,41 @@ export class OpenideChatController extends Disposable {
 	 * Resolves even when compaction fails: `/compact <message>` must still send its message.
 	 */
 	async compact(): Promise<void> {
-		if (this._busy) {
+		const conversationId = this.sessions.ensureActive();
+		const conversation = this.conversation(conversationId);
+		if (conversation.busy) {
 			this.publishNotice('info', COMPACT_BUSY);
 			return;
 		}
-		const conversationId = this.sessions.ensureActive();
 		this._activeId = conversationId;
 		this._effects.setVisibleConversation(conversationId);
+		this.publishModelRoute(conversationId);
 		const messages = this.sessions.messagesOf(conversationId);
-		this._runCts?.cancel();
+		conversation.runCts?.cancel();
 		const runCts = new CancellationTokenSource();
-		this._runCts = runCts;
-		this._compacting = true;
-		this.setBusy(true);
-		this.finishStream({ isCanceled: true });
-		this._state = openOpenideChatReply(beginOpenideChatHiddenTurn(this._state, generateUuid()));
-		this._streaming = true;
-		const runPromise = this.agentService.compactConversation(messages, event => this.handleRunEvent(runCts, conversationId, messages, event), runCts.token);
-		this._runPromise = runPromise;
+		conversation.runCts = runCts;
+		conversation.compacting = true;
+		this.setBusy(conversationId, true);
+		this.finishStream(conversationId, { isCanceled: true });
+		conversation.state = openOpenideChatReply(beginOpenideChatHiddenTurn(conversation.state, generateUuid()));
+		conversation.streaming = true;
+		const runPromise = this.agentService.compactConversation(messages, event => this.handleRunEvent(runCts, conversationId, messages, event), runCts.token, conversationId);
+		conversation.runPromise = runPromise;
 		try {
 			await runPromise;
-			if (this._runCts !== runCts) { return; }
+			if (conversation.runCts !== runCts) { return; }
 			this.sessions.save(conversationId, messages, false);
-			this.finishStream({});
+			this.finishStream(conversationId, {});
 		} catch (error) {
-			if (this._runCts !== runCts) { return; }
-			this.finishStream({ errorMessage: error instanceof Error ? error.message : String(error) });
+			if (conversation.runCts !== runCts) { return; }
+			this.finishStream(conversationId, { errorMessage: error instanceof Error ? error.message : String(error) });
 		} finally {
-			if (this._runCts === runCts) {
-				this._runCts = undefined;
-				this._compacting = false;
-				this.setBusy(false);
+			if (conversation.runCts === runCts) {
+				conversation.runCts = undefined;
+				conversation.compacting = false;
+				this.setBusy(conversationId, false);
 			}
-			if (this._runPromise === runPromise) { this._runPromise = undefined; }
+			if (conversation.runPromise === runPromise) { conversation.runPromise = undefined; }
 		}
 	}
 
@@ -579,8 +847,8 @@ export class OpenideChatController extends Disposable {
 		if (!conversationId) { return; }
 		if (mode === 'fork') {
 			// The card offered a branch: the widget owns forking; here the run simply ends.
-			this.finishStream({});
-			this.setBusy(false);
+			this.finishStream(conversationId, {});
+			this.setBusy(conversationId, false);
 			return;
 		}
 		const messages = this.sessions.messagesOf(conversationId);
@@ -593,48 +861,50 @@ export class OpenideChatController extends Disposable {
 		this.launchRun(conversationId, messages, user.messageId ?? generateUuid(), mode, providerOverride, modelOverride, refinedPrompt?.trim() || undefined);
 	}
 
-	private appendItems(messageId: string, request: IOpenideChatSendRequest, mode: AgentMode, providerId: string, modelId: string): void {
+	private appendItems(conversationId: string, messageId: string, request: IOpenideChatSendRequest, mode: AgentMode, providerId: string, modelId: string): void {
+		const conversation = this.conversation(conversationId);
 		// A second turn admitted while one is streaming takes over the run (launchRun cancels the
 		// previous CTS). Closing the old reply here is what stops it from keeping a caret forever:
 		// its dataId would never gain the `_done` suffix once no event can reach it again.
-		this.finishStream({ isCanceled: true });
-		this._state = openOpenideChatReply(beginOpenideChatTurn(this._state, createOpenideChatRequestItem({
+		this.finishStream(conversationId, { isCanceled: true });
+		conversation.state = openOpenideChatReply(beginOpenideChatTurn(conversation.state, createOpenideChatRequestItem({
 			id: messageId, messageId, text: request.text, displayText: request.displayText,
 			images: request.images, capabilities: request.capabilities, mode, providerId, modelId,
 		})));
 		// The reply row opens EMPTY right away: it is what carries the "Pensando…" shimmer during
 		// the silence before the first event, and the reducer withdraws it if the turn settles with
 		// nothing to show.
-		this._streaming = true;
-		this._onDidChangeItems.fire();
+		conversation.streaming = true;
+		this.repaint(conversationId);
 	}
 
 	private launchRun(conversationId: string, messages: IChatMessage[], messageId: string, mode: AgentMode, providerOverride: string, modelOverride: string, modeInstruction?: string): void {
-		this._runCts?.cancel();
+		const conversation = this.conversation(conversationId);
+		conversation.runCts?.cancel();
 		const runCts = new CancellationTokenSource();
-		this._runCts = runCts;
-		this._modeHandoff = false;
-		this.setBusy(true);
+		conversation.runCts = runCts;
+		conversation.modeHandoff = false;
+		this.setBusy(conversationId, true);
 		const runPromise = this.agentService.runMessages(
 			messages,
 			event => this.handleRunEvent(runCts, conversationId, messages, event),
 			runCts.token,
-			{ mode, messageId, providerOverride, modelOverride, modeInstruction },
+			{ mode, messageId, providerOverride, modelOverride, modeInstruction, conversationId },
 		);
-		this._runPromise = runPromise;
+		conversation.runPromise = runPromise;
 		void runPromise.then(() => {
-			if (this._runCts !== runCts || this._modeHandoff) { return; }
+			if (conversation.runCts !== runCts || conversation.modeHandoff) { return; }
 			this.sessions.save(conversationId, messages, false);
-			this.finishStream({});
-			this.settlePlanBuild(false);
-			this.finishRun(false);
+			this.finishStream(conversationId, {});
+			this.settlePlanBuild(conversationId, false);
+			this.finishRun(conversationId, false);
 		}, error => {
-			if (this._runCts !== runCts || this._modeHandoff) { return; }
-			this.finishStream({ errorMessage: error instanceof Error ? error.message : String(error) });
-			this.settlePlanBuild(true);
-			this.finishRun(true);
+			if (conversation.runCts !== runCts || conversation.modeHandoff) { return; }
+			this.finishStream(conversationId, { errorMessage: error instanceof Error ? error.message : String(error) });
+			this.settlePlanBuild(conversationId, true);
+			this.finishRun(conversationId, true);
 		}).finally(() => {
-			if (this._runPromise === runPromise) { this._runPromise = undefined; }
+			if (conversation.runPromise === runPromise) { conversation.runPromise = undefined; }
 		});
 	}
 
@@ -648,18 +918,35 @@ export class OpenideChatController extends Disposable {
 	private handleRunEvent(runCts: CancellationTokenSource, conversationId: string, messages: IChatMessage[], event: AgentLoopEvent): void {
 		// The change-set is host-only metadata and the rollback's source of truth. It is applied even
 		// for a cancelled run, because the files it describes were already written to disk.
-		const step = applyAgentEvent(this._state, event);
-		if (this._runCts !== runCts) {
+		const conversation = this.conversation(conversationId);
+		if (event.type === 'modelRoute') {
+			conversation.modelRoute = {
+				providerId: event.providerId, model: event.model,
+				intendedProviderId: event.intendedProviderId, intendedModel: event.intendedModel,
+				reason: event.reason, ...(event.until ? { until: event.until } : {}),
+			};
+			this.publishModelRoute(conversationId);
+			return;
+		}
+		const step = applyAgentEvent(conversation.state, event);
+		if (conversation.runCts !== runCts) {
 			// A late callback from a superseded run must not touch the live transcript, but its
 			// storage effects still have to land: those describe work that really happened.
 			this._effects.apply({ conversationId, messages }, step.sessionEffects.filter(isStorageEffect));
 			return;
 		}
-		this._state = step.state;
+		// Whoever is emitting owns the rows that arrive outside the stream (`applySurface`).
+		this._streamingId = conversationId;
+		if (event.type === 'subagentRun') {
+			// Remember where the reducer just put this card, so the run service's own updates —
+			// which carry no conversation — can find it again.
+			this._subagentCards.set(event.run.runId, { conversationId, snapshot: '' });
+		}
+		conversation.state = step.state;
 		this._effects.apply({ conversationId, messages }, step.sessionEffects);
 		this.applyRunLifecycle(conversationId, messages, step.sessionEffects);
 		if (!step.dropped) {
-			this._onDidChangeItems.fire();
+			this.repaintOnNextFrame(conversationId);
 		}
 	}
 
@@ -672,7 +959,7 @@ export class OpenideChatController extends Disposable {
 			if (effect.type === 'modeHandoff') {
 				// The triage run is over but the request is not: `resumeInMode` takes over as soon as
 				// the suggestion card reports the acceptance. Busy stays up and the turn stays open.
-				this._modeHandoff = true;
+				this.conversation(conversationId).modeHandoff = true;
 				this.sessions.save(conversationId, messages, false);
 				continue;
 			}
@@ -683,36 +970,79 @@ export class OpenideChatController extends Disposable {
 			this.sessions.save(conversationId, messages, failed);
 			// The reducer already closed the reply and, for a real failure, wrote the message into it.
 			// Re-stamping it here would only bump the version, so the stream is just released.
-			this._streaming = false;
-			this.finishRun(failed);
+			this.releaseStream(conversationId);
+			this.finishRun(conversationId, failed);
 		}
 	}
 
 	/** Idempotent: `done` and the run promise both settle, and only the first one may close the row. */
-	private finishStream(update: { readonly isCanceled?: boolean; readonly errorMessage?: string }): void {
-		const next = closeOpenideChatTurn(this._state, update);
-		this._streaming = false;
-		if (next === this._state) {
+	private finishStream(conversationId: string, update: { readonly isCanceled?: boolean; readonly errorMessage?: string }): void {
+		const conversation = this.conversation(conversationId);
+		const next = closeOpenideChatTurn(conversation.state, update);
+		this.releaseStream(conversationId);
+		if (next === conversation.state) {
 			return; // nothing was open: the reducer's own `done` already settled the turn
 		}
-		this._state = next;
-		this._onDidChangeItems.fire();
+		conversation.state = next;
+		this.repaint(conversationId);
+	}
+
+	/**
+	 * The reroute belongs to the run, so it goes when the run does: leaving it up would have the
+	 * chip claim a detour that is over, and the next turn may well go back to the chosen model.
+	 */
+	private publishModelRoute(conversationId: string): void {
+		if (conversationId === this._activeId) {
+			this._onDidChangeModelRoute.fire(this.conversation(conversationId).modelRoute);
+		}
+	}
+
+	/** The visible conversation's reroute; the widget reads it when it switches tabs. */
+	get modelRoute(): IOpenideChatModelRoute | undefined {
+		return this._activeId ? this.conversation(this._activeId).modelRoute : undefined;
+	}
+
+	/** The conversation stops owning the open reply — and stops owning the rows that arrive loose. */
+	private releaseStream(conversationId: string): void {
+		this.conversation(conversationId).streaming = false;
+		if (this.conversation(conversationId).modelRoute) {
+			this.conversation(conversationId).modelRoute = undefined;
+			this.publishModelRoute(conversationId);
+		}
+		if (this._streamingId === conversationId) {
+			this._streamingId = undefined;
+		}
 	}
 
 	/** Single closing point of a REAL run: clears busy and reports "task finished" once. */
-	private finishRun(hadError: boolean): void {
-		const wasBusy = this._busy;
-		const wasCompacting = this._compacting;
-		this.setBusy(false);
+	private finishRun(conversationId: string, hadError: boolean): void {
+		const conversation = this.conversation(conversationId);
+		const wasBusy = conversation.busy;
+		const wasCompacting = conversation.compacting;
+		this.setBusy(conversationId, false);
+		this.sessions.setStatus(conversationId, hadError ? 'failed' : 'completed');
+		this._onDidChangeSessions.fire();
 		if (wasBusy && !wasCompacting) {
-			this._onDidFinishRun.fire({ hadError });
+			this._onDidFinishRun.fire({ hadError, conversationId });
 		}
 	}
 
-	private setBusy(busy: boolean): void {
-		if (this._busy === busy) { return; }
-		this._busy = busy;
-		this._onDidChangeBusy.fire(busy);
+	/**
+	 * Busy is per conversation now. Two things read it: the composer, which only cares about the one
+	 * ON SCREEN, and the strip, where a conversation working in another tab says so with its dot —
+	 * `setStatus` also marks it unread when it is not the one being watched.
+	 */
+	private setBusy(conversationId: string, busy: boolean): void {
+		const conversation = this.conversation(conversationId);
+		if (conversation.busy === busy) { return; }
+		conversation.busy = busy;
+		if (busy) {
+			this.sessions.setStatus(conversationId, 'in-progress');
+			this._onDidChangeSessions.fire();
+		}
+		if (conversationId === this._activeId) {
+			this._onDidChangeBusy.fire(busy);
+		}
 	}
 
 	private publishNotice(severity: IOpenideChatNotice['severity'], message: string): void {
@@ -723,21 +1053,26 @@ export class OpenideChatController extends Disposable {
 		const conversationId = this._activeId ?? this.sessions.ensureActive();
 		const outcome = await runOpenideChatRollback({
 			sessions: this.sessions, agentService: this.agentService, conversationId, messageId, restoreComposer,
-			drainRun: () => this.drainRun(),
+			drainRun: () => this.drainRun(conversationId),
 		});
 		if (!outcome.committed) {
 			return outcome;
 		}
-		this.setBusy(false);
-		this.rebuildItems(this.sessions.messagesOf(conversationId));
+		this.setBusy(conversationId, false);
+		this.rebuildItems(conversationId, this.sessions.messagesOf(conversationId));
 		return outcome;
 	}
 
-	/** Cancels the run in flight and waits it out: no tool may keep writing during a rollback. */
-	private async drainRun(): Promise<void> {
-		const runToStop = this._runPromise;
-		this._runCts?.cancel();
-		this._runCts = undefined;
+	/**
+	 * Cancels THAT conversation's run and waits it out: no tool may keep writing during a rollback.
+	 * A run belonging to another conversation is none of this rollback's business — it is not
+	 * touching the files being restored, because the agent service serializes the runs.
+	 */
+	private async drainRun(conversationId: string): Promise<void> {
+		const conversation = this.conversation(conversationId);
+		const runToStop = conversation.runPromise;
+		conversation.runCts?.cancel();
+		conversation.runCts = undefined;
 		if (runToStop) {
 			try { await runToStop; } catch { /* the run's own failure is not the rollback's problem */ }
 		}
@@ -749,15 +1084,38 @@ export class OpenideChatController extends Disposable {
 	 * The rebuilt items become the reducer's initial state rather than a detached array, so a run
 	 * that starts right after a restore appends to the same list instead of forking a second one.
 	 */
-	private rebuildItems(messages: readonly IChatMessage[]): void {
-		this._state = createOpenideChatReducerState(buildOpenideChatTranscript(messages));
-		this._streaming = false;
-		this._onDidChangeItems.fire();
+	private rebuildItems(conversationId: string, messages: readonly IChatMessage[]): void {
+		this.conversation(conversationId).state = createOpenideChatReducerState(
+			buildOpenideChatTranscript(messages, { runs: this.subagentRunsFor(conversationId) }),
+		);
+		this.releaseStream(conversationId);
+		this.repaint(conversationId);
+	}
+
+	/**
+	 * The specialist runs this conversation delegated, by runId, for the restore to rebuild their
+	 * rows from.
+	 *
+	 * Asked of the store rather than the transcript because the transcript never held them: what it
+	 * persists is the sentence the tool answered with. Runs the store has already purged (it keeps
+	 * 300) simply do not appear, and the restore degrades those cards to what the call itself said.
+	 */
+	private subagentRunsFor(conversationId: string): ReadonlyMap<string, ISubagentRun> {
+		const runs = new Map<string, ISubagentRun>();
+		for (const run of this.subagentOrchestration.getRunsForParent(conversationId)) {
+			runs.set(run.runId, run);
+			// The card also has to be reachable from the run service's later updates, which carry no
+			// conversation of their own.
+			this._subagentCards.set(run.runId, { conversationId, snapshot: '' });
+		}
+		return runs;
 	}
 
 	override dispose(): void {
-		this._runCts?.cancel();
-		this._runCts = undefined;
+		for (const conversation of this._conversations.values()) {
+			conversation.runCts?.cancel();
+			conversation.runCts = undefined;
+		}
 		super.dispose();
 	}
 }

@@ -1,7 +1,7 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — native chat: the canvas card.
  *
- *  SOURCE OF TRUTH: browser/openideChatHtml.ts:483-487 (`.canvas-card`, `.canvas-head`,
+ *  SOURCE OF TRUTH: the removed chat webview (`.canvas-card`, `.canvas-head`,
  *  `.canvas-title`, `.canvas-path`, `.canvas-open`). Values are transcribed, not re-decided.
  *--------------------------------------------------------------------------------------------*/
 
@@ -10,10 +10,10 @@
 .openide-chat-canvas-card {
 	display: flow-root;
 	margin: 10px 0;
-	border: 1px solid rgba(128, 128, 128, 0.3);
-	border-radius: 10px;
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border-strong));
+	border-radius: var(--oi-chat-card-radius);
 	padding: 12px;
-	background: rgba(128, 128, 128, 0.035);
+	background: var(--oi-chat-card-bg, var(--oi-tint-1));
 }
 
 .openide-chat-canvas-head {
@@ -44,7 +44,7 @@
 	margin-top: 10px;
 	float: right;
 	border: 1px solid var(--vscode-button-border, transparent);
-	border-radius: 5px;
+	border-radius: var(--oi-radius-md);
 	padding: 4px 10px;
 	background: var(--vscode-button-background);
 	color: var(--vscode-button-foreground);

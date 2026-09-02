@@ -4,11 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 /*
- *  OpenIDE — indexer de la memoria del codebase (coordinador en shared process). Procesa
- *  archivos por lotes con yielding, respeta CPU budget y cancelación, y persiste vía storage.
+ *  OpenIDE — the codebase-memory indexer (the coordinator in the shared process). It walks files
+ *  in batches with yielding, honours the CPU budget and cancellation, and persists through storage.
  *
- *  Los providers de language server se ejecutan en el renderer y se integran por IPC; este
- *  indexer sólo corre providers puros (regex/text) más la evidencia remota recibida.
+ *  The language server providers run in the renderer and arrive over IPC; this indexer only runs
+ *  the pure providers (regex/text) plus the remote evidence it receives.
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
@@ -45,7 +45,7 @@ export interface IIndexProgress {
 
 interface IScanCounters { excludedByUser: number; excludedTests: number; skippedTooLarge: number }
 
-/** Un patrón "carpeta" (sin metacaracteres glob ni extensión) cubre también todo su subárbol. */
+/** A "folder" pattern (no glob metacharacters, no extension) covers its whole subtree too. */
 function normalizePattern(pattern: string): string[] {
 	const trimmed = pattern.replace(/^\/+|\/+$/g, '').trim();
 	if (!trimmed) { return []; }
@@ -100,8 +100,8 @@ export class CodebaseMemoryIndexer extends Disposable {
 	private options: ICodebaseMemoryIndexOptions = DEFAULT_CODEBASE_MEMORY_INDEX_OPTIONS;
 	private excludePatterns: glob.ParsedPattern[] = [];
 	private includePatterns: glob.ParsedPattern[] = [];
-	/** Un include con extensión explícita ("**\/*.vue") amplía el allowlist de extensiones;
-	 *  uno estilo carpeta ("src") solo acota el scope y conserva CODE_EXT. */
+	/** An include with an explicit extension ("**\/*.vue") widens the extension allowlist;
+	 *  a folder-style one ("src") only narrows the scope and keeps CODE_EXT. */
 	private includeHasExplicitExtension = false;
 	private lastScanCounters: IScanCounters = { excludedByUser: 0, excludedTests: 0, skippedTooLarge: 0 };
 
@@ -122,7 +122,7 @@ export class CodebaseMemoryIndexer extends Disposable {
 		this.includeHasExplicitExtension = options.include.some(pattern => /\.[^/]+$/.test(pattern));
 	}
 
-	/** Path relativo al primer folder que contiene la uri ('' si está fuera del workspace). */
+	/** Path relative to the first folder containing the uri ('' when it is outside the workspace). */
 	private relativePath(uriStr: string): string {
 		for (const folder of this.workspaceFolders) {
 			const base = folder.toString().endsWith('/') ? folder.toString() : folder.toString() + '/';
@@ -131,7 +131,7 @@ export class CodebaseMemoryIndexer extends Disposable {
 		return '';
 	}
 
-	/** Regla única de elegibilidad por archivo (walk + camino incremental). */
+	/** The single eligibility rule per file (the walk and the incremental path share it). */
 	private fileEligible(relPath: string, name: string): { ok: boolean; reason?: 'excluded' | 'test' } {
 		if (this.excludePatterns.length && matchesAny(this.excludePatterns, relPath)) { return { ok: false, reason: 'excluded' }; }
 		if (!this.options.indexTests && isTestFilePath(relPath)) { return { ok: false, reason: 'test' }; }
@@ -154,7 +154,7 @@ export class CodebaseMemoryIndexer extends Disposable {
 		return this.workspaceFolders.map(folder => folder.toString()).join('|') || 'empty';
 	}
 
-	/** Indexación completa. Cancela cualquier indexación en curso. */
+	/** A full index. It cancels any indexing already in flight. */
 	rebuildFull(token?: CancellationToken): Promise<IIndexProgress> {
 		this.cts?.cancel();
 		const localCts = new CancellationTokenSource(token);
@@ -173,15 +173,15 @@ export class CodebaseMemoryIndexer extends Disposable {
 		const start = Date.now();
 		const workspaceKey = this.workspaceKey();
 		await this.storage.load(workspaceKey);
-		// Guard anti-encogimiento (Graphify #479): recordar el tamaño previo para poder avisar
-		// si el rebuild produce un índice drásticamente más chico (exclude mal escrito, walk
-		// interrumpido) — se reporta, no se bloquea: este índice es regenerable.
+		// Anti-shrink guard (Graphify #479): remember the previous size so we can report a rebuild that
+		// produces a drastically smaller index (a mistyped exclude, an interrupted walk) — it is
+		// reported, never blocked: this index is regenerable.
 		const previousFileCount = Object.keys(this.storage.getManifest()?.files ?? {}).length;
-		// Mantener el índice anterior hasta terminar el nuevo no requiere dos roots en este
-		// storage; removemos sólo el payload lógico después de capturar el estado para cancelación.
+		// Keeping the old index until the new one is done needs no second root in this storage: only the
+		// logical payload is removed, after the state for cancellation has been captured.
 		await this.storage.clear();
 		await this.storage.load(workspaceKey);
-		// No reutilizar evidencia LS de una generación completa ya que los archivos se vuelven a leer.
+		// LS evidence from a full generation is not reused: the files are read again anyway.
 		this.externalExtractions.clear();
 		this.metrics.fullRebuilds++;
 		this.lastScanCounters = { excludedByUser: 0, excludedTests: 0, skippedTooLarge: 0 };
@@ -212,7 +212,7 @@ export class CodebaseMemoryIndexer extends Disposable {
 		return done;
 	}
 
-	/** Indexación incremental: recibe cambios de archivos y procesa sólo los modificados. */
+	/** Incremental indexing: it takes file changes and processes only what changed. */
 	indexIncremental(changes: { uri: URI; content?: string; deleted?: boolean }[], token: CancellationToken): Promise<IIndexProgress> {
 		const run = this.operationQueue.then(() => this.runIncremental(changes, token));
 		this.operationQueue = run.catch(() => undefined);
@@ -247,8 +247,8 @@ export class CodebaseMemoryIndexer extends Disposable {
 
 	private async indexOne(uri: string, content: string, workspaceKey: string, token: CancellationToken): Promise<void> {
 		if (token.isCancellationRequested) { return; }
-		// Guardia por archivo: el camino incremental NO pasa por walk(). Un archivo que dejó de
-		// ser elegible (setting nuevo) se purga del índice en vez de reindexarse.
+		// A per-file guard: the incremental path does NOT go through walk(). A file that stopped being
+		// eligible (a new setting) is purged from the index instead of reindexed.
 		const relPath = this.relativePath(uri);
 		if (relPath && !this.fileEligible(relPath, relPath.split('/').pop() ?? relPath).ok) {
 			await this.storage.removeFile(uri);
@@ -305,8 +305,8 @@ export class CodebaseMemoryIndexer extends Disposable {
 					// Dot-directories are noise, with one exception: `.openide` holds the shared
 					// memory, and skipping it here is what would keep notes out of the graph.
 					if (EXCLUDED_DIRS.has(child.name) || (child.name.startsWith('.') && child.name !== '.openide')) { continue; }
-					// Sólo exclude poda directorios; include se evalúa por archivo (podar acá
-					// requeriría probar si algún patrón podría matchear debajo — no vale el riesgo).
+					// Only exclude prunes directories; include is evaluated per file (pruning here would mean
+					// testing whether some pattern could match below — not worth the risk).
 					if (this.excludePatterns.length && matchesAny(this.excludePatterns, relPath)) { counters.excludedByUser++; continue; }
 					await walk(child.resource);
 				} else {

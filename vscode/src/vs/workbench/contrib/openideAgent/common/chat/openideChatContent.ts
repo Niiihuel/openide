@@ -30,6 +30,7 @@ export type IOpenideChatContent =
 	| IOpenideChatEditContent
 	| IOpenideChatTerminalContent
 	| IOpenideChatConfirmationContent
+	| IOpenideChatAccountChoiceContent
 	| IOpenideChatDecisionContent
 	| IOpenideChatAskContent
 	| IOpenideChatTodosContent
@@ -100,6 +101,12 @@ export interface IOpenideChatEditContent {
 	/** Accumulated against the turn baseline, unlike the per-edit numbers inside `diff`. */
 	readonly added: number;
 	readonly removed: number;
+	/**
+	 * The conversation whose turn on this file this write is waiting for. Set while it queues, gone
+	 * once it has the file: a write parked for up to two minutes has to say WHY, or it reads as the
+	 * agent having frozen.
+	 */
+	readonly waitingFor?: string;
 }
 
 export type OpenideChatTerminalState = 'running' | 'awaiting-input' | 'exited';
@@ -108,6 +115,8 @@ export interface IOpenideChatTerminalContent {
 	readonly kind: 'terminal';
 	readonly callId: string;
 	readonly command: string;
+	/** The model's 3-5 word title for the command (`run_command`'s `description`); the card's header. */
+	readonly description?: string;
 	readonly background: boolean;
 	readonly output: string;
 	readonly state: OpenideChatTerminalState;
@@ -118,6 +127,24 @@ export interface IOpenideChatTerminalContent {
  * Inline approval. One of the three kinds that survive as a request/response protocol with an id,
  * because the service is literally blocked on a Promise until the user answers.
  */
+/**
+ * The turn ran out of quota and more than one account could carry it.
+ *
+ * Asked rather than decided because the answer spends a subscription: with two accounts holding
+ * room, "which one pays" is not a detail the IDE gets to settle on its own, and an account billed
+ * per use is a question about whether to spend at all. Same card grammar as an approval, because it
+ * is the same kind of moment — the run is parked waiting for a person.
+ */
+export interface IOpenideChatAccountChoiceContent {
+	readonly kind: 'accountChoice';
+	readonly requestId: string;
+	/** Account that ran out, so the card can say what it is recovering from. */
+	readonly spentLabel: string;
+	readonly candidates: readonly { readonly accountId: string; readonly label: string; readonly paid?: boolean }[];
+	/** Set once answered: the account id chosen, or `stop`. The card stays as the record. */
+	readonly decision?: string;
+}
+
 export interface IOpenideChatConfirmationContent {
 	readonly kind: 'confirmation';
 	readonly requestId: string;
@@ -188,6 +215,12 @@ export interface IOpenideChatSubagentContent {
 	readonly total: number;
 	readonly title: string;
 	readonly model?: string;
+	/**
+	 * Model of the turn that delegated this specialist, so the row can name the specialist's model
+	 * ONLY when it differs — a badge repeating the model you are already running says nothing.
+	 * Stamped at creation from the request item; absent on conversations saved before this existed.
+	 */
+	readonly parentModel?: string;
 	readonly status: OpenideChatSubagentStatus;
 	/** Absent on legacy conversations, which only persisted subagentStart/subagentDone. */
 	readonly run?: ISubagentRun;
@@ -228,7 +261,7 @@ export interface IOpenideChatNoticeContent {
 	readonly kind: 'notice';
 	readonly severity: 'info' | 'warning' | 'error';
 	readonly message: string;
-	readonly action?: 'connect' | 'continue';
+	readonly action?: 'connect' | 'continue' | 'account-back';
 	readonly retry?: IOpenideChatRetryInfo;
 }
 
@@ -286,7 +319,7 @@ export interface IOpenideChatProgressContent {
 export const OPENIDE_CHAT_CONTENT_KINDS = [
 	'markdown', 'thinking', 'tool', 'explore', 'edit', 'terminal', 'confirmation', 'decision',
 	'ask', 'todos', 'plan', 'planUpdate', 'subagent', 'delegation', 'diagram', 'notice',
-	'compaction', 'canvas', 'modeSuggestion', 'screenshot', 'progress',
+	'compaction', 'canvas', 'modeSuggestion', 'screenshot', 'progress', 'accountChoice',
 ] as const satisfies readonly OpenideChatContentKind[];
 
 /** Kinds a part exists for in Stage 1. The factory falls back to 'progress' for the rest. */
