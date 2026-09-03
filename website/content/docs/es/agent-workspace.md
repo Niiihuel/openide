@@ -50,7 +50,7 @@ Los planes son Markdown, así que se pueden revisar en un pull request como cual
 
 ## Canvas
 
-Un canvas es un artefacto analítico visual almacenado como `.openide/canvases/<name>.canvas.tsx`. Puede contener tablas, gráficos y diagramas independientes construidos a partir de datos que el agente recolectó. Abrí uno con **OpenIDE: Open Canvas** (`openide.canvas.open`). Los diagramas se pueden expandir a pantalla completa (`openide.diagram.fullscreen`), y el comando *Architecture map* (`openide.archmap.project`) produce un diagrama de la estructura del proyecto.
+Un canvas es un artefacto analítico visual almacenado como `.openide/canvases/<name>.canvas.tsx`. Puede contener tablas, gráficos y diagramas independientes construidos a partir de datos que el agente recolectó. Abrí uno con **OpenIDE: Open Canvas** (`openide.canvas.open`). Los diagramas se pueden expandir a pantalla completa (`openide.diagram.fullscreen`). Para la estructura del proyecto está el **Project Map** (`openide.memory.open`), que dibuja el índice del código como un grafo de nodos.
 
 ## Memoria del código
 

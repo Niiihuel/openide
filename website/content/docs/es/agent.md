@@ -18,7 +18,6 @@ El encabezado del chat muestra el proveedor y el modelo activos. Usá **OpenIDE:
 | **Agent** | Ejecuta: lee, edita, corre comandos y delega a subagentes cuando una tarea es clara. | Un cambio concreto que querés que se haga. |
 | **Plan** | Solo lectura. Produce un plan de implementación completo que revisás antes de que se escriba código. | Cambios grandes o riesgosos, cualquier cosa que quieras diseñar primero. |
 | **Ask** | Solo lectura. Responde preguntas usando las herramientas de lectura, sin editar. | Entender código, obtener explicaciones. |
-| **Ultracode** | Orquestación multiagente para tareas grandes que se benefician de workers en paralelo. | Refactors amplios, trabajo que se divide en partes independientes. |
 | **Fork** | Bifurca la conversación actual en una nueva sesión con el mismo contexto. | Probar un enfoque alternativo. |
 
 El agente también puede sugerir un modo mejor para el pedido actual: cuando un mensaje en modo *Ask* en realidad pide un cambio, ofrece cambiar a *Agent* con el pedido ya delimitado.

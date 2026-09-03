@@ -18,7 +18,6 @@ The header of the chat shows the active provider and model. Use **OpenIDE: Selec
 | **Agent** | Executes: reads, edits, runs commands and delegates to subagents when a task is clear. | A concrete change you want done. |
 | **Plan** | Read-only. Produces a complete implementation plan that you review before any code is written. | Larger or risky changes, anything you want to design first. |
 | **Ask** | Read-only. Answers questions using the reading tools, without editing. | Understanding code, getting explanations. |
-| **Ultracode** | Multi-agent orchestration for large tasks that benefit from parallel workers. | Wide refactors, work that splits into independent parts. |
 | **Fork** | Branches the current conversation into a new session with the same context. | Trying an alternative approach. |
 
 The agent can also suggest a better mode for the current request: when a message in *Ask* mode really asks for a change, it offers to switch to *Agent* with the request already scoped.

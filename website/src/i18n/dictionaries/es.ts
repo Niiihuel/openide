@@ -63,12 +63,12 @@ export const es: Dictionary = {
       intro:
         'El agente vive como una contribución nativa del workbench, no como una extensión. Tiene acceso a todo lo que el editor sabe sobre tu proyecto.',
       modesLabel: 'Modos de operación',
-      modes: ['Agent', 'Plan', 'Ask', 'Ultracode', 'Fork'],
+      modes: ['Agent', 'Plan', 'Ask', 'Fork'],
       features: [
         {
           title: 'Chat con modos de operación',
           description:
-            'Una conversación en el panel derecho con los modos Agent, Plan, Ask, Ultracode y Fork, más una revisión adversarial de los cambios antes de hacer commit.',
+            'Una conversación en el panel derecho con los modos Agent, Plan, Ask y Fork, más una revisión adversarial de los cambios antes de hacer commit.',
         },
         {
           title: 'Multiproveedor',

@@ -182,12 +182,12 @@ export const en: Dictionary = {
       intro:
         'The agent lives as a native workbench contribution, not as an extension. It has access to everything the editor knows about your project.',
       modesLabel: 'Operating modes',
-      modes: ['Agent', 'Plan', 'Ask', 'Ultracode', 'Fork'],
+      modes: ['Agent', 'Plan', 'Ask', 'Fork'],
       features: [
         {
           title: 'Chat with operating modes',
           description:
-            'A conversation in the right dock with Agent, Plan, Ask, Ultracode and Fork modes, plus adversarial review of the changes before committing.',
+            'A conversation in the right dock with Agent, Plan, Ask and Fork modes, plus adversarial review of the changes before committing.',
         },
         {
           title: 'Multi-provider',

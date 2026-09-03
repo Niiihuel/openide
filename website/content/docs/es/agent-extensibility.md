@@ -45,10 +45,6 @@ Creá o editá un subagente con **OpenIDE: Create Subagent** (`openide.subagent.
 
 `web_search` y `web_fetch` usan un descargador headless separado de la vista previa de localhost. `openide.agent.web.enabled` los activa; `openide.agent.web.allowedHosts`, `openide.agent.web.blockedHosts` y `openide.agent.web.allowHttp` los delimitan, y `openide.agent.web.searchEndpoint` selecciona el backend de búsqueda. El descargador valida HTTPS, resuelve DNS por cada salto, bloquea direcciones de loopback, LAN, link-local y de metadata, sigue redirecciones manualmente y limita timeouts y tamaños. Los resultados llevan citas y nada se persiste fuera de la transcripción del modelo.
 
-## Workflows
-
-Los workflows multiagente determinísticos se declaran en `.openide/workflow.json` y los usa el modo *Ultracode*. Describen fases, los agentes que corren en cada fase y cómo se combinan los resultados.
-
 ## Modelo de consentimiento
 
 Cada integración de arriba está deshabilitada hasta que la habilitás, y la configuración a nivel de proyecto solo se respeta en un workspace confiable. Las aprobaciones están atadas a una huella del comando, la URL, el entorno y los headers, así que un cambio en cualquiera de ellos vuelve a preguntar.

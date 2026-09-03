@@ -50,7 +50,7 @@ Plans are Markdown, so they can be reviewed in a pull request like any other fil
 
 ## Canvas
 
-A canvas is a visual analytical artifact stored as `.openide/canvases/<name>.canvas.tsx`. It can hold tables, charts and standalone diagrams built from data the agent gathered. Open one with **OpenIDE: Open Canvas** (`openide.canvas.open`). Diagrams can be expanded to full screen (`openide.diagram.fullscreen`), and the *Architecture map* command (`openide.archmap.project`) produces a diagram of the project structure.
+A canvas is a visual analytical artifact stored as `.openide/canvases/<name>.canvas.tsx`. It can hold tables, charts and standalone diagrams built from data the agent gathered. Open one with **OpenIDE: Open Canvas** (`openide.canvas.open`). Diagrams can be expanded to full screen (`openide.diagram.fullscreen`). For the project's structure there is the **Project Map** (`openide.memory.open`), which draws the code index as a graph of nodes.
 
 ## Codebase memory
 
