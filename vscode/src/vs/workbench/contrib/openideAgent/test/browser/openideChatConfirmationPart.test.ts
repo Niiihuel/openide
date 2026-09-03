@@ -55,6 +55,15 @@ suite('OpenIDE ChatConfirmationPart', () => {
 	const labels = (part: OpenideChatConfirmationPart) => buttons(part).map(b => b.textContent?.trim());
 	const status = (part: OpenideChatConfirmationPart) =>
 		part.domNode.querySelector('.openide-chat-approval-status')?.textContent ?? '';
+	/**
+	 * An answered card HIDES its offer rather than greying it out — see `_renderDecision`. These
+	 * asserts used to read `buttons(part).every(b => b.disabled)`, which is the contract from
+	 * before that redesign and had been failing ever since: the buttons are still in the DOM and
+	 * were never given the `disabled` property, because what stops a second answer is the
+	 * `_decided` guard in `_onClick`, not the button's state.
+	 */
+	const offerHidden = (part: OpenideChatConfirmationPart) =>
+		part.domNode.querySelector('.openide-chat-approval-actions')?.classList.contains('hidden') === true;
 
 	test('says what it is about to run', () => {
 		const { part } = create();
@@ -102,12 +111,12 @@ suite('OpenIDE ChatConfirmationPart', () => {
 		assert.deepStrictEqual(resolved, [{ id: 'req-1', decision: 'once' }]);
 	});
 
-	test('the answered card stays on screen, disabled, saying what was decided', () => {
+	test('the answered card stays on screen, without its offer, saying what was decided', () => {
 		// Removing it would erase the only record of what the user authorised.
 		const { part } = create();
 		buttons(part)[2].click();
 		assert.strictEqual(part.domNode.classList.contains('decided'), true);
-		assert.strictEqual(buttons(part).every(b => b.disabled), true);
+		assert.strictEqual(offerHidden(part), true);
 		assert.strictEqual(status(part), 'Permitido siempre');
 	});
 
@@ -124,7 +133,7 @@ suite('OpenIDE ChatConfirmationPart', () => {
 		const { part } = create();
 		assert.strictEqual(part.hasSameContent(content({ decision: 'once' })), true);
 		assert.strictEqual(status(part), 'Permitido');
-		assert.strictEqual(buttons(part).every(b => b.disabled), true);
+		assert.strictEqual(offerHidden(part), true);
 	});
 
 	test('a different request is a different card', () => {
