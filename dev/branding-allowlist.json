@@ -1,0 +1,15 @@
+{
+  "allowed": [
+    { "path": "vscode/src/vscode-dts", "reason": "Public VS Code Extension API contract" },
+    { "path": "vscode/extensions", "reason": "Upstream extensions with their attributions preserved" },
+    { "path": "vscode/test", "reason": "Upstream fixtures and compatibility" },
+    { "path": "vscode/src/vs/base/test", "reason": "Upstream fixtures" },
+    { "path": "vscode/ThirdPartyNotices.txt", "reason": "Legal attribution" },
+    { "path": "vscode/LICENSE.txt", "reason": "Upstream license" },
+    { "path": "vendor", "reason": "Vendored code and attributions" },
+    { "path": "docs/upstream", "reason": "Archived upstream documentation" },
+    { "path": "build/linux/package_bin.sh", "reason": "Third-party toolchain images (vscode-linux-build-agent); not product branding" },
+    { "path": "build/linux/package_reh.sh", "reason": "Third-party toolchain images (vscodium-linux-build-agent); not product branding" },
+    { "path": "build/alpine/package_reh.sh", "reason": "Third-party toolchain images (vscodium-linux-build-agent); not product branding" }
+  ]
+}

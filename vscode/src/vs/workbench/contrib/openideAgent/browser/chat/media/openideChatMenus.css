@@ -1,0 +1,460 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — popovers of the native composer (mode, model, reasoning effort, permissions, the
+ *  `@` / `/` suggestions) and of the chat header (history, kebab, session kind).
+ *
+ *  One surface, drawn once: a hairline-bordered card with a large radius and a soft shadow, whose
+ *  rows are INSET by the container's 4px padding so the hover highlight never touches the border
+ *  or its corners. The current value is marked by a trailing check, not by a tint — the hover is
+ *  the only fill in the menu, so a moving cursor is always the strongest signal.
+ *
+ *  These are rendered by IContextViewService into the workbench overlay, which owns
+ *  `position`/`z-index`; only the surface is described here. For the same reason the selectors are
+ *  NOT scoped under `.openide-chat-native` — the popovers are not inside that subtree.
+ *
+ *  Geometry (measured against the reference, then tightened to Cursor's density on request):
+ *  container padding 4, row 24 tall with 6px side padding and a 6px gap, a 16px icon column
+ *  carrying a 14px glyph, a 12px check on the trailing
+ *  edge of the active row, radius-lg on the card and radius-md on the row.
+ *--------------------------------------------------------------------------------------------*/
+
+/* ---- Popovers --------------------------------------------------------------------------- */
+
+/* The workbench ships no global border-box reset, and these subtrees live OUTSIDE the chat's own
+   reset because the context view renders them in the overlay. */
+.openide-menu,
+.openide-menu *,
+.openide-mp-detail,
+.openide-mp-detail * { box-sizing: border-box; }
+
+.openide-menu {
+	display: flex;
+	flex-direction: column;
+	min-width: min(200px, calc(100vw - 16px));
+	max-width: calc(100vw - 16px);
+	max-height: min(420px, 60vh);
+	border-radius: var(--oi-radius-lg);
+	border: 1px solid var(--oi-border);
+	background: var(--oi-overlay);
+	color: var(--vscode-menu-foreground, var(--vscode-foreground));
+	box-shadow: var(--oi-shadow);
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	overflow: hidden;
+}
+
+/* Opening: a short fade with a 2px settle. Compositor-only properties, so the rows never
+   re-layout while it runs. The class is added by the popover hosts AFTER the context view has
+   measured and placed the menu — with the animation on from the first style resolution, a fixed-
+   position context view (aux windows) reads the view's own rect while it is still translated. */
+@keyframes openide-menu-enter {
+	from { opacity: 0; transform: translateY(-2px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+
+.openide-menu.openide-menu-enter { animation: openide-menu-enter 90ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-menu.openide-menu-enter { animation: none; }
+}
+
+/* The air between a trigger and its list is NOT a margin here: `.openide-menu` is the context
+   view's own element, and the gap comes from the anchor box `OpenideComposerPopover.show` hands
+   it (grown by MENU_ANCHOR_GAP on both edges), so it holds above and below alike. */
+
+.openide-menu-model {
+	/* Cursor's model list is a 320px column; ours carried 340-420 and read as a panel. */
+	min-width: min(320px, calc(100vw - 16px));
+	max-width: min(360px, calc(100vw - 16px));
+}
+
+/* Full panel width: the conversation list uses all the space (title and actions can breathe)
+   instead of a narrow popover floating on the right. The popover feeds the measured header width
+   as --openide-menu-anchor-width; pinning min and max to it fixes the width exactly, and both
+   survive the `width: initial` that contextview.ts writes after every layout. */
+.openide-menu.openide-chat-history-menu {
+	min-width: var(--openide-menu-anchor-width, 0);
+	max-width: var(--openide-menu-anchor-width, none);
+	max-height: min(480px, 70vh);
+}
+
+.openide-menu.openide-chat-kebab-menu {
+	min-width: 200px;
+	max-width: min(280px, calc(100vw - 16px));
+}
+
+/* The 4px inset lives on the scrolling body, not on the card: the model picker hangs a footer and
+   a hint bar under the body whose top hairlines have to run the full card width. */
+.openide-menu-content {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	padding: 4px;
+	overflow-y: auto;
+	overflow-x: hidden;
+	scrollbar-width: none;
+}
+
+.openide-menu-content::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* ---- Rows ------------------------------------------------------------------------------- */
+
+.openide-menu-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	min-height: 24px;
+	padding: 0 6px;
+	background: transparent;
+	border: none;
+	border-radius: var(--oi-radius-sm);
+	cursor: pointer;
+	font-family: inherit;
+	font-size: 12px;
+	color: var(--vscode-menu-foreground, var(--vscode-foreground));
+	text-align: left;
+}
+
+/* Hover and keyboard focus paint the same inset fill; the foreground does not change, so the
+   descriptions and hints keep their own tone. The active row is NOT tinted (its check is the
+   mark), and hovering it paints this same fill. `menu.selectionBorder` only exists in high-
+   contrast themes; drawn as an inset outline so it costs the row no box. */
+.openide-menu-row:hover,
+.openide-menu-row:focus-visible {
+	background: var(--vscode-list-hoverBackground, var(--oi-tint-2));
+}
+
+/* `.monaco-workbench button:focus` (0-2-1) outranks a bare `:focus-visible` (0-2-0), so the ring
+   the workbench draws on every focused button has to be replaced from a heavier selector. */
+.monaco-workbench .openide-menu-row:focus-visible,
+.monaco-workbench .openide-menu-row:hover {
+	outline: 1px solid var(--vscode-menu-selectionBorder, transparent);
+	outline-offset: -1px;
+}
+
+.openide-menu-row-icon {
+	flex: 0 0 16px;
+	width: 18px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+/* 16px glyphs in the 18px column. The workbench's blanket `.codicon` rule is 16px already; this
+   restates it at a weight the rows own, and hands the glyph the row's colour. */
+.monaco-workbench .openide-menu .openide-menu-row .codicon[class*="codicon-"] { font-size: 14px; color: inherit; }
+.monaco-workbench .openide-menu .openide-menu-row .openide-menu-submenu-chevron.codicon[class*="codicon-"] { font-size: 12px; color: var(--vscode-descriptionForeground); }
+.openide-menu-row .openide-menu-row-icon > .openide-provider-icon { width: 14px; height: 14px; }
+
+.openide-menu-label {
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.openide-menu-detail {
+	margin-left: auto;
+	max-width: 45%;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.openide-menu-keybinding {
+	margin-left: auto;
+	flex-shrink: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+	letter-spacing: 0.02em;
+	white-space: nowrap;
+}
+/* When a row carries both, the detail claims the free space and the hint trails it. */
+.openide-menu-detail ~ .openide-menu-keybinding { margin-left: 0; }
+
+/* The check: present on every row (`createMenuRow` / `menuRow` append it) and shown only on the
+   one carrying `.openide-menu-active`. `order` pins it past whatever else a caller appended after
+   the label — details, keybinding hints, action strips — so it always closes the row. */
+.openide-menu-check {
+	display: none;
+	flex: 0 0 16px;
+	width: 16px;
+	align-items: center;
+	justify-content: center;
+	order: 100;
+	color: inherit;
+}
+
+.openide-menu-row.openide-menu-active > .openide-menu-check { display: inline-flex; }
+.monaco-workbench .openide-menu .openide-menu-row .openide-menu-check .codicon[class*="codicon-"] { font-size: 12px; }
+
+.openide-menu-muted .openide-menu-label { color: var(--vscode-descriptionForeground); }
+.openide-menu-row.openide-menu-muted:hover .openide-menu-label { color: inherit; }
+
+/* ---- Headings, separators, empty state ---------------------------------------------------- */
+
+.openide-menu-section {
+	padding: 5px 6px 2px;
+	font-size: 10.5px;
+	color: var(--vscode-descriptionForeground);
+	user-select: none;
+}
+
+/* Plain-text headings are set in small caps; a composite heading (the usage popover's, which lays
+   out a title, a freshness line and a button) styles its own children and must not inherit it. */
+.openide-menu-section:not(:has(*)) {
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.openide-menu-sep {
+	height: 1px;
+	margin: 4px 0;
+	background: var(--oi-border-soft);
+}
+
+/* Indented to the label column (8 padding + 18 icon + 8 gap) so it reads as a row without one. */
+.openide-menu-empty {
+	display: flex;
+	align-items: center;
+	min-height: 24px;
+	padding: 0 6px 0 28px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}
+
+/* ---- Search row (model picker, history) --------------------------------------------------- */
+
+/* Sits inside the body, so it respects the 4px inset like the rows under it. */
+.openide-menu-search-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 26px;
+	padding: 0 6px;
+	margin-bottom: 4px;
+	border-bottom: 1px solid var(--oi-border-soft);
+}
+
+.monaco-workbench .openide-menu .openide-menu-search-row .codicon[class*="codicon-"] {
+	flex: 0 0 18px;
+	width: 18px;
+	text-align: center;
+	font-size: 14px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.openide-menu-search {
+	flex: 1;
+	min-width: 0;
+	background: transparent;
+	border: none;
+	outline: none;
+	color: var(--vscode-menu-foreground, var(--vscode-foreground));
+	font-family: inherit;
+	font-size: 13px;
+}
+
+.openide-menu-search::placeholder { color: var(--vscode-descriptionForeground); opacity: 0.7; }
+
+/* Restated at a weight that wins inside the workbench: `.monaco-workbench input` (0-1-1),
+   `.monaco-workbench input::placeholder` (0-1-2) and `.monaco-workbench input[type="text"]:focus`
+   (0-3-1, browser/media/style.css) all outrank the two rules above, so the field silently picked
+   up `input.placeholderForeground` and a 1px focus ring — and both popovers focus this field on
+   open, so the ring was on screen the whole time the search was usable. */
+.monaco-workbench .openide-menu .openide-menu-search {
+	font-size: 13px;
+	color: var(--vscode-menu-foreground, var(--vscode-foreground));
+}
+
+.monaco-workbench .openide-menu .openide-menu-search:focus { outline: none; }
+.monaco-workbench .openide-menu .openide-menu-search::placeholder { color: var(--vscode-descriptionForeground); opacity: 0.7; }
+
+/* The per-row action strip (`menuRowAction()`) is styled in media/openideChatHistory.css: the
+   history popover is its only consumer, and keeping the rules here meant a row that reflowed on
+   hover could only be fixed for every popover at once. */
+
+/* ---- Model picker ------------------------------------------------------------------------ */
+
+.openide-mp-list .monaco-list-row { padding: 0; }
+/* Same reason as list.css:47 upstream: the scrollbar is an overlay drawn over the rows and has to
+   stay on top of them, or a row's own background swallows the slider. */
+.openide-mp-list .monaco-scrollable-element > .scrollbar { z-index: 1; }
+
+/* Same row as the menus above, at the height the virtual list is told (PICKER_ROW_HEIGHT in
+   openideChatModelPicker.ts). 14px on the trailing edge = the 10px overlay scrollbar
+   (scrollableElement.ts default `verticalScrollbarSize`) + 4px of air, the same "separate from
+   scrollbar" reserve quickInput.css gives its row action bar. Reserved unconditionally so the star
+   column does not shift by 10px the moment the list becomes scrollable. */
+.openide-mp-row {
+	height: 24px;
+	min-height: 24px;
+	padding: 0 12px 0 6px;
+}
+
+/* The list is driven from the search field, so its own focus/hover paint is switched off
+   (openideChatModelPicker.ts hands `List.style` no row colours) and the fill is painted on the
+   inner row instead — the same inset fill as every other menu row. */
+.openide-mp-list .monaco-list-row.focused .openide-mp-row {
+	background: var(--vscode-list-hoverBackground, var(--oi-tint-2));
+}
+
+.openide-mp-name { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.openide-mp-size {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}
+
+/* `margin-left: auto` opens the whole slack HERE, so the star pins to a fixed column. Hanging off
+   the name instead, every row put its star at a different x and the column read as a sawtooth. */
+.openide-mp-star {
+	/* The LAST thing on the row, 12px wide like the section chevrons, so the stars line up with
+	   them on the trailing edge. `order` puts it past the check, which `createMenuRow` appends. */
+	flex: 0 0 12px;
+	order: 101;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	margin-left: auto;
+	padding: 0;
+	border: none;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+}
+
+.monaco-workbench .openide-menu .openide-mp-star .codicon[class*="codicon-"] { font-size: 12px; }
+.openide-mp-star.on { color: var(--vscode-textLink-foreground, var(--vscode-focusBorder)); }
+.openide-mp-star:hover { color: var(--vscode-foreground); }
+
+/* The check shows only on the active row and sits BEFORE the star (the star is the trailing
+   column). Reserving the check column on every row used to push the stars 16px in from the edge,
+   out of line with the section chevrons. */
+.openide-mp-row .openide-menu-check { display: none; }
+.openide-mp-row.openide-menu-active .openide-menu-check { display: inline-flex; margin-right: 6px; }
+
+/* Collapsible section header: the whole row is the button, the chevron only shows state. */
+.openide-mp-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	height: 25px;
+	/* Same trailing reserve as the model rows: the chevron shares their column and would otherwise
+	   sit under the overlay scrollbar. */
+	padding: 4px 12px 2px 6px;
+	border: none;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: inherit;
+	/* Sentence case at the rows' size, as Cursor groups its models: an uppercase, letter-spaced
+	   caption on every provider made the list read as a settings page instead of a menu. */
+	font-size: 12px;
+	cursor: pointer;
+	user-select: none;
+}
+
+.openide-mp-head:hover { color: var(--vscode-foreground); }
+.openide-mp-head-icon { display: inline-flex; align-items: center; }
+.openide-mp-head .openide-provider-icon { width: 14px; height: 14px; }
+.monaco-workbench .openide-menu .openide-mp-head .codicon[class*="codicon-"] { font-size: 14px; }
+.openide-mp-head-label { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.monaco-workbench .openide-menu .openide-mp-head .openide-mp-chevron { font-size: 12px; transition: transform 120ms; }
+.openide-mp-head.collapsed .openide-mp-chevron { transform: rotate(-90deg); }
+
+/* Same override as the composer's trigger: the workbench's monogram has no frame, the webview's
+   does, and the picker is where the two would otherwise sit side by side. */
+.openide-menu .openide-provider-icon.monogram {
+	border: 1px solid var(--oi-border-strong);
+	border-radius: var(--oi-radius-sm);
+	background: var(--oi-tint-2);
+	font-size: 7.5px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+}
+
+/* No shortcut bar ("↑↓ navegar  ↵ elegir") any more: Cursor's list ends at "Add Models", and the
+   bar added a fourth hairline and 26px to a menu that has to stay small. */
+
+/* Footer that carries "add provider". Outside `.openide-menu-content` so the action stays at the
+   foot of the popover instead of scrolling away with the models. */
+.openide-mp-foot {
+	flex: 0 0 auto;
+	padding: 4px;
+	border-top: 1px solid var(--oi-border-soft);
+}
+
+/* Detail panel: a sibling of the menu (which is `overflow: hidden`), placed in viewport
+   coordinates because "to the right of the popover" is off-screen in the right dock.
+   z-index clears the context view's own 2575 (contextview.ts:194, `2575 + layer`), so the card is
+   never painted under the popover it describes. It is parented into `.monaco-workbench`
+   (openideChatModelDetail.ts) — that is where the `--vscode-*` variables below exist. Same card
+   recipe as the popover itself: hairline, radius-lg, soft shadow. */
+.openide-mp-detail {
+	position: fixed;
+	z-index: 2600;
+	min-width: 208px;
+	max-width: min(280px, calc(100vw - 16px));
+	padding: 10px 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	border-radius: var(--oi-radius-lg);
+	border: 1px solid var(--oi-border);
+	/* `background-color`, not the `background` shorthand: the shorthand also resets `background-image`
+	   and every other longhand, and one unresolved variable in it drops the whole declaration —
+	   including the colour. */
+	background-color: var(--oi-overlay);
+	box-shadow: var(--oi-shadow);
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	color: var(--vscode-menu-foreground, var(--vscode-foreground));
+}
+
+.openide-mp-detail[hidden] { display: none; }
+/* This used to carry literal values with a note saying the `--oi-*` tokens resolved to nothing
+   here, because the block in openideSurfaceCss.ts was declared on `:root` alone while the theme
+   publishes `--vscode-*` on `.monaco-workbench`. That block now declares BOTH selectors, and this
+   card is parented into `.monaco-workbench` (openideChatModelDetail.ts), so the tokens resolve —
+   verified on screen. `dev/audit-surface-tokens.mjs` keeps the two-selector rule from regressing. */
+.openide-mp-detail-head { padding-bottom: 7px; border-bottom: 1px solid var(--oi-border-soft); }
+.openide-mp-detail-name { font-weight: 600; font-size: 12.5px; }
+.openide-mp-detail-id {
+	margin-top: 2px;
+	color: var(--vscode-descriptionForeground);
+	font: 10.5px/15px var(--vscode-editor-font-family, monospace);
+	overflow-wrap: anywhere;
+}
+.openide-mp-detail-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.openide-mp-detail-key { flex: 0 0 auto; color: var(--vscode-descriptionForeground); }
+.openide-mp-detail-val { flex: 1 1 auto; text-align: right; color: var(--vscode-foreground); overflow-wrap: anywhere; }
+
+
+/* ---- Model picker skeleton (while `getConnectedModelGroups` answers) ---------------------- */
+/* Same geometry as a real row, so the list does not jump when the models arrive. */
+.openide-mp-skeleton { display: flex; flex-direction: column; }
+.openide-mp-skeleton-row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; }
+.openide-mp-skeleton-icon,
+.openide-mp-skeleton-bar {
+	border-radius: var(--oi-radius-sm);
+	background: linear-gradient(100deg,
+		color-mix(in srgb, var(--vscode-foreground) 8%, transparent) 40%,
+		color-mix(in srgb, var(--vscode-foreground) 16%, transparent) 50%,
+		color-mix(in srgb, var(--vscode-foreground) 8%, transparent) 60%);
+	background-size: 200% 100%;
+	animation: openide-mp-skeleton-sweep 1.4s ease-in-out infinite;
+}
+.openide-mp-skeleton-icon { width: 16px; height: 16px; flex: 0 0 auto; }
+.openide-mp-skeleton-bar { height: 10px; }
+@keyframes openide-mp-skeleton-sweep {
+	from { background-position: 120% 0; }
+	to { background-position: -80% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.openide-mp-skeleton-icon, .openide-mp-skeleton-bar { animation: none; }
+}

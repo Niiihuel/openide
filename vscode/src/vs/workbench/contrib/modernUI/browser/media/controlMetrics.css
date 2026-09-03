@@ -1,0 +1,110 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*
+ * OpenIDE module: "Control metrics".
+ *
+ * Structure only — height, radius, alignment. Not one colour is declared here, and none should
+ * ever be: the theme owns colour, the product owns geometry. That split is the whole point of the
+ * file. A form whose controls agree on their height reads as designed in any palette; one whose
+ * controls disagree reads as assembled from parts, and no theme can rescue it.
+ *
+ * The problem this fixes, measured in Settings before it existed:
+ *
+ *     .monaco-inputbox        28px
+ *     .monaco-button          26px
+ *     .monaco-select-box      20px   <- eight pixels shorter than the input beside it
+ *     .monaco-custom-toggle   18px, radius 3px (everything else was already 4px)
+ *
+ * The target is 28px, which is what the input box already computes to (4px padding + 18.2px line
+ * box + 2px border). Levelling UP to the tallest control means nothing gets clipped and no text
+ * has to shrink; levelling down would have meant re-deriving the input's padding and fighting the
+ * font-size scaling that feeds it.
+ *
+ * The input box is deliberately absent below: it already lands on 28px on its own, and its padding
+ * inside the side bar and the auxiliary bar is derived from `--vscode-workbench-sidebar-font-size`
+ * (`inputBox.css:116`, specificity 0,6,0). Restating a height here would freeze a metric the user's
+ * font-size setting is supposed to move.
+ *
+ * Gated behind `.modern-ui`, like every other module in this contrib: one class toggles the whole
+ * look, the vendored upstream widget CSS stays untouched, and reverting is deleting one import.
+ */
+
+.modern-ui.monaco-workbench {
+	/* One number, so a control that joins the family later has somewhere to read it from. */
+	--openide-control-height: 28px;
+}
+
+/*
+ * Select. Upstream gives it neither height nor vertical padding, so it collapses to whatever the
+ * font's normal line box happens to be — 20px at 13.33px. Both the wrapper and the native
+ * `<select>` need it: the wrapper is what the row lays out, the element is what draws the text.
+ */
+.modern-ui.monaco-workbench .monaco-select-box,
+.modern-ui.monaco-workbench .select-container > .monaco-select-box {
+	height: var(--openide-control-height);
+	line-height: var(--openide-control-height);
+}
+
+/*
+ * Button. `min-height` and not `height`: a button with a wrapped label or an icon still has to be
+ * able to grow, and upstream's own `padding: 4px 8px` keeps working underneath.
+ */
+.modern-ui.monaco-workbench .monaco-button {
+	min-height: var(--openide-control-height);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+/*
+ * Checkbox. The 18px box is upstream's and matches every other IDE, so only the radius moves —
+ * it was the last 3px in a workbench where every other control had already been rounded to
+ * `cornerRadius-small` by `roundedCorners.css`.
+ */
+.modern-ui.monaco-workbench .monaco-custom-toggle {
+	border-radius: var(--vscode-cornerRadius-small);
+}
+
+/*
+ * Number inputs: no native spinner.
+ *
+ * A `type=number` field renders the browser's own stepper — a boxed pair of arrows with its own
+ * metrics, painted by the UA and immune to the theme. It is the one control in the form that does
+ * not belong to the IDE. Settings values are typed, not stepped, so it is hidden rather than
+ * restyled.
+ */
+.modern-ui.monaco-workbench input[type="number"] {
+	appearance: textfield;
+	-moz-appearance: textfield;
+}
+
+.modern-ui.monaco-workbench input[type="number"]::-webkit-outer-spin-button,
+.modern-ui.monaco-workbench input[type="number"]::-webkit-inner-spin-button {
+	appearance: none;
+	-webkit-appearance: none;
+	margin: 0;
+}
+
+/*
+ * Select dropdown: detached from its trigger, and its label aligned with the options.
+ *
+ * The list opened flush against the trigger's bottom edge (measured gap: 0), so the two read as
+ * one tall box instead of a field and its menu.
+ *
+ * The alignment is the trigger's fault, not the list's. Upstream insets each option by 9px —
+ * 1px container border, 2px row, 6px `.option-text` — while the `<select>` itself carries no
+ * horizontal padding, leaving the selected value against its own border. Opening the list then
+ * shifted the same word 8px to the right. Padding the element to the same 8px lines the label up
+ * with the option that replaces it; the list keeps upstream's numbers untouched.
+ */
+.modern-ui.monaco-workbench .monaco-select-box-dropdown-container {
+	margin-top: var(--vscode-spacing-size20);
+}
+
+.modern-ui.monaco-workbench .monaco-select-box,
+.modern-ui.monaco-workbench .select-container > .monaco-select-box {
+	padding-left: var(--vscode-spacing-size80);
+}

@@ -1,0 +1,687 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat session header (tab strip + history / new chat / kebab) and the two
+ *  popovers it opens.
+ *
+ *  Every declaration here is transcribed from the webview stylesheet
+ *  (its `#header` … `.head-btn`, the `.menu` family and the marquee):
+ *  the native chat must be pixel-identical to the webview, so nothing in this file is a new
+ *  design decision. Where the webview relies on `body`-level defaults (13px, --vscode-font-family)
+ *  the value is restated, because the popovers render inside `.context-view`, outside our root.
+ *
+ *  Class names carry the `openide-chat-` prefix on purpose: the webview lives in an iframe and can
+ *  own bare `.tab` / `.menu` / `.menu-row`, this DOM does not.
+ *--------------------------------------------------------------------------------------------*/
+
+/* ---- Header bar ---- */
+
+/* No bottom border: the webview separates the header by tone alone (an explicit product decision,
+   see the comment above `#header` in the webview it replaced). */
+.openide-chat-header {
+	position: relative;
+	display: flex;
+	align-items: center;
+	flex: 0 0 auto;
+	height: var(--openide-chat-head-height, 32px);
+	/* The island's own surface, not the editor's tab strip colour: a header on a different tone
+	   read as a band with a line under it against the transcript below. */
+	background: var(--oi-surface);
+	border-bottom: none;
+}
+
+.openide-chat-tabs {
+	display: flex;
+	align-items: center;
+	flex: 1 1 auto;
+	/* Positioned so a tab's `offsetLeft` is measured against the STRIP: `revealActiveTab` compares
+	   it with `scrollLeft`, and with the header as the offset parent the two were off by the row's
+	   own left padding. */
+	position: relative;
+	min-width: 0;
+	height: 100%;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+}
+
+/* The edge that still has a tab behind it fades out. It is the only sign the strip continues: the
+   scrollbar is hidden on purpose, so without this a strip scrolled to its end reads as the whole
+   list of open conversations. The classes come from `updateOverflowAffordance`. */
+.openide-chat-tabs.overflow-start {
+	-webkit-mask-image: linear-gradient(to right, transparent 0, #000 14px);
+	mask-image: linear-gradient(to right, transparent 0, #000 14px);
+}
+.openide-chat-tabs.overflow-end {
+	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent 100%);
+	mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent 100%);
+}
+.openide-chat-tabs.overflow-start.overflow-end {
+	-webkit-mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+	mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+}
+
+.openide-chat-header .openide-chat-tabs::-webkit-scrollbar { display: none; width: 0; height: 0; } /* outranks the generic chat scrollbar skin */
+
+/* ==== Tabs del dock = tabs del editor ====================================================
+ *
+ * Un tab del dock es UNA CONVERSACIÓN, igual que un tab del editor es un documento. Por eso
+ * hereda la anatomía de `modernUI/tabs.css` y no la de la composite bar: la caja transparente,
+ * la píldora interior con radio, y las mismas MEDIDAS POR TOKEN que usa el editor —
+ * `padding: 0 spacing-size80 0 spacing-size60`, `cornerRadius-small`, `fontSize-body1`.
+ * Antes eran 11px MAYÚSCULAS con colores `panelTitle.*`, que es el tratamiento de un contenedor
+ * de vistas: correcto cuando cada tab era una vista (CHAT / CLAUDE CODE), equivocado desde que
+ * cada tab es una conversación.
+ *
+ * Colores de la familia `modernEditorTab.*`, la misma que pinta los tabs del editor, para que un
+ * tema los mueva a los dos juntos en vez de que el dock quede atado a otra paleta.
+ *
+ * Also the HEIGHTS: the row is 32px and the pill 28px, the editor's own two numbers. The row used
+ * to be 35px with the pill at 100% of it, and that is what the tab strip of the dock and the tab
+ * strip of the editor never lining up came from — a pill flush against the island's rounded top
+ * edge on one side of the gap, a pill with 2px of air on the other. The two are tokens
+ * (`--openide-chat-head-height` / `--openide-chat-tab-height`) because the sessions panel hangs
+ * off the first one.
+ *
+ * El icono de marca sí es propio y se gana el lugar: identifica al agente que corre esa
+ * conversación, y es lo único que queda cuando el título se elide.
+ *
+ * `max-width` + strip que SCROLLEA es la respuesta de upstream al overflow: los tabs nunca se
+ * encogen entre sí, porque dejar que flex reparta el faltante colapsa todos los títulos a la vez.
+ */
+.openide-chat-tab {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size60, 6px);
+	height: var(--openide-chat-tab-height, 28px);
+	padding: 0 var(--vscode-spacing-size80, 8px) 0 var(--vscode-spacing-size60, 6px);
+	/* The tabs SHARE the row: they grow into whatever is free and shrink together down to
+	   `--openide-chat-tab-min` when there is not enough. It was `0 0 auto` — two tabs at a fixed
+	   160px against the ~90px the row has left at the dock's default width, so the second
+	   conversation was not on screen at all and, with the scrollbar hidden, there was no way to
+	   get to it. Below the floor nothing is squeezed any further: the strip scrolls, which is what
+	   the fades and the wheel handler are for. The cap is the editor strip's fit-to-content
+	   ceiling, not 160px: at 160 two tabs left a third of a wide dock empty while both titles
+	   were elided. Equal shares (basis 0), not content-proportional: with basis `auto` a long
+	   title took two thirds of the row and squeezed its neighbour to the floor. */
+	flex: 1 1 0px;
+	min-width: var(--openide-chat-tab-min, 88px);
+	max-width: 320px;
+	cursor: pointer;
+	user-select: none;
+	font-size: var(--vscode-fontSize-body1, 13px);
+	font-weight: var(--vscode-fontWeight-regular, 400);
+	background: transparent;
+	/* `tab.inactiveForeground`, and MEASURED rather than assumed: `modernUI/tabs.css` declares a
+	   `--modern-ui-editor-tab-inactive-foreground` but never applies it to `.tab`, so what actually
+	   paints an inactive editor tab is this token (Dracula: #6272a4). Reaching for the modern-ui one
+	   here would have made the dock the only strip in the IDE honouring it. */
+	color: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground));
+	border: none;
+	border-radius: var(--oi-radius-sm);
+}
+
+/* La píldora. El tab del editor la resuelve con un hijo `.tab-fill`; acá no hay ese nodo, así que
+   va en un pseudo-elemento con el mismo `inset: 0 spacing-size20` y el mismo radio. Detrás del
+   contenido (`z-index: 0` contra el 1 del título) para no tapar el texto ni el icono. */
+.openide-chat-tab::before {
+	content: '';
+	position: absolute;
+	inset: 0 var(--vscode-spacing-size20, 2px);
+	z-index: 0;
+	border-radius: var(--oi-radius-sm);
+	background-color: var(--vscode-modernEditorTab-inactiveBackground, transparent);
+	pointer-events: none;
+}
+
+.openide-chat-tab > * { position: relative; z-index: 1; }
+
+/* Alto contraste excluido, igual que `modernUI/tabs.css`: ahí el estado se comunica con bordes,
+   no con relleno. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .openide-chat-tab:not(.active):hover::before {
+	background-color: var(--vscode-modernEditorTab-hoverBackground, var(--oi-tint-2));
+}
+.monaco-workbench:not(.hc-black):not(.hc-light) .openide-chat-tab:not(.active):hover {
+	color: var(--vscode-modernEditorTab-hoverForeground, var(--vscode-foreground));
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .openide-chat-tab.active::before {
+	background-color: var(--vscode-modernEditorTab-activeBackground, var(--vscode-tab-activeBackground));
+}
+.openide-chat-tab.active {
+	color: var(--vscode-modernEditorTab-activeForeground, var(--vscode-tab-activeForeground, var(--vscode-foreground)));
+}
+.monaco-workbench:not(.hc-black):not(.hc-light) .openide-chat-tab.active:hover::before {
+	background-color: var(--vscode-modernEditorTab-activeHoverBackground, var(--vscode-modernEditorTab-activeBackground));
+}
+
+/* When the row is tight the tab you are IN gives up its title last: it shrinks at a fraction of
+   the rate of the others, so the shortfall comes out of the conversations you are not reading.
+   Every tab strip with a selected tab does this; below the floor they are all equal again and the
+   strip scrolls. */
+.openide-chat-tab.active {
+	flex-shrink: 0.4;
+}
+
+/* ONE conversation open: the tab stops being a strip item and becomes the dock's title, filling
+   the row up to the toolbar. `max-width` has to go with it — it is the 160px cap that was leaving
+   an elided title next to empty space — and so does the floor: a single tab must be able to
+   shrink to whatever the row has left (an unfolded toolbar leaves ~75px), never overflow it. From
+   two tabs on both are back: they share the row, and whatever does not fit scrolls. */
+.openide-chat-tabs.single .openide-chat-tab {
+	flex: 1 1 auto;
+	min-width: 0;
+	max-width: none;
+}
+
+/* A title that does not fit fades out instead of ending in `…`: the ellipsis eats three
+   characters of a 160px tab to say what the strip's own edge fade already says, and the fade
+   reads as "there is more" without pretending the word ended there. Clip, not ellipsis, so the
+   last glyph runs under the mask. 14px is the strip's edge fade (`.openide-chat-tabs.can-scroll-*`). */
+.openide-chat-tab-title {
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: clip;
+	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent 100%);
+	mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent 100%);
+}
+
+.openide-chat-tab-close {
+	width: 18px;
+	height: 18px;
+	flex: 0 0 auto;
+	border: none;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	visibility: hidden;
+}
+
+.monaco-workbench .openide-chat-native .openide-chat-header .openide-chat-tab-close .codicon[class*="codicon-"] {
+	font-size: 13px;
+	color: inherit;
+}
+.openide-chat-tab:hover .openide-chat-tab-close,
+.openide-chat-tab.active .openide-chat-tab-close { visibility: visible; }
+.openide-chat-tab-close:hover { background: var(--vscode-toolbar-hoverBackground); }
+
+.openide-chat-header-actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 0 4px;
+	flex: 0 0 auto;
+}
+
+.openide-chat-head-btn {
+	width: 24px;
+	height: 24px;
+	border: none;
+	border-radius: var(--oi-radius-md);
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+}
+
+.openide-chat-head-btn:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .openide-chat-native .openide-chat-header .openide-chat-head-btn .codicon[class*="codicon-"] {
+	font-size: 14px;
+	color: inherit;
+}
+
+/* ---- Marquee for truncated titles ---- */
+
+/* Ping-pong only for titles that are really clipped. The speed is derived from the actual
+   distance and both ends hold still long enough to read the start and the end. */
+.openide-chat-marquee { overflow: hidden; text-overflow: clip; white-space: nowrap; }
+
+.openide-chat-marquee-content {
+	display: block;
+	width: max-content;
+	min-width: 100%;
+	white-space: nowrap;
+	transform: translateX(0);
+}
+
+.openide-chat-tab.active .openide-chat-marquee.openide-chat-marquee-active .openide-chat-marquee-content {
+	will-change: transform;
+	animation: openide-chat-marquee var(--marquee-duration, 6s) ease-in-out infinite alternate;
+}
+
+@keyframes openide-chat-marquee {
+	0%, 16% { transform: translateX(0); }
+	84%, 100% { transform: translateX(var(--marquee-offset, 0px)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-marquee { text-overflow: ellipsis; }
+	.openide-chat-marquee .openide-chat-marquee-content {
+		animation: none !important;
+		transform: none !important;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+}
+
+/* ---- Editor-tab semantics ported to the strip (multieditortabscontrol.css:450-500) ---------- */
+
+/* The close button earns its space only on the tab you are ON or over; everywhere else it is
+   invisible but still occupies layout, so titles do not shift when it appears. */
+.openide-chat-tab .openide-chat-tab-close {
+	opacity: 0;
+	transition: opacity 80ms linear;
+}
+.openide-chat-tab.active .openide-chat-tab-close,
+.openide-chat-tab:hover .openide-chat-tab-close,
+.openide-chat-tab-close:focus-visible {
+	opacity: 1;
+}
+
+/* Drag feedback: the dragged tab dims, the drop side is a 2px focus-colored inset edge — the same
+   left/right half-width contract as `drop-target-left/right` in the editor strip. */
+.openide-chat-tab.dragging { opacity: 0.4; }
+.openide-chat-tab.drop-target-left { box-shadow: inset 2px 0 0 var(--vscode-focusBorder); }
+.openide-chat-tab.drop-target-right { box-shadow: inset -2px 0 0 var(--vscode-focusBorder); }
+
+
+/* ==== Sessions panel (VS Code Agent Sessions, in the dock) + hosted agent terminals ==== */
+
+.openide-chat-tab-dot {
+	flex: 0 0 auto;
+	width: 7px;
+	height: 7px;
+	margin-right: 5px;
+	border-radius: var(--oi-radius-circle);
+	background: var(--vscode-descriptionForeground);
+	opacity: 0.55;
+}
+.openide-chat-tab-dot.in-progress { background: var(--openide-green); opacity: 1; box-shadow: 0 0 0 2px color-mix(in srgb, var(--openide-green) 25%, transparent); }
+.openide-chat-tab-dot.needs-input { background: var(--openide-amber); opacity: 1; animation: openide-chat-dot-pulse 1.6s ease-in-out infinite; }
+.openide-chat-tab-dot.failed { background: var(--openide-red); opacity: 1; }
+.openide-chat-tab.unread .openide-chat-tab-title { font-weight: 600; }
+@keyframes openide-chat-dot-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.35); } }
+@media (prefers-reduced-motion: reduce) { .openide-chat-tab-dot.needs-input { animation: none; } }
+
+/* The dock's two vertical constants, declared where the header, the tabs and the sessions panel
+   can all read them. They are the editor's: `modernUI/tabs.css` runs a 32px title row with a 28px
+   pill inside it, and the dock is the island next to that one. */
+.openide-chat-native {
+	position: relative;
+	--openide-chat-head-height: 32px;
+	--openide-chat-tab-height: 28px;
+	/* How far the tabs shrink before the strip starts scrolling instead. The chrome inside a tab
+	   (mark, gaps, paddings, close box) is ~58px, so this leaves a title with something to say; the
+	   editor's own shrink floor is 80px on the same anatomy. */
+	--openide-chat-tab-min: 88px;
+}
+.openide-chat-sessions-pane {
+	position: absolute;
+	top: var(--openide-chat-head-height, 32px);
+	right: 0;
+	bottom: 0;
+	left: 0;
+	z-index: 20;
+	display: flex;
+	flex-direction: column;
+	background: var(--oi-surface, var(--vscode-sideBar-background));
+	border-left: 1px solid transparent;
+}
+.openide-chat-sessions-pane.side {
+	left: auto;
+	width: 300px;
+	border-left-color: var(--oi-border-soft);
+	box-shadow: var(--vscode-shadow-md, -4px 0 12px rgba(0, 0, 0, 0.12));
+}
+.openide-chat-sessions-pane.hidden { display: none; }
+/* One row: the search field and the filter, Cursor's panel head. The title, the refresh, the
+   panel toggle and the full-width "New session" button that used to live here were all removed —
+   each of them repeated something the dock's header already does. */
+.openide-chat-sessions-head {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-height: 32px;
+	padding: 6px 8px 6px 10px;
+}
+/* The box is `.monaco-inputbox` now — themed border, background and focus ring come from the
+   native widget. This wrapper only positions it and lays the magnifier over it. */
+.openide-chat-sessions-search {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+}
+.openide-chat-sessions-search .monaco-inputbox {
+	width: 100%;
+	height: 26px;
+	border-radius: var(--oi-radius-sm);
+	/* `defaultInputBoxStyles` pinta el widget con `input.background`, que en varios temas es el
+	   MISMO color que la isla (Dracula: los dos #282a36) — el campo desaparecía contra el dock y
+	   sólo lo separaba su borde. `--oi-raised` se deriva de la superficie, así que contrasta en
+	   cualquier tema. */
+	background-color: var(--oi-raised);
+}
+/* The selector is long on purpose. `inputBox.css:116` pads every input inside `.part.auxiliarybar`
+   from the sidebar font-size scaling with `.monaco-workbench .part.auxiliarybar .monaco-inputbox >
+   .ibwrapper > .input` — six classes, (0,6,0) — which is why shorter attempts kept losing and the
+   magnifier sat on top of the placeholder. This is (0,6,1). Only `padding-left` is overridden, so
+   the vertical padding keeps following that scaling instead of being frozen here. */
+.monaco-workbench .part .openide-chat-sessions-search .monaco-inputbox > .ibwrapper > input.input {
+	height: 24px;
+	padding-left: 24px;
+	font-size: 12px;
+}
+.openide-chat-sessions-search-icon {
+	position: absolute;
+	top: 50%;
+	left: var(--vscode-spacing-size60, 6px);
+	transform: translateY(-50%);
+	pointer-events: none;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}
+.openide-chat-sessions-scroll { flex: 1; min-height: 0; }
+.openide-chat-sessions-list { display: flex; flex-direction: column; padding: 0 6px 8px; overflow: hidden; }
+.openide-chat-sessions-group {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 6px 3px;
+	font-size: 10.5px;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+}
+.openide-chat-sessions-group-count { margin-left: auto; font-weight: 400; font-variant-numeric: tabular-nums; }
+.openide-chat-sessions-empty { padding: 18px 6px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.openide-chat-sessions-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 40px;
+	padding: 4px 6px;
+	border-radius: var(--oi-radius-sm);
+	cursor: pointer;
+	outline: none;
+}
+.openide-chat-sessions-row:hover, .openide-chat-sessions-row:focus-visible { background: var(--oi-hover, var(--vscode-list-hoverBackground)); }
+.openide-chat-sessions-row.active { background: var(--oi-selected, var(--vscode-list-activeSelectionBackground)); }
+.openide-chat-sessions-row .openide-chat-session-dot {
+	flex: 0 0 auto;
+	width: 7px;
+	height: 7px;
+	border-radius: var(--oi-radius-circle);
+	background: var(--vscode-descriptionForeground);
+	opacity: 0.4;
+}
+.openide-chat-sessions-row .openide-chat-session-dot.in-progress { background: var(--openide-green); opacity: 1; }
+.openide-chat-sessions-row .openide-chat-session-dot.needs-input { background: var(--openide-amber); opacity: 1; }
+.openide-chat-sessions-row .openide-chat-session-dot.failed { background: var(--openide-red); opacity: 1; }
+.openide-chat-sessions-kind { display: inline-flex; color: var(--vscode-descriptionForeground); }
+.openide-chat-sessions-kind .codicon { font-size: 14px; }
+.openide-chat-sessions-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.openide-chat-sessions-row-title { font-size: 12.5px; color: var(--vscode-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.openide-chat-sessions-row.unread .openide-chat-sessions-row-title { font-weight: 600; }
+.openide-chat-sessions-row-meta { font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.openide-chat-sessions-row-actions { display: none; flex: 0 0 auto; gap: 0; }
+.openide-chat-sessions-row:hover .openide-chat-sessions-row-actions, .openide-chat-sessions-row:focus-within .openide-chat-sessions-row-actions { display: inline-flex; }
+.openide-menu-hint { margin-left: auto; padding-left: 10px; font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
+
+/* The hosted terminal replaces transcript + composer while a CLI session is the active tab. */
+.openide-chat-agent-terminal { position: relative; flex: 1; min-height: 0; background: var(--vscode-terminal-background, var(--vscode-editor-background)); }
+.openide-chat-agent-terminal.hidden { display: none; }
+.openide-chat-agent-terminal-host { position: absolute; inset: 0; padding: 4px 0 0 6px; }
+.openide-chat-agent-terminal-host .terminal-wrapper { height: 100%; }
+.openide-chat-cli-active .openide-chat-list-host,
+.openide-chat-cli-active .openide-chat-notice,
+.openide-chat-cli-active .openide-chat-dock { display: none !important; }
+.openide-chat-agent-terminal-banner {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 14px 16px;
+	font-size: 12.5px;
+	color: var(--vscode-descriptionForeground);
+}
+.openide-chat-agent-terminal-banner.error { color: var(--vscode-errorForeground); }
+.openide-chat-agent-terminal-relaunch {
+	height: 24px;
+	padding: 0 10px;
+	border: 1px solid transparent;
+	border-radius: var(--oi-radius-sm);
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+.openide-chat-agent-terminal-relaunch:hover { background: var(--vscode-button-hoverBackground); }
+
+/* Session-type chip (VS Code's "Local ▾" target picker) in the composer footer slot. */
+.openide-chat-session-kind-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: 20px;
+	margin: 0 0 4px 10px;
+	padding: 0 6px;
+	border: 0;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: inherit;
+	font-size: 11.5px;
+	cursor: pointer;
+}
+.openide-chat-session-kind-chip:hover { background: var(--oi-hover, var(--vscode-toolbar-hoverBackground)); color: var(--vscode-foreground); }
+.openide-chat-session-kind-chip .codicon { font-size: 13px; }
+.openide-chat-session-kind-chip .codicon-chevron-down { font-size: 11px; }
+
+/* The pane reuses the menu's row-action buttons outside a menu: give them the menu's flat look. */
+.openide-chat-sessions-pane .openide-menu-row-action {
+	width: 22px;
+	height: 22px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 0;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	padding: 0;
+	cursor: pointer;
+}
+.openide-chat-sessions-pane .openide-menu-row-action:hover { background: var(--oi-hover-strong, var(--vscode-toolbar-hoverBackground)); color: var(--vscode-foreground); }
+.openide-chat-sessions-pane .openide-menu-row-action .codicon { font-size: 16px; }
+/* The stripping rules that used to live here (border/outline/padding reset on the raw input) are
+   gone with the hand-rolled box: `.monaco-inputbox` owns the frame now, and resetting its input's
+   padding to 0 was what kept the magnifier sitting on top of the placeholder. */
+
+/* ==== Head bar: ONE row (VS Code chat view anatomy, Cursor's chrome economy) ==== */
+.openide-chat-headbar { display: flex; flex-direction: column; flex: 0 0 auto; }
+/* `+ ▾` — `menuEntryActionViewItem.css`'s `.monaco-dropdown-with-primary`: two real buttons that
+   share ONE hover surface, so the pair reads as a single control while each half keeps its own
+   focus ring and tooltip. */
+.openide-chat-head-split { display: inline-flex; align-items: center; border-radius: var(--oi-radius-md); }
+.openide-chat-head-split:hover { background: var(--vscode-toolbar-hoverBackground); }
+.openide-chat-head-split .openide-chat-head-btn:hover { background: transparent; }
+.openide-chat-headbar .openide-chat-head-split .openide-chat-head-btn { width: 18px; }
+.openide-chat-headbar .openide-chat-head-split .openide-chat-head-split-chevron { width: 14px; }
+.monaco-workbench .openide-chat-native .openide-chat-headbar .openide-chat-head-split-chevron .codicon[class*="codicon-"] { font-size: 12px; }
+
+
+/* ==== Head bar: la fila de 35px con los tabs y la toolbar ====
+   Las métricas de TAB ya no se redefinen acá. Existía una capa que las pisaba con la anatomía de
+   la composite bar (35px, 11px MAYÚSCULAS, colores panelTitle.*, borde inferior de 1px) porque
+   entonces cada tab era una VISTA. Desde que cada tab es una conversación, esa capa contradecía a
+   la de arriba y mantenía dos diseños compitiendo en el mismo archivo. ==== */
+.openide-chat-headbar .openide-chat-header {
+	height: var(--openide-chat-head-height, 32px);
+	/* 2px on the left, the same gutter `modernUI/tabs.css` gives the editor's tabs-and-actions
+	   container: the dock's first tab and the editor's first tab then start at the same distance
+	   from their island's edge instead of the dock's sitting 6px further in. */
+	padding: 0 4px 0 2px;
+	/* La isla, igual que el panel de sesiones. Con `sideBar.background` crudo el header quedaba de
+	   otro color que el dock en cualquier tema que defina los dos distinto (Dracula, Dracula Soft). */
+	background: var(--oi-surface, var(--vscode-sideBar-background));
+}
+.openide-chat-headbar .openide-chat-tabs { align-items: center; }
+
+.openide-chat-headbar .openide-chat-tab-dot { width: 6px; height: 6px; margin-right: 2px; }
+/* Toolbar metrics are upstream's, not invented: `actionbar.css` gives an action label 3px of
+   padding around a 16px glyph (a 22px hit target) and `auxiliaryBarPart.css` puts 4px between
+   items. Ours ran a 14px glyph inside the same 22px box with 2px gaps — the hover then read as an
+   oversized empty square and the whole cluster looked cramped next to VS Code's. */
+.openide-chat-headbar .openide-chat-header-actions { display: flex; align-items: center; gap: 4px; padding-left: 8px; }
+.openide-chat-headbar .openide-chat-head-btn { width: 22px; height: 22px; color: var(--vscode-icon-foreground, var(--vscode-foreground)); }
+.monaco-workbench .openide-chat-native .openide-chat-headbar .openide-chat-head-btn .codicon[class*="codicon-"] { font-size: 16px; }
+/* Spacing only: the header carries no hairlines (the dock is line-free by request). */
+.openide-chat-head-sep { width: 0; height: 16px; margin: 0 6px; background: transparent; }
+
+/* ==== The foldable cluster ====================================================================
+ *
+ * The fold is a GRID collapsing from `1fr` to `0fr`, not a `max-width` running to a number somebody
+ * guessed: `1fr` resolves to the cluster's real width, so the animation ends exactly where the
+ * buttons end and stays right when one is added. `display: none` was the first version and cannot
+ * be transitioned at all.
+ *
+ * `visibility` is what takes the folded buttons out of the tab order (a `hidden`-by-opacity button
+ * still takes focus), and it is delayed by the duration so it flips only once the fold is over —
+ * and NOT delayed on the way back, so unfolding shows them at once.
+ *
+ * The toggle stays dimmer than the controls it hides: it is chrome about chrome and must not
+ * compete with `+` for the eye.
+ */
+.openide-chat-head-options-wrap {
+	display: grid;
+	grid-template-columns: 1fr;
+	min-width: 0;
+}
+.openide-chat-head-options {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	overflow: hidden;
+}
+/* The buttons keep their size while the grid closes over them, so they are CLIPPED rather than
+   squashed — a row of squeezing icons is what makes a fold look broken. */
+.openide-chat-head-options > * { flex: 0 0 auto; }
+
+.openide-chat-head-options-wrap.collapsed { grid-template-columns: 0fr; }
+.openide-chat-head-options-wrap.collapsed > .openide-chat-head-options { visibility: hidden; }
+
+/* Armed by `animated`, the class the toggle adds for one fold (paneview.ts does the same), so the
+   restored state never animates itself on the first paint. Duration and easing are paneview.css's. */
+.openide-chat-headbar.animated .openide-chat-head-options-wrap {
+	transition: grid-template-columns 0.15s ease-out;
+}
+.openide-chat-headbar.animated .openide-chat-head-options-wrap > .openide-chat-head-options {
+	transition: visibility 0s linear;
+}
+.openide-chat-headbar.animated .openide-chat-head-options-wrap.collapsed > .openide-chat-head-options {
+	transition: visibility 0s linear 0.15s;
+}
+.openide-chat-headbar.animated .openide-chat-head-collapse .codicon {
+	transition: transform 0.15s ease-out;
+}
+
+.openide-chat-headbar .openide-chat-head-collapse { width: 18px; opacity: 0.65; }
+.openide-chat-headbar .openide-chat-head-collapse:hover { opacity: 1; }
+.monaco-workbench .openide-chat-native .openide-chat-headbar .openide-chat-head-collapse .codicon[class*="codicon-"] { font-size: 16px; }
+/* One glyph, turned — the tree's twistie, not two icons swapping mid-animation. */
+.openide-chat-headbar .openide-chat-head-collapse.collapsed .codicon { transform: rotate(180deg); }
+
+/* Same opt-out as every pane in the IDE: `monaco-reduce-motion` is the workbench setting,
+   `prefers-reduced-motion` the OS one. */
+.monaco-reduce-motion .openide-chat-headbar.animated .openide-chat-head-options-wrap,
+.monaco-reduce-motion .openide-chat-headbar.animated .openide-chat-head-collapse .codicon {
+	transition-duration: 0s !important;
+}
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-headbar.animated .openide-chat-head-options-wrap,
+	.openide-chat-headbar.animated .openide-chat-head-collapse .codicon {
+		transition-duration: 0s !important;
+	}
+}
+
+/* Sessions panel, agentsessionsviewer.css metrics. */
+.openide-chat-sessions-head { min-height: 35px; border-bottom: 1px solid transparent; }
+.openide-chat-sessions-list { padding: 0 6px 8px; }
+.openide-chat-sessions-group {
+	padding: 6px 6px 2px;
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: 0;
+	text-transform: uppercase;
+	color: var(--vscode-descriptionForeground);
+}
+.openide-chat-sessions-group-count { opacity: 0.7; margin-right: 4px; }
+.openide-chat-sessions-row {
+	align-items: flex-start;
+	gap: 0;
+	min-height: 0;
+	padding: 8px 6px;
+	border-radius: var(--oi-radius-md);
+	outline: 1px solid transparent;
+	outline-offset: -1px;
+}
+.openide-chat-sessions-row .openide-chat-session-dot { margin: 5px 0 0; }
+.openide-chat-sessions-row .openide-chat-sessions-kind { display: none; }
+.openide-chat-sessions-body { padding-left: 6px; }
+.openide-chat-sessions-row-title { font-size: 13px; line-height: 17px; padding-bottom: 2px; }
+.openide-chat-sessions-row-meta { font-size: 12px; line-height: 15px; }
+.openide-chat-sessions-row.active {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+	outline-color: var(--vscode-focusBorder);
+}
+.openide-chat-sessions-row.active .openide-chat-sessions-row-title,
+.openide-chat-sessions-row.active .openide-chat-sessions-row-meta { color: var(--vscode-list-activeSelectionForeground); }
+.openide-chat-sessions-row-actions { align-self: center; }
+
+/* Brand mark. It follows the tab's own colour, so an inactive tab's agent dims with its title and
+   the active one comes forward with it — the logo never reads brighter than the tab it names. */
+/* Tabs keep their natural width and the strip clips, upstream's composite-bar behaviour. Letting
+   them shrink was tried and is worse: flex spreads the shortfall over ALL of them, so four views
+   turn into "C… CLAU… C… OPE…" instead of three readable labels and one clipped tail. */
+/* Never shrinks, never hides: see the tab rule above. */
+.openide-chat-tab-icon { width: 14px; height: 14px; flex: 0 0 auto; color: inherit; }
+.monaco-workbench .openide-chat-tab .openide-chat-tab-icon.codicon[class*="codicon-"] { font-size: 14px; color: inherit; }
+.openide-chat-tab .openide-provider-icon.monogram { font-size: 7px; border-radius: var(--vscode-cornerRadius-xSmall, 2px); }
+
+
+/* ==== Sessions panel modes ==== */
+/* `full`: no session open — the list is the body (upstream's stacked AgentSessionsControl),
+   between the header and the composer. `side`: a 300px column beside the transcript. */
+.openide-chat-sessions-pane.full {
+	left: 0;
+	right: 0;
+	width: auto;
+	z-index: 5;
+	border-left: 0;
+	box-shadow: none;
+	background: var(--vscode-editor-background);
+}
+.openide-chat-native.sessions-side > .openide-chat-list-host,
+.openide-chat-native.sessions-side > .openide-chat-notice,
+.openide-chat-native.sessions-side > .openide-chat-agent-terminal,
+.openide-chat-native.sessions-side > .openide-chat-dock {
+	margin-right: 300px;
+}

@@ -1,0 +1,48 @@
+name: Lint - zizmor
+
+on:
+  push:
+    branches:
+      - master
+      - insider
+    paths-ignore:
+      - "**/*.md"
+  pull_request:
+    branches:
+      - "**"
+    paths-ignore:
+      - "**/*.md"
+
+permissions: {}
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-latest
+    permissions:
+      # `contents: read` is required now that the repository is private: the workflow declares
+      # `permissions: {}` above, so the token inherits nothing, and a checkout without read
+      # permission fails with "repository not found" — which sounds like a wrong URL and is in fact
+      # a missing permission. On a public repository it was not needed: the clone is anonymous.
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@b1d7e1fb5de872772f31590499237e7cce841e8e # v0.5.3
+        with:
+          # OUR workflows only. By default it sweeps the whole repository, and that includes
+          # `vscode/.github/` — Microsoft's workflows that come with the vendored tree: findings we
+          # cannot fix and that never run here anyway, because GitHub only executes what lives in
+          # the root `.github/workflows/`.
+          inputs: .github/workflows/
+          # No SARIF upload: the action publishes its findings to code scanning by default, and on
+          # a PRIVATE repository that requires GitHub Advanced Security. Without that plan the
+          # upload fails with "Resource not accessible by integration" and takes the job down even
+          # when zizmor found nothing — a lint failing over where it files its report rather than
+          # over what it says. Findings go to the log and the job still fails when there are any.
+          # Turn this back on when the repository becomes public.
+          advanced-security: false

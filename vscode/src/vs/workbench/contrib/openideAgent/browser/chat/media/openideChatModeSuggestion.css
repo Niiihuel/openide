@@ -1,0 +1,161 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat: the mode suggestion card.
+ *
+ *  SOURCE OF TRUTH: the removed chat webview (`.suggest-wrap` … `.suggest-accept .kbd`).
+ *  Values are transcribed, not re-decided.
+ *--------------------------------------------------------------------------------------------*/
+
+.openide-chat-suggest-wrap {
+	min-width: 0;
+	margin: 10px 0;
+}
+
+/* Answered: the card stays as the record of what was proposed, dimmed so it stops competing with
+   the live turn below it. */
+.openide-chat-suggest-resolved .openide-chat-suggest-card {
+	opacity: 0.72;
+}
+
+.openide-chat-suggest-card {
+	overflow: hidden;
+	min-width: 0;
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border-strong));
+	border-radius: var(--oi-chat-card-radius);
+	background: var(--oi-chat-card-bg, var(--oi-tint-1));
+}
+
+.openide-chat-suggest-head {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-width: 0;
+	padding: 10px 12px 7px;
+}
+
+.openide-chat-suggest-head > .codicon {
+	flex: 0 0 auto;
+	font-size: 14px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.openide-chat-suggest-title {
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--vscode-foreground);
+}
+
+.openide-chat-suggest-kicker {
+	flex: 0 0 auto;
+	margin-left: auto;
+	font-size: 10.5px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* Indented to the head's text column (12px + 14px glyph + 7px gap) so the reason reads as the
+   title's body and not as a second, unrelated paragraph. Breaks anywhere: the reason is model
+   prose and may carry an unbroken path, which would otherwise widen every row of the list. */
+.openide-chat-suggest-body {
+	padding: 2px 12px 12px 33px;
+	font-size: 12.5px;
+	line-height: 1.5;
+	color: var(--vscode-descriptionForeground);
+	word-break: break-word;
+	overflow-wrap: anywhere;
+}
+
+.openide-chat-suggest-actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 9px 10px;
+	border-top: 1px solid var(--oi-border-soft);
+}
+
+.openide-chat-suggest-actions.hidden {
+	display: none;
+}
+
+.openide-chat-suggest-dismiss {
+	padding: 4px 8px;
+	border: none;
+	border-radius: var(--oi-radius-md);
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font-family: inherit;
+	font-size: 12.5px;
+	cursor: pointer;
+}
+
+.openide-chat-suggest-dismiss:hover {
+	background: var(--oi-border-soft);
+	color: var(--vscode-foreground);
+}
+
+/* Same primary action as Build Plan: compact, one line, with its shortcut visible. */
+.openide-chat-suggest-accept {
+	position: relative;
+	overflow: hidden;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: var(--oi-radius-sm);
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	font-family: inherit;
+	font-size: 12px;
+	font-weight: 600;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.openide-chat-suggest-accept:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+/* Outranks `.monaco-workbench .codicon[class*='codicon-']` (style.css:229) and the sidebar variant
+   (:391), which otherwise paint the glyph with `icon-foreground` — white on the amber primary. */
+.monaco-workbench .openide-chat-suggest-accept .codicon[class*='codicon-'] {
+	font-size: 13px;
+	color: inherit;
+}
+
+/* The accept button's shortcut hint is the shared `.oi-kbd` (openideSurfaceCss.ts). */
+
+/* Progress bar of the auto-accept: it fills INSIDE the button that is about to fire, so the time
+   left sits where the consequence is instead of in some other corner. */
+.openide-chat-suggest-timer {
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	width: 100%;
+	background: color-mix(in srgb, var(--vscode-button-foreground) 22%, transparent);
+	pointer-events: none;
+	/* The fill is a `transform`, not a `width` written from a timer: the part sets the duration in
+	   `--openide-chat-suggest-seconds` and flips `.running`, and the compositor draws every frame
+	   of it. A 100ms `setInterval` animating `width` laid the button out ten times a second. */
+	transform: scaleX(0);
+	transform-origin: left center;
+	transition: transform var(--openide-chat-suggest-seconds, 0s) linear;
+}
+.openide-chat-suggest-timer.running { transform: scaleX(1); }
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-suggest-timer { transition: none; }
+}
+
+.openide-chat-suggest-count {
+	position: relative;
+	opacity: 0.75;
+	font-weight: 500;
+	font-variant-numeric: tabular-nums;
+}

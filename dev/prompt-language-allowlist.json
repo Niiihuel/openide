@@ -1,0 +1,7 @@
+{
+	"comment": "Model-facing strings still awaiting translation to English, per file. A ratchet: a file may never exceed its budget. Lower the numbers as you translate, drop the entry at zero. Regenerate with: node dev/audit-prompt-language.mjs --update. NOTE on openideCanvasRuntime.ts: its remaining strings are NOT ordinary debt. That module is serialised with Function.prototype.toString() and injected into the canvas webview (openideCanvasHtml.ts), so it cannot import t() -- a call would throw in the iframe, and openideCanvasRuntime.test.ts pins that it stays self-contained. Localising them needs a strings payload on globalThis.__openideCanvasState, which is a design change, not a translation.",
+	"totalPending": 4,
+	"files": {
+		"vscode/src/vs/workbench/contrib/openideAgent/browser/openideCanvasRuntime.ts": 4
+	}
+}

@@ -1,0 +1,263 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Project Map nativo: el canvas ocupa todo el pane y los paneles flotan encima como cards del
+   workbench (tokens de radio/sombra de upstream, superficies --oi-* de openideSurfaceCss). */
+
+.openide-pmap {
+	position: relative;
+	overflow: hidden;
+	background: var(--vscode-editor-background);
+	color: var(--vscode-foreground);
+	font-size: 12.5px;
+	user-select: none;
+}
+.openide-pmap {
+	--pmap-inset: 14px;
+	/* The gutter between the two top columns. */
+	--pmap-gutter: 12px;
+	--pmap-right-width: min(300px, 42%);
+	/* One height for every card head, so the search field and the modules card read as ONE row
+	   instead of two boxes of 34px and 40px that happen to start at the same y. */
+	--pmap-head-height: 34px;
+}
+.openide-pmap-stage { position: absolute; inset: 0; }
+.openide-pmap-canvas { display: block; touch-action: none; }
+.openide-pmap-canvas.dragging { cursor: grabbing; }
+
+.openide-pmap-panel {
+	position: absolute;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	z-index: 2;
+	pointer-events: none;
+}
+.openide-pmap-panel > * { pointer-events: auto; }
+/* ==== The two top columns must never meet =====================================================
+ *
+ * They are absolutely positioned against opposite edges, so their widths are the only thing
+ * keeping them apart, and they were sized as if the other one did not exist: 360px pinned left,
+ * 300px pinned right. Below ~690px of stage that is more than there is, and the modules card
+ * simply LANDED ON the search field — measured at a 629px stage: the two boxes overlapping by
+ * 59px, the right third of the search input underneath the card.
+ *
+ * The left column now subtracts the right one and the gutter between them, so the gap is a fact
+ * of the layout instead of a coincidence of two constants. The right column is proportional under
+ * its own maximum, which keeps the split sane as the stage narrows rather than needing a
+ * breakpoint: at 629px it is 264px and the search keeps 325px; at 400px it is 168 and 192.
+ */
+.openide-pmap-panel.top { top: var(--pmap-inset); }
+.openide-pmap-panel.left {
+	left: var(--pmap-inset);
+	width: min(360px, calc(100% - var(--pmap-inset) * 2 - var(--pmap-right-width) - var(--pmap-gutter)));
+}
+.openide-pmap-panel.right { right: var(--pmap-inset); width: var(--pmap-right-width); align-items: flex-end; }
+.openide-pmap-panel.top.right { max-height: calc(100% - 160px); }
+.openide-pmap-panel.bottom { bottom: var(--pmap-inset); flex-direction: row; align-items: flex-end; justify-content: flex-end; }
+
+.openide-pmap-card {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	min-height: 0;
+	background: color-mix(in srgb, var(--oi-card, var(--vscode-editorWidget-background)) 94%, transparent);
+	backdrop-filter: blur(6px);
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-border, var(--vscode-editorWidget-border));
+	border-radius: var(--oi-radius-lg);
+	box-shadow: var(--vscode-shadow-md);
+	overflow: hidden;
+}
+/* The head IS the toggle (workbench pane behaviour), so it takes the pointer and a hover tint. */
+.openide-pmap-card-head {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-height: var(--pmap-head-height);
+	padding: 0 10px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	cursor: pointer;
+}
+.openide-pmap-card-head:hover { background: var(--oi-hover, var(--vscode-list-hoverBackground)); }
+.openide-pmap-card-head:focus-visible { outline: 1px solid var(--oi-focus, var(--vscode-focusBorder)); outline-offset: -1px; }
+.openide-pmap-card-head .codicon { font-size: 14px; }
+.openide-pmap-card-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Everything the panel hangs in the head, kept together and pinned right of the title. */
+.openide-pmap-head-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; min-width: 0; }
+.openide-pmap-card-head .openide-pmap-insp-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--vscode-foreground); }
+.openide-pmap-count { font-weight: 400; color: var(--oi-text-muted, var(--vscode-descriptionForeground)); font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0; }
+/* One rule for every card: the body folds, the head keeps its own shape.
+   `flex: 1 1 auto` + `min-height: 0` is load-bearing, not tidiness. The body sits between the
+   card (which carries the max-height) and the DomScrollableElement inside it. Left at the default
+   `flex: 0 1 auto` the body grows to its CONTENT height, the scrollable inherits that height, and
+   the scrollbar concludes everything is visible — it renders a slider as tall as the track while
+   the card's max-height quietly clips the overflow. Measured: a 632px module list in a 342px
+   viewport with a 632px slider, i.e. rows nobody could reach. */
+.openide-pmap-card-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.openide-pmap-card.collapsed > .openide-pmap-card-body { display: none; }
+.openide-pmap-card.collapsed > .openide-pmap-card-head { border-bottom: 0; }
+.openide-pmap-link { border: 0; background: transparent; color: var(--vscode-textLink-foreground); font: inherit; font-size: 11px; text-transform: none; letter-spacing: 0; cursor: pointer; padding: 0 2px; }
+.openide-pmap-link:hover { text-decoration: underline; }
+
+/* ---- búsqueda (mismo patrón que el campo de Settings)
+   The search row doubles as this card's head: the field is the point of the panel, so it stays on
+   screen while the scope and the index status fold away under it. */
+.openide-pmap-search-wrap {
+	height: var(--pmap-head-height);
+	padding: 0 6px 0 10px;
+	text-transform: none;
+	letter-spacing: 0;
+	font-weight: 400;
+	font-size: 12.5px;
+	cursor: default;
+}
+.openide-pmap-search-wrap:hover { background: transparent; }
+.openide-pmap-search-wrap > .codicon { color: var(--oi-text-muted, var(--vscode-descriptionForeground)); font-size: 14px; }
+/* The field must take the row, so its wrapper cannot be the auto-margin actions box. */
+.openide-pmap-search-wrap > .openide-pmap-head-actions { flex: 1 1 auto; margin-left: 0; }
+.openide-pmap-search-input {
+	flex: 1;
+	min-width: 0;
+	border: 0;
+	outline: 0 !important;
+	background: transparent;
+	color: var(--vscode-input-foreground);
+	font: inherit;
+	appearance: none;
+}
+.openide-pmap-search-input::-webkit-search-cancel-button { appearance: none; }
+.openide-pmap-search-input::placeholder { color: var(--vscode-input-placeholderForeground, var(--oi-text-muted)); opacity: 0.78; }
+.openide-pmap-results-scroll { max-height: 260px; }
+.openide-pmap-results { display: flex; flex-direction: column; max-height: 260px; overflow: hidden; padding: 4px; }
+.openide-pmap-result, .openide-pmap-relation, .openide-pmap-module {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	min-height: 26px;
+	padding: 3px 8px;
+	border: 0;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: var(--vscode-foreground);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.openide-pmap-result:hover, .openide-pmap-relation:hover, .openide-pmap-module:hover { background: var(--oi-hover, var(--vscode-list-hoverBackground)); }
+.openide-pmap-result .codicon, .openide-pmap-relation .codicon { color: var(--oi-text-muted, var(--vscode-descriptionForeground)); font-size: 14px; flex: 0 0 auto; }
+.openide-pmap-result-name, .openide-pmap-relation-name, .openide-pmap-module-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-pmap-result-detail, .openide-pmap-relation-kind, .openide-pmap-module-count { flex: 0 1 auto; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--oi-text-muted, var(--vscode-descriptionForeground)); font-variant-numeric: tabular-nums; }
+.openide-pmap-result-empty { padding: 8px 10px; font-size: 11.5px; color: var(--oi-text-muted, var(--vscode-descriptionForeground)); }
+
+.openide-pmap-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 6px 8px 2px; font-size: 11.5px; }
+.openide-pmap-crumbs .codicon { font-size: 12px; color: var(--oi-text-muted, var(--vscode-descriptionForeground)); }
+.openide-pmap-crumb { border: 0; background: transparent; color: var(--vscode-foreground); font: inherit; font-size: 11.5px; padding: 2px 5px; border-radius: var(--oi-radius-sm); cursor: pointer; }
+.openide-pmap-crumb:hover { background: var(--oi-hover, var(--vscode-list-hoverBackground)); }
+.openide-pmap-status { display: flex; align-items: center; gap: 7px; padding: 4px 10px 8px; font-size: 11.5px; color: var(--oi-text-muted, var(--vscode-descriptionForeground)); }
+.openide-pmap-status > .codicon { font-size: 13px; color: var(--openide-green, #2b9771); }
+.openide-pmap-status.busy > .codicon { color: var(--oi-text-muted, var(--vscode-descriptionForeground)); }
+.openide-pmap-status.error > .codicon { color: var(--vscode-editorWarning-foreground, #cca700); }
+.openide-pmap-status-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- módulos */
+.openide-pmap-modules { max-height: 46vh; flex: 0 1 auto; }
+/* With a node open, the two right-hand cards share the column — unless one of them is folded, in
+   which case the other is free to use the height the fold gave back. */
+.openide-pmap-panel.top.right:has(.openide-pmap-inspector:not(.hidden):not(.collapsed)) .openide-pmap-modules:not(.collapsed) { max-height: 26vh; }
+/* Why the scrollports are flex items with `flex-basis: 0` and NOT `height: 100%`.
+ *
+ * DomScrollableElement measures the CONTENT element: `scanDomNode()` takes its clientHeight as the
+ * viewport and its scrollHeight as the range, and the element scrolls itself natively while the
+ * widget only paints a slider over it. So the content element must be clipped to the card, or both
+ * numbers come out equal and the widget concludes nothing overflows — which is what happened here:
+ * a 632px module list reporting a 632px viewport inside a 342px card, with a slider as tall as its
+ * own track and 15 modules nobody could scroll to.
+ *
+ * `height: 100%` cannot fix it. Every card's height comes from `max-height` plus its content, and
+ * that is an INDEFINITE height in CSS terms, so a percentage down the chain has nothing to resolve
+ * against and falls back to `auto` — measured: still 632px, even forced inline.
+ *
+ * `flex: 1 1 0` does fix it, because a flex-basis of zero makes the item's size independent of its
+ * own content: the wrapper hands down whatever the card allowed, and `min-height: 0` lets it
+ * shrink below the content it holds. That is the whole trick. */
+.openide-pmap-card-body > .monaco-scrollable-element { display: flex; flex: 1 1 auto; min-height: 0; }
+.openide-pmap-card-body > .monaco-scrollable-element > .openide-pmap-modules-list,
+.openide-pmap-card-body > .monaco-scrollable-element > .openide-pmap-insp-body { flex: 1 1 0; min-height: 0; }
+.openide-pmap-collapse { flex: 0 0 auto; }
+.openide-pmap-modules-list { display: flex; flex-direction: column; box-sizing: border-box; padding: 4px; overflow: hidden; }
+.openide-pmap-swatch { width: 9px; height: 9px; flex: 0 0 auto; border-radius: var(--vscode-cornerRadius-xSmall, 2px); }
+.openide-pmap-module.hidden-module { opacity: 0.4; }
+.openide-pmap-module.hidden-module .openide-pmap-swatch { background: transparent !important; box-shadow: inset 0 0 0 1.5px currentColor; }
+
+/* ---- inspector */
+.openide-pmap-inspector { max-height: 52vh; flex: 0 1 auto; }
+/* The file's icon comes from the icon theme as a background image, so it needs a box to paint in. */
+.openide-pmap-insp-icon { flex: 0 0 16px; width: 16px; height: 16px; background-size: 16px; background-repeat: no-repeat; background-position: center; }
+.openide-pmap-insp-body { box-sizing: border-box; padding: 8px 10px 10px; overflow: hidden; }
+.openide-pmap-insp-path { font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; color: var(--oi-text-muted, var(--vscode-descriptionForeground)); word-break: break-all; user-select: text; }
+.openide-pmap-insp-module { display: flex; align-items: center; gap: 7px; margin-top: 6px; font-size: 11.5px; }
+.openide-pmap-insp-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.openide-pmap-btn {
+	height: 26px;
+	padding: 0 10px;
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-border);
+	border-radius: var(--oi-radius-sm);
+	background: var(--oi-raised, var(--vscode-button-secondaryBackground));
+	color: var(--vscode-foreground);
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+.openide-pmap-btn:hover { background: var(--oi-hover-strong, var(--vscode-button-secondaryHoverBackground)); }
+.openide-pmap-btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: transparent; }
+.openide-pmap-btn.primary:hover { background: var(--vscode-button-hoverBackground); }
+.openide-pmap-btn.done { color: var(--openide-green, #2b9771); border-color: color-mix(in srgb, var(--openide-green, #2b9771) 45%, transparent); }
+.openide-pmap-insp-section { margin-top: 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--oi-text-muted, var(--vscode-descriptionForeground)); }
+.openide-pmap-insp-section.error { text-transform: none; letter-spacing: 0; color: var(--vscode-errorForeground); }
+.openide-pmap-insp-subsection { display: flex; align-items: center; gap: 6px; margin: 8px 0 2px; font-size: 11px; color: var(--oi-text-muted, var(--vscode-descriptionForeground)); }
+.openide-pmap-relation { min-height: 24px; padding: 2px 6px; margin: 0 -4px; width: calc(100% + 8px); }
+
+/* ---- minimapa y zoom */
+.openide-pmap-minimap { width: 176px; height: 112px; padding: 4px; }
+.openide-pmap-minimap-canvas { display: block; width: 100%; height: 100%; }
+.openide-pmap-zoom { width: auto; flex-direction: column; padding: 3px; gap: 2px; }
+
+.openide-pmap-iconbtn {
+	width: 24px;
+	height: 24px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	border: 0;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	cursor: pointer;
+	padding: 0;
+}
+.openide-pmap-iconbtn:hover { background: var(--oi-hover, var(--vscode-toolbar-hoverBackground)); color: var(--vscode-foreground); }
+.openide-pmap-iconbtn .codicon { font-size: 16px; }
+
+/* ---- vacío */
+.openide-pmap-empty {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+}
+.openide-pmap-empty .codicon { font-size: 36px; opacity: 0.6; }
+
+.openide-pmap .hidden { display: none !important; }

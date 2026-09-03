@@ -1,0 +1,21 @@
+{
+	"filledSuffix": "filled",
+	"semanticSuffixes": [
+		"dot",
+		"error",
+		"half",
+		"off",
+		"slash",
+		"sparkle",
+		"warning"
+	],
+	"preserveCodiconNames": [
+		"multiple-windows"
+	],
+	"preserveCodiconPrefixes": [
+		"terminal-"
+	],
+	"distinctFrom": {
+		"multiple-windows": "empty-window"
+	}
+}

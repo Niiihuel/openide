@@ -1,0 +1,115 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — tool approval card. Transcribed from the webview's `.approval` block
+ *. The purple accent marks a built-in tool; skills and MCP fall
+ *  back to the muted foreground, exactly as `.approval.tool-kind-*` does there.
+ *--------------------------------------------------------------------------------------------*/
+
+.openide-chat-approval {
+	--approval-accent: var(--vscode-charts-purple, #a855f7);
+	margin: 5px 0 7px;
+	display: flex;
+	flex-direction: column;
+	background: var(--oi-chat-card-bg, var(--oi-tint-1));
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
+	border-radius: var(--oi-chat-card-radius);
+}
+.openide-chat-approval.tool-kind-skill,
+.openide-chat-approval.tool-kind-mcp { --approval-accent: var(--oi-text-muted); }
+
+.openide-chat-approval-head {
+	width: 100%;
+	min-height: 39px;
+	padding: 6px 9px;
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-width: 0;
+	color: var(--oi-text-muted);
+}
+.openide-chat-approval-head > .codicon { color: var(--approval-accent); font-size: 13px; }
+.openide-chat-approval-title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font: 12px var(--oi-font-mono);
+	color: var(--oi-text);
+}
+.openide-chat-approval-kind {
+	flex: 0 0 auto;
+	margin-left: auto;
+	padding: 2px 5px;
+	border-radius: var(--oi-radius-sm);
+	background: var(--oi-border-soft);
+	color: var(--oi-text-muted);
+	font-size: 9px;
+	line-height: 1.2;
+	font-weight: 650;
+	letter-spacing: 0.035em;
+	text-transform: uppercase;
+}
+
+.openide-chat-approval-body { padding: 8px 9px 9px; border-top: 1px solid var(--oi-border-soft); }
+.openide-chat-approval-description { margin-bottom: 7px; color: var(--oi-text); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+
+/* Its own scroller: the list runs supportDynamicHeights with horizontalScrolling disabled, so a
+   long command that widened the row would break the layout of the whole transcript. */
+.openide-chat-approval-cmd {
+	display: block;
+	max-height: 132px;
+	margin: 1px 0 7px;
+	padding: 6px 8px;
+	overflow: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-md);
+	background: var(--oi-tint-1);
+	color: var(--oi-text);
+	font: 11.5px/1.5 var(--oi-font-mono);
+}
+
+.openide-chat-approval-actions { margin-top: 7px; display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
+.openide-chat-abtn {
+	height: 22px;
+	padding: 0 7px;
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	border: none;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: var(--oi-text-muted);
+	font-family: inherit;
+	font-size: 11.5px;
+	cursor: pointer;
+	white-space: nowrap;
+	transition: background 120ms ease, color 120ms ease;
+}
+/* `.monaco-workbench .codicon` (style.css:225) paints glyphs with `icon-foreground`; on the amber
+   primary the glyph must follow the button's own dark foreground instead. */
+.monaco-workbench .openide-chat-abtn .codicon[class*='codicon-'] { font-size: 12px; color: inherit; }
+.openide-chat-abtn:hover { background: var(--oi-border-soft); color: var(--oi-text); }
+.openide-chat-abtn.primary {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	font-weight: 500;
+}
+.openide-chat-abtn.primary:hover { background: var(--vscode-button-hoverBackground); color: var(--vscode-button-foreground); }
+.openide-chat-abtn.deny:hover { color: var(--oi-danger); background: color-mix(in srgb, var(--oi-danger) 12%, transparent); }
+.openide-chat-abtn:disabled { opacity: 0.45; cursor: default; background: transparent; }
+
+.openide-chat-approval-actions.hidden { display: none; }
+/* The answer replaces the offer: a glyph and a sentence, on the muted text colour so the decided
+   card settles into the transcript instead of holding attention like a pending question. */
+.openide-chat-approval-status:not(:empty) {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 6px;
+	color: var(--oi-text-muted);
+	font-size: 11.5px;
+}
+.openide-chat-approval-status > .codicon { font-size: 12px; color: var(--openide-green, #2b9771); }
+.openide-chat-approval-status.denied > .codicon { color: var(--openide-red, var(--vscode-errorForeground)); }
+.openide-chat-approval.decided { opacity: 0.75; }

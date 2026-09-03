@@ -1,0 +1,34 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Dev-only placeholder for a content kind with no part. It has no webview counterpart on purpose:
+   the webview never had this failure mode, and this row must never be mistaken for product UI.
+   Hence the dashed border and the warning tone — it reads as scaffolding, not as a card. */
+.openide-chat-unrendered {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 3px 0;
+	padding: 4px 8px;
+	border: 1px dashed var(--oi-warn, var(--vscode-editorWarning-foreground));
+	border-radius: var(--oi-radius-md);
+	background: color-mix(in srgb, var(--oi-warn, var(--vscode-editorWarning-foreground)) 8%, transparent);
+	color: var(--oi-warn, var(--vscode-editorWarning-foreground));
+	font-size: 11px;
+	line-height: 1.4;
+}
+
+.openide-chat-unrendered .codicon {
+	flex: 0 0 auto;
+	font-size: 12px;
+}
+
+/* R3: the list is `supportDynamicHeights` with `horizontalScrolling: false`, so a kind name long
+   enough to overflow must wrap rather than widen the row — one wide row stretches the whole list. */
+.openide-chat-unrendered-text {
+	min-width: 0;
+	overflow-wrap: anywhere;
+	font-family: var(--oi-font-mono, var(--vscode-editor-font-family, monospace));
+}

@@ -1,0 +1,271 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* The update popover, in OpenIDE's surface language.
+ *
+ * It is written against the `--oi-*` tokens from `openideAgent/browser/openideSurfaceCss.ts`,
+ * which `OpenideDialogsContribution` installs at BlockRestore -- before anything can put a hover
+ * on screen -- so they are always defined by the time this renders. Every token here carries a
+ * `--vscode-*` fallback anyway: the hover can be summoned from the title bar of an auxiliary
+ * window, and a surface that loses its palette should degrade to the theme, not to unstyled text.
+ *
+ * The card supplies its own padding and NOT its own frame. An element handed to the hover service
+ * lands in `.hover-contents.html-hover-contents`, which upstream deliberately leaves unpadded
+ * (`hoverWidget.css:29` pads only the :not() case), while the rounded, bordered, `overflow:hidden`
+ * box around it belongs to `.monaco-hover`. A second radius and a second ground in here would draw
+ * a card inside a card, misaligned by a pixel at every corner. */
+.update-tooltip {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	padding: 14px;
+	min-width: 320px;
+	max-width: 372px;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	font-family: var(--oi-font, var(--vscode-font-family));
+	font-size: var(--oi-text-sm, 12px);
+	line-height: 1.5;
+}
+
+/* Header ------------------------------------------------------------------------------------ */
+
+.update-tooltip .header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.update-tooltip .header .title {
+	font-size: var(--oi-text-lg, 14px);
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	color: var(--oi-text, var(--vscode-foreground));
+}
+
+/* Product block ----------------------------------------------------------------------------- */
+
+/* A framed row, not four loose lines. The frame is what separates "which build you are on" from
+   the state message underneath, which is the only part that changes between checks. */
+.update-tooltip .product-info {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 10px;
+	border: 1px solid var(--oi-border-soft, rgba(128, 128, 128, 0.14));
+	border-radius: var(--oi-radius-md, 6px);
+	background: var(--oi-tint-1, rgba(128, 128, 128, 0.04));
+}
+
+/* Masked over the foreground rather than drawn as an image. The product mark is a dark figure, so
+   as a plain background it disappears into a dark theme -- and as a light one into a light theme.
+   A mask makes it the text colour, which is right in both, and in high contrast. */
+.update-tooltip .product-logo {
+	width: 36px;
+	height: 36px;
+	flex: 0 0 36px;
+	background-color: var(--oi-text, var(--vscode-foreground));
+	-webkit-mask: url('../../../../browser/media/code-icon.svg') center / contain no-repeat;
+	mask: url('../../../../browser/media/code-icon.svg') center / contain no-repeat;
+}
+
+/* The product mark is a SILHOUETTE, so it wants the polarity of the theme and not its foreground:
+   `--vscode-foreground` is #cccccc on dark and #1f1f1f on light -- greys that make the mark look
+   faded next to real white or real black. The workbench puts exactly one of `vs` / `vs-dark` /
+   `hc-black` / `hc-light` on its container, which is the only reliable statement of polarity a
+   stylesheet gets (a theme's `type` never reaches CSS). The rule above stays as the default, so a
+   surface mounted outside that container still gets a legible mark instead of none. */
+.monaco-workbench.vs-dark .update-tooltip .product-logo,
+.monaco-workbench.hc-black .update-tooltip .product-logo {
+	background-color: #ffffff;
+}
+
+.monaco-workbench.vs .update-tooltip .product-logo,
+.monaco-workbench.hc-light .update-tooltip .product-logo {
+	background-color: #000000;
+}
+
+.update-tooltip .product-details {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	min-width: 0;
+}
+
+.update-tooltip .product-name {
+	font-size: var(--oi-text-md, 13px);
+	font-weight: 600;
+	color: var(--oi-text, var(--vscode-foreground));
+}
+
+.update-tooltip .product-version {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	font-size: var(--oi-text-xs, 11px);
+}
+
+/* Tabular numerals so a version or a date does not change width as its digits change -- these sit
+   in a fixed row next to the product name, and proportional digits make that row breathe. */
+.update-tooltip .product-version > span:first-child,
+.update-tooltip .product-release-date {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+
+.update-tooltip .product-release-date {
+	margin-top: 1px;
+	font-size: var(--oi-text-xs, 11px);
+}
+
+/* Revealed on hover/focus so the block reads as text at rest. Faded rather than removed: the
+   button keeps its box either way, so nothing reflows when it appears. */
+.update-tooltip .copy-version-button {
+	flex: 0 0 auto;
+	cursor: pointer;
+	opacity: 0;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	transition: opacity 0.1s;
+}
+
+.update-tooltip .product-version:hover .copy-version-button,
+.update-tooltip .product-version:focus-within .copy-version-button {
+	opacity: 1;
+}
+
+.update-tooltip .copy-version-button:hover,
+.update-tooltip .copy-version-button:focus-visible {
+	color: var(--oi-text, var(--vscode-foreground));
+}
+
+.monaco-workbench.monaco-reduce-motion .update-tooltip .copy-version-button {
+	transition: none;
+}
+
+/* Progress ---------------------------------------------------------------------------------- */
+
+.update-tooltip .progress-container {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.update-tooltip .progress-bar {
+	height: 4px;
+	border-radius: var(--oi-radius-circle, 9999px);
+	background-color: var(--oi-tint-3, rgba(128, 128, 128, 0.12));
+	overflow: hidden;
+}
+
+.update-tooltip .progress-fill {
+	height: 100%;
+	border-radius: inherit;
+	background-color: var(--vscode-progressBar-background);
+	transition: width 0.3s ease;
+}
+
+.monaco-workbench.monaco-reduce-motion .update-tooltip .progress-fill {
+	transition: none;
+}
+
+/* Tabular numerals are not cosmetic here: without them the percentage and the byte counts change
+   width every tick and the two ends of the row jitter against each other for the whole download. */
+.update-tooltip .progress-text,
+.update-tooltip .download-stats {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	font-size: var(--oi-text-xs, 11px);
+	font-variant-numeric: tabular-nums;
+}
+
+.update-tooltip .progress-text {
+	color: var(--oi-text, var(--vscode-foreground));
+}
+
+/* State message ----------------------------------------------------------------------------- */
+
+.update-tooltip .state-message {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	font-size: var(--oi-text-md, 13px);
+	color: var(--oi-text, var(--vscode-foreground));
+}
+
+.update-tooltip .state-message-icon.codicon[class*='codicon-'] {
+	font-size: 16px;
+	flex-shrink: 0;
+	margin-top: 1px;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+}
+
+.update-tooltip .state-message-icon.codicon.codicon-warning {
+	color: var(--oi-warn, var(--vscode-editorWarning-foreground));
+}
+
+.update-tooltip .state-message-icon.codicon.codicon-error {
+	color: var(--oi-danger, var(--vscode-editorError-foreground));
+}
+
+.update-tooltip .state-message-icon.codicon.codicon-check,
+.update-tooltip .state-message-icon.codicon.codicon-verified {
+	color: var(--oi-success, var(--vscode-charts-green));
+}
+
+/* Button bar -------------------------------------------------------------------------------- */
+
+/* Separated by a hairline rather than by whitespace: the buttons act on the machine (download,
+   restart), and the rule is what marks where reading ends and acting begins. */
+.update-tooltip .button-bar {
+	display: flex;
+	justify-content: flex-end;
+	align-items: center;
+	gap: 8px;
+	margin-top: -2px;
+	padding-top: 12px;
+	border-top: 1px solid var(--oi-border-soft, rgba(128, 128, 128, 0.14));
+}
+
+.update-tooltip .button-bar button {
+	display: inline-flex;
+	align-items: center;
+	min-height: 26px;
+	padding: 4px 12px;
+	border-radius: var(--oi-radius-md, 6px);
+	font-family: inherit;
+	font-size: var(--oi-text-sm, 12px);
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.update-tooltip .button-bar button:focus-visible {
+	outline: 1px solid var(--oi-focus, var(--vscode-focusBorder));
+	outline-offset: 1px;
+}
+
+.update-tooltip .release-notes-button {
+	border: 1px solid var(--oi-border, rgba(128, 128, 128, 0.24));
+	background-color: transparent;
+	color: var(--oi-text, var(--vscode-foreground));
+}
+
+.update-tooltip .release-notes-button:hover {
+	background-color: var(--oi-hover, var(--vscode-toolbar-hoverBackground));
+	border-color: var(--oi-border-strong, rgba(128, 128, 128, 0.34));
+}
+
+.update-tooltip .action-button {
+	border: 1px solid var(--vscode-button-border, transparent);
+	background-color: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	font-weight: 550;
+}
+
+.update-tooltip .action-button:hover {
+	background-color: var(--vscode-button-hoverBackground);
+}

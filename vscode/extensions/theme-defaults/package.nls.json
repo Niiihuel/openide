@@ -1,0 +1,16 @@
+{
+	"displayName": "OpenIDE Themes",
+	"description": "The light and dark themes OpenIDE ships with",
+	"light2026ThemeLabel": "OpenIDE Light 2026",
+	"dark2026ThemeLabel": "OpenIDE Dark 2026",
+	"darkPlusColorThemeLabel": "OpenIDE Dark+",
+	"darkModernThemeLabel": "OpenIDE Dark Modern",
+	"lightPlusColorThemeLabel": "OpenIDE Light+",
+	"lightModernThemeLabel": "OpenIDE Light Modern",
+	"darkColorThemeLabel": "OpenIDE Dark Classic",
+	"lightColorThemeLabel": "OpenIDE Light Classic",
+	"hcColorThemeLabel": "OpenIDE Dark High Contrast",
+	"lightHcColorThemeLabel": "OpenIDE Light High Contrast",
+	"minimalIconThemeLabel": "OpenIDE Minimal",
+	"openideBootstrapProductIconThemeLabel": "OpenIDE Bootstrap"
+}

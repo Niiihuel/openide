@@ -1,0 +1,234 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native plan editor. Transcribed from the stylesheet of the webview it replaced (removed with it)
+ *  onto the surface tokens; the diagram frame and chart classes come from the shared
+ *  browser/diagrams/media/openideDiagrams.css, the prose from the chat's markdown stylesheet.
+ *--------------------------------------------------------------------------------------------*/
+
+.openide-plan {
+	position: relative;
+	overflow: hidden;
+	outline: none;
+	background: var(--vscode-editor-background);
+	color: var(--vscode-foreground);
+	font-family: var(--vscode-font-family);
+	font-size: 13px;
+}
+
+.openide-plan > .monaco-scrollable-element {
+	width: 100%;
+	height: 100%;
+}
+
+/* `DomScrollableElement` measures THIS element: `clientHeight` against `scrollHeight`. Without a
+   height it is a plain auto-height block, the two are always equal, and the wrapper concludes
+   there is nothing to scroll — the plan simply got clipped by `.openide-plan`'s `overflow: hidden`
+   and the wheel did nothing. The same `height`/`box-sizing` pair is what makes the follow-to-bottom
+   check in `renderAll` mean anything, since it reads these same numbers. */
+.openide-plan-doc {
+	height: 100%;
+	box-sizing: border-box;
+	padding: 34px 32px 96px;
+}
+
+.openide-plan-wrap {
+	width: 100%;
+	max-width: var(--oi-column, 760px);
+	margin: 0 auto;
+}
+
+.openide-plan .hidden { display: none !important; }
+
+/* ---- prose: the chat's markdown, at the document scale of the settings page ---- */
+.openide-plan-prose { margin: 0; }
+.openide-plan-prose h1 { font-size: 25px; font-weight: 600; margin: 0 0 16px; line-height: 32px; letter-spacing: -0.01em; }
+.openide-plan-prose h2 { font-size: 17px; font-weight: 600; margin: 30px 0 12px; padding-bottom: 13px; border-bottom: 1px solid var(--oi-border); letter-spacing: -0.005em; }
+.openide-plan-prose h3 { font-size: 14px; font-weight: 620; margin: 18px 0 8px; }
+.openide-plan-prose h4, .openide-plan-prose h5, .openide-plan-prose h6 { font-size: 13px; font-weight: 620; margin: 14px 0 6px; }
+.openide-plan-prose p { margin: 8px 0; line-height: 1.6; }
+.openide-plan-prose ul, .openide-plan-prose ol { margin: 8px 0; padding-left: 22px; line-height: 1.6; }
+.openide-plan-prose li { margin: 3px 0; }
+.openide-plan-prose hr { border: none; border-top: 1px solid var(--oi-border); margin: 18px 0; }
+.openide-plan-prose blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid var(--oi-border-strong); color: var(--vscode-descriptionForeground); }
+.openide-plan-prose table { border-collapse: collapse; margin: 12px 0; font-size: 12.5px; width: 100%; display: block; overflow-x: auto; }
+.openide-plan-prose th, .openide-plan-prose td { border: 1px solid var(--oi-border); padding: 5px 10px; text-align: left; vertical-align: top; }
+.openide-plan-prose th { background: var(--oi-tint-2); font-weight: 620; }
+
+/* Diagram frames breathe like the webview's `.diagram` (14px); a fence the engine did not
+   understand shows its source, readable, exactly like the fallback did. */
+.openide-plan-md > .openide-diagram { margin: 14px 0; }
+.openide-plan-diagram-code {
+	position: relative;
+	margin: 12px 0;
+	background: var(--vscode-textCodeBlock-background, var(--oi-tint-2));
+	border: 1px solid var(--oi-border-soft);
+	border-radius: var(--oi-radius-md);
+	overflow: hidden;
+}
+.openide-plan-diagram-code pre {
+	margin: 0;
+	padding: 12px 14px;
+	overflow-x: auto;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 12.5px;
+	line-height: 1.5;
+	white-space: pre;
+}
+
+/* ---- follow strip: the model chip and the run button live in the breadcrumb ---- */
+/* A LINE, not a card. It was a bordered raised box the full width of the column, which gave a
+   passing status the visual weight of the plan itself — the first thing the eye landed on above
+   the title. What it has to say is one short sentence and one action, so it says it as text. */
+.openide-plan-follow {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	margin: 0 0 14px;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}
+.openide-plan-follow.error { color: var(--vscode-errorForeground); }
+.openide-plan-follow-spacer { flex: 1; }
+.openide-plan-follow .codicon { font-size: 13px; }
+.openide-plan-follow-toggle {
+	border: none;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+	padding: 2px 4px;
+	border-radius: var(--oi-radius-sm);
+}
+.openide-plan-follow-toggle:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+
+/* ---- tasks: "N To-dos" + "+ Nuevo", separator, rows with circles — flat, no card ---- */
+.openide-plan-tasks { margin: 22px 0 8px; }
+.openide-plan-tasks-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0 0 4px;
+	padding: 0 2px 8px;
+	border-bottom: 1px solid var(--oi-border-soft);
+}
+.openide-plan-tasks-count { font-size: 13px; font-weight: 500; color: var(--vscode-descriptionForeground); }
+.openide-plan-tasks-spacer { flex: 1; }
+.openide-plan-tasks-add {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 3px 10px;
+	border: 1px solid var(--oi-border-strong);
+	border-radius: var(--oi-radius-md);
+	background: var(--vscode-button-secondaryBackground, var(--oi-tint-2));
+	color: var(--vscode-foreground);
+	font-family: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+.openide-plan-tasks-add:hover { background: var(--vscode-toolbar-hoverBackground, var(--oi-border)); }
+.openide-plan-tasks-add .codicon { font-size: 12px; }
+
+.openide-plan-task {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 7px 4px;
+	border-radius: var(--oi-radius-md);
+}
+.openide-plan-task:hover { background: var(--oi-tint-1); }
+.openide-plan-task-circle {
+	flex: 0 0 auto;
+	margin-top: 1px;
+	background: none;
+	border: none;
+	padding: 0;
+	cursor: pointer;
+	color: var(--vscode-descriptionForeground);
+}
+.openide-plan-task.done .openide-plan-task-circle { color: var(--openide-green); }
+.openide-plan-task-circle .codicon { font-size: 16px; display: inline-block; }
+.openide-plan-task-text { flex: 1; line-height: 1.55; font-size: 13px; }
+.openide-plan-task.done .openide-plan-task-text { color: var(--vscode-descriptionForeground); text-decoration: line-through; }
+.openide-plan-task-input {
+	flex: 1;
+	background: transparent;
+	border: none;
+	outline: none;
+	color: var(--vscode-foreground);
+	font-family: inherit;
+	font-size: 13px;
+	line-height: 1.55;
+	padding: 0;
+}
+.openide-plan-task-input::placeholder { color: var(--vscode-descriptionForeground); }
+.openide-plan-task-del {
+	flex: 0 0 auto;
+	background: none;
+	border: none;
+	padding: 2px;
+	cursor: pointer;
+	color: var(--vscode-descriptionForeground);
+	opacity: 0;
+	border-radius: var(--oi-radius-sm);
+}
+.openide-plan-task:hover .openide-plan-task-del { opacity: 0.8; }
+.openide-plan-task-del:hover { opacity: 1; background: var(--oi-border-soft); }
+.openide-plan-task-del .codicon { font-size: 13px; }
+
+/* Change pulse. Deliberately NOT animating the strike-through: it would need the real line width
+   and breaks on two-line texts. The focus goes to the circle, plus a background wash that places
+   the row on screen. */
+.openide-plan-task.tk-just-done, .openide-plan-task.tk-just-undone, .openide-plan-task.tk-just-added { animation: openide-plan-wash 900ms ease-out; }
+.openide-plan-task.tk-just-done .openide-plan-task-circle .codicon { animation: openide-plan-pop 480ms cubic-bezier(.34, 1.56, .64, 1); }
+.openide-plan-task.tk-just-undone .openide-plan-task-circle .codicon { animation: openide-plan-pop-out 380ms ease-out; }
+.openide-plan-task.tk-just-added { animation: openide-plan-wash 900ms ease-out, openide-plan-slide 320ms cubic-bezier(.22, .61, .36, 1); }
+@keyframes openide-plan-wash {
+	0% { background: color-mix(in srgb, var(--openide-green) 22%, transparent); }
+	100% { background: transparent; }
+}
+@keyframes openide-plan-pop { 0% { transform: scale(.4); opacity: .3; } 60% { transform: scale(1.28); opacity: 1; } 100% { transform: scale(1); } }
+@keyframes openide-plan-pop-out { 0% { transform: scale(1.2); } 100% { transform: scale(1); } }
+@keyframes openide-plan-slide { 0% { opacity: 0; transform: translateY(-6px); } 100% { opacity: 1; transform: none; } }
+
+/* ---- drafting: skeleton bars with shimmer + writing caret ---- */
+@keyframes openide-plan-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.openide-plan-skeleton { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 4px; }
+.openide-plan-sk-line {
+	height: 11px;
+	border-radius: var(--oi-radius-sm);
+	background: linear-gradient(90deg,
+		var(--vscode-editorWidget-border, var(--oi-border-soft)) 25%,
+		var(--vscode-editor-inactiveSelectionBackground, var(--oi-border-strong)) 37%,
+		var(--vscode-editorWidget-border, var(--oi-border-soft)) 63%);
+	background-size: 200% 100%;
+	animation: openide-plan-shimmer 1.9s linear infinite;
+}
+/* The title is taller and shorter: without it the skeleton does not read as a document. */
+.openide-plan-sk-line.sk-title { height: 22px; width: 62%; border-radius: var(--oi-radius-sm); margin-bottom: 6px; }
+.openide-plan-sk-line.sk-heading { height: 14px; width: 34%; margin-top: 10px; }
+/* Uneven widths: a block of equal bars reads as a table, not as prose. */
+.openide-plan-sk-line.w95 { width: 95%; }
+.openide-plan-sk-line.w88 { width: 88%; }
+.openide-plan-sk-line.w72 { width: 72%; }
+.openide-plan-sk-line.w60 { width: 60%; }
+.openide-plan-caret {
+	display: inline-block;
+	width: 7px;
+	height: 1.05em;
+	margin-left: 3px;
+	vertical-align: text-bottom;
+	background: var(--vscode-editorCursor-foreground, var(--vscode-foreground));
+	opacity: .75;
+	animation: openide-plan-caret 1.05s steps(1) infinite;
+}
+@keyframes openide-plan-caret { 0%, 49% { opacity: .75; } 50%, 100% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-plan-task.tk-just-done, .openide-plan-task.tk-just-undone, .openide-plan-task.tk-just-added,
+	.openide-plan-task.tk-just-done .openide-plan-task-circle .codicon, .openide-plan-task.tk-just-undone .openide-plan-task-circle .codicon { animation-duration: 1ms; }
+	.openide-plan-sk-line { animation: none; }
+	.openide-plan-caret { animation: none; }
+}

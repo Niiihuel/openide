@@ -1,0 +1,35 @@
+name: Promote OpenIDE Stable
+on:
+  workflow_dispatch:
+    inputs:
+      tag: { description: 'Signed draft tag (vX.Y.Z)', required: true }
+permissions: { contents: write }
+jobs:
+  promote:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        # None of these jobs push: without this the checkout token is written into `.git/config`
+        # and can travel inside an artifact.
+        with: { persist-credentials: false }
+      - name: Verify complete signed release
+        # The tag arrives through `env`, NOT interpolated into the script. `${{ }}` expands while
+        # the shell is being ASSEMBLED, before a single line runs, so the regex check below arrives
+        # too late: a value containing a quote would already have closed the assignment and injected
+        # its own commands into the workflow that publishes releases. Through `env` the value is
+        # data to bash, never part of the program, and then the regex is what decides.
+        env:
+          GH_TOKEN: '${{ github.token }}'
+          INPUT_TAG: '${{ inputs.tag }}'
+        run: |
+          set -euo pipefail
+          tag="$INPUT_TAG"; [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release view "$tag" --json isDraft,isPrerelease --jq 'select(.isDraft == true and .isPrerelease == false)' >/dev/null
+          assets=$(gh release view "$tag" --json assets --jq '[.assets[].name]')
+          # PLATFORM COUNT: mirrors the build matrix of release-openide.yml — every row, whether or
+          # not it feeds the updater, because this checks what people can DOWNLOAD. macOS is out
+          # until the signing keychain is provisioned; add darwin-x64 and darwin-arm64 back
+          # together with it, or a release with no mac build gets promoted as if it were complete.
+          # win32-arm64 is out too, for cost rather than tooling — see the matrix comment there.
+          for required in linux-x64 linux-arm64 win32-x64; do jq -e --arg p "$required" 'any(.[]; contains($p))' <<<"$assets" >/dev/null; done
+          gh release edit "$tag" --draft=false --latest

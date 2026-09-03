@@ -1,0 +1,26 @@
+#!/bin/bash
+#
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License. See License.txt in the project root for license information.
+
+rm -f /usr/bin/@@NAME@@
+
+# Uninstall the desktop entry
+if hash update-desktop-database 2>/dev/null; then
+	update-desktop-database
+fi
+
+# Update mimetype database for removed workspace mimetype
+if hash update-mime-database 2>/dev/null; then
+	update-mime-database /usr/share/mime
+fi
+
+# Upstream removes Microsoft's apt source and signing key here, mirroring the postinst that had
+# added them. OpenIDE's postinst adds NEITHER, so removing them would delete files this package
+# never owned -- uninstalling OpenIDE would silently break a real VS Code install sitting next to
+# it. Nothing to undo, so nothing is removed.
+
+if [ "$1" = "purge" ] && [ -e '/usr/share/debconf/confmodule' ]; then
+	. /usr/share/debconf/confmodule
+	db_purge
+fi

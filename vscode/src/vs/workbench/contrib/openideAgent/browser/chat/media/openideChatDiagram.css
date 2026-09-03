@@ -1,0 +1,32 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat: the diagram row.
+ *
+ *  The frame, the full-screen button and every chart class live in the SHARED stylesheet
+ *  (browser/diagrams/media/openideDiagrams.css) because the plan viewer draws the same pictures.
+ *  What is left here is the row's own concern: the fallback for a fence the engine does not
+ *  understand, transcribed from the webview's `.codewrap` / `pre.code`
+ * minus the copy button, which belongs to the markdown code
+ *  block and not to a diagram that failed to parse.
+ *--------------------------------------------------------------------------------------------*/
+
+.openide-chat-diagram-code {
+	position: relative;
+	margin: 6px 0;
+	background: var(--oi-tint-2);
+	border: 1px solid var(--oi-border);
+	border-radius: 2px;
+	overflow: hidden;
+}
+
+/* The fence scrolls HERE. The chat list runs with horizontalScrolling: false, so a long mermaid
+   line that widened this row would widen every row in the transcript. */
+.openide-chat-diagram-code pre {
+	margin: 0;
+	padding: 8px 10px;
+	overflow-x: auto;
+	background: transparent;
+	border: none;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 12px;
+	white-space: pre;
+}

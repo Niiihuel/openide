@@ -1,0 +1,5 @@
+{
+  "comment": "Files with comments still awaiting translation to English. This is a ratchet: a file may never exceed its budget. Lower the numbers as you translate, and drop the entry when it reaches zero. Regenerate with: node dev/audit-comment-language.mjs --update",
+  "totalPending": 0,
+  "pending": []
+}

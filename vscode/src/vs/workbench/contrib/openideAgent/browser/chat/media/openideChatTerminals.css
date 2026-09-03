@@ -1,0 +1,153 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat: the background terminals tray.
+ *
+ *  TRANSCRIBED from the chat webview this replaced (removed when the chat became native): every
+ *  literal below comes from its `<style>`, because the native chat had to be indistinguishable
+ *  from it.
+ *
+ *  The dock surface (:896-914), the head (:915-927) and the body (:939-944) are the SAME rules the
+ *  files tray already carries in openideChatFiles.css. They are restated here rather than shared
+ *  through a common class because in the webview they were one selector list covering four trays
+ *  (queue, subagents, files, terms), and reproducing that list needs the other two trays to exist
+ *  natively first. When the queue tray lands, these three blocks are what collapse into one.
+ *--------------------------------------------------------------------------------------------*/
+
+/* the removed chat webview (.terms-tray, sharing the selector list with .files-tray).
+   See the long note on `.openide-chat-files-tray`: the width belongs to the tray host and the
+   -10px bottom margin is what lets the composer card overlap the tray's lower edge. */
+.openide-chat-terms-tray {
+	position: relative;
+	z-index: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	width: 100%;
+	box-sizing: border-box;
+	margin: 0 0 -10px;
+	padding: 3px 7px 14px;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-md);
+	background: var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+	box-shadow: var(--oi-shadow-sm);
+}
+
+.openide-chat-terms-tray.hidden,
+.openide-chat-terms-tray .hidden {
+	display: none !important;
+}
+
+.openide-chat-terms-head {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-height: 20px;
+}
+
+/* the removed chat webview — `foreground`/500, not the dimmer generic dock toggle: it is a
+   heading. `nowrap` keeps "2 Background Terminals" from breaking across two lines in a narrow
+   dock, which would double the head's height. */
+.openide-chat-terms-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	flex: 0 0 auto;
+	min-width: 0;
+	white-space: nowrap;
+	padding: 0;
+	border: none;
+	background: transparent;
+	color: var(--vscode-foreground);
+	font-family: inherit;
+	font-size: 11.5px;
+	font-weight: 500;
+	cursor: pointer;
+}
+
+.openide-chat-terms-toggle .codicon {
+	flex: 0 0 auto;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.openide-chat-terms-count {
+	font-variant-numeric: tabular-nums;
+}
+
+/* The shimmer paints the text with a clipped gradient, so it overrides `color` by design. The
+   chevron beside it must NOT be swept — it is furniture, not activity — which is why the class
+   sits on the count and not on the toggle. */
+
+.openide-chat-terms-body {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	padding-top: 1px;
+}
+
+/* the removed chat webview (.dock-bg-row) */
+.openide-chat-terms-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	padding: 2px 3px;
+	margin: 0 -1px;
+	border-radius: var(--oi-radius-sm);
+	font-size: 11.5px;
+	cursor: pointer;
+}
+
+.openide-chat-terms-row:hover {
+	background: var(--oi-tint-2);
+}
+
+.openide-chat-terms-row > .codicon {
+	flex: 0 0 auto;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* the removed chat webview (.dock-bg-label) — the editor's mono face, because the row's content is
+   a shell command and a proportional face makes `npm run dev -- --port 3000` unreadable. */
+.openide-chat-terms-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11px;
+}
+
+/* the removed chat webview (.term-stop) — invisible until the row is hovered, so a list of
+   running servers is not a row of red buttons. `:focus-within` is the addition: opacity 0 alone
+   makes the button unreachable by keyboard, which the webview simply never handled. */
+.openide-chat-terms-stop {
+	width: 18px;
+	height: 18px;
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: none;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	opacity: 0;
+}
+
+.openide-chat-terms-row:hover .openide-chat-terms-stop,
+.openide-chat-terms-row:focus-within .openide-chat-terms-stop {
+	opacity: 1;
+}
+
+.openide-chat-terms-stop:hover {
+	background: var(--oi-border-soft);
+	color: var(--vscode-foreground);
+}
+
+.openide-chat-terms-stop .codicon {
+	font-size: 12px;
+}

@@ -1,0 +1,203 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Agent Changes.
+
+   Rows are 22px and the paddings are Source Control's, deliberately: this view sits in the same
+   bar, answering the neighbouring question, and a list of files that measures differently reads
+   as a different kind of thing. What is NOT borrowed is the section header, which carries the
+   agent's own mark and the dock's shimmer — that half belongs to the conversation, not to git. */
+
+.openide-cli-changes {
+	overflow-y: auto;
+	overflow-x: hidden;
+	user-select: none;
+}
+
+/* The empty state carries no rules here on purpose: it is the workbench's welcome view
+   (registered in openideAgent.contribution.ts), styled by browser/parts/views/media/views.css like
+   the Explorer's and Source Control's. The pane hides this list while the welcome is up. */
+
+/* ---- one section per conversation ---------------------------------------------------------- */
+
+.openide-cli-changes-section + .openide-cli-changes-section {
+	/* The separator does the sectioning, so the header needs no background of its own: two
+	   conversations must be tellable apart at a glance without the list turning into stripes. */
+	margin-top: 4px;
+	border-top: 1px solid var(--vscode-panel-border, var(--vscode-editorWidget-border));
+	padding-top: 4px;
+}
+
+.openide-cli-changes-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 26px;
+	padding: 2px 10px 2px 6px;
+	cursor: pointer;
+}
+
+.openide-cli-changes-header:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.openide-cli-changes-twistie {
+	flex: 0 0 auto;
+	width: 16px;
+	font-size: 14px;
+	color: var(--vscode-icon-foreground);
+	opacity: .8;
+}
+
+.openide-cli-changes-brand {
+	flex: 0 0 auto;
+	width: 14px;
+	height: 14px;
+	font-size: 10px;
+}
+
+/* Name over conversation title: two lines of very different weight, so the eye lands on the
+   agent first and only reads the title when it is looking for a specific one. */
+.openide-cli-changes-heading {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	flex: 1 1 auto;
+	line-height: 1.25;
+}
+
+.openide-cli-changes-agent {
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: .02em;
+	color: var(--vscode-foreground);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.openide-cli-changes-subtitle {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.openide-cli-changes-count {
+	flex: 0 0 auto;
+	min-width: 16px;
+	padding: 0 5px;
+	border-radius: var(--oi-radius-lg);
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+	font-size: 10px;
+	line-height: 15px;
+	text-align: center;
+}
+
+/* ONE state chip. The `aprox.` caveat lives in its tooltip rather than in a second label: it is
+   real, but two chips competing in a 26px header meant neither got read. */
+.openide-cli-changes-state {
+	flex: 0 0 auto;
+	font-size: 10px;
+	letter-spacing: .04em;
+	text-transform: uppercase;
+	white-space: nowrap;
+}
+
+.openide-cli-changes-state.state-typing {
+	color: var(--vscode-descriptionForeground);
+}
+
+.openide-cli-changes-state.state-waiting {
+	/* The only state that asks something of the user, so it is the only one that gets a colour
+	   with urgency in it. */
+	color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground));
+}
+
+.openide-cli-changes-state.state-done {
+	color: var(--vscode-descriptionForeground);
+	opacity: .7;
+}
+
+.openide-cli-changes-state.state-failed {
+	color: var(--vscode-editorError-foreground, var(--vscode-errorForeground));
+}
+
+/* The dock's shimmer, recipe for recipe (openideChatActivity.css). Redeclared here rather than
+   imported because this view renders with the chat dock closed, and a keyframe that lives in the
+   chat's stylesheet would resolve to no animation at all. */
+.openide-cli-changes-shimmer {
+	background: linear-gradient(90deg,
+		var(--vscode-descriptionForeground) 0%,
+		var(--vscode-descriptionForeground) 30%,
+		var(--vscode-chat-thinkingShimmer, var(--vscode-foreground)) 50%,
+		var(--vscode-descriptionForeground) 70%,
+		var(--vscode-descriptionForeground) 100%);
+	background-size: 400% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+	color: transparent;
+	animation: openide-cli-changes-shimmer-sweep 2s linear infinite;
+	/* No `will-change`: see openideChatActivity.css — the hint costs a re-uploaded layer per
+	   frame and composites nothing, because `background-position` is not a compositable property. */
+}
+
+@keyframes openide-cli-changes-shimmer-sweep {
+	0% { background-position: 120% 0; }
+	100% { background-position: -120% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-cli-changes-shimmer {
+		animation: none;
+		-webkit-text-fill-color: var(--vscode-foreground);
+		color: var(--vscode-foreground);
+	}
+}
+
+/* ---- file rows ----------------------------------------------------------------------------- */
+
+/* The row is `OpenideChatFileRow` (openideChatFiles.css), the primitive the chat paints; this
+   file only sets its metrics for a sidebar list: Source Control's 22px and left inset, so the
+   list measures like the neighbouring view's, and the chat's radius removed — a sidebar row is
+   a band, not a chip. The status letter and the ±N come from the primitive. */
+.openide-cli-changes .openide-cli-changes-row {
+	--oi-file-row-size: 13px;
+	min-height: 22px;
+	padding: 0 10px 0 22px;
+	margin: 0;
+	border-radius: 0;
+	width: auto;
+}
+.openide-cli-changes .openide-cli-changes-row:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+.openide-cli-changes .openide-cli-changes-row .openide-chat-file-name {
+	font-size: 13px;
+}
+/* The repo holds no earlier version of this file, so its diff shows everything. Marked, because
+   a diff that shows the whole file looks exactly like an agent that rewrote the whole file. */
+.openide-cli-changes-nobase {
+	flex: 0 0 auto;
+	font-size: 12px;
+	color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground));
+	opacity: .85;
+}
+
+/* ---- notes inside a section ---------------------------------------------------------------- */
+
+.openide-cli-changes-note {
+	padding: 3px 10px 5px 22px;
+	font-size: 11px;
+	line-height: 1.4;
+	color: var(--vscode-descriptionForeground);
+}
+
+.openide-cli-changes-warn {
+	color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground));
+}

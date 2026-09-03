@@ -1,0 +1,591 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import * as os from 'os';
+import * as crypto from 'crypto';
+import { IntervalTimer, timeout } from '../../../base/common/async.js';
+import { listenStream } from '../../../base/common/stream.js';
+import { CancellationToken, CancellationTokenSource } from '../../../base/common/cancellation.js';
+import { Emitter, Event } from '../../../base/common/event.js';
+import { isMacintosh, isWindows } from '../../../base/common/platform.js';
+import { getWindowsReleaseSync } from '../../../base/node/windowsVersion.js';
+import { IMeteredConnectionService } from '../../meteredConnection/common/meteredConnection.js';
+import { IConfigurationService } from '../../configuration/common/configuration.js';
+import { IEnvironmentMainService } from '../../environment/electron-main/environmentMainService.js';
+import { ILifecycleMainService, LifecycleMainPhase } from '../../lifecycle/electron-main/lifecycleMainService.js';
+import { ILogService } from '../../log/common/log.js';
+import { IProductService } from '../../product/common/productService.js';
+import { getOpenideVersion } from '../../product/common/openideVersion.js';
+import { asJson, IRequestService, NO_FETCH_TELEMETRY } from '../../request/common/request.js';
+import { parseOpenideUpdateManifest, OpenideUpdateArchitecture, OpenideUpdatePlatform, OpenideUpdateTarget } from '../common/openideUpdateManifest.js';
+import { verifyOpenideManifestSignature } from '../node/openideUpdateVerifier.js';
+import { StorageScope, StorageTarget } from '../../storage/common/storage.js';
+import { IApplicationStorageMainService } from '../../storage/electron-main/storageMainService.js';
+import { ITelemetryService } from '../../telemetry/common/telemetry.js';
+import { Architecture, AvailableForDownload, DisablementReason, IUpdate, IUpdateService, Platform, State, StateType, Target, UpdateType } from '../common/update.js';
+import * as semver from 'semver';
+
+const LAST_KNOWN_VERSION_STORAGE_KEY = 'abstractUpdateService/lastKnownVersion';
+const OPENIDE_HIGH_WATER_PREFIX = 'openideUpdate/highWater/';
+const OPENIDE_ROLLOUT_ID_KEY = 'openideUpdate/rolloutId';
+
+export interface IUpdateURLOptions {
+	readonly background?: boolean;
+	readonly internalOrg?: string;
+}
+
+export function createUpdateURL(productService: IProductService, quality: string, platform: Platform, architecture: Architecture, target?: Target): string {
+	if (target) {
+		return `${productService.updateUrl}/${quality}/${platform}/${architecture}/${target}/latest.json`;
+	} else {
+		return `${productService.updateUrl}/${quality}/${platform}/${architecture}/latest.json`;
+	}
+}
+
+/**
+ * Builds common headers for update requests, including those issued
+ * via Electron's auto-updater (e.g. setFeedURL({ url, headers })) and
+ * manual HTTP requests that bypass the auto-updater. The headers include
+ * OS version information which the update server uses for EOL detection.
+ *
+ * On macOS, the User-Agent includes the Darwin kernel version.
+ * On Windows, the User-Agent includes accurate Windows version from the registry.
+ */
+export function getUpdateRequestHeaders(productVersion: string): Record<string, string> | undefined {
+	if (isMacintosh) {
+		const darwinVersion = os.release();
+		return {
+			'User-Agent': `OpenIDE/${productVersion} Darwin/${darwinVersion}`
+		};
+	}
+
+	if (isWindows) {
+		const match = getWindowsReleaseSync().match(/^(\d+\.\d+)/);
+		if (match) {
+			return {
+				'User-Agent': `OpenIDE/${productVersion} Electron/${process.versions.electron} Windows NT ${match[1]}`
+			};
+		}
+	}
+
+	return undefined;
+}
+
+export type UpdateErrorClassification = {
+	owner: 'joaomoreno';
+	messageHash: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The hash of the error message.' };
+	comment: 'This is used to know how often OpenIDE updates have failed.';
+};
+
+export abstract class AbstractUpdateService implements IUpdateService {
+
+	declare readonly _serviceBrand: undefined;
+
+	protected quality: string | undefined;
+
+	private _state: State = State.Uninitialized;
+	protected _overwrite: boolean = false;
+	private _hasCheckedForOverwriteOnQuit: boolean = false;
+	private readonly overwriteUpdatesCheckInterval = new IntervalTimer();
+	private _internalOrg: string | undefined = undefined;
+
+	private readonly _onStateChange = new Emitter<State>();
+	readonly onStateChange: Event<State> = this._onStateChange.event;
+
+	get state(): State {
+		return this._state;
+	}
+
+	protected setState(state: State): void {
+		if (state.type === StateType.Updating) {
+			this.logService.trace('update#setState', state.type);
+		} else {
+			this.logService.info('update#setState', state.type);
+		}
+		this._state = state;
+		this._onStateChange.fire(state);
+
+		// Clear transient one-time properties from Idle state after delivering the event.
+		// This prevents new windows from seeing stale error/notAvailable messages.
+		if (state.type === StateType.Idle && (state.error || state.notAvailable)) {
+			this._state = State.Idle(state.updateType);
+		}
+
+		// Schedule 5-minute checks when in Ready state and overwrite is supported
+		if (this.supportsUpdateOverwrite) {
+			if (state.type === StateType.Ready) {
+				this.overwriteUpdatesCheckInterval.cancelAndSet(() => this.checkForOverwriteUpdates(), 5 * 60 * 1000);
+			} else {
+				this.overwriteUpdatesCheckInterval.cancel();
+			}
+		}
+	}
+
+	constructor(
+		@ILifecycleMainService protected readonly lifecycleMainService: ILifecycleMainService,
+		@IConfigurationService protected configurationService: IConfigurationService,
+		@IEnvironmentMainService protected environmentMainService: IEnvironmentMainService,
+		@IRequestService protected requestService: IRequestService,
+		@ILogService protected logService: ILogService,
+		@IProductService protected readonly productService: IProductService,
+		@ITelemetryService protected readonly telemetryService: ITelemetryService,
+		@IApplicationStorageMainService protected readonly applicationStorageMainService: IApplicationStorageMainService,
+		@IMeteredConnectionService protected readonly meteredConnectionService: IMeteredConnectionService,
+		protected readonly supportsUpdateOverwrite: boolean,
+	) {
+		lifecycleMainService.when(LifecycleMainPhase.AfterWindowOpen)
+			.finally(() => this.initialize());
+	}
+
+	/**
+	 * This must be called before any other call. This is a performance
+	 * optimization, to avoid using extra CPU cycles before first window open.
+	 * https://github.com/microsoft/vscode/issues/89784
+	 */
+	protected async initialize(): Promise<void> {
+		if (!this.environmentMainService.isBuilt) {
+			this.setState(State.Disabled(DisablementReason.NotBuilt));
+			return; // updates are never enabled when running out of sources
+		}
+
+		await this.trackVersionChange();
+
+		if (this.environmentMainService.disableUpdates) {
+			this.setState(State.Disabled(DisablementReason.DisabledByEnvironment));
+			this.logService.info('update#ctor - updates are disabled by the environment');
+			return;
+		}
+
+		if (!this.productService.updateUrl || !this.productService.commit || this.productService.applicationName === 'openide' && (!this.productService.openideUpdateKeyId || !this.productService.openideUpdatePublicKey || !Number.isSafeInteger(this.productService.openideUpdaterVersion) || this.productService.openideUpdaterVersion! < 1)) {
+			this.setState(State.Disabled(DisablementReason.MissingConfiguration));
+			this.logService.info('update#ctor - updates are disabled as there is no update URL');
+			return;
+		}
+
+		const updateMode = this.configurationService.getValue<'none' | 'manual' | 'start' | 'default'>('update.mode');
+		const updateModeInspection = this.configurationService.inspect<'none' | 'manual' | 'start' | 'default'>('update.mode');
+		const policyDisablesUpdates = updateModeInspection.policyValue !== undefined && !this.getProductQuality(updateModeInspection.policyValue);
+		const quality = this.getProductQuality(updateMode);
+
+		if (!quality) {
+			if (policyDisablesUpdates) {
+				this.setState(State.Disabled(DisablementReason.Policy));
+				this.logService.info('update#ctor - updates are disabled by policy');
+			} else {
+				this.setState(State.Disabled(DisablementReason.ManuallyDisabled));
+				this.logService.info('update#ctor - updates are disabled by user preference');
+			}
+			return;
+		}
+
+		if (!this.buildUpdateFeedUrl(quality, this.productService.commit!)) {
+			this.setState(State.Disabled(DisablementReason.InvalidConfiguration));
+			this.logService.info('update#ctor - updates are disabled as the update URL is badly formed');
+			return;
+		}
+
+		this.quality = quality;
+
+		this.setState(State.Idle(this.getUpdateType()));
+
+		await this.postInitialize();
+
+		if (updateMode === 'manual') {
+			this.logService.info('update#ctor - manual checks only; automatic updates are disabled by user preference');
+			return;
+		}
+
+		if (updateMode === 'start') {
+			this.logService.info('update#ctor - startup checks only; automatic updates are disabled by user preference');
+
+			// Check for updates only once after 30 seconds
+			setTimeout(() => this.checkForUpdates(false), 30 * 1000);
+		} else {
+			// Start checking for updates after 30 seconds
+			this.scheduleCheckForUpdates(30 * 1000).then(undefined, err => this.logService.error(err));
+		}
+	}
+
+	private async trackVersionChange(): Promise<void> {
+		await this.applicationStorageMainService.whenReady;
+
+		interface ILastKnownVersion {
+			readonly version: string;
+			readonly commit: string | undefined;
+			readonly timestamp: number;
+		}
+
+		let from: ILastKnownVersion | undefined;
+		const raw = this.applicationStorageMainService.get(LAST_KNOWN_VERSION_STORAGE_KEY, StorageScope.APPLICATION);
+		if (typeof raw === 'string') {
+			try {
+				from = JSON.parse(raw);
+			} catch (error) {
+				// ignore
+			}
+		}
+
+		const to: ILastKnownVersion = {
+			version: this.productService.version,
+			commit: this.productService.commit,
+			timestamp: Date.now(),
+		};
+
+		if (from?.commit === to.commit) {
+			return;
+		}
+
+		this.applicationStorageMainService.store(LAST_KNOWN_VERSION_STORAGE_KEY, JSON.stringify(to), StorageScope.APPLICATION, StorageTarget.MACHINE);
+
+		if (!from) {
+			return;
+		}
+
+		type VersionChangeEvent = {
+			fromVersion: string | undefined;
+			fromCommit: string | undefined;
+			fromVersionTime: number | undefined;
+			toVersion: string;
+			toCommit: string | undefined;
+			timeToUpdateMs: number | undefined;
+			updateMode: string | undefined;
+		};
+
+		type VersionChangeClassification = {
+			owner: 'dmitriv';
+			comment: 'Fired when VS Code detects a version change on startup.';
+			fromVersion: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The previous version of VS Code.' };
+			fromCommit: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The commit hash of the previous version.' };
+			fromVersionTime: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'Timestamp when the previous version was first detected.' };
+			toVersion: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The current version of VS Code.' };
+			toCommit: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The commit hash of the current version.' };
+			timeToUpdateMs: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; isMeasurement: true; comment: 'Milliseconds between the previous version install and this version install.' };
+			updateMode: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The update mode configured by the user.' };
+		};
+
+		this.telemetryService.publicLog2<VersionChangeEvent, VersionChangeClassification>('update:versionChanged', {
+			fromVersion: from.version,
+			fromCommit: from.commit,
+			fromVersionTime: from.timestamp,
+			toVersion: to.version,
+			toCommit: to.commit,
+			timeToUpdateMs: to.timestamp - from.timestamp,
+			updateMode: this.configurationService.getValue<string>('update.mode'),
+		});
+	}
+
+	private getProductQuality(updateMode: string): string | undefined {
+		return updateMode === 'none' ? undefined : this.productService.quality;
+	}
+
+	private scheduleCheckForUpdates(delay = 60 * 60 * 1000): Promise<void> {
+		return timeout(delay)
+			.then(() => this.checkForUpdates(false))
+			.then(() => {
+				// Check again after 1 hour
+				return this.scheduleCheckForUpdates(60 * 60 * 1000);
+			});
+	}
+
+	async checkForUpdates(explicit: boolean): Promise<void> {
+		this.logService.trace('update#checkForUpdates, state = ', this.state.type);
+
+		if (this.state.type !== StateType.Idle) {
+			return;
+		}
+
+		this.doCheckForUpdates(explicit);
+	}
+
+	async downloadUpdate(explicit: boolean): Promise<void> {
+		this.logService.trace('update#downloadUpdate, state = ', this.state.type);
+
+		if (this.state.type !== StateType.AvailableForDownload) {
+			return;
+		}
+
+		if (!explicit && this.meteredConnectionService.isConnectionMetered) {
+			this.logService.info('update#downloadUpdate - skipping download because connection is metered');
+			return;
+		}
+
+		await this.doDownloadUpdate(this.state);
+	}
+
+	protected async doDownloadUpdate(state: AvailableForDownload): Promise<void> {
+		// noop
+	}
+
+	async applyUpdate(): Promise<void> {
+		this.logService.trace('update#applyUpdate, state = ', this.state.type);
+
+		if (this.state.type !== StateType.Downloaded) {
+			return;
+		}
+
+		await this.doApplyUpdate();
+	}
+
+	protected async doApplyUpdate(): Promise<void> {
+		// noop
+	}
+
+	async quitAndInstall(): Promise<void> {
+		this.logService.trace('update#quitAndInstall, state = ', this.state.type);
+
+		if (this.state.type !== StateType.Ready) {
+			return undefined;
+		}
+
+		if (this.supportsUpdateOverwrite && !this._hasCheckedForOverwriteOnQuit) {
+			this._hasCheckedForOverwriteOnQuit = true;
+			const didOverwrite = await this.checkForOverwriteUpdates(true);
+
+			if (didOverwrite) {
+				this.logService.info('update#quitAndInstall(): overwrite update detected, postponing quitAndInstall');
+				return;
+			}
+		}
+
+		// Remember the Ready state so we can restore it if the quit is vetoed
+		const readyState = this.state;
+
+		this.setState(State.Restarting(this.state.update));
+		this.logService.trace('update#quitAndInstall(): before lifecycle quit()');
+
+		this.lifecycleMainService.quit(true /* will restart */).then(vetod => {
+			this.logService.trace(`update#quitAndInstall(): after lifecycle quit() with veto: ${vetod}`);
+			if (vetod) {
+				this.logService.info('update#quitAndInstall(): quit was vetoed, restoring Ready state');
+				this.setState(readyState);
+				return;
+			}
+
+			this.logService.trace('update#quitAndInstall(): running raw#quitAndInstall()');
+			this.doQuitAndInstall();
+		});
+
+		return Promise.resolve(undefined);
+	}
+
+	private async checkForOverwriteUpdates(explicit: boolean = false): Promise<boolean> {
+		if (this._state.type !== StateType.Ready) {
+			return false;
+		}
+
+		const pendingUpdateCommit = this._state.update.version;
+
+		if (!pendingUpdateCommit || pendingUpdateCommit === 'unknown') {
+			return false;
+		}
+
+		let isLatest: boolean | undefined;
+
+		try {
+			const cts = new CancellationTokenSource();
+			const timeoutPromise = timeout(2000).then(() => { cts.cancel(); return undefined; });
+			isLatest = await Promise.race([this.isLatestVersion(pendingUpdateCommit, cts.token), timeoutPromise]);
+			cts.dispose();
+		} catch (error) {
+			this.logService.warn('update#checkForOverwriteUpdates(): failed to check for updates, proceeding with restart');
+			this.logService.warn(error);
+			return false;
+		}
+
+		if (isLatest === false && this._state.type === StateType.Ready) {
+			this.logService.info('update#readyStateCheck: newer update available, restarting update machinery');
+
+			try {
+				await this.cancelPendingUpdate();
+			} catch (error) {
+				this.logService.error('update#checkForOverwriteUpdates(): failed to cancel pending update, aborting overwrite');
+				this.logService.error(error);
+				return false;
+			}
+
+			this._overwrite = true;
+			this.setState(State.Overwriting(this._state.update, explicit));
+			this.doCheckForUpdates(explicit, pendingUpdateCommit);
+			return true;
+		}
+
+		return false;
+	}
+
+	async isLatestVersion(commit?: string, token: CancellationToken = CancellationToken.None): Promise<boolean | undefined> {
+		if (!this.quality) {
+			return undefined;
+		}
+
+		const mode = this.configurationService.getValue<'none' | 'manual' | 'start' | 'default'>('update.mode');
+
+		if (mode === 'none' || mode === 'manual') {
+			return undefined;
+		}
+
+		const url = this.buildUpdateFeedUrl(this.quality, commit ?? this.productService.commit!, { internalOrg: this.getInternalOrg() });
+
+		if (!url) {
+			return undefined;
+		}
+
+		return this._isLatestVersion(url, false, token)
+			.then((result) => {
+				return Promise.resolve(result ? result.lastest : result);
+			})
+			.then(undefined, (error) => {
+				this.logService.error('update#isLatestVersion(): failed to check for updates');
+				this.logService.error(error);
+
+				return Promise.resolve(undefined);
+			});
+	}
+
+	private openideTarget(): OpenideUpdateTarget {
+		if (process.platform === 'linux') { return 'appimage'; }
+		if (process.platform === 'darwin') { return 'archive'; }
+		return this.productService.target === 'user' ? 'user' : this.productService.target === 'system' ? 'system' : this.productService.target === 'msi' ? 'msi' : 'archive';
+	}
+
+	private openideManifestQueue: Promise<void> = Promise.resolve();
+	protected async readSignedOpenideManifest(url: string, token: CancellationToken = CancellationToken.None): Promise<IUpdate | undefined> {
+		const keyId = this.productService.openideUpdateKeyId;
+		const publicKey = this.productService.openideUpdatePublicKey;
+		const updaterVersion = this.productService.openideUpdaterVersion;
+		if (!keyId || !publicKey || !updaterVersion) { throw new Error('Configuración de firma OpenIDE incompleta.'); }
+		const headers = getUpdateRequestHeaders(this.productService.version);
+		const [manifestContext, signatureContext] = await Promise.all([
+			this.requestService.request({ url, headers, callSite: NO_FETCH_TELEMETRY }, token),
+			this.requestService.request({ url: `${url}.minisig`, headers, callSite: NO_FETCH_TELEMETRY }, token),
+		]);
+		const readLimited = (context: typeof manifestContext, max: number) => new Promise<string>((resolve, reject) => {
+			const chunks: Buffer[] = []; let size = 0; let settled = false;
+			listenStream(context.stream, {
+				onData: chunk => { if (settled) { return; } size += chunk.byteLength; if (size > max) { settled = true; context.stream.destroy(); reject(new Error('Respuesta de update excede el límite permitido.')); return; } chunks.push(Buffer.from(chunk.buffer)); },
+				onError: error => { if (!settled) { settled = true; reject(error); } },
+				onEnd: () => { if (!settled) { settled = true; resolve(Buffer.concat(chunks).toString('utf8')); } },
+			});
+		});
+		const [manifestText, signatureText] = await Promise.all([readLimited(manifestContext, 64 * 1024), readLimited(signatureContext, 4 * 1024)]);
+		if (!manifestText || !signatureText) { throw new Error('Manifest o firma OpenIDE vacío.'); }
+		verifyOpenideManifestSignature(Buffer.from(manifestText, 'utf8'), signatureText, keyId, publicKey);
+		await this.applicationStorageMainService.whenReady;
+		const feedIdentity = `${this.quality}/${process.platform}/${process.arch}/${this.openideTarget()}`;
+		const highestKey = `${OPENIDE_HIGH_WATER_PREFIX}${feedIdentity}`;
+		let highWater: { productVersion?: string; buildVersion?: string; sha256?: string } = {};
+		try { highWater = JSON.parse(this.applicationStorageMainService.get(highestKey, StorageScope.APPLICATION, '{}')); } catch { /* migración fail-safe */ }
+		const manifest = parseOpenideUpdateManifest(JSON.parse(manifestText), {
+			channel: this.quality as 'stable' | 'insider', platform: process.platform as OpenideUpdatePlatform,
+			architecture: process.arch as OpenideUpdateArchitecture, target: this.openideTarget(), currentVersion: getOpenideVersion(this.productService),
+			minimumUpdaterVersion: updaterVersion, highestSeenVersion: highWater.productVersion,
+			highestSeenBuildVersion: highWater.buildVersion, highestSeenArtifactSha256: highWater.sha256,
+		});
+		if (token.isCancellationRequested) { return undefined; }
+		this.applicationStorageMainService.store(highestKey, JSON.stringify({ productVersion: manifest.productVersion, buildVersion: manifest.buildVersion, sha256: manifest.artifact.sha256 }), StorageScope.APPLICATION, StorageTarget.MACHINE);
+		if (manifest.rollout && manifest.rollout.percentage < 100) {
+			let rolloutId = this.applicationStorageMainService.get(OPENIDE_ROLLOUT_ID_KEY, StorageScope.APPLICATION);
+			if (!rolloutId) { rolloutId = crypto.randomUUID(); this.applicationStorageMainService.store(OPENIDE_ROLLOUT_ID_KEY, rolloutId, StorageScope.APPLICATION, StorageTarget.MACHINE); }
+			let bucket = 0; for (const char of `${manifest.rollout.seed}:${rolloutId}`) { bucket = (bucket * 31 + char.charCodeAt(0)) >>> 0; }
+			if (bucket % 10000 >= manifest.rollout.percentage * 100) { return undefined; }
+		}
+		return { version: manifest.buildVersion, productVersion: manifest.productVersion, timestamp: Date.parse(manifest.publishedAt), url: manifest.artifact.url, sha256hash: manifest.artifact.sha256, size: manifest.artifact.size };
+	}
+
+	_isLatestVersion(url: string, explicit: boolean, token: CancellationToken = CancellationToken.None): Promise<{lastest: boolean, update: IUpdate} | undefined> {
+		if (this.productService.applicationName === 'openide') {
+			const operation = this.openideManifestQueue.then(() => token.isCancellationRequested ? undefined : this.readSignedOpenideManifest(url, token));
+			this.openideManifestQueue = operation.then(() => undefined, () => undefined);
+			return operation.then(update => update ? ({ lastest: this.state.type === StateType.Ready && update.version === this.state.update.version && update.productVersion === this.state.update.productVersion && update.sha256hash === this.state.update.sha256hash, update }) : undefined, error => {
+				if (String(error?.code ?? '') === 'rollback') { return undefined; }
+				throw error;
+			});
+		}
+		const headers = getUpdateRequestHeaders(this.productService.version);
+
+		this.logService.info('update#isLatestVersion() - checking update server', { url, headers });
+
+		return this.requestService.request({ url, headers, callSite: NO_FETCH_TELEMETRY }, CancellationToken.None)
+			.then<IUpdate | null>(asJson)
+			.then(update => {
+				if (!update || !update.url || !update.version || !update.productVersion) {
+					this.setState(State.Idle(UpdateType.Setup, undefined, explicit || undefined));
+
+					return Promise.resolve(undefined);
+				}
+
+				const fetchedVersion = /\d+\.\d+\.\d+\.\d+/.test(update.productVersion) ? update.productVersion.replace(/(\d+\.\d+\.\d+)\.\d+(\-\w+)?/, '$1$2') : update.productVersion.replace(/(\d+\.\d+\.)0+(\d+)(\-\w+)?/, '$1$2$3');
+				const currentVersion = getOpenideVersion(this.productService).replace(/(\d+\.\d+\.)0+(\d+)(\-\w+)?/, '$1$2$3');
+
+				this.logService.info(`update#isLatestVersion() - found: ${fetchedVersion}, current: ${currentVersion}`);
+
+				const lastest = semver.compareBuild(currentVersion, fetchedVersion) >= 0;
+
+				const minReleaseAge = this.configurationService.getValue<number>('update.minReleaseAge');
+
+				if(minReleaseAge === 0) {
+					return Promise.resolve({ lastest, update });
+				}
+
+				const releaseDate = update.timestamp ? new Date(Number.parseInt(String(update.timestamp), 10)) : null;
+
+				this.logService.info(`update#isLatestVersion() - releaseDate: ${releaseDate}`);
+
+				if(!releaseDate || isNaN(releaseDate.getTime())) {
+					return Promise.resolve(undefined);
+				}
+
+				const age = Math.round(Math.abs(Date.now() - releaseDate.getTime()) / (1000 * 60 * 60));
+
+				this.logService.info(`update#isLatestVersion() - releaseAge: ${age}, minReleaseAge: ${minReleaseAge}`);
+
+				if(age >= minReleaseAge) {
+					return Promise.resolve({ lastest, update });
+				}
+				else {
+					return Promise.resolve(undefined);
+				}
+			})
+	}
+
+	async cancelDownload(): Promise<void> { await this.cancelPendingUpdate(); }
+
+	async recoverPreviousVersion(): Promise<void> { /* platform adapters opt in */ }
+
+	async _applySpecificUpdate(packagePath: string): Promise<void> {
+		// noop
+	}
+
+	async setInternalOrg(internalOrg: string | undefined): Promise<void> {
+		if (this._internalOrg === internalOrg) {
+			return;
+		}
+
+		this.logService.info('update#setInternalOrg', internalOrg);
+		this._internalOrg = internalOrg;
+	}
+
+	protected getInternalOrg(): string | undefined {
+		return this._internalOrg;
+	}
+
+	protected getUpdateType(): UpdateType {
+		return UpdateType.Archive;
+	}
+
+	protected doQuitAndInstall(): void {
+		// noop
+	}
+
+	protected async postInitialize(): Promise<void> {
+		// noop
+	}
+
+	protected async cancelPendingUpdate(): Promise<void> {
+		// noop
+	}
+
+	protected abstract buildUpdateFeedUrl(quality: string, commit: string, options?: IUpdateURLOptions): string | undefined;
+	protected abstract doCheckForUpdates(explicit: boolean, pendingCommit?: string): void;
+}

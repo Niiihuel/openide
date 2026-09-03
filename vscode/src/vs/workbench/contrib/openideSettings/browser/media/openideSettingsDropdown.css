@@ -1,0 +1,74 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — the Settings dropdown trigger. The list it opens is the shared popover
+ *  (openideChatMenus.css); only the closed control lives here.
+ *
+ *  A compact pill sized to its value, not a full-width select: the control column of a row is as
+ *  wide as the control, so a short value ("GitHub") reads as a chip and a long one grows with it.
+ *--------------------------------------------------------------------------------------------*/
+.openide-settings-dropdown {
+	display: inline-flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	width: auto;
+	min-width: 0;
+	max-width: 100%;
+	height: var(--oi-row-md);
+	padding: 0 8px 0 10px;
+	box-sizing: border-box;
+	border: 1px solid var(--oi-border-soft);
+	border-radius: var(--oi-radius-md);
+	background: var(--oi-raised);
+	color: var(--vscode-foreground);
+	font: inherit;
+	font-size: var(--oi-text-md);
+	text-align: left;
+	cursor: pointer;
+}
+.openide-settings-dropdown:hover {
+	border-color: var(--oi-border);
+}
+.openide-settings-dropdown:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+.openide-settings-dropdown.disabled {
+	color: var(--vscode-descriptionForeground);
+	cursor: default;
+}
+.openide-settings-dropdown-label {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+/* Two 10px chevrons stacked into one 16px-tall mark: the codicon set has no chevron-up-down, and
+   the fold/unfold pair carries a bar through the middle. */
+.openide-settings-dropdown-chevron {
+	flex: 0 0 auto;
+	display: inline-flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	width: 12px;
+	height: 16px;
+	color: var(--vscode-descriptionForeground);
+}
+.monaco-workbench .openide-settings-dropdown .openide-settings-dropdown-chevron .codicon[class*="codicon-"] {
+	font-size: 10px;
+	line-height: 7px;
+	height: 7px;
+	color: inherit;
+}
+
+/* The list stays compact whatever the enum descriptions say: Cursor's is a short column under the
+   pill, and a menu that grows to the description's length walks across half the page. The detail
+   column ellipsizes inside `.openide-menu-detail`. */
+.openide-menu.openide-menu-settings-dropdown {
+	min-width: 160px;
+	max-width: min(320px, calc(100vw - 16px));
+}
+.openide-menu.openide-menu-settings-dropdown .openide-menu-detail {
+	max-width: 50%;
+}

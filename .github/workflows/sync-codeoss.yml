@@ -1,0 +1,60 @@
+name: Sync Code OSS
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit o tag de microsoft/vscode (vacío = stable actual)
+        required: false
+        type: string
+  schedule:
+    - cron: '23 8 * * 1'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name openide-bot
+          git config user.email openide-bot@users.noreply.github.com
+          git switch -c "sync/codeoss-${GITHUB_RUN_ID}"
+
+      - name: Integrate Code OSS delta
+        id: integrate
+        env:
+          TARGET_REF: ${{ inputs.ref }}
+        run: ./dev/sync-codeoss.sh "${TARGET_REF}"
+
+      - name: Install dependencies
+        working-directory: vscode
+        run: npm ci
+
+      - name: Compile
+        working-directory: vscode
+        run: npm run compile
+
+      - name: Open synchronization PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --cached --quiet; then
+            echo "No hay una versión nueva de Code OSS."
+            exit 0
+          fi
+          CODE_OSS_VERSION=$(jq -r '.codeOss.version' openide-version.json)
+          BRANCH=$(git branch --show-current)
+          git commit -m "chore(codeoss): sync ${CODE_OSS_VERSION}"
+          git push --set-upstream origin "${BRANCH}"
+          gh pr create \
+            --title "chore(codeoss): sync ${CODE_OSS_VERSION}" \
+            --body "Integra el delta de Code OSS ${CODE_OSS_VERSION} sobre la fuente canónica de OpenIDE. El compile directo terminó correctamente."

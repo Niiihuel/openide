@@ -1,0 +1,322 @@
+name: Release OpenIDE
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+# Nothing by default: every job asks for what it needs. `contents: write` up here also handed it
+# to the `build` job, which compiles third-party code (npm install runs scripts) and only needs to
+# READ. A write-capable token in a job that executes dependencies is the difference between a
+# compromised build and a compromised repository.
+permissions: {}
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `feed: yes` = this build goes into the signed update feed, so the IDE can update itself
+          # to it. Linux arm64 is built and downloadable (deb, rpm, tarball) but NOT in the feed:
+          # on Linux the updater only replaces an AppImage (`updateService.linux.ts`), and the
+          # AppImage is only produced for x64 (`build/linux/prepare_assets.sh` forces
+          # SHOULD_BUILD_APPIMAGE=no on every other architecture). Putting it in the feed would
+          # advertise an update that cannot install.
+          - { os: ubuntu-22.04, platform: linux, arch: x64, target: appimage, feed: 'yes' }
+          - { os: ubuntu-24.04-arm, platform: linux, arch: arm64, target: archive, feed: 'no' }
+          - { os: windows-2022, platform: win32, arch: x64, target: user, feed: 'yes' }
+          # windows-11-arm is commented out, not deleted, for the same reason macOS is: it works,
+          # it just costs more than it returns right now. It was the single most expensive row in
+          # the matrix — ~68 minutes billed at the 2x Windows rate, ~136 of the ~310 minutes a
+          # release consumed, against a private-repo allowance of 2000/month. Turn it back on when
+          # someone actually asks for Windows on ARM, and raise the PLATFORM COUNT below and the
+          # required list in promote-openide.yml back to include win32-arm64.
+          # - { os: windows-11-arm, platform: win32, arch: arm64, target: user, feed: 'yes' }
+          # macOS is commented out, not deleted: `dev/sign-macos.sh` works, but signing needs the
+          # Developer ID identity inside a keychain and a notarytool profile, and NOTHING here
+          # provisions either — the script assumes a Mac already configured by hand. Since `publish`
+          # needs every matrix job, leaving these in would fail the two mac jobs and block the
+          # Linux and Windows releases that did build.
+          #
+          # To turn macOS back on: uncomment these two rows, add the provisioning step before
+          # "Native sign and notarize" (import the .p12 with `security import`, then
+          # `xcrun notarytool store-credentials`), and raise the platform counts flagged with
+          # PLATFORM COUNT below and in promote-openide.yml.
+          # - { os: macos-14, platform: darwin, arch: arm64, target: archive }
+          # - { os: macos-13, platform: darwin, arch: x64, target: archive }
+    runs-on: ${{ matrix.os }}
+    # A build that finishes takes about 40 minutes; the longest so far was Windows x64 at 43. This
+    # is not a deadline for a slow build, it is a bound on a stuck one. The x64 Linux build of
+    # v1.121.1 went silent inside `bundle-vscode` and was killed by the runner an hour later with
+    # "The runner has received a shutdown signal" -- no error, no failing step, and six hours of
+    # default budget it could have burned through instead. A hang should cost minutes and say so.
+    timeout-minutes: 120
+    env:
+      APP_NAME: OpenIDE
+      ASSETS_REPOSITORY: ${{ github.repository }}
+      BINARY_NAME: openide
+      GH_REPO_PATH: ${{ github.repository }}
+      VSCODE_ARCH: ${{ matrix.arch }}
+      VSCODE_QUALITY: stable
+      # At JOB level, not on one step. `prepare_assets.sh` dispatches on this to pick the platform's
+      # packager, and it was only set on the build step: the packaging step fell through to the
+      # `else` branch and every Windows and macOS runner tried to build a Linux .deb, dying on
+      # `fakeroot is not recognized`. It describes the matrix row, so it belongs to the whole job.
+      OS_NAME: ${{ matrix.platform == 'win32' && 'windows' || matrix.platform == 'darwin' && 'osx' || 'linux' }}
+      OPENIDE_UPDATE_PRIVATE_KEY_CONTENT: ${{ secrets.OPENIDE_UPDATE_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        # The checkout token is written into `.git/config` and this job uploads artifacts: without
+        # this a credential can travel inside one. Nothing here pushes, so it is not needed.
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        # `package-manager-cache: false` in the pipeline that SIGNS the binaries. setup-node v6
+        # restores the npm cache by default, and a cache is writable from any branch of the
+        # repository: a push to any branch could leave a poisoned package there that ends up inside
+        # the binary we then sign. In CI a cache is speed; here it is attack surface, and a release
+        # is built once per version.
+        with: { node-version-file: .nvmrc, package-manager-cache: false }
+      # Every secret the platform's signing script actually reads, checked BEFORE a two-hour build
+      # instead of after it. It used to check two of the five and name none of the missing ones, so
+      # a release died deep inside `codesign` with "Missing APPLE_TEAM_ID" after the whole compile.
+      - name: Validate signing prerequisites
+        shell: bash
+        env:
+          APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_PROFILE }}
+          WINDOWS_SIGNING_CERT: ${{ secrets.WINDOWS_SIGNING_CERT }}
+          WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" ]] || missing+=(OPENIDE_UPDATE_PRIVATE_KEY)
+          if [[ '${{ matrix.platform }}' == darwin ]]; then
+            for name in APPLE_DEVELOPER_ID APPLE_TEAM_ID APPLE_NOTARY_PROFILE; do
+              [[ -n "${!name}" ]] || missing+=("$name")
+            done
+          fi
+          # Windows signing is optional: without a certificate the installer ships unsigned and the
+          # auto-update still works (the updater checks the manifest's Ed25519 signature and the
+          # artifact's SHA-256, not Authenticode). Only a HALF-configured setup is refused, because
+          # that one produces unsigned installers while looking configured.
+          if [[ '${{ matrix.platform }}' == win32 && -n "$WINDOWS_SIGNING_PASSWORD" && -z "$WINDOWS_SIGNING_CERT" ]]; then
+            missing+=(WINDOWS_SIGNING_CERT)
+          fi
+          if [[ '${{ matrix.platform }}' == win32 && -n "$WINDOWS_SIGNING_CERT" && -z "$WINDOWS_SIGNING_PASSWORD" ]]; then
+            missing+=(WINDOWS_SIGNING_PASSWORD)
+          fi
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "Missing repository secrets for ${{ matrix.platform }}: ${missing[*]}" >&2
+            exit 1
+          fi
+      - name: Materialize update signing key
+        shell: bash
+        run: printf '%s' "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" > "$RUNNER_TEMP/openide-update.pem" && chmod 600 "$RUNNER_TEMP/openide-update.pem"
+      - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update -y && sudo apt-get install -y libkrb5-dev
+
+      # Two Linux runners died mid-build with no logs uploaded — the shape of a runner that ran out
+      # of room, not of a build that failed. A GitHub runner starts with ~14 GB free, and this job
+      # produces out-build, out-vscode, out-vscode-min, the REH bundles, the packaged app and then
+      # a deb, an rpm and an AppImage on top. The images ship ~30 GB of toolchains this build never
+      # touches, so reclaiming them is free headroom.
+      - name: Free disk space
+        if: matrix.platform == 'linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean || true
+          df -h /
+
+      # Both Linux builds die in the same place -- the last line of `bundle-vscode`, the peak of the
+      # whole build -- and neither dies reliably: arm64 failed two runs out of three, x64 one out of
+      # two, with no error, just "The runner has received a shutdown signal". That is the shape of
+      # the kernel killing the runner agent to reclaim memory, and it is a coin flip because 7.7 GB
+      # is right at the edge of what this build needs at that instant.
+      #
+      # Lowering Node's heap ceiling did not help: the pressure is the whole gulp process tree plus
+      # page cache, not one process overshooting its own limit.
+      #
+      # Swap does not make the build faster -- it makes the peak survivable, trading a few slow
+      # minutes for not losing a 40-minute job. The image ships 3 GB of it; this adds 12 GB on /mnt,
+      # which is the large scratch disk and has the room to spare.
+      #
+      # The real fix is a bigger runner: GitHub gives private repositories 7 GB and public ones 16.
+      # This is what makes the private build finish in the meantime.
+      - name: Enlarge swap
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SWAPFILE=/mnt/openide-swap
+          [[ -d /mnt ]] || SWAPFILE=/openide-swap
+          sudo rm -f "${SWAPFILE}"
+          # Added alongside the image's own swap rather than replacing it -- `swapoff -a` first would
+          # only shrink what is available if this step then failed.
+          sudo fallocate -l 12G "${SWAPFILE}"
+          sudo chmod 600 "${SWAPFILE}"
+          sudo mkswap "${SWAPFILE}"
+          sudo swapon "${SWAPFILE}"
+          swapon --show
+          free -h
+
+      # The Windows half of the same problem. It fails at the identical point -- the line after the
+      # last `Bundled entry point` -- but reports it properly instead of dying silently:
+      #
+      #   'vscode-min-prepack' errored after 11 min
+      #   Error: The service was stopped   at esbuild/lib/main.js
+      #
+      # "The service was stopped" is esbuild's child process being killed. Same cause as Linux, same
+      # instant, better error: on Linux the kernel took the runner agent with it, so there was
+      # nothing left to write a message.
+      #
+      # Windows has no swapfile to add; the equivalent is the pagefile, which is system-managed and
+      # grows only as fast as the pressure that is already killing the build. Setting an explicit
+      # floor means the room is there before it is needed rather than after.
+      #
+      # Kept non-fatal on purpose. Some size changes only take effect after a reboot, which a runner
+      # cannot do mid-job, so this is an attempt that helps when it lands -- not a step worth failing
+      # a 40-minute build over. The instrumentation below reports what actually took effect.
+      - name: Enlarge pagefile
+        if: matrix.platform == 'win32'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          try {
+            $cs = Get-CimInstance Win32_ComputerSystem
+            if ($cs.AutomaticManagedPagefile) {
+              Set-CimInstance -InputObject $cs -Property @{ AutomaticManagedPagefile = $false }
+            }
+            $setting = Get-CimInstance Win32_PageFileSetting -ErrorAction SilentlyContinue
+            if ($setting) {
+              Set-CimInstance -InputObject $setting -Property @{ InitialSize = 16384; MaximumSize = 16384 }
+            } else {
+              New-CimInstance -ClassName Win32_PageFileSetting -Property @{ Name = 'C:\pagefile.sys'; InitialSize = 16384; MaximumSize = 16384 }
+            }
+            Get-CimInstance Win32_PageFileSetting | Format-List Name, InitialSize, MaximumSize
+          } catch {
+            Write-Host "Could not resize the pagefile: $_"
+          }
+          exit 0
+
+      # Printed before AND after: if a runner dies again, the numbers say whether it was running out
+      # of room, and how fast. Guessing at that costs a 45-minute build per guess.
+      - name: Resources before build
+        shell: bash
+        run: |
+          df -h . || true
+          # `free` does not exist on the Windows runners, so this step reported nothing at all there
+          # -- which is how three Windows builds were diagnosed with no memory numbers to look at.
+          if command -v free >/dev/null 2>&1; then
+            free -h
+            swapon --show || true
+          elif command -v powershell >/dev/null 2>&1; then
+            powershell -NoProfile -Command '
+              $os = Get-CimInstance Win32_OperatingSystem
+              "RAM total : {0:N1} GB" -f ($os.TotalVisibleMemorySize / 1MB)
+              "RAM free  : {0:N1} GB" -f ($os.FreePhysicalMemory / 1MB)
+              "Commit max: {0:N1} GB" -f ($os.TotalVirtualMemorySize / 1MB)
+              Get-CimInstance Win32_PageFileUsage |
+                ForEach-Object { "Pagefile  : {0} ({1} MB allocated, {2} MB peak)" -f $_.Name, $_.AllocatedBaseSize, $_.PeakUsage }
+            ' || true
+          fi
+      - name: Build canonical product
+        shell: bash
+        run: ./dev/build.sh
+      - name: Resources after build
+        if: always()
+        shell: bash
+        run: |
+          df -h . || true
+          # `free` does not exist on the Windows runners, so this step reported nothing at all there
+          # -- which is how three Windows builds were diagnosed with no memory numbers to look at.
+          if command -v free >/dev/null 2>&1; then
+            free -h
+            swapon --show || true
+          elif command -v powershell >/dev/null 2>&1; then
+            powershell -NoProfile -Command '
+              $os = Get-CimInstance Win32_OperatingSystem
+              "RAM total : {0:N1} GB" -f ($os.TotalVisibleMemorySize / 1MB)
+              "RAM free  : {0:N1} GB" -f ($os.FreePhysicalMemory / 1MB)
+              "Commit max: {0:N1} GB" -f ($os.TotalVirtualMemorySize / 1MB)
+              Get-CimInstance Win32_PageFileUsage |
+                ForEach-Object { "Pagefile  : {0} ({1} MB allocated, {2} MB peak)" -f $_.Name, $_.AllocatedBaseSize, $_.PeakUsage }
+            ' || true
+          fi
+
+      - name: Package release assets
+        shell: bash
+        env: { SKIP_ASSETS: 'no' }
+        run: ./prepare_assets.sh
+      - name: Record which asset the update feed points at
+        if: matrix.feed == 'yes'
+        shell: bash
+        run: ./dev/write-manifest-input.sh '${{ matrix.platform }}' '${{ matrix.arch }}' '${{ matrix.target }}'
+      # The secrets have to reach the scripts. They did not: the step declared no `env`, so both
+      # signers aborted on their first `:?` guard with the build already done.
+      - name: Native sign and notarize
+        shell: bash
+        env:
+          APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_PROFILE }}
+          WINDOWS_SIGNING_CERT: ${{ secrets.WINDOWS_SIGNING_CERT }}
+          WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          if [[ '${{ matrix.platform }}' == darwin ]]; then ./dev/sign-macos.sh; fi
+          if [[ '${{ matrix.platform }}' == win32 ]]; then ./dev/sign-windows.sh; fi
+      - name: Upload unsigned feed inputs
+        # Pinned to the commit, not the tag: a tag is movable, so `@v4` lets whoever controls the
+        # action change what code runs in the pipeline that signs your binaries.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with: { name: 'openide-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.target }}', path: 'assets/*' }
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    # The only job that writes: it creates the release and publishes the signed feed.
+    permissions:
+      contents: write
+    steps:
+      # This one KEEPS its credentials, unlike every other checkout in the repository. The release
+      # is published with `gh`, but `dev/publish-update-feed.sh` also does a real `git push` to the
+      # `updates` branch that carries the signed feed — the branch the IDE polls for updates. Take
+      # the credentials away and the release still gets created and the feed still gets built, and
+      # then the push fails at the very last step: shipped binaries nobody can update to.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      # Pinned to the commit for the same reason as the upload above.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with: { path: release-assets, merge-multiple: true }
+      - name: Publish draft release and signed feeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENIDE_UPDATE_PRIVATE_KEY_CONTENT: ${{ secrets.OPENIDE_UPDATE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          . ./version.sh
+          printf '%s' "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" > "$RUNNER_TEMP/openide-update.pem"
+
+          # Each build job left a fragment naming the one file of its output the updater installs.
+          # Merged BEFORE the release is created, and then moved out of the way: they are build
+          # bookkeeping, and uploading them would put six stray JSON files on the release page next
+          # to the binaries. An empty list is refused outright — it would ship a release whose
+          # update feed points nowhere, and only a user whose IDE refuses to update would find out.
+          mkdir -p feed-inputs
+          jq -s '.' release-assets/manifest-input-*.json >feed-inputs/manifest-inputs.json
+          # PLATFORM COUNT: one per matrix row with `feed: yes`.
+          [[ $(jq 'length' feed-inputs/manifest-inputs.json) -eq 2 ]] || {
+            echo "Expected 2 platform mappings, got $(jq 'length' feed-inputs/manifest-inputs.json)." >&2
+            jq -r '.[].asset' feed-inputs/manifest-inputs.json >&2; exit 1
+          }
+          rm -f release-assets/manifest-input-*.json
+
+          gh release create "v${RELEASE_VERSION}" release-assets/* --draft --verify-tag --title "OpenIDE ${RELEASE_VERSION}"
+          jq -c '.[]' feed-inputs/manifest-inputs.json | while read -r row; do
+            asset=$(jq -r .asset <<<"$row"); platform=$(jq -r .platform <<<"$row"); arch=$(jq -r .arch <<<"$row"); target=$(jq -r .target <<<"$row")
+            OPENIDE_UPDATE_PRIVATE_KEY="$RUNNER_TEMP/openide-update.pem" ./dev/generate-update-manifest.sh "$platform" "$arch" "release-assets/$asset" update-feed "$target"
+          done
+          ./dev/publish-update-feed.sh update-feed updates
