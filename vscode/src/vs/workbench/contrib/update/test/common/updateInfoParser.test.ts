@@ -200,6 +200,40 @@ suite('updateInfoParser', () => {
 			});
 		});
 
+		test('carries a banner clip and its poster through both shapes', () => {
+			const meta = {
+				bannerVideoUrl: 'https://example.com/demo.mp4',
+				bannerPosterUrl: 'https://example.com/demo.png',
+			};
+
+			assert.deepStrictEqual(parseUpdateInfoInput(JSON.stringify({ markdown: 'Body', ...meta })), {
+				markdown: 'Body',
+				buttons: undefined,
+				bannerVideoUrl: 'https://example.com/demo.mp4',
+				bannerPosterUrl: 'https://example.com/demo.png',
+			});
+
+			assert.deepStrictEqual(parseUpdateInfoInput(`---\n${JSON.stringify(meta)}\n---\nBody text`), {
+				markdown: 'Body text',
+				buttons: undefined,
+				bannerVideoUrl: 'https://example.com/demo.mp4',
+				bannerPosterUrl: 'https://example.com/demo.png',
+			});
+		});
+
+		test('ignores non-string bannerVideoUrl and bannerPosterUrl', () => {
+			const input = JSON.stringify({
+				markdown: 'text',
+				bannerVideoUrl: 42,
+				bannerPosterUrl: { not: 'a string' },
+			});
+
+			assert.deepStrictEqual(parseUpdateInfoInput(input), {
+				markdown: 'text',
+				buttons: undefined,
+			});
+		});
+
 		test('ignores non-string bannerImageUrl, badge, and title', () => {
 			const input = JSON.stringify({
 				markdown: 'text',

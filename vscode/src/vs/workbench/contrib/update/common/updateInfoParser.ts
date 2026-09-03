@@ -38,6 +38,21 @@ export interface IParsedUpdateInfoInput {
 	 * Must be an `https://` URL; non-HTTPS URLs are ignored.
 	 */
 	readonly bannerImageUrl?: string;
+	/**
+	 * Optional URL for a short clip shown in place of the banner image: a feature is often easier
+	 * to show moving than to describe, which is what the banner slot is for.
+	 *
+	 * Must be `https://`. It is NOT loaded by the `<video>` element directly -- the workbench's CSP
+	 * is `media-src 'self' blob:`, so the widget fetches it through the request service and hands
+	 * the element a blob. Anything that fails on the way (the fetch, the size cap, the content
+	 * type) leaves the banner exactly as it would have been without this field.
+	 */
+	readonly bannerVideoUrl?: string;
+	/**
+	 * Optional still for {@link bannerVideoUrl}: shown while the clip loads, and shown INSTEAD of it
+	 * when the user has asked for reduced motion. Same rules as {@link bannerImageUrl}.
+	 */
+	readonly bannerPosterUrl?: string;
 	/** Optional short badge label (e.g. `"New"`) displayed on the widget. */
 	readonly badge?: string;
 	/** Optional heading title rendered above the markdown body. */
@@ -61,6 +76,8 @@ export interface IParsedUpdateInfoInput {
  *   "title": "What's New",
  *   "badge": "New",
  *   "bannerImageUrl": "https://example.com/banner.png",
+ *   "bannerVideoUrl": "https://example.com/demo.mp4",
+ *   "bannerPosterUrl": "https://example.com/demo-poster.png",
  *   "buttons": [
  *     { "label": "Release Notes", "commandId": "update.showCurrentReleaseNotes", "style": "secondary" },
  *     { "label": "Open Sessions", "commandId": "workbench.action.chat.open", "style": "primary" }
@@ -99,7 +116,7 @@ function tryParseUpdateInfoEnvelope(text: string): IParsedUpdateInfoInput | unde
 	}
 
 	try {
-		const value = JSON.parse(trimmed) as { markdown?: string; buttons?: unknown; bannerImageUrl?: unknown; badge?: unknown; title?: unknown; features?: unknown };
+		const value = JSON.parse(trimmed) as { markdown?: string; buttons?: unknown; bannerImageUrl?: unknown; bannerVideoUrl?: unknown; bannerPosterUrl?: unknown; badge?: unknown; title?: unknown; features?: unknown };
 		if (typeof value.markdown !== 'string') {
 			return undefined;
 		}
@@ -110,12 +127,14 @@ function tryParseUpdateInfoEnvelope(text: string): IParsedUpdateInfoInput | unde
 	}
 }
 
-function buildParsedInput(markdown: string, meta: { buttons?: unknown; bannerImageUrl?: unknown; badge?: unknown; title?: unknown; features?: unknown }): IParsedUpdateInfoInput {
+function buildParsedInput(markdown: string, meta: { buttons?: unknown; bannerImageUrl?: unknown; bannerVideoUrl?: unknown; bannerPosterUrl?: unknown; badge?: unknown; title?: unknown; features?: unknown }): IParsedUpdateInfoInput {
 	const result: Mutable<IParsedUpdateInfoInput> = {
 		markdown,
 		buttons: parseUpdateInfoButtons(meta.buttons),
 	};
 	if (typeof meta.bannerImageUrl === 'string') { result.bannerImageUrl = meta.bannerImageUrl; }
+	if (typeof meta.bannerVideoUrl === 'string') { result.bannerVideoUrl = meta.bannerVideoUrl; }
+	if (typeof meta.bannerPosterUrl === 'string') { result.bannerPosterUrl = meta.bannerPosterUrl; }
 	if (typeof meta.badge === 'string') { result.badge = meta.badge; }
 	if (typeof meta.title === 'string') { result.title = meta.title; }
 	const features = parseUpdateInfoFeatures(meta.features);
@@ -139,7 +158,7 @@ function parseUpdateInfoFrontmatter(text: string): IParsedUpdateInfoInput {
 
 function parseUpdateInfoFrontmatterMatch(text: string, jsonText: string, markdown: string): IParsedUpdateInfoInput {
 	try {
-		const meta = JSON.parse(jsonText) as { buttons?: unknown; bannerImageUrl?: unknown; badge?: unknown; title?: unknown; features?: unknown };
+		const meta = JSON.parse(jsonText) as { buttons?: unknown; bannerImageUrl?: unknown; bannerVideoUrl?: unknown; bannerPosterUrl?: unknown; badge?: unknown; title?: unknown; features?: unknown };
 		return buildParsedInput(markdown, meta);
 	} catch {
 		return { markdown: text };
