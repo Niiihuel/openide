@@ -153,11 +153,11 @@ suite('UpdateUtils', () => {
 
 	suite('getUpdateInfoUrl', () => {
 		test('constructs correct URL for .0 versions', () => {
-			assert.strictEqual(getUpdateInfoUrl('1.109.0'), 'https://code.visualstudio.com/raw/v1_109_update.md');
+			assert.strictEqual(getUpdateInfoUrl('1.109.0'), 'https://raw.githubusercontent.com/Niiihuel/openide/master/docs/updates/v1_109_update.md');
 		});
 
 		test('constructs correct URL for patch versions', () => {
-			assert.strictEqual(getUpdateInfoUrl('1.109.5'), 'https://code.visualstudio.com/raw/v1_109_5_update.md');
+			assert.strictEqual(getUpdateInfoUrl('1.109.5'), 'https://raw.githubusercontent.com/Niiihuel/openide/master/docs/updates/v1_109_5_update.md');
 		});
 	});
 

@@ -83,11 +83,21 @@ export function computeUpdateInfoVersion(currentVersion: string, targetVersion: 
 
 /**
  * Computes the URL to fetch update info from.
- * Follows the release notes URL pattern but with `_update` suffix.
+ *
+ * OpenIDE serves its own note from its own repository. Upstream points this at
+ * `code.visualstudio.com/raw`, and inheriting that meant the card that greets a user right after
+ * an OpenIDE update described whatever Microsoft shipped in the matching VS Code release -- their
+ * features, their wording, their product -- presented as this one's release. The card is the most
+ * prominent thing the update system puts on screen, so it is the last place to borrow a voice.
+ *
+ * The file is authored by hand in `docs/updates/`, one per released version. When it is missing
+ * the fetch 404s and `PostUpdateWidgetContribution.getUpdateInfo` returns undefined, so a release
+ * that has no note simply shows no card -- which is the right default, and is why this does not
+ * need the release pipeline to generate anything.
  */
 export function getUpdateInfoUrl(version: string): string {
 	const versionLabel = version.replace(/\./g, '_').replace(/_0$/, '');
-	return `https://code.visualstudio.com/raw/v${versionLabel}_update.md`;
+	return `https://raw.githubusercontent.com/Niiihuel/openide/master/docs/updates/v${versionLabel}_update.md`;
 }
 
 /**

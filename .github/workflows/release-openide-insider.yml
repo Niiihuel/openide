@@ -1,7 +1,19 @@
 name: Release OpenIDE Insider
+# NO `schedule:`, on purpose. The nightly cron ran every weekday for weeks and failed every time
+# in 14 seconds on the `test "$OPENIDE_CHANNEL" = insider` below, because it fires against `master`
+# and `openide-version.json` there says `"channel": "stable"`. A cron that cannot pass is not a
+# safety net, it is a broken red dot next to every real failure.
+#
+# It is not a matter of relaxing the guard either: `release-openide.yml` hardcodes
+# `VSCODE_QUALITY: stable` at job level and only triggers on `v<x>.<y>.<z>` tags, so dispatching it
+# from here would build and sign a STABLE release and publish it as insider. Turning the channel on
+# means, at minimum: an insider version line in `openide-version.json` (`x.y.z-insider.YYYYMMDD.n`,
+# the shape `version.sh` and the manifest parser already validate), a `quality` input threaded
+# through `release-openide.yml` into `VSCODE_QUALITY`, and the matching arm in `promote-openide.yml`.
+# Until that exists this stays dispatch-only, where the guard below is an honest precondition
+# instead of a daily false alarm.
 on:
   workflow_dispatch: {}
-  schedule: [{ cron: '17 3 * * 1-5' }]
 permissions: { contents: write }
 jobs:
   validate:
