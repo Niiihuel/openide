@@ -283,8 +283,8 @@ export class UpdateTooltip extends Disposable {
 						Codicon.radioTower);
 				} else {
 					this.renderMessage(
-						localize('updateTooltip.autoUpdateDefault', "Automatic updates are enabled. Happy Coding!"),
-						Codicon.smiley);
+						localize('updateTooltip.autoUpdateDefault', "Automatic updates are enabled."),
+						Codicon.check);
 				}
 				break;
 		}

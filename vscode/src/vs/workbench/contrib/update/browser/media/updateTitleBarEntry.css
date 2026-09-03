@@ -1,12 +1,12 @@
 /*---------------------------------------------------------------------------------------------
- *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Copyright (c) OpenIDE. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
 .monaco-action-bar .update-indicator {
 	display: flex;
 	align-items: center;
-	border-radius: var(--vscode-cornerRadius-medium);
+	border-radius: var(--oi-radius-md, 6px);
 	white-space: nowrap;
 	padding: 0px 8px;
 	height: 22px;
@@ -16,12 +16,16 @@
 }
 
 .monaco-action-bar .update-indicator:hover {
-	background-color: var(--vscode-toolbar-hoverBackground);
+	background-color: var(--oi-hover-strong, var(--vscode-toolbar-hoverBackground));
 }
 
 .monaco-action-bar .update-indicator .indicator-label {
-	font-size: var(--vscode-bodyFontSize-small);
 	position: relative;
+	font-family: var(--oi-font, var(--vscode-font-family));
+	font-size: var(--oi-text-sm, var(--vscode-bodyFontSize-small));
+	/* The label is the download percentage while one is running. Proportional digits make the
+	   whole title bar entry -- and everything to its right -- twitch on every progress tick. */
+	font-variant-numeric: tabular-nums;
 }
 
 /* Prominent state (action required) — primary button style */
@@ -39,6 +43,11 @@
 /* Disabled state */
 .monaco-action-bar .update-indicator.update-disabled .indicator-label {
 	color: var(--vscode-disabledForeground);
+}
+
+.monaco-action-bar .update-indicator:focus-visible {
+	outline: 1px solid var(--oi-focus, var(--vscode-focusBorder));
+	outline-offset: -1px;
 }
 
 /* Progress underline bar (shared base) */
