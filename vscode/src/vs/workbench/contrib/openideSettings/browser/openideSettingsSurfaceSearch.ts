@@ -32,6 +32,9 @@ export function openideSettingsSurfaceSearch(): ReadonlyMap<string, readonly IOp
 		['openideAgent/subagents', [
 			{ title: t('settings.surface.subagents'), description: t('settings.surface.subagents.desc'), keywords: ['subagente', 'subagent', 'agente', 'agent', 'delegar', 'especialista', 'prompt'] },
 		]],
+		['openideAgent/import', [
+			{ title: t('settings.nav.agent.import'), description: t('settings.import.desc'), keywords: ['importar', 'import', 'migrar', 'migrate', 'traer', 'vscode', 'vs code', 'cursor', 'windsurf', 'antigravity', 'claude', 'codex', 'opencode', 'gemini', 'settings', 'ajustes', 'keybindings', 'atajos', 'snippets', 'extensiones', 'extensions', 'mcp', 'reglas', 'rules'] },
+		]],
 		['openideAgent/projectMap', [
 			{ title: t('settings.nav.agent.projectMap'), description: t('settings.surface.projectMap.desc'), keywords: ['project map', 'mapa', 'indice', 'índice', 'indexar', 'codebase', 'grafo', 'graph', 'simbolos', 'símbolos', 'imports', 'memoria', 'memory', 'notas', 'notes', 'MEMORY.md', 'contexto'] },
 		]],
