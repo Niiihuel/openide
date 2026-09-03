@@ -1,0 +1,577 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* OpenIDE's first-run screen. See `openideWelcomeOverlay.ts` for why it exists as a stylesheet
+   rather than as inline styles.
+
+   Everything here is on the `--oi-*` tokens from `openideAgent/browser/openideSurfaceCss.ts`.
+   The two deliberate exceptions are commented where they appear: the theme preview, which has to
+   paint a theme that is NOT the active one, and the product mark, which is a mask. */
+
+.openide-welcome-overlay {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	/* The modal-editor rung of the workbench's z-index ladder: above the title bar (2500) so it
+	   covers every part, and BELOW notifications (2545), quick input (2550) and dialogs (2575).
+	   That last one is load-bearing, not tidiness: the GitHub step starts a device flow, and the
+	   one-time code arrives in a modal dialog. Painted over the top of the stack, this overlay hid
+	   that dialog and the code never reached the screen. */
+	z-index: 2540;
+	background: var(--oi-surface, var(--vscode-editor-background));
+	color: var(--oi-text, var(--vscode-foreground));
+	font-family: var(--oi-font, var(--vscode-font-family));
+}
+
+.openide-welcome-overlay:focus {
+	outline: none;
+}
+
+/* Header ------------------------------------------------------------------------------------ */
+
+.openide-welcome-header {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 20px 28px;
+}
+
+.openide-welcome-brand {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-width: 0;
+}
+
+/* The product mark, as a mask over the foreground colour: one asset that stays legible on dark,
+   light and high-contrast alike. It replaces a rocket emoji, which rendered in whatever the
+   platform's emoji font decided and was the only piece of art in the product nobody had drawn. */
+.openide-welcome-mark {
+	flex: 0 0 32px;
+	width: 32px;
+	height: 32px;
+	background-color: var(--oi-text, var(--vscode-foreground));
+	-webkit-mask: url('../../../../browser/media/code-icon.svg') center / contain no-repeat;
+	mask: url('../../../../browser/media/code-icon.svg') center / contain no-repeat;
+}
+
+/* The product mark is a SILHOUETTE, so it wants the polarity of the theme and not its foreground:
+   `--vscode-foreground` is #cccccc on dark and #1f1f1f on light -- greys that make the mark look
+   faded next to real white or real black. The workbench puts exactly one of `vs` / `vs-dark` /
+   `hc-black` / `hc-light` on its container, which is the only reliable statement of polarity a
+   stylesheet gets (a theme's `type` never reaches CSS). The rule above stays as the default, so a
+   surface mounted outside that container still gets a legible mark instead of none. */
+.monaco-workbench.vs-dark .openide-welcome-mark,
+.monaco-workbench.hc-black .openide-welcome-mark {
+	background-color: #ffffff;
+}
+
+.monaco-workbench.vs .openide-welcome-mark,
+.monaco-workbench.hc-light .openide-welcome-mark {
+	background-color: #000000;
+}
+
+.openide-welcome-brand-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.openide-welcome-product {
+	font-size: var(--oi-text-md, 13px);
+	font-weight: 600;
+	letter-spacing: -0.01em;
+}
+
+.openide-welcome-build {
+	font-size: var(--oi-text-xs, 11px);
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	font-variant-numeric: tabular-nums;
+	user-select: text;
+}
+
+.openide-welcome-skip {
+	flex: 0 0 auto;
+	padding: 4px 8px;
+	border: 0;
+	border-radius: var(--oi-radius-sm, 4px);
+	background: transparent;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	font: inherit;
+	font-size: var(--oi-text-sm, 12px);
+	cursor: pointer;
+}
+
+.openide-welcome-skip:hover {
+	background: var(--oi-hover, rgba(128, 128, 128, 0.08));
+	color: var(--oi-text, var(--vscode-foreground));
+}
+
+/* Body -------------------------------------------------------------------------------------- */
+
+.openide-welcome-body {
+	flex: 1 1 auto;
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	overflow: auto;
+	padding: 24px 32px 40px;
+}
+
+.openide-welcome-inner {
+	width: 100%;
+	max-width: 640px;
+	display: flex;
+	flex-direction: column;
+}
+
+.openide-welcome-step-title {
+	margin: 0;
+	font-size: 24px;
+	font-weight: 600;
+	letter-spacing: -0.02em;
+	text-align: center;
+}
+
+.openide-welcome-step-subtitle {
+	margin: 8px auto 0;
+	max-width: 480px;
+	font-size: var(--oi-text-md, 13px);
+	line-height: 1.5;
+	text-align: center;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+}
+
+/* A floor, not a height: the steps differ in length, and without it the title jumps up and down
+   as the wizard advances. */
+.openide-welcome-step {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	min-height: 320px;
+	margin-top: 28px;
+}
+
+/* Step 1: theme ----------------------------------------------------------------------------- */
+
+.openide-welcome-themes {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 20px;
+	justify-content: center;
+}
+
+.openide-welcome-theme {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 6px;
+	border: 1px solid transparent;
+	border-radius: var(--oi-radius-lg, 8px);
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+
+.openide-welcome-theme:hover {
+	border-color: var(--oi-border, rgba(128, 128, 128, 0.24));
+}
+
+.openide-welcome-theme.selected {
+	border-color: var(--oi-focus, var(--vscode-focusBorder));
+}
+
+.openide-welcome-theme:focus-visible {
+	outline: 1px solid var(--oi-focus, var(--vscode-focusBorder));
+	outline-offset: 1px;
+}
+
+/* The preview is a portrait of ONE theme. Its colours are set from the theme's own palette in TS
+   and must NOT come from tokens -- tokens would paint every tile in the theme that is already
+   active, and the comparison this step exists for would disappear. Only the frame is tokenised. */
+.openide-welcome-theme-preview {
+	display: flex;
+	flex-direction: column;
+	width: 210px;
+	height: 132px;
+	border: 1px solid var(--oi-border, rgba(128, 128, 128, 0.24));
+	border-radius: var(--oi-radius-md, 6px);
+	overflow: hidden;
+}
+
+.openide-welcome-theme-topbar { height: 16px; }
+.openide-welcome-theme-body { flex: 1; display: flex; }
+.openide-welcome-theme-sidebar { width: 42px; }
+
+.openide-welcome-theme-code {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	padding: 12px 10px;
+}
+
+.openide-welcome-theme-line {
+	height: 6px;
+	border-radius: var(--oi-radius-circle, 9999px);
+}
+
+.openide-welcome-theme-label {
+	text-align: center;
+	font-size: var(--oi-text-sm, 12px);
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+}
+
+.openide-welcome-theme.selected .openide-welcome-theme-label {
+	color: var(--oi-text, var(--vscode-foreground));
+}
+
+/* Step 2: GitHub ---------------------------------------------------------------------------- */
+
+.openide-welcome-github {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-height: 40px;
+}
+
+.openide-welcome-connected-icon {
+	font-size: 18px;
+	color: var(--oi-success, var(--vscode-charts-green));
+}
+
+.openide-welcome-connected {
+	font-size: var(--oi-text-md, 13px);
+}
+
+/* Step 3: import ---------------------------------------------------------------------------- */
+
+.openide-welcome-editors {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	border: 1px solid var(--oi-border-soft, rgba(128, 128, 128, 0.14));
+	border-radius: var(--oi-radius-lg, 8px);
+	background: var(--oi-card, transparent);
+	overflow: hidden;
+}
+
+.openide-welcome-editor {
+	display: grid;
+	grid-template-columns: 28px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 14px;
+	min-height: 52px;
+}
+
+.openide-welcome-editor + .openide-welcome-editor {
+	border-top: 1px solid var(--oi-border-soft, rgba(128, 128, 128, 0.14));
+}
+
+/* An editor that was not found on the PATH stays on the list and stays importable -- the launcher
+   can be missing while the configuration folder is exactly where it always is -- but it does not
+   get to look like a finding. */
+.openide-welcome-editor:not(.found) .openide-welcome-editor-logo,
+.openide-welcome-editor:not(.found) .openide-welcome-editor-name {
+	opacity: 0.6;
+}
+
+.openide-welcome-editor-logo {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	color: var(--oi-text, var(--vscode-foreground));
+}
+
+.openide-welcome-editor-mark {
+	width: 22px;
+	height: 22px;
+	object-fit: contain;
+}
+
+/* The single-path marks are masked so they take the surrounding text colour; the mask image itself
+   is set from TS, because it is data (a base64 URI from the catalogue) and not style. */
+.openide-welcome-editor-mark.masked {
+	display: block;
+	background-color: currentColor;
+	-webkit-mask-position: center;
+	mask-position: center;
+	-webkit-mask-size: contain;
+	mask-size: contain;
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+}
+
+.openide-welcome-editor-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.openide-welcome-editor-name {
+	font-size: var(--oi-text-md, 13px);
+}
+
+/* This line carries a resolved absolute path, so it is set in the mono face and clipped rather
+   than wrapped: a path that wraps changes the height of the row it is in. The full value is on the
+   element's `title`, which is where a path too long to show belongs. */
+.openide-welcome-editor-detail {
+	font-family: var(--oi-font-mono, monospace);
+	font-size: var(--oi-text-xs, 11px);
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.openide-welcome-editors-status {
+	margin-top: 12px;
+	font-size: var(--oi-text-sm, 12px);
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	text-align: center;
+}
+
+/* Step 4: the update card ------------------------------------------------------------------- */
+
+/* Same anatomy as the post-update popover (`update/browser/media/postUpdateWidget.css`): banner,
+   badge, title, feature rows, actions. Not shared code -- one is a hover and this is a step -- but
+   deliberately the same shape, so everything the update system says looks like the same object. */
+.openide-welcome-card {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	border: 1px solid var(--oi-border, rgba(128, 128, 128, 0.24));
+	border-radius: var(--oi-radius-lg, 8px);
+	background: var(--oi-card, var(--vscode-editorWidget-background));
+	overflow: hidden;
+}
+
+.openide-welcome-card-banner {
+	position: relative;
+	height: 84px;
+	background-color: var(--oi-raised, var(--vscode-editorWidget-background));
+	/* The wash is the PRODUCT'S accent -- the same colour as the buttons -- at two low mixes, so
+	   the banner belongs to whatever theme is loaded instead of introducing a hue of its own. It
+	   was a fixed green, which sat next to amber buttons and followed no theme anywhere. */
+	background-image:
+		radial-gradient(ellipse 70% 120% at 18% 110%, color-mix(in srgb, var(--vscode-button-background, #eeb266) 26%, transparent), transparent 70%),
+		radial-gradient(ellipse 80% 130% at 88% -20%, color-mix(in srgb, var(--vscode-button-background, #eeb266) 14%, transparent), transparent 70%);
+	border-bottom: 1px solid var(--oi-border-soft, rgba(128, 128, 128, 0.14));
+}
+
+.openide-welcome-card-banner::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background-color: var(--oi-text, var(--vscode-foreground));
+	-webkit-mask: url('../../../../browser/media/code-icon.svg') right 20px center / auto 62% no-repeat;
+	mask: url('../../../../browser/media/code-icon.svg') right 20px center / auto 62% no-repeat;
+	opacity: 0.14;
+}
+
+/* The product mark is a SILHOUETTE, so it wants the polarity of the theme and not its foreground:
+   `--vscode-foreground` is #cccccc on dark and #1f1f1f on light -- greys that make the mark look
+   faded next to real white or real black. The workbench puts exactly one of `vs` / `vs-dark` /
+   `hc-black` / `hc-light` on its container, which is the only reliable statement of polarity a
+   stylesheet gets (a theme's `type` never reaches CSS). The rule above stays as the default, so a
+   surface mounted outside that container still gets a legible mark instead of none. */
+.monaco-workbench.vs-dark .openide-welcome-card-banner::after,
+.monaco-workbench.hc-black .openide-welcome-card-banner::after {
+	background-color: #ffffff;
+}
+
+.monaco-workbench.vs .openide-welcome-card-banner::after,
+.monaco-workbench.hc-light .openide-welcome-card-banner::after {
+	background-color: #000000;
+}
+
+.openide-welcome-card-body {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	padding: 16px;
+}
+
+.openide-welcome-card-badge {
+	align-self: flex-start;
+	padding: 2px 8px;
+	border: 1px solid var(--oi-border, rgba(128, 128, 128, 0.24));
+	border-radius: var(--oi-radius-sm, 4px);
+	background: var(--oi-tint-2, rgba(128, 128, 128, 0.08));
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	font-size: var(--oi-text-xs, 11px);
+	font-weight: 600;
+	letter-spacing: 0.02em;
+}
+
+.openide-welcome-card-title {
+	font-size: 16px;
+	font-weight: 600;
+	line-height: 1.3;
+	letter-spacing: -0.015em;
+}
+
+.openide-welcome-card-features {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.openide-welcome-card-feature {
+	display: grid;
+	grid-template-columns: 20px minmax(0, 1fr);
+	column-gap: 12px;
+	align-items: start;
+}
+
+.openide-welcome-card-feature-icon {
+	margin-top: 1px;
+	font-size: 16px;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+}
+
+.openide-welcome-card-feature-text {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.openide-welcome-card-feature-title {
+	font-size: var(--oi-text-md, 13px);
+	font-weight: 600;
+}
+
+.openide-welcome-card-feature-description {
+	font-size: var(--oi-text-sm, 12px);
+	line-height: 1.45;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+}
+
+.openide-welcome-card-actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding-top: 12px;
+	border-top: 1px solid var(--oi-border-soft, rgba(128, 128, 128, 0.14));
+}
+
+.openide-welcome-card-state {
+	min-width: 0;
+	font-size: var(--oi-text-sm, 12px);
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+}
+
+/* Footer ------------------------------------------------------------------------------------ */
+
+.openide-welcome-nav {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 16px 28px;
+	border-top: 1px solid var(--oi-border-soft, rgba(128, 128, 128, 0.14));
+}
+
+.openide-welcome-dots {
+	display: flex;
+	gap: 10px;
+}
+
+.openide-welcome-dot {
+	width: 8px;
+	height: 8px;
+	padding: 0;
+	border: 0;
+	border-radius: var(--oi-radius-circle, 9999px);
+	background: var(--oi-border-strong, rgba(128, 128, 128, 0.34));
+	cursor: pointer;
+}
+
+.openide-welcome-dot.active {
+	background: var(--oi-text, var(--vscode-foreground));
+}
+
+.openide-welcome-dot:focus-visible {
+	outline: 1px solid var(--oi-focus, var(--vscode-focusBorder));
+	outline-offset: 2px;
+}
+
+/* Buttons ----------------------------------------------------------------------------------- */
+
+.openide-welcome-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-height: 30px;
+	padding: 5px 14px;
+	border: 1px solid transparent;
+	border-radius: var(--oi-radius-md, 6px);
+	font: inherit;
+	font-size: var(--oi-text-sm, 12px);
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.openide-welcome-button:focus-visible {
+	outline: 1px solid var(--oi-focus, var(--vscode-focusBorder));
+	outline-offset: 1px;
+}
+
+.openide-welcome-button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+.openide-welcome-button.primary {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	border-color: var(--vscode-button-border, transparent);
+	font-weight: 550;
+}
+
+.openide-welcome-button.primary:hover:not(:disabled) {
+	background: var(--vscode-button-hoverBackground);
+}
+
+.openide-welcome-button.quiet {
+	background: transparent;
+	color: var(--oi-text, var(--vscode-foreground));
+	border-color: var(--oi-border, rgba(128, 128, 128, 0.24));
+}
+
+.openide-welcome-button.quiet:hover:not(:disabled) {
+	background: var(--oi-hover, rgba(128, 128, 128, 0.08));
+	border-color: var(--oi-border-strong, rgba(128, 128, 128, 0.34));
+}
+
+.openide-welcome-button.ghost {
+	background: transparent;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	padding-left: 8px;
+}
+
+.openide-welcome-button.ghost:hover:not(:disabled) {
+	background: var(--oi-hover, rgba(128, 128, 128, 0.08));
+	color: var(--oi-text, var(--vscode-foreground));
+}
+
+/* Narrow windows ---------------------------------------------------------------------------- */
+
+@media (max-width: 720px) {
+	.openide-welcome-body { padding: 16px 20px 32px; }
+	.openide-welcome-themes { gap: 12px; }
+	.openide-welcome-theme-preview { width: 170px; height: 108px; }
+	.openide-welcome-card-actions { flex-direction: column; align-items: stretch; }
+}
