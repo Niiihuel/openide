@@ -28,25 +28,6 @@ export const OPENIDE_DIAGRAM_SVG_CSS = `
 	.dleg-swatch.focal { fill: var(--oid-accent-tint); stroke: var(--oid-accent); }
 	.dleg-line { stroke: var(--oid-muted); stroke-width: 1; stroke-dasharray: 4 3; }
 	.dleg-label { fill: var(--oid-soft); font-size: 8.5px; font-family: var(--vscode-font-family); }
-	.amap-title { fill: var(--oid-muted); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-family: var(--vscode-font-family); }
-	.amap-hull { fill: color-mix(in srgb, var(--oid-ink) 3%, transparent); stroke: var(--oid-rule); stroke-dasharray: 5 4; }
-	.amap-hull-label { fill: var(--oid-soft); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--vscode-font-family); }
-	.amap-edge { fill: none; stroke: var(--oid-muted); stroke-width: 1.2; opacity: 0.45; transition: opacity 0.12s, stroke 0.12s; }
-	.amap-edge.dashed { stroke-dasharray: 4 3; stroke-width: 1; }
-	.amap-node { transition: opacity 0.12s; }
-	.amap-shape { fill: var(--oid-paper); stroke-width: 1.2; }
-	.amap-shape.emphasis { stroke-width: 1.8; }
-	.amap-card { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; overflow: hidden; font-family: var(--vscode-font-family); pointer-events: none; }
-	.amap-card-row { display: flex; align-items: center; gap: 6px; max-width: 100%; }
-	.amap-card-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-	.amap-card-title { font-size: 11.5px; font-weight: 600; color: var(--oid-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-	.amap-card-sub { font-size: 9.5px; color: var(--oid-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-	.amap-focus .amap-node { opacity: 0.18; }
-	.amap-focus .amap-edge { opacity: 0.06; }
-	.amap-focus .amap-node.on { opacity: 1; }
-	.amap-focus .amap-edge.on { opacity: 0.85; stroke: var(--amap-c, var(--oid-muted)); stroke-width: 1.4; }
-	.amap-focus .amap-node.pinned .amap-shape { stroke-width: 2.4; }
-	.smap-lifeline { stroke: var(--oid-rule-solid); stroke-width: 1; stroke-dasharray: 2 4; }
 	/* Scrollbars: the same thin pill as the shared skin in openideSurfaceCss.ts. A webview page
 	   otherwise shows Electron's native bar, which no workbench surface has. */
 	::-webkit-scrollbar { width: 12px; height: 12px; }

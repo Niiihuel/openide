@@ -326,37 +326,6 @@ async function runScenarios(page, only) {
 			await shot(page, 'escenario-diagrama');
 		},
 
-		archmap: async () => {
-			// No contract in the prompt on purpose: the system prompt teaches the IR, and THAT is what
-			// this scenario proves — the model can author a valid archmap from the hint alone.
-			await ask(page, 'Dibujame con un fence ```archmap el mapa de arquitectura de este sistema: una web Next.js que llama a una API FastAPI dentro de AWS, la API usa PostgreSQL y un cache Redis (ambos en AWS), y la autenticacion es Auth0 externo. Solo el bloque, sin explicacion.');
-			const parts = await transcriptParts(page);
-			log('partes: ' + JSON.stringify(parts));
-			check('el fence archmap se dibujo como diagrama', parts.diagram > 0, `diagram=${parts.diagram}`);
-			const map = await page.evaluate(() => {
-				const root = document.querySelector('.openide-chat-native');
-				const svg = root?.querySelector('svg.amap-svg');
-				return {
-					// An invalid IR falls back to the code block: presence of the SVG is the validation
-					// passing end to end, model included.
-					rendered: !!svg,
-					fallback: root?.querySelectorAll('.openide-chat-diagram-code').length ?? 0,
-					nodes: svg?.querySelectorAll('.amap-dot').length ?? 0,
-					edges: svg?.querySelectorAll('.amap-edge').length ?? 0,
-					hulls: svg?.querySelectorAll('.amap-hull').length ?? 0,
-				};
-			});
-			log('archmap: ' + JSON.stringify(map));
-			check('el JSON del modelo paso la validacion y se dibujo como mapa', map.rendered, JSON.stringify(map));
-			check('no quedo el fuente como bloque de codigo', map.fallback === 0, `fallback=${map.fallback}`);
-			check('el mapa tiene los componentes descritos', map.nodes >= 4, `nodes=${map.nodes}`);
-			check('el mapa tiene conexiones', map.edges >= 3, `edges=${map.edges}`);
-			check('el group AWS produjo su hull', map.hulls >= 1, `hulls=${map.hulls}`);
-			check('no quedo ninguna parte sin renderer', parts.unrendered === 0);
-			await checkPinnedToTail(page);
-			await shot(page, 'escenario-archmap');
-		},
-
 		plan: async () => {
 			await ask(page, 'Entra en modo plan: crea un plan corto (3 tareas) para agregar un endpoint de health check al server. Usa plan_save.');
 			await approveIfAsked(page);

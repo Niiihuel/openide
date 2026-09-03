@@ -32,7 +32,6 @@ export interface IOpenideChatKebabActions {
 	remove(): void;
 	removeAll(): void;
 	openProjectMap(): void;
-	openArchMap(): void;
 }
 
 /**
@@ -50,7 +49,6 @@ const ITEMS: readonly IKebabItem[] = [
 	{ icon: 'clear-all', label: 'chat.menu.deleteAll', run: actions => actions.removeAll() },
 	{ separator: true },
 	{ icon: 'type-hierarchy', label: 'chat.menu.projectMap', run: actions => actions.openProjectMap() },
-	{ icon: 'circuit-board', label: 'chat.menu.archMap', run: actions => actions.openArchMap() },
 ];
 
 export class OpenideChatKebabMenu extends OpenideChatMenuPopover {

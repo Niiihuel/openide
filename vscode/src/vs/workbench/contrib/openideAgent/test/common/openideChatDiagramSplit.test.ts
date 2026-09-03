@@ -102,8 +102,8 @@ suite('OpenIDE chat diagram fences', () => {
 		// The presentation-only counterpart of "a fence still being typed is not drawn": the
 		// markdown part swaps the raw streaming source for a skeleton, and needs to know where
 		// the prose ends and which language opened.
-		const open = splitOpenOpenideChatDiagram('Mirá:\n\n```archmap\n{"type":"archmap"');
-		assert.deepStrictEqual(open, { prose: 'Mirá:\n\n', syntax: 'archmap' });
+		const open = splitOpenOpenideChatDiagram('Mirá:\n\n```mermaid\nflowchart LR');
+		assert.deepStrictEqual(open, { prose: 'Mirá:\n\n', syntax: 'mermaid' });
 	});
 
 	test('the skeleton split ignores closed fences and ordinary code blocks', () => {
@@ -116,10 +116,10 @@ suite('OpenIDE chat diagram fences', () => {
 
 	test('a fence whose info line is still arriving is held back, and claims nothing', () => {
 		// The reported bug: `marked` runs with `fillInIncompleteTokens` while a turn streams, so a
-		// dangling ```` ```flowm ```` was closed for us and rendered as an EMPTY grey box under the
-		// answer — and providers pause exactly there, right before a long JSON body, so it sat on
-		// screen for seconds looking like a broken widget.
-		for (const partial of ['```', '```f', '```flowma']) {
+		// dangling ```` ```merm ```` was closed for us and rendered as an EMPTY grey box under the
+		// answer — and providers pause exactly there, right before a long body, so it sat on screen
+		// for seconds looking like a broken widget.
+		for (const partial of ['```', '```m', '```merma']) {
 			const open = splitOpenOpenideChatDiagram(`El flujo principal sería:\n\n${partial}`);
 			assert.deepStrictEqual(open, { prose: 'El flujo principal sería:\n\n', syntax: '' }, `"${partial}" was not held back`);
 		}
@@ -128,7 +128,7 @@ suite('OpenIDE chat diagram fences', () => {
 	});
 
 	test('the newline resolves it: a diagram opens, anything else goes back to the prose', () => {
-		assert.strictEqual(splitOpenOpenideChatDiagram('Mirá:\n\n```flowmap\n')?.syntax, 'flowmap');
+		assert.strictEqual(splitOpenOpenideChatDiagram('Mirá:\n\n```flowchart\n')?.syntax, 'flowchart');
 		assert.strictEqual(splitOpenOpenideChatDiagram('Corré:\n\n```bash\n'), undefined, 'a shell fence is a code block again');
 	});
 

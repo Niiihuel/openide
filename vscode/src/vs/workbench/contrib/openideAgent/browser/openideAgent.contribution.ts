@@ -61,8 +61,6 @@ import { EditorExtensions, IEditorFactoryRegistry } from '../../../common/editor
 import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/editor.js';
 import { IEditorService, MODAL_GROUP } from '../../../services/editor/common/editorService.js';
 import { OpenideDiagramEditor } from './diagrams/openideDiagramEditor.js';
-import { OpenideArchMapEditor } from './diagrams/openideArchMapEditor.js';
-import { OpenideArchMapInput, OpenideArchMapInputSerializer } from './openideArchMapInput.js';
 import { OpenideDiagramInput, toOpenideDiagramPayload } from './openideDiagramInput.js';
 import { OpenidePlanEditor } from './plan/openidePlanEditor.js';
 import { OpenidePlanInput } from './openidePlanInput.js';
@@ -554,27 +552,6 @@ registerAction2(class extends Action2 {
 	}
 });
 
-// Command: the Project Map retold as an architecture map — the SAME index, one level up.
-//
-// It opens a derived editor and nothing else: there is no file to write, because the index already
-// knows which modules exist and what they import. A saved copy would start lying the moment a
-// folder moves, and it would be a second place holding an answer we can always recompute.
-registerAction2(class extends Action2 {
-	constructor() {
-		super({
-			id: 'openide.archmap.project',
-			// The palette entry keeps the product prefix; the tab keeps the plain name.
-			title: { value: t('archmap.project.command'), original: 'OpenIDE: Project architecture' },
-			category: Categories.View,
-			f1: true,
-		});
-	}
-
-	async run(accessor: ServicesAccessor): Promise<void> {
-		await accessor.get(IEditorService).openEditor(new OpenideArchMapInput());
-	}
-});
-
 registerAction2(class extends Action2 {
 	constructor() { super({ id: 'openide.memory.rebuild', title: localize2('openide.memory.rebuild', 'OpenIDE: Rebuild Codebase Memory'), category: Categories.View, f1: true }); }
 	async run(accessor: ServicesAccessor): Promise<void> { await accessor.get(ICodebaseMemoryService).rebuildFull(); }
@@ -850,15 +827,6 @@ class OpenidePlanEditorResolverContribution implements IWorkbenchContribution {
 }
 PlatformRegistry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench)
 	.registerWorkbenchContribution(OpenidePlanEditorResolverContribution, LifecyclePhase.Restored);
-
-// The project's architecture map is DERIVED, so its editor is registered over a synthetic scheme
-// and a singleton input — the same arrangement as the Project Map above, and for the same reason:
-// there is no document behind it, only the index.
-Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(OpenideArchMapInput.ID, OpenideArchMapInputSerializer);
-Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
-	EditorPaneDescriptor.create(OpenideArchMapEditor, OpenideArchMapEditor.ID, localize('openide.archmap.editorName', "Project architecture")),
-	[new SyncDescriptor(OpenideArchMapInput)]
-);
 
 // Subagentes: editor especializado para definiciones Markdown del workspace/importadas.
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(

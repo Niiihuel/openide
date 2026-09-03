@@ -22,7 +22,7 @@ import {
  * text rather than replacing the renderer: `edit_file` snippets, shell transcripts and JSON are the
  * overwhelming majority of fences and none of them want a frame around them.
  */
-const DIAGRAM_LANGUAGES = new Set(['mermaid', 'flowchart', 'diagram', 'archmap', 'flowmap', 'lifemap', 'seqmap']);
+const DIAGRAM_LANGUAGES = new Set(['mermaid', 'flowchart', 'diagram']);
 
 /**
  * A CLOSED fence. Streaming is exactly why the closing ``` is required: half a graph parses to a

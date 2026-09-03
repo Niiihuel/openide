@@ -15,7 +15,10 @@
  *
  * The one-accent rule is the load-bearing design decision: `accent` marks the focal element —
  * the first series, the critical hatch, the entry node — and everything else is ink at an opacity.
- * Rainbow ramps are exactly what the style guide forbids.
+ * Rainbow ramps are exactly what the style guide forbids. The accent resolves to the theme's button
+ * colour -- the product's amber (media/openideDiagrams.css explains why) -- so a figure is neutral
+ * ink except for the ONE thing that is focal, and that one thing wears the same accent as the
+ * buttons around it. Nothing here changes with that, because nothing here ever named a colour.
  */
 
 /** Semantic tokens, referenced by role — never inline a colour in a renderer. */

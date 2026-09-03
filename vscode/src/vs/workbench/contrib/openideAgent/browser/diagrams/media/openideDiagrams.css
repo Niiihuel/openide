@@ -19,8 +19,18 @@
    diagram scrolls under it. It is also what keeps a wide diagram from widening the whole chat list,
    which has horizontalScrolling: false. */
 .openide-diagram {
-	/* Editorial tokens (diagram-design style-guide.md), derived from the active theme: warm-neutral
-	   paper, one ink, ONE accent. Referenced by every diagram renderer as var(--oid-*). */
+	/* Editorial tokens (diagram-design style-guide.md): paper, ONE ink, and a focal role -- every
+	   one of them DERIVED from the active theme, so a diagram sits in a light, a dark and a
+	   high-contrast theme without a palette per theme.
+	   `--oid-accent` used to be a literal `#eb6c36`, and since nothing in the product ever set
+	   `--openide-diagram-accent`, EVERY diagram in the IDE was drawn with that one orange -- a hue
+	   that belongs to no theme and to no other surface in the fork, on the only surface loud enough
+	   to notice it. It is now the theme's BUTTON colour, which is the product's amber (#eeb266 dark,
+	   #e8a44f light) and the one accent the rest of the IDE already spends: a diagram picks up the
+	   accent the window around it is using instead of introducing a second one, and a theme that
+	   disagrees moves the diagrams with it. Everything that is not focal stays ink at a fraction of
+	   itself, so exactly one thing in a figure is coloured. The `--openide-diagram-accent` hook
+	   stays for anyone who wants a different one. */
 	--oid-paper: var(--vscode-editor-background);
 	--oid-paper-2: color-mix(in srgb, var(--vscode-foreground) 4%, var(--vscode-editor-background));
 	--oid-ink: var(--vscode-foreground);
@@ -28,9 +38,9 @@
 	--oid-soft: color-mix(in srgb, var(--vscode-descriptionForeground) 62%, transparent);
 	--oid-rule: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
 	--oid-rule-solid: color-mix(in srgb, var(--vscode-foreground) 26%, transparent);
-	--oid-accent: var(--openide-diagram-accent, #eb6c36);
-	--oid-accent-tint: color-mix(in srgb, var(--openide-diagram-accent, #eb6c36) 9%, transparent);
-	--oid-link: var(--vscode-textLink-foreground, #2e5aa8);
+	--oid-accent: var(--openide-diagram-accent, var(--vscode-button-background, #eeb266));
+	--oid-accent-tint: color-mix(in srgb, var(--oid-accent) 9%, transparent);
+	--oid-link: var(--oi-text-link, var(--vscode-textLink-foreground));
 	--oid-dot: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
 	position: relative;
 	margin: 8px 0;
@@ -41,6 +51,17 @@
 	background-image: radial-gradient(var(--oid-dot) 1px, transparent 1px);
 	background-size: 22px 22px;
 	overflow: hidden;
+}
+
+/* High contrast needs a different source for the accent, and it is not a style preference.
+   `button.background` is literally `Color.black` in hc-black (colors/inputColors.ts) -- the button
+   there is a black box drawn by its contrast border -- so inheriting it painted the focal node's
+   stroke black ON black paper, and the one node the figure exists to point at became the LEAST
+   visible thing in it. `focusBorder` is the colour those themes reserve for "look here" (#F38518
+   in hc-black, #006BBD in hc-light) and is guaranteed to contrast with the ground. */
+.monaco-workbench.hc-black .openide-diagram,
+.monaco-workbench.hc-light .openide-diagram {
+	--oid-accent: var(--openide-diagram-accent, var(--vscode-focusBorder));
 }
 
 .openide-diagram-scroll {
@@ -101,27 +122,6 @@
 .openide-diagram .dleg-line { stroke: var(--oid-muted); stroke-width: 1; stroke-dasharray: 4 3; }
 .openide-diagram .dleg-label { fill: var(--oid-soft); font-size: 8.5px; font-family: var(--vscode-font-family); }
 
-/* ---- archmap: the Project Map's visual grammar in SVG (openideArchMapDiagram.ts) ---- */
-
-.openide-diagram .amap-title { fill: var(--oid-muted); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-family: var(--vscode-font-family); }
-.openide-diagram .amap-hull { fill: color-mix(in srgb, var(--oid-ink) 3%, transparent); stroke: var(--oid-rule); stroke-dasharray: 5 4; }
-.openide-diagram .amap-hull-label { fill: var(--oid-soft); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--vscode-font-family); }
-.openide-diagram .amap-edge { fill: none; stroke: var(--oid-muted); stroke-width: 1.2; opacity: 0.45; transition: opacity 0.12s, stroke 0.12s; }
-.openide-diagram .amap-edge.dashed { stroke-dasharray: 4 3; stroke-width: 1; }
-.openide-diagram .amap-node { transition: opacity 0.12s; }
-.openide-diagram .amap-shape { fill: var(--oid-paper); stroke-width: 1.2; }
-.openide-diagram .amap-shape.emphasis { stroke-width: 1.8; }
-.openide-diagram .amap-card { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; overflow: hidden; font-family: var(--vscode-font-family); pointer-events: none; }
-.openide-diagram .amap-card-row { display: flex; align-items: center; gap: 6px; max-width: 100%; }
-.openide-diagram .amap-card-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-.openide-diagram .amap-card-title { font-size: 11.5px; font-weight: 600; color: var(--oid-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.openide-diagram .amap-card-sub { font-size: 9.5px; color: var(--oid-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.openide-diagram .amap-focus .amap-node { opacity: 0.18; }
-.openide-diagram .amap-focus .amap-edge { opacity: 0.06; }
-.openide-diagram .amap-focus .amap-node.on { opacity: 1; }
-.openide-diagram .amap-focus .amap-edge.on { opacity: 0.85; stroke: var(--amap-c, var(--oid-muted)); stroke-width: 1.4; }
-.openide-diagram .amap-focus .amap-node.pinned .amap-shape { stroke-width: 2.4; }
-.openide-diagram .smap-lifeline { stroke: var(--oid-rule-solid); stroke-width: 1; stroke-dasharray: 2 4; }
 
 /* ---- charts: monochrome, one ink per series, no library ---- */
 
@@ -256,7 +256,6 @@
 /* ---- Scrollbars: the shared skin in openideSurfaceCss.ts (thin pill, no track) selects on
    .openide-chat-native *, .openide-diagram * and .openide-diagram-scroll. Nothing local. */
 
-
 /* ---- Native full-screen viewer (browser/diagrams/openideDiagramEditor.ts) ----
    Transcribed from the overlay-webview viewer it replaced: toolbar, dotted stage, transformed
    canvas. The picture keeps its `.openide-diagram` box (that is where the --oid tokens live),
@@ -365,294 +364,3 @@
 	background: var(--vscode-editor-background);
 }
 .openide-diagram-viewer-overlay.hidden { display: none; }
-
-/* ---- A saved map that does not draw yet (browser/diagrams/openideMapEditor.ts) ----
-   The validator's own diagnostics, shown verbatim: the same {code, subject, message, fix} the
-   agent repairs against. Reads as a document, not as an error dialog — the file is a draft on its
-   way to being a map, and the toolbar above still opens the JSON. */
-.openide-map-problems {
-	max-width: 720px;
-	margin: 0 auto;
-	padding: 28px 24px 40px;
-	font-family: var(--vscode-font-family);
-	color: var(--vscode-foreground);
-	cursor: default;
-	user-select: text;
-}
-.openide-map-problems-title {
-	font-size: 15px;
-	font-weight: 600;
-	margin-bottom: 4px;
-}
-.openide-map-problems-hint {
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
-	margin-bottom: 18px;
-}
-.openide-map-problems-list {
-	list-style: none;
-	margin: 0;
-	padding: 0;
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-}
-.openide-map-problem {
-	padding: 10px 12px;
-	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-panel-border, var(--oid-rule-solid));
-	border-left-width: 2px;
-	border-radius: var(--oi-radius-sm);
-	background: var(--oid-paper-2);
-}
-.openide-map-problem.error { border-left-color: var(--vscode-editorError-foreground); }
-.openide-map-problem.warning { border-left-color: var(--vscode-editorWarning-foreground); }
-.openide-map-problem-head {
-	display: flex;
-	align-items: baseline;
-	gap: 8px;
-	margin-bottom: 4px;
-}
-.openide-map-problem-code {
-	font-family: var(--vscode-editor-font-family, monospace);
-	font-size: 11px;
-	color: var(--vscode-descriptionForeground);
-}
-.openide-map-problem-subject {
-	font-size: 12px;
-	font-weight: 600;
-}
-.openide-map-problem-message { font-size: 12.5px; line-height: 1.5; }
-.openide-map-problem-fix {
-	margin-top: 6px;
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
-}
-
-
-/* With the overlay up there is no picture: the zoom controls and their hint would act on nothing.
-   The pane's own actions (edit the JSON, reveal) are nested one level deeper and stay — they are
-   exactly what the overlay is asking for. */
-.openide-diagram-viewer.has-overlay > .openide-diagram-viewer-bar > .openide-diagram-viewer-btn,
-.openide-diagram-viewer.has-overlay .openide-diagram-viewer-zoom,
-.openide-diagram-viewer.has-overlay .openide-diagram-viewer-hint {
-	display: none;
-}
-
-/* A stage with no toolbar row: the canvas is the pane, edge to edge, and the controls float over
-   it as cards (the Project Map's arrangement). */
-.openide-diagram-viewer.chromeless > .openide-diagram-viewer-bar { display: none; }
-/* The picture answers clicks here, so it says so. In the chat, where a click does nothing, it
-   keeps the default cursor. */
-.openide-map-stage .amap-node { cursor: pointer; }
-
-/* ---- The saved-map editor (browser/diagrams/openideMapEditor.ts) ----
-   Structured like the Project Map: the canvas IS the pane and the panels float over it. The card,
-   panel and icon-button rules come from the Project Map's own stylesheet, which this editor
-   imports; what follows is only what a map has and a file graph does not. */
-.openide-map-editor {
-	position: relative;
-	height: 100%;
-	overflow: hidden;
-}
-.openide-map-stage {
-	/* The Project Map's panel geometry, verbatim: same insets, same gutter, same head height, so
-	   the two views line up when they sit side by side. */
-	--pmap-inset: 14px;
-	--pmap-gutter: 12px;
-	--pmap-right-width: min(300px, 42%);
-	--pmap-head-height: 34px;
-}
-.openide-map-id { width: 100%; }
-.openide-map-id-icon {
-	display: flex;
-	align-items: center;
-	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
-}
-.openide-map-id-icon .codicon { font-size: 14px; }
-/* The content of a DomScrollableElement never scrolls itself: the wrapper carries the height and
-   the workbench's own scrollbar, the content just overflows into it. */
-.openide-map-list {
-	display: flex;
-	flex-direction: column;
-	box-sizing: border-box;
-	padding: 4px;
-	overflow: hidden;
-}
-.openide-map-list-scroll { max-height: 260px; }
-.openide-map-inspector { width: 100%; }
-.openide-map-insp-body { box-sizing: border-box; padding: 4px; overflow: hidden; }
-/* Load-bearing, not tidiness: the body sits between the card's max-height and the scrollable, and
-   at the default `flex: 0 1 auto` it grows to its content height — the slider then concludes
-   everything is visible while the card quietly clips the rest. */
-.openide-pmap-card-body > .monaco-scrollable-element > .openide-map-list,
-.openide-pmap-card-body > .monaco-scrollable-element > .openide-map-insp-body { flex: 1 1 0; min-height: 0; }
-.openide-map-insp-meta {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 6px;
-	padding: 4px 6px 8px;
-}
-.openide-map-kind {
-	display: inline-flex;
-	align-items: center;
-	font-size: 10.5px;
-	letter-spacing: 0.02em;
-	text-transform: uppercase;
-	padding: 1px 7px;
-	border-radius: var(--oi-radius-circle);
-	color: var(--openide-map-kind-color, var(--vscode-foreground));
-	border: 1px solid var(--openide-map-kind-color, var(--oid-rule-solid));
-	background: color-mix(in srgb, var(--openide-map-kind-color, transparent) 12%, transparent);
-}
-.openide-map-insp-sub {
-	font-size: 11.5px;
-	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
-}
-.openide-map-insp-section {
-	padding: 6px 6px 3px;
-	font-size: 10.5px;
-	letter-spacing: 0.04em;
-	text-transform: uppercase;
-	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
-}
-/* The rows are buttons so they answer the keyboard, but they must read as list rows. */
-.openide-map-row {
-	border: 0;
-	background: transparent;
-	font: inherit;
-	text-align: left;
-	width: 100%;
-	cursor: pointer;
-}
-.openide-map-row:focus-visible {
-	outline: 1px solid var(--oi-focus, var(--vscode-focusBorder));
-	outline-offset: -1px;
-}
-.openide-map-dot {
-	width: 8px;
-	height: 8px;
-	border-radius: 50%;
-	flex: 0 0 auto;
-}
-/* An async or reply relation, marked the way the picture marks it. */
-.openide-map-dot.dashed {
-	background: transparent !important;
-	border: 1px dashed var(--oid-muted);
-}
-/* The Project Map scopes its own `.hidden` to its root; this pane needs the same inside its stage
-   or the inspector card, which starts hidden, would sit there empty. */
-.openide-map-stage .hidden { display: none !important; }
-.openide-map-id .openide-pmap-count { white-space: nowrap; }
-/* The card head names the map, so the title drawn INSIDE the picture would say it twice. It stays
-   in the SVG for the chat and the modal, where there is no card. */
-.openide-map-stage .amap-title { display: none; }
-/* The TITLE is the view picker: a name with a chevron after it, which reads as a picker anywhere.
-   The card's own fold chevron stays at the far right, where every workbench card keeps it. */
-.openide-map-switch {
-	display: flex;
-	align-items: center;
-	gap: 3px;
-	min-width: 0;
-	flex: 1 1 auto;
-	border: 0;
-	background: transparent;
-	padding: 2px 4px;
-	margin-left: -4px;
-	border-radius: var(--oi-radius-sm);
-	color: inherit;
-	font: inherit;
-	text-transform: inherit;
-	letter-spacing: inherit;
-	cursor: pointer;
-}
-.openide-map-switch:hover { background: var(--oi-hover, var(--vscode-toolbar-hoverBackground)); }
-.openide-map-switch:focus-visible {
-	outline: 1px solid var(--oi-focus, var(--vscode-focusBorder));
-	outline-offset: -1px;
-}
-.openide-map-switch-label {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-.openide-map-switch-chevron {
-	display: flex;
-	align-items: center;
-	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
-}
-.openide-map-switch-chevron .codicon { font-size: 12px; }
-.openide-map-switcher-menu {
-	min-width: var(--openide-menu-anchor-width, 220px);
-	max-width: var(--openide-menu-anchor-width, 320px);
-}
-/* The node's explanation: the header comment of the file it stands for. Prose, so it wraps and it
-   is selectable — it is the one thing in the panel meant to be READ rather than clicked. */
-.openide-map-insp-doc {
-	padding: 2px 6px 10px;
-	font-size: 11.5px;
-	line-height: 1.5;
-	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
-	user-select: text;
-	cursor: text;
-}
-/* Sized like the Explorer's rows so a themed icon lands where the glyph used to. */
-.openide-map-file-icon {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 16px;
-	height: 16px;
-	flex: 0 0 auto;
-	background-size: 16px;
-	background-position: center;
-	background-repeat: no-repeat;
-}
-.openide-map-file-icon .codicon { font-size: 13px; }
-
-/* ---- The navigation stack's back button ----
-   Apple's rule: it carries the PREVIOUS title, so you know where it goes before you press it.
-   With nothing behind it, there is no button at all. */
-.openide-map-back {
-	display: flex;
-	align-items: center;
-	gap: 2px;
-	max-width: 45%;
-	border: 0;
-	background: transparent;
-	padding: 0 4px 0 0;
-	margin-right: 2px;
-	color: var(--vscode-textLink-foreground);
-	font: inherit;
-	font-size: 11.5px;
-	text-transform: none;
-	letter-spacing: 0;
-	cursor: pointer;
-	flex: 0 1 auto;
-	min-width: 0;
-}
-.openide-map-back .codicon { font-size: 13px; }
-.openide-map-back-label {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-.openide-map-back:hover { text-decoration: underline; }
-.openide-map-back:focus-visible {
-	outline: 1px solid var(--oi-focus, var(--vscode-focusBorder));
-	outline-offset: -1px;
-}
-
-/* The empty state's one action: build the index this view is a picture of. */
-.openide-map-empty-action {
-	margin-top: 14px;
-	padding: 4px 12px;
-	border: none;
-	border-radius: var(--oi-radius-sm);
-	background: var(--vscode-button-background);
-	color: var(--vscode-button-foreground);
-	font: inherit;
-	font-size: 12.5px;
-	cursor: pointer;
-}
-.openide-map-empty-action:hover { background: var(--vscode-button-hoverBackground); }

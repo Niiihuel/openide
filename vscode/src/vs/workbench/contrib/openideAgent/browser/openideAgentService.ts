@@ -606,13 +606,8 @@ Tenés herramientas para trabajar sobre el workspace real (usalas en vez de inve
 
 write_file, edit_file y run_command piden aprobación al usuario antes de ejecutarse; si el usuario rechaza, recibís un resultado de error y debés adaptarte (no reintentar lo mismo). Antes de editar un archivo, leelo. Respondé en el idioma del usuario.
 
-DIAGRAMAS — cuando un dibujo explica mejor que la prosa, elegí el tipo por lo que se cuenta e incluilo con su fence; el chat renderiza los cuatro con la misma piel de grafo de nodos (layout automático y determinista, no hay posiciones que autorear):
-- Componentes, servicios, límites e infraestructura → \`\`\`archmap: {"type":"archmap","title"?,"nodes":[{"id","label","kind":"frontend|backend|database|cloud|security|messagebus|external","sublabel"?,"group"?,"emphasis"?}],"edges":[{"from","to","label"?,"dashed"?}]}. Flujo izquierda→derecha, límites por group, color por kind, anillo en los emphasis.
-- Procesos, pipelines, decisiones, CI/CD → \`\`\`flowmap: la MISMA forma, con "kind":"start|step|decision|tool|end|failure" y group como carril.
-- Estados, reintentos, ciclos de vida → \`\`\`lifemap: la MISMA forma, con "kind":"initial|active|waiting|terminal|failure"; los ciclos (reintentos) están permitidos.
-- Llamadas API, traces, request/response en el tiempo → \`\`\`seqmap: {"type":"seqmap","title"?,"actors":[{"id","label","kind" como archmap,"sublabel"?}],"steps":[{"from","to","label","reply"?,"dashed"?}]}. El orden de steps ES el tiempo; label del paso obligatorio; "reply" marca la respuesta (punteada).
-Mantenelos enfocados: ≤ 12 nodos primarios, un camino principal claro, ids estables y labels cortos (el detalle va en sublabel); un JSON inválido se muestra como código, no como diagrama. \`\`\`mermaid (flowchart/sequenceDiagram/stateDiagram) sigue soportado. Para explicar la arquitectura de ESTE proyecto, consultá primero project_map_query y dibujá el archmap con los módulos reales que devuelve.
-La arquitectura de ESTE proyecto no se dibuja a mano: la genera la IDE desde su índice (comando «Arquitectura del proyecto»), así que si te la piden, mandalos ahí en vez de inventar un archmap que va a quedar viejo.`;
+DIAGRAMAS — cuando un dibujo explica mejor que la prosa, incluilo en un fence \`\`\`mermaid y el chat lo renderiza: flowchart y graph (componentes, procesos, decisiones), stateDiagram-v2 (estados y ciclos de vida), sequenceDiagram (llamadas y traces en el tiempo), y además pie, gantt, timeline, journey, quadrantChart y gitGraph. Mantenelos enfocados: ≤ 12 nodos primarios, un camino principal claro y labels cortos; una fuente que el parser no entiende se muestra como código, no como diagrama.
+La arquitectura de ESTE proyecto no se dibuja de memoria: consultá primero project_map_query y dibujá el mermaid con los módulos reales que devuelve.`;
 
 /** System prompt suffix per mode (plan/ask are read-only). */
 const MODE_PROMPTS: Record<AgentMode, string> = {

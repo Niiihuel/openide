@@ -88,7 +88,6 @@ const COLLAPSE_ICON = 'chevron-right';
 const COLLAPSE_ANIMATION_MS = 150;
 
 /** The project's other view: the same index drawn as an architecture diagram. */
-const ARCH_MAP_COMMAND = 'openide.archmap.project';
 
 /** Command the webview's `openProjectMap` message ends up executing (openideChatView.ts). */
 const PROJECT_MAP_COMMAND = 'openide.memory.open';
@@ -193,7 +192,6 @@ export class OpenideChatHeader extends Disposable {
 			},
 			removeAll: () => void this.deleteAllSessions(),
 			openProjectMap: () => { void this.commandService.executeCommand(PROJECT_MAP_COMMAND); },
-			openArchMap: () => { void this.commandService.executeCommand(ARCH_MAP_COMMAND); },
 		}));
 
 		// `‹ | + ▾`, ▣, ⚙, ⋯ | ⛶, ✕ — upstream's ChatViewTitle order, separator before the window

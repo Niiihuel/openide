@@ -138,7 +138,7 @@ export function diffPlanTasks(previous: readonly IPlanTask[] | undefined, next: 
 	return changes;
 }
 
-const DIAGRAM_LANGS = new Set(['mermaid', 'flowchart', 'diagram', 'openide-diagram', 'archmap', 'flowmap', 'lifemap', 'seqmap']);
+const DIAGRAM_LANGS = new Set(['mermaid', 'flowchart', 'diagram', 'openide-diagram']);
 
 type PlanSegment = { kind: 'markdown'; text: string } | { kind: 'diagram'; source: string };
 

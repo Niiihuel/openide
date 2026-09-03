@@ -9,8 +9,6 @@ import { renderSequenceChart } from './openideChartSequence.js';
 import { renderGitChart, renderQuadrantChart } from './openideChartStructure.js';
 import { IOpenideChartRender } from './openideChartTheme.js';
 import { renderGraphDiagramSvg } from './openideGraphDiagram.js';
-import { INodeMapFocus, renderNodeMapSvg } from './openideNodeMapDiagram.js';
-import { renderSeqMapSvg } from './openideSeqMapDiagram.js';
 import './media/openideDiagrams.css';
 
 /**
@@ -36,11 +34,6 @@ export interface IOpenideDiagramRender {
 	 * and journey charts are lists of HTML rows with no single node that means anything on its own.
 	 */
 	readonly svg?: SVGSVGElement;
-	/**
-	 * The picture's selection, for the frames that offer one. Only the typed maps have it: a chart
-	 * has no nodes to pin, and a mermaid graph's focus is hover-only.
-	 */
-	readonly focus?: INodeMapFocus;
 }
 
 function renderChartSpec(doc: Document, spec: ChartSpec): IOpenideChartRender | undefined {
@@ -84,15 +77,6 @@ export function renderOpenideDiagram(doc: Document, source: string): IOpenideDia
 			const svg = renderGraphDiagramSvg(doc, result.layout);
 			scroll.appendChild(svg);
 			return { domNode, svg };
-		}
-		if (result.family === 'nodemap' || result.family === 'seqmap') {
-			// The typed maps keep the dotted grid: it is the graph family's canvas texture, and the
-			// Project Map (whose visual grammar this is) draws the same dots behind its nodes.
-			const map = result.family === 'seqmap'
-				? renderSeqMapSvg(doc, result.spec, result.layout)
-				: renderNodeMapSvg(doc, result.spec, result.layout);
-			scroll.appendChild(map.svg);
-			return { domNode, svg: map.svg, focus: map.focus };
 		}
 		const chart = renderChartSpec(doc, result.spec);
 		if (!chart || !chart.nodes.length) {
