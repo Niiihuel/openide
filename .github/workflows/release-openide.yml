@@ -28,13 +28,13 @@ jobs:
           - { os: ubuntu-22.04, platform: linux, arch: x64, target: appimage, feed: 'yes' }
           - { os: ubuntu-24.04-arm, platform: linux, arch: arm64, target: archive, feed: 'no' }
           - { os: windows-2022, platform: win32, arch: x64, target: user, feed: 'yes' }
-          # windows-11-arm is commented out, not deleted, for the same reason macOS is: it works,
-          # it just costs more than it returns right now. It was the single most expensive row in
-          # the matrix — ~68 minutes billed at the 2x Windows rate, ~136 of the ~310 minutes a
-          # release consumed, against a private-repo allowance of 2000/month. Turn it back on when
-          # someone actually asks for Windows on ARM, and raise the PLATFORM COUNT below and the
-          # required list in promote-openide.yml back to include win32-arm64.
-          # - { os: windows-11-arm, platform: win32, arch: arm64, target: user, feed: 'yes' }
+          # Windows on ARM was commented out while the repository was private: at ~68 minutes
+          # billed at the 2x Windows rate it was ~136 of the ~310 minutes a release cost, against
+          # an allowance of 2000/month. The repository is public now and standard runners are not
+          # billed on public repositories, so the one argument against this row is gone. If it ever
+          # comes out again, lower the PLATFORM COUNT below AND drop win32-arm64 from the required
+          # list in promote-openide.yml — both, or the release fails at its very last step.
+          - { os: windows-11-arm, platform: win32, arch: arm64, target: user, feed: 'yes' }
           # macOS is commented out, not deleted: `dev/sign-macos.sh` works, but signing needs the
           # Developer ID identity inside a keychain and a notarytool profile, and NOTHING here
           # provisions either — the script assumes a Mac already configured by hand. Since `publish`
@@ -308,8 +308,8 @@ jobs:
           mkdir -p feed-inputs
           jq -s '.' release-assets/manifest-input-*.json >feed-inputs/manifest-inputs.json
           # PLATFORM COUNT: one per matrix row with `feed: yes`.
-          [[ $(jq 'length' feed-inputs/manifest-inputs.json) -eq 2 ]] || {
-            echo "Expected 2 platform mappings, got $(jq 'length' feed-inputs/manifest-inputs.json)." >&2
+          [[ $(jq 'length' feed-inputs/manifest-inputs.json) -eq 3 ]] || {
+            echo "Expected 3 platform mappings, got $(jq 'length' feed-inputs/manifest-inputs.json)." >&2
             jq -r '.[].asset' feed-inputs/manifest-inputs.json >&2; exit 1
           }
           rm -f release-assets/manifest-input-*.json

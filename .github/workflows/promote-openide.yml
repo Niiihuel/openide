@@ -30,6 +30,5 @@ jobs:
           # not it feeds the updater, because this checks what people can DOWNLOAD. macOS is out
           # until the signing keychain is provisioned; add darwin-x64 and darwin-arm64 back
           # together with it, or a release with no mac build gets promoted as if it were complete.
-          # win32-arm64 is out too, for cost rather than tooling — see the matrix comment there.
-          for required in linux-x64 linux-arm64 win32-x64; do jq -e --arg p "$required" 'any(.[]; contains($p))' <<<"$assets" >/dev/null; done
+          for required in linux-x64 linux-arm64 win32-x64 win32-arm64; do jq -e --arg p "$required" 'any(.[]; contains($p))' <<<"$assets" >/dev/null; done
           gh release edit "$tag" --draft=false --latest
