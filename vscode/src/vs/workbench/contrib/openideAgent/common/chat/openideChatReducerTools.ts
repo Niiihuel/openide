@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { IOpenideChatAskContent, IOpenideChatDelegationContent, IOpenideChatEditContent, IOpenideChatExploreContent, IOpenideChatTerminalContent, IOpenideChatToolContent, OpenideChatToolState } from './openideChatContent.js';
+import { IPersistedFlowVideo } from '../openideAgentTypes.js';
 import { appendOpenideChatExploreEntry, createOpenideChatExploreContent, createOpenideChatExploreEntry, enrichOpenideChatExploreEntry, settleOpenideChatExploreEntry } from './openideChatExploreGroup.js';
 import {
 	closeOpenideChatMarkdown, finalizeOpenideChatExplore, finalizeOpenideChatThinking, getOpenideChatContentAt,
@@ -333,4 +334,12 @@ export function applyOpenideChatScreenshot(draft: IOpenideChatDraft, callId: str
 	finalizeOpenideChatThinking(draft);
 	finalizeOpenideChatExplore(draft);
 	pushOpenideChatContent(draft, { kind: 'screenshot', callId, image: { mimeType, data } });
+}
+
+/** A recorded flow lands as its own card, right after the tool row that produced it. */
+export function applyOpenideChatVideo(draft: IOpenideChatDraft, callId: string, video: IPersistedFlowVideo): void {
+	closeOpenideChatMarkdown(draft);
+	finalizeOpenideChatThinking(draft);
+	finalizeOpenideChatExplore(draft);
+	pushOpenideChatContent(draft, { kind: 'video', callId, video });
 }

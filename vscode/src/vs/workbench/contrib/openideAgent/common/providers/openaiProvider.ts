@@ -13,7 +13,7 @@ import { listenStream } from '../../../../../base/common/stream.js';
 import { asText, IRequestService } from '../../../../../platform/request/common/request.js';
 import { AgentStreamEvent, IChatMessage, ILLMProvider, IProviderRequest, IProviderResult, IToolCall } from '../openideAgentTypes.js';
 import { openAIReasoningBody } from '../openideReasoning.js';
-import { isToolCallingUnsupportedError, providerModelCapabilityKey } from '../openideProviderCapabilities.js';
+import { isImageInputUnsupportedError, isToolCallingUnsupportedError, providerModelCapabilityKey } from '../openideProviderCapabilities.js';
 import { sseDataOf } from '../openideSse.js';
 
 interface IStreamAccum {
@@ -24,6 +24,22 @@ interface IStreamAccum {
 	gotUsage: boolean;
 }
 
+function hasImages(req: IProviderRequest): boolean {
+	return req.messages.some(message => !!message.images?.length);
+}
+
+/** The same turn with every picture replaced by a line naming it: the paths still reach the model. */
+function withoutImages(req: IProviderRequest): IProviderRequest {
+	return {
+		...req,
+		messages: req.messages.map(message => !message.images?.length ? message : {
+			...message,
+			images: [],
+			content: `${message.content}\n[${message.images.length} image(s) omitted: this model does not accept image input. The files, if any, are listed in the preceding tool result.]`,
+		}),
+	};
+}
+
 export class OpenAICompatibleProvider implements ILLMProvider {
 
 	readonly id = 'openai';
@@ -32,6 +48,8 @@ export class OpenAICompatibleProvider implements ILLMProvider {
 
 	/** Per endpoint/model learning: avoids paying every turn for a request we know is invalid. */
 	private readonly modelsWithoutTools = new Set<string>();
+	/** Models that rejected image input this session, keyed like `modelsWithoutTools`. */
+	private readonly modelsWithoutImages = new Set<string>();
 	/**
 	 * Empty-with-tools incidents per capability. One empty answer is NOT proof the endpoint lacks
 	 * function calling — stealth/preview models return the occasional empty stream and recover on
@@ -44,6 +62,7 @@ export class OpenAICompatibleProvider implements ILLMProvider {
 
 	resetSessionState(): void {
 		this.modelsWithoutTools.clear();
+		this.modelsWithoutImages.clear();
 		this.emptyToolStrikes.clear();
 	}
 
@@ -55,6 +74,9 @@ export class OpenAICompatibleProvider implements ILLMProvider {
 		const capabilityKey = providerModelCapabilityKey(req.providerId, req.baseUrl, req.model);
 		if (req.tools?.length && this.modelsWithoutTools.has(capabilityKey)) {
 			return this.streamChatAttempt(this.withoutTools(req), onEvent, token, emptyRetried);
+		}
+		if (this.modelsWithoutImages.has(capabilityKey) && hasImages(req)) {
+			return this.streamChatAttempt(withoutImages(req), onEvent, token, emptyRetried);
 		}
 		const base = (req.baseUrl?.replace(/\/+$/, '')) || 'https://api.openai.com/v1';
 		const url = `${base}/chat/completions`;
@@ -102,6 +124,15 @@ export class OpenAICompatibleProvider implements ILLMProvider {
 				this.modelsWithoutTools.add(capabilityKey);
 				onEvent({ type: 'info', message: `${req.model} rechazó function calling; OpenIDE reintenta sin tools y recordará esta capacidad para esta sesión.` });
 				return this.streamChatAttempt(this.withoutTools(req), onEvent, token, emptyRetried);
+			}
+			if (hasImages(req) && isImageInputUnsupportedError(detail)) {
+				// Same idea for pictures: a screenshot or a recording's contact sheet attached to
+				// the turn must not sink the turn on a text-only model. The pictures are replaced by
+				// a line saying they were left out, so the model still hands the user the paths the
+				// tool result already carries.
+				this.modelsWithoutImages.add(capabilityKey);
+				onEvent({ type: 'info', message: `${req.model} no acepta imágenes; OpenIDE reintenta sin ellas (quedan como archivos) y recordará esta capacidad para esta sesión.` });
+				return this.streamChatAttempt(withoutImages(req), onEvent, token, emptyRetried);
 			}
 			throw new Error(detail);
 		}

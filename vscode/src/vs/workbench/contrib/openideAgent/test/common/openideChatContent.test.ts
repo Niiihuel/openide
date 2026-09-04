@@ -53,6 +53,7 @@ suite('OpenIDE chat content', () => {
 		canvas: { kind: 'canvas', canvasId: 'k1', title: 'canvas' },
 		modeSuggestion: { kind: 'modeSuggestion', requestId: 'r3', mode: 'plan', reason: 'complejo' },
 		screenshot: { kind: 'screenshot', callId: 'c3', image: { mimeType: 'image/png', data: 'AAA' } },
+		video: { kind: 'video', callId: 'c4', video: { label: 'login', dir: '/r', videoPath: '/r/flow.webm', sheetPath: '/r/sheet.jpg', durationMs: 1200, width: 640, height: 480, steps: [] } },
 		progress: { kind: 'progress', text: '· read_file', sourceEvent: 'toolStart' },
 	};
 

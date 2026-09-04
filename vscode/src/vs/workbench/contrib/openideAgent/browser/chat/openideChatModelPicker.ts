@@ -325,12 +325,29 @@ export class OpenideChatModelPicker extends Disposable {
 				: localize('openide.chat.model.noProviders', "Sin proveedores conectados")));
 		}
 		const contentHeight = rows.reduce((total, row) => total + (row.kind === 'section' ? MODEL_SECTION_HEIGHT : PICKER_ROW_HEIGHT), 0);
-		const viewport = getWindow(host).innerHeight;
-		const available = Math.max(PICKER_ROW_HEIGHT, Math.min(PICKER_MAX_HEIGHT, viewport * 0.6) - PICKER_CHROME_HEIGHT);
-		const height = Math.min(contentHeight, available);
+		const height = Math.min(contentHeight, this._listBudget(host));
 		host.style.height = `${height}px`;
 		list.layout(height);
 		this._popover.layout();
+	}
+
+	/**
+	 * How tall the virtual list may be, taken from the CARD and not from a number of its own.
+	 *
+	 * `.openide-menu` caps every popover in the product (openideChatMenus.css) and clips what
+	 * overflows. This method used to repeat that cap as its own constants, and the moment the two
+	 * drifted apart the picker laid its list out TALLER than the card could show: the rows past the
+	 * card's edge were clipped, and the list — believing it had the room it was given — would not
+	 * scroll to them. Filtering is where it showed, because that is when the row count lands
+	 * between the two numbers. Reading the computed cap keeps one source of truth; the constants
+	 * stay as the fallback for a surface mounted outside a menu.
+	 */
+	private _listBudget(host: HTMLElement): number {
+		const window = getWindow(host);
+		const menu = host.closest('.openide-menu');
+		const cap = menu ? parseFloat(window.getComputedStyle(menu).maxHeight) : Number.NaN;
+		const ceiling = Number.isFinite(cap) && cap > 0 ? cap : Math.min(PICKER_MAX_HEIGHT, window.innerHeight * 0.6);
+		return Math.max(PICKER_ROW_HEIGHT, ceiling - PICKER_CHROME_HEIGHT);
 	}
 
 	/** ↑↓ move over MODEL rows only — stopping on a section header would make Enter a no-op. */

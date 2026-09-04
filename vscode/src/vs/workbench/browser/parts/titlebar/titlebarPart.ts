@@ -14,8 +14,8 @@ import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
 import { IConfigurationService, IConfigurationChangeEvent } from '../../../../platform/configuration/common/configuration.js';
 import { DisposableStore, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { IBrowserWorkbenchEnvironmentService } from '../../../services/environment/browser/environmentService.js';
-import { IThemeService } from '../../../../platform/theme/common/themeService.js';
-import { TITLE_BAR_ACTIVE_BACKGROUND, TITLE_BAR_ACTIVE_FOREGROUND, TITLE_BAR_INACTIVE_FOREGROUND, TITLE_BAR_INACTIVE_BACKGROUND, TITLE_BAR_BORDER, WORKBENCH_BACKGROUND } from '../../../common/theme.js';
+import { IColorTheme, IThemeService } from '../../../../platform/theme/common/themeService.js';
+import { TITLE_BAR_ACTIVE_BACKGROUND, TITLE_BAR_ACTIVE_FOREGROUND, TITLE_BAR_INACTIVE_FOREGROUND, TITLE_BAR_INACTIVE_BACKGROUND, TITLE_BAR_BORDER, WORKBENCH_BACKGROUND, OPENIDE_WORKBENCH_BACKGROUND } from '../../../common/theme.js';
 import { isMacintosh, isWindows, isLinux, isWeb, isNative, platformLocale } from '../../../../base/common/platform.js';
 import { Color } from '../../../../base/common/color.js';
 import { EventType, EventHelper, Dimension, append, $, addDisposableListener, prepend, reset, getWindow, getWindowId, isAncestor, getActiveDocument, isHTMLElement } from '../../../../base/browser/dom.js';
@@ -811,13 +811,24 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 				this.element.classList.remove('inactive');
 			}
 
-			const titleBackground = this.getColor(this.isInactive ? TITLE_BAR_INACTIVE_BACKGROUND : TITLE_BAR_ACTIVE_BACKGROUND, (color, theme) => {
-				// LCD Rendering Support: the title bar part is a defining its own GPU layer.
-				// To benefit from LCD font rendering, we must ensure that we always set an
-				// opaque background color. As such, we compute an opaque color given we know
-				// the background color is the workbench background.
-				return color.isOpaque() ? color : color.makeOpaque(WORKBENCH_BACKGROUND(theme));
-			}) || '';
+			// LCD Rendering Support: the title bar part is a defining its own GPU layer.
+			// To benefit from LCD font rendering, we must ensure that we always set an
+			// opaque background color. As such, we compute an opaque color given we know
+			// the background color is the workbench background.
+			const opaque = (color: Color, theme: IColorTheme) => color.isOpaque() ? color : color.makeOpaque(WORKBENCH_BACKGROUND(theme));
+			// OpenIDE: the header is shell, not a strip with a palette of its own. The product
+			// renders the editor, side bars and panel as islands over one backdrop, and
+			// `openide.workbenchBackground` IS that backdrop -- the colour already painted in the
+			// gaps between them (floatingPanels.css). A theme that tints `titleBar.*` on its own
+			// terms then left the header a third tone next to the gutter and the islands: Dracula
+			// puts #21222C here, #343746 in the gutter and #282A36 on the islands, and the window
+			// reads as three unrelated surfaces. The product colour resolves through the theme
+			// anyway (its default IS `activityBar.background`, which is what OpenIDE's own themes
+			// set the header to), so this changes nothing for a theme built for the shell and
+			// makes every other one coherent. Upstream's colours stay as the fallback.
+			const titleBackground = this.getColor(OPENIDE_WORKBENCH_BACKGROUND, opaque)
+				|| this.getColor(this.isInactive ? TITLE_BAR_INACTIVE_BACKGROUND : TITLE_BAR_ACTIVE_BACKGROUND, opaque)
+				|| '';
 			this.element.style.backgroundColor = titleBackground;
 			this.layoutService.getContainer(getWindow(this.element)).style.setProperty('--modern-ui-shell-background', titleBackground);
 

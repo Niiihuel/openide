@@ -42,6 +42,7 @@ import { IOpenideAgentHostService, OPENIDE_AGENT_HOST_CHANNEL } from '../../../.
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { IToolDefinition } from '../common/openideAgentTypes.js';
 import { parseScreenshotMarker } from './openideBrowserTools.js';
+import { parseVideoMarker } from '../common/openideBrowserRecorder.js';
 import { IOpenideCliDefinition, IOpenideMcpEndpoint } from '../common/openideAgentCliCatalog.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
@@ -278,6 +279,19 @@ export class OpenideIdeServerService extends Disposable {
 						content: [
 							{ type: 'image', data: shot.data, mimeType: shot.mimeType },
 							...(shot.note ? [{ type: 'text' as const, text: shot.note }] : []),
+						],
+					};
+				}
+				// A recorded flow: MCP has no video content type, so the CLI gets the paths in text
+				// (a CLI that takes video reads the .webm itself), the contact sheet as one image and
+				// the key frames the tool chose to attach as more images.
+				const flow = parseVideoMarker(output);
+				if (flow) {
+					return {
+						content: [
+							{ type: 'text', text: flow.note },
+							{ type: 'image', data: flow.video.sheet.data, mimeType: flow.video.sheet.mimeType },
+							...flow.video.keyFrames.filter(frame => !!frame.data).map(frame => ({ type: 'image' as const, data: frame.data!, mimeType: 'image/jpeg' })),
 						],
 					};
 				}

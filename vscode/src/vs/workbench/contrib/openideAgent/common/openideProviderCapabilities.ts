@@ -17,6 +17,20 @@ export function isToolCallingUnsupportedError(message: string): boolean {
 		|| /["'`]?tools?["'`]?.{0,20}(?:is not allowed|is unavailable for this model)/.test(value);
 }
 
+/**
+ * The endpoint said the model cannot take pictures. OpenRouter: "No endpoints found that support
+ * image input"; OpenAI-compatible servers: "does not support image(s)/vision", "image_url is not
+ * supported", "invalid content type: image_url". A recording ends with a contact sheet attached
+ * to the turn, so without this a text-only model turned every recording into a failed turn.
+ */
+export function isImageInputUnsupportedError(message: string): boolean {
+	const value = message.toLowerCase();
+	return /support(?:s)? image[ _-]?input/.test(value)
+		|| /(?:does not|doesn't|do not|not) support.{0,40}(?:image|vision|multimodal)/.test(value)
+		|| /(?:image|image_url|vision).{0,40}(?:not supported|unsupported|unavailable|not allowed)/.test(value)
+		|| /invalid (?:content )?type.{0,20}image_url/.test(value);
+}
+
 export function providerModelCapabilityKey(providerId: string | undefined, baseUrl: string | undefined, model: string): string {
 	return `${providerId ?? ''}\u0000${baseUrl?.replace(/\/+$/, '').toLowerCase() ?? ''}\u0000${model.trim().toLowerCase()}`;
 }

@@ -23,6 +23,7 @@
 
 import { ChildProcess, spawn } from 'child_process';
 import { accessSync, constants as fsConstants, createWriteStream, statSync, truncateSync, WriteStream } from 'fs';
+import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { delimiter, isAbsolute, join, resolve as resolvePath } from 'path';
 import { app, dialog } from 'electron';
@@ -36,6 +37,7 @@ import { OpenideWebFetchRequest, OpenideWebFetchResponse, validatePublicWebUrl, 
 import { clampSeconds, HookExecRequest, HookExecResult, HOOK_INPUT_MAX_BYTES, HOOK_TIMEOUT_DEFAULT_SECONDS, HOOK_TIMEOUT_MAX_SECONDS, HOOK_TIMEOUT_MIN_SECONDS, IOpenideAgentHostService, MCP_CALL_TIMEOUT_DEFAULT_SECONDS, MCP_CALL_TIMEOUT_MAX_SECONDS, MCP_CALL_TIMEOUT_MIN_SECONDS, MCP_CONNECT_TIMEOUT_DEFAULT_SECONDS, MCP_MAX_JSONRPC_MESSAGE_BYTES, MCP_MAX_STDERR_LOG_BYTES, consumeMcpJsonLines, McpConnectResult, McpServerConfig, McpServerState, McpServerStatus, McpServerToolsEvent, isMcpToolAllowed, McpRequestBudget, McpToolInfo, McpToolResult, redactSecrets, sanitizeMcpStdioEnvironment, shlexSplit, validateMcpServerConfig } from '../common/openideAgentHost.js';
 import { getOpenideOauthPage } from '../common/openideOauthPage.js';
 import { IIdeServerInfo, IIdeServerStartOptions, IIdeToolRequest, IIdeToolResult, IIdeToolSchema } from '../common/openideIdeServer.js';
+import { ICredentialSourcesSnapshot, IExternalCredentialScan, OPENIDE_CREDENTIAL_SOURCES } from '../common/openideCredentialSources.js';
 import { OpenideIdeServerMain } from './openideIdeServerMain.js';
 
 const PROTOCOL_VERSION = '2025-03-26';
@@ -607,6 +609,13 @@ export class OpenideAgentHostMainService implements IOpenideAgentHostService {
 	constructor(
 		private readonly logService: ILogService,
 		private readonly environmentMainService: IEnvironmentMainService,
+		/**
+		 * The user's LOGIN shell environment. A GUI launch does not inherit it, so `process.env`
+		 * alone would miss exactly the `*_API_KEY` exports people put in their shell profile —
+		 * which is the whole point of reading the environment at all. Injected rather than
+		 * imported so this service keeps its two dependencies; app.ts owns the resolver.
+		 */
+		private readonly resolveShellEnv?: () => Promise<Readonly<Record<string, string | undefined>>>,
 	) {
 		// keepalive: detecta servers stdio COLGADOS (los muertos ya disparan 'exit')
 		const keepalive = setInterval(() => this.keepaliveTick(), KEEPALIVE_INTERVAL_MS);
@@ -939,6 +948,40 @@ export class OpenideAgentHostMainService implements IOpenideAgentHostService {
 	}
 	async mcpHeartbeat(clientId: string, ownerToken: string): Promise<void> {
 		if (!this.authorizeOwner(clientId, ownerToken)) { throw new Error('owner MCP no autorizado'); }
+	}
+
+	async readCredentialSources(envNames: readonly string[]): Promise<ICredentialSourcesSnapshot> {
+		const env: Record<string, string> = {};
+		try {
+			const resolved = (await this.resolveShellEnv?.()) ?? process.env;
+			for (const name of envNames) {
+				// Only what was asked for. The environment carries the user's whole machine and
+				// this answer crosses a channel; a wholesale copy would be a leak with no purpose.
+				const value = resolved[name] ?? process.env[name];
+				if (typeof value === 'string' && value) {
+					env[name] = value;
+				}
+			}
+		} catch (error) {
+			this.logService.trace('[openide-credentials] shell env unavailable', error);
+		}
+		const home = homedir();
+		const sources: { id: string; scan: IExternalCredentialScan }[] = [];
+		for (const source of OPENIDE_CREDENTIAL_SOURCES) {
+			try {
+				const file = join(home, ...source.path);
+				const text = await readFile(file, 'utf8');
+				const scan = source.parse(text);
+				// A tool that is installed but has nothing configured contributes nothing; keeping
+				// the empty entry would only make the UI say "opencode" over an empty list.
+				if (Object.keys(scan.keys).length || scan.oauth.length) {
+					sources.push({ id: source.id, scan });
+				}
+			} catch {
+				// Not installed, or no credentials yet. Absence is the normal case, not an error.
+			}
+		}
+		return { env, sources };
 	}
 
 	async webFetch(request: OpenideWebFetchRequest): Promise<OpenideWebFetchResponse> {

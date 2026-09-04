@@ -13,7 +13,7 @@ import { StatusbarAlignment, IStatusbarService, IStatusbarEntry, IStatusbarEntry
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
 import { IAction, Separator, toAction } from '../../../../base/common/actions.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
-import { OPENIDE_SHELL_SEPARATOR, STATUS_BAR_BACKGROUND, STATUS_BAR_FOREGROUND, STATUS_BAR_NO_FOLDER_BACKGROUND, STATUS_BAR_ITEM_HOVER_BACKGROUND, STATUS_BAR_NO_FOLDER_FOREGROUND, STATUS_BAR_ITEM_COMPACT_HOVER_BACKGROUND, STATUS_BAR_ITEM_FOCUS_BORDER, STATUS_BAR_FOCUS_BORDER } from '../../../common/theme.js';
+import { OPENIDE_SHELL_SEPARATOR, OPENIDE_WORKBENCH_BACKGROUND, STATUS_BAR_BACKGROUND, STATUS_BAR_FOREGROUND, STATUS_BAR_NO_FOLDER_BACKGROUND, STATUS_BAR_ITEM_HOVER_BACKGROUND, STATUS_BAR_NO_FOLDER_FOREGROUND, STATUS_BAR_ITEM_COMPACT_HOVER_BACKGROUND, STATUS_BAR_ITEM_FOCUS_BORDER, STATUS_BAR_FOCUS_BORDER } from '../../../common/theme.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
 import { contrastBorder, activeContrastBorder } from '../../../../platform/theme/common/colorRegistry.js';
 import { EventHelper, addDisposableListener, EventType, clearNode, getWindow, isHTMLElement, $ } from '../../../../base/browser/dom.js';
@@ -695,7 +695,18 @@ class StatusbarPart extends Part implements IStatusbarEntryContainer {
 		const styleOverride: IStatusbarStyleOverride | undefined = [...this.styleOverrides].sort((a, b) => a.priority - b.priority)[0];
 
 		// Background / foreground colors
-		const backgroundColor = this.getColor(styleOverride?.background ?? (this.contextService.getWorkbenchState() !== WorkbenchState.EMPTY ? STATUS_BAR_BACKGROUND : STATUS_BAR_NO_FOLDER_BACKGROUND)) || '';
+		// The OpenIDE footer is shell, the same backdrop the gutters between the islands paint
+		// (`openide.workbenchBackground`), for the same reason the border below takes the product
+		// separator: a theme's own `statusBar.background` is chosen against ITS layout, and under
+		// the island shell it lands as one more unrelated tone along the bottom edge (Dracula:
+		// #191A21 here, #343746 in the gutter, #282A36 on the islands). The product colour still
+		// resolves through the theme -- its default is `activityBar.background`, which is exactly
+		// what OpenIDE's own themes give the footer -- so a theme built for this shell is
+		// unaffected. Only an explicit runtime style override (the debug session's colours) wins,
+		// and upstream's colours remain the fallback.
+		const backgroundColor = (styleOverride?.background
+			? this.getColor(styleOverride.background)
+			: this.getColor(OPENIDE_WORKBENCH_BACKGROUND) || this.getColor(this.contextService.getWorkbenchState() !== WorkbenchState.EMPTY ? STATUS_BAR_BACKGROUND : STATUS_BAR_NO_FOLDER_BACKGROUND)) || '';
 		container.style.backgroundColor = backgroundColor;
 		container.style.boxShadow = this.getId() === Parts.STATUSBAR_PART && this.layoutService.isFloatingPanelsEnabled() && !isHighContrast(this.theme.type) && backgroundColor
 			? `0 1px 0 ${backgroundColor}`

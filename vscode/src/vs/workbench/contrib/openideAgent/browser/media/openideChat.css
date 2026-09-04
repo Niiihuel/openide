@@ -718,7 +718,14 @@
 /* The status bar's brand mark: same flat mask as the popover. The item is a block whose label is an
    inline anchor, so `content` lands on a second line — the mark is pinned at the item's left edge
    and the label makes room for it. */
-.monaco-workbench .statusbar-item:has(> .openide-status-provider-icon) { position: relative; }
+.monaco-workbench .statusbar-item:has(> .openide-status-provider-icon) {
+	position: relative;
+	/* The mark is positioned absolutely, so the ITEM is what must reserve its room. An entry with
+	   no text gets `display: none` on its label (the status bar hides an empty one), the item then
+	   measured ZERO wide, and the mark painted outside it — on top of whatever sat beside it, which
+	   is how the usage mark ended up over "Ln 13, Col 16". */
+	min-width: 23px;
+}
 .monaco-workbench .part.statusbar > .items-container > .statusbar-item:has(> .openide-status-provider-icon) > .statusbar-item-label { padding-left: 23px; }
 .monaco-workbench .statusbar-item .openide-status-provider-icon {
 	position: absolute;
@@ -731,7 +738,9 @@
 	width: 13px;
 	height: 13px;
 	color: currentColor;
-	pointer-events: none;
+	/* Clickable on its own: with no text there is no label anchor to take the press, and both marks
+	   carry the same command their entry does (openideChatView.ts). */
+	cursor: pointer;
 }
 .monaco-workbench .statusbar-item .openide-status-provider-icon.monogram { font-size: 8px; font-weight: 600; line-height: 1; }
 

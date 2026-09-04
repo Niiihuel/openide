@@ -9,15 +9,20 @@
  *  instance nor a parallel automation page. The legacy channel is kept only for Pick & Polish.
  *--------------------------------------------------------------------------------------------*/
 
-import { encodeBase64 } from '../../../../base/common/buffer.js';
+import { encodeBase64, VSBuffer } from '../../../../base/common/buffer.js';
+import { joinPath } from '../../../../base/common/resources.js';
 import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
 import { IPlaywrightService, IInvokeFunctionResult } from '../../../../platform/browserView/common/playwrightService.js';
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
 import { IOpenideBrowserAutomation, OPENIDE_BROWSER_AUTOMATION_CHANNEL } from '../../../../platform/openideBrowser/common/openideBrowserAutomation.js';
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
 import { normalizeLocalUrl } from '../common/openideLocalUrl.js';
 import { cursorInstallScript, OPENIDE_CURSOR_GLOBAL, stripCursorHost } from '../common/openideBrowserCursor.js';
+import { flowSlug, formatFlowTime, IFlowFrame, IFlowVideoResult, IRecorderStatus, pickKeyFrames, recorderRuntimeSource, videoMarker } from '../common/openideBrowserRecorder.js';
+import { encodeFlowWebm, frameBytes, renderContactSheet } from './openideFlowVideo.js';
 import { IAgentTool, IAgentToolContext, OpenideToolRegistry } from './openideTools.js';
 
 /** Prefix of the image marker in tool results (interpreted by the run loop). */
@@ -77,12 +82,17 @@ export class OpenideBrowserAutomation {
 
 	private readonly client: IOpenideBrowserAutomation;
 	private readonly playwrightSessionId = 'openide-native-browser';
+	/** The flow being recorded, if any. Mirrors the recorder that lives on the page, so the
+	 *  action tools can add their marks without a round trip when nothing is recording. */
+	private recording: { id: string; label: string } | undefined;
 
 	constructor(
 		mainProcessService: IMainProcessService,
 		private readonly configurationService: IConfigurationService,
 		private readonly browserViewService: IBrowserViewWorkbenchService,
 		private readonly playwrightService: IPlaywrightService,
+		private readonly fileService: IFileService,
+		private readonly environmentService: IEnvironmentService,
 	) {
 		this.client = ProxyChannel.toService<IOpenideBrowserAutomation>(mainProcessService.getChannel(OPENIDE_BROWSER_AUTOMATION_CHANNEL));
 	}
@@ -150,6 +160,134 @@ export class OpenideBrowserAutomation {
 	private screenshotQuality(): number {
 		const value = Number(this.configurationService.getValue('openide.agent.browserTools.screenshotQuality'));
 		return Number.isFinite(value) && value > 0 && value <= 100 ? value : 80;
+	}
+
+	private recordFps(): number {
+		const value = Number(this.configurationService.getValue('openide.agent.browserTools.recordFps'));
+		return Number.isFinite(value) && value >= 2 && value <= 30 ? value : 12;
+	}
+
+	private recordMaxSeconds(): number {
+		const value = Number(this.configurationService.getValue('openide.agent.browserTools.recordMaxSeconds'));
+		return Number.isFinite(value) && value >= 5 && value <= 300 ? value : 90;
+	}
+
+	/** Key frames attached to the model as pictures, on top of the strip. 0 = strip only. */
+	private recordFramesToModel(): number {
+		const value = Number(this.configurationService.getValue('openide.agent.browserTools.recordFramesToModel'));
+		return Number.isFinite(value) && value >= 0 && value <= 12 ? Math.floor(value) : 6;
+	}
+
+	/** One command of the recorder that lives on the page (see openideBrowserRecorder.ts). */
+	private recorder<T>(command: string, options?: Record<string, unknown>): Promise<T> {
+		return this.invokeRaw<T>(recorderRuntimeSource(), command, options ?? {});
+	}
+
+	/** A mark on the recording, if one is running. Never fails the action it annotates. */
+	private async mark(label: string, kind: string): Promise<void> {
+		if (!this.recording) {
+			return;
+		}
+		try {
+			await this.recorder('mark', { label: label.slice(0, 120), kind });
+		} catch {
+			// The recorder may be gone (page closed); the action itself already happened.
+		}
+	}
+
+	/** Where recordings land: beside the other per-user agent data, one folder per flow. */
+	private recordingsRoot() {
+		return joinPath(this.environmentService.userRoamingDataHome, 'openideAgent', 'recordings');
+	}
+
+	/**
+	 * Stops the capture, pulls the frames over in batches, encodes, and writes everything to
+	 * disk. Returns the marker the run loop turns into a card and into pictures for the model.
+	 */
+	private async finishRecording(framesToModel: number): Promise<string> {
+		const status = await this.recorder<IRecorderStatus>('stop');
+		const frames: IFlowFrame[] = [];
+		for (let from = 0; from < status.frames; from += 40) {
+			const batch = await this.recorder<{ frames: IFlowFrame[]; total: number }>('take', { from, count: 40 });
+			frames.push(...batch.frames);
+			if (frames.length >= batch.total) {
+				break;
+			}
+		}
+		// The page no longer needs to hold the frames: from here on they are ours.
+		await this.recorder('discard').catch(() => { });
+		this.recording = undefined;
+		if (!frames.length) {
+			return 'Error: the recording captured no frames — the preview did not paint while it ran (is it visible?).';
+		}
+
+		const label = status.label || 'flow';
+		const fps = this.recordFps();
+		const keyFrames = pickKeyFrames(frames, status.marks, this.settleMs());
+		const durationMs = Math.max(frames[frames.length - 1].t, status.elapsedMs);
+		const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, '').replace('T', '-');
+		const dir = joinPath(this.recordingsRoot(), `${stamp}-${flowSlug(label)}`);
+		await this.fileService.createFolder(joinPath(dir, 'frames'));
+
+		// The video can fail on a build without WebCodecs; the strip and the frames still land.
+		let videoPath = '';
+		let width = status.width;
+		let height = status.height;
+		let videoError = '';
+		try {
+			const encoded = await encodeFlowWebm(frames, fps);
+			const videoUri = joinPath(dir, 'flow.webm');
+			await this.fileService.writeFile(videoUri, VSBuffer.wrap(encoded.webm));
+			videoPath = videoUri.fsPath;
+			width = encoded.width;
+			height = encoded.height;
+		} catch (error) {
+			videoError = error instanceof Error ? error.message : String(error);
+		}
+
+		const sheetBytes = await renderContactSheet(keyFrames, { title: label, durationMs });
+		const sheetUri = joinPath(dir, 'sheet.jpg');
+		await this.fileService.writeFile(sheetUri, VSBuffer.wrap(sheetBytes));
+
+		const keyFrameEntries: IFlowVideoResult['keyFrames'][number][] = [];
+		for (let i = 0; i < keyFrames.length; i++) {
+			const key = keyFrames[i];
+			const file = joinPath(dir, 'frames', `${String(i + 1).padStart(2, '0')}-${flowSlug(`${key.mark.kind} ${key.mark.label}`, key.mark.kind)}.jpg`);
+			await this.fileService.writeFile(file, VSBuffer.wrap(frameBytes(key.frame)));
+			keyFrameEntries.push({ file: file.fsPath, t: key.mark.t, label: key.mark.label, kind: key.mark.kind, ...(i < framesToModel ? { data: key.frame.data } : {}) });
+		}
+
+		const result: IFlowVideoResult = {
+			id: status.id,
+			label,
+			dir: dir.fsPath,
+			videoPath,
+			sheetPath: sheetUri.fsPath,
+			manifestPath: joinPath(dir, 'manifest.json').fsPath,
+			durationMs,
+			width,
+			height,
+			fps,
+			frameCount: frames.length,
+			truncated: status.truncated,
+			sheet: { mimeType: 'image/jpeg', data: encodeBase64(VSBuffer.wrap(sheetBytes)) },
+			keyFrames: keyFrameEntries,
+		};
+		const manifest = { ...result, sheet: 'sheet.jpg', keyFrames: keyFrameEntries.map(entry => ({ file: entry.file, t: entry.t, label: entry.label, kind: entry.kind })), marks: status.marks };
+		await this.fileService.writeFile(joinPath(dir, 'manifest.json'), VSBuffer.fromString(JSON.stringify(manifest, undefined, 2)));
+
+		const steps = keyFrameEntries.map((entry, index) => ` ${index + 1}. ${formatFlowTime(entry.t)}  ${entry.kind}${entry.label ? ' · ' + entry.label : ''}`).join('\n');
+		const note = [
+			`Flow recorded: "${label}" — ${formatFlowTime(durationMs)}, ${frames.length} frames at ${fps} fps, ${width}×${height}${status.truncated ? ' (cut at the size limit)' : ''}.`,
+			videoPath ? `Video (WebM, VP8/VP9): ${videoPath}` : `Video: not encoded (${videoError}).`,
+			`Contact sheet (all steps in one image, attached as the next message): ${sheetUri.fsPath}`,
+			`Key frames (one per action): ${joinPath(dir, 'frames').fsPath}`,
+			`Manifest: ${result.manifestPath}`,
+			'Steps:',
+			steps,
+			'Give the video path to a model that accepts video to review animations and transitions; the sheet and the frames cover the ones that only read images.',
+		].join('\n');
+		return videoMarker(result, note);
 	}
 
 	registerTools(registry: OpenideToolRegistry): void {
@@ -226,6 +364,7 @@ export class OpenideBrowserAutomation {
 						if (cursorScript) { await page.evaluate(cursorScript).catch(() => {}); }
 						return { url: page.url(), title: await page.title() };
 					}`, this.navigationTimeoutMs(), this.cursorScript());
+					await this.mark(result.url, 'navigate');
 					return model.error ? `Error: ${model.error.errorDescription}` : `OK: loaded ${result.url} (title: ${result.title || 'untitled'}).`;
 				},
 			},
@@ -327,7 +466,7 @@ export class OpenideBrowserAutomation {
 					try {
 						// The pointer glides BEFORE the click: that way you see where it came from and the
 						// next screenshot shows it over the element, not halfway there.
-						await this.invokeRaw(`async (page, selector, x, y, timeoutMs, cursorScript, cursorGlobal, settleMs) => {
+						const clicked = await this.invokeRaw<{ label: string }>(`async (page, selector, x, y, timeoutMs, cursorScript, cursorGlobal, settleMs) => {
 							let point = null;
 							let rect = null;
 							let label = '';
@@ -370,7 +509,9 @@ export class OpenideBrowserAutomation {
 							}
 							if (cursorScript) await page.evaluate(g => globalThis[g].clearHighlight(), cursorGlobal).catch(() => {});
 							if (settleMs > 0) await page.waitForTimeout(settleMs);
+							return { label: label };
 						}`, args?.selector ? String(args.selector) : '', args?.x, args?.y, this.actionTimeoutMs(), this.cursorScript(), OPENIDE_CURSOR_GLOBAL, this.settleMs());
+						await this.mark(clicked?.label || (args?.selector ? String(args.selector) : `${args?.x},${args?.y}`), 'click');
 						return 'OK: click enviado en la vista previa nativa.';
 					} catch (error) {
 						return `Error: ${error instanceof Error ? error.message : String(error)}`;
@@ -393,9 +534,10 @@ export class OpenideBrowserAutomation {
 					try {
 						// fill() does not move the mouse, so without this, typing was the most invisible
 						// step of all: the text appeared with nothing indicating where.
-						const typed = await this.invokeRaw<{ mode: string; value: string | null }>(`async (page, selector, text, timeoutMs, cursorScript, cursorGlobal, keyDelayMs, maxKeystrokes, settleMs) => {
+						const typed = await this.invokeRaw<{ mode: string; value: string | null; field: string }>(`async (page, selector, text, timeoutMs, cursorScript, cursorGlobal, keyDelayMs, maxKeystrokes, settleMs) => {
 							const locator = page.locator(selector).first();
 							await locator.waitFor({ state: 'visible', timeout: timeoutMs });
+							const field = await locator.evaluate(el => { ${FRIENDLY_LABEL_BODY} }).catch(() => '');
 							let rect = null;
 							if (cursorScript) {
 								try {
@@ -437,9 +579,10 @@ export class OpenideBrowserAutomation {
 							// the field's formatting/animations finish before re-reading it.
 							if (settleMs > 0) { await page.waitForTimeout(settleMs); }
 							const value = await locator.inputValue().catch(() => null);
-							return { mode: mode, value: value };
+							return { mode: mode, value: value, field: field };
 						}`, String(args.selector ?? ''), String(args.text ?? ''), this.actionTimeoutMs(), this.cursorScript(), OPENIDE_CURSOR_GLOBAL, this.keystrokeDelayMs(), this.maxKeystrokes(), this.settleMs());
 						const wanted = String(args.text ?? '');
+						await this.mark(`${typed.field || String(args.selector ?? '')} ← ${JSON.stringify(wanted.length > 24 ? wanted.slice(0, 24) + '…' : wanted)}`, 'type');
 						const how = typed.mode === 'keys' ? ' tecla por tecla' : '';
 						if (typed.value !== null && typed.value !== wanted) {
 							return `OK: text entered${how}, but the field normalised it: it ended up as ${JSON.stringify(typed.value)} instead of ${JSON.stringify(wanted)} (the field applies a mask or formatting).`;
@@ -525,6 +668,7 @@ export class OpenideBrowserAutomation {
 							return 'Error: browser_playwright operates exclusively on the existing native page; it cannot create or close browsers or pages.';
 						}
 						const { pageId } = await this.getPage();
+						await this.mark(code.replace(/\s+/g, ' ').slice(0, 80), 'playwright');
 						// Here the code is arbitrary and cannot be instrumented step by step; the
 						// overlay covers it anyway by mirroring the real events Playwright generates.
 						const cursorScript = this.cursorScript();
@@ -539,6 +683,95 @@ export class OpenideBrowserAutomation {
 						const result = await this.playwrightService.invokeFunction(this.playwrightSessionId, pageId, `async (page) => { ${engageOn} try { ${code} } finally { ${engageOff} } }`, [], Number(args.timeoutMs) || this.actionTimeoutMs());
 						return this.formatPlaywrightResult(result);
 					} catch (error) {
+						return `Error: ${error instanceof Error ? error.message : String(error)}`;
+					}
+				},
+			},
+			{
+				risk: 'safe' as const,
+				def: {
+					name: 'browser_record_start',
+					description: 'Starts recording the native preview as video (screencast of the same visible page). Every browser_click / browser_type / browser_navigate / browser_playwright that follows is marked as a step; browser_record_stop encodes a WebM plus a contact sheet and one key frame per step. Use it to review animations, transitions and multi-step flows — things a single screenshot cannot show. Keep recordings short and focused (one flow per recording).',
+					parameters: {
+						type: 'object',
+						properties: {
+							label: { type: 'string', description: 'What this flow is ("login", "open settings modal"). Names the files and the card.' },
+							fps: { type: 'number', description: 'Frames per second, 2-30. Default from openide.agent.browserTools.recordFps (12).' },
+							maxSeconds: { type: 'number', description: 'Automatic stop, 5-300 s. Default from openide.agent.browserTools.recordMaxSeconds (90).' },
+						},
+					},
+				},
+				invoke: async (args: any) => {
+					try {
+						const { pageId } = await this.getPage();
+						// The pointer is part of the story: install it before the first frame.
+						const cursorScript = this.cursorScript();
+						if (cursorScript) {
+							await this.playwrightService.invokeFunctionRaw(this.playwrightSessionId, pageId, `async (page, cursorScript) => { await page.evaluate(cursorScript).catch(() => {}); }`, cursorScript).catch(() => { /* decorativo */ });
+						}
+						const label = String(args?.label ?? '').trim();
+						const status = await this.recorder<IRecorderStatus & { alreadyActive?: boolean }>('start', {
+							label,
+							fps: Number(args?.fps) || this.recordFps(),
+							maxSeconds: Number(args?.maxSeconds) || this.recordMaxSeconds(),
+							quality: this.screenshotQuality(),
+						});
+						this.recording = { id: status.id, label: status.label };
+						if (status.alreadyActive) {
+							return `OK: a recording is already running ("${status.label || status.id}", ${formatFlowTime(status.elapsedMs)} so far). Call browser_record_stop when the flow is done.`;
+						}
+						return `OK: recording "${label || status.id}" at ${this.recordFps()} fps (auto-stop at ${this.recordMaxSeconds()} s). Drive the flow with the browser tools — each action becomes a step — then call browser_record_stop.`;
+					} catch (error) {
+						return `Error: ${error instanceof Error ? error.message : String(error)}`;
+					}
+				},
+			},
+			{
+				risk: 'safe' as const,
+				def: {
+					name: 'browser_record_mark',
+					description: 'Adds a named step to the running recording, for moments no tool produced (an animation finished, a state to point at). The browser tools add their own marks automatically.',
+					parameters: { type: 'object', properties: { label: { type: 'string' } }, required: ['label'] },
+				},
+				invoke: async (args: any) => {
+					try {
+						if (!this.recording) {
+							return 'Error: nothing is recording. Call browser_record_start first.';
+						}
+						const status = await this.recorder<IRecorderStatus>('mark', { label: String(args?.label ?? ''), kind: 'mark' });
+						return `OK: step ${status.marks.length} at ${formatFlowTime(status.elapsedMs)}.`;
+					} catch (error) {
+						return `Error: ${error instanceof Error ? error.message : String(error)}`;
+					}
+				},
+			},
+			{
+				risk: 'safe' as const,
+				def: {
+					name: 'browser_record_stop',
+					description: 'Stops the recording and produces: flow.webm (video), sheet.jpg (every step tiled in one image, attached as the next message), frames/ (one JPEG per step) and manifest.json, all under the user\'s OpenIDE data folder. The result lists absolute paths, so a model or CLI that accepts video can be handed the .webm and one that only reads images gets the sheet and the frames.',
+					parameters: {
+						type: 'object',
+						properties: {
+							framesToModel: { type: 'number', description: 'How many key frames to attach as images besides the sheet, 0-12. Default from openide.agent.browserTools.recordFramesToModel (6).' },
+							discard: { type: 'boolean', description: 'Stop and throw the recording away without writing anything.' },
+						},
+					},
+				},
+				invoke: async (args: any) => {
+					try {
+						if (!this.recording) {
+							return 'Error: nothing is recording. Call browser_record_start first.';
+						}
+						if (args?.discard) {
+							await this.recorder('discard');
+							this.recording = undefined;
+							return 'OK: recording discarded.';
+						}
+						const framesToModel = Number.isFinite(Number(args?.framesToModel)) ? Math.max(0, Math.min(12, Math.floor(Number(args.framesToModel)))) : this.recordFramesToModel();
+						return await this.finishRecording(framesToModel);
+					} catch (error) {
+						this.recording = undefined;
 						return `Error: ${error instanceof Error ? error.message : String(error)}`;
 					}
 				},

@@ -12,6 +12,7 @@
  *  shlex (hooks here; /commands use it for $1..$9 with quoting).
  *--------------------------------------------------------------------------------------------*/
 
+import { ICredentialSourcesSnapshot } from './openideCredentialSources.js';
 import { Event } from '../../../base/common/event.js';
 import { OpenideWebFetchRequest, OpenideWebFetchResponse } from './openideWebResearch.js';
 import { IIdeServerInfo, IIdeServerStartOptions, IIdeToolRequest, IIdeToolResult, IIdeToolSchema } from './openideIdeServer.js';
@@ -177,6 +178,17 @@ export interface IOpenideAgentHostService {
 	mcpHeartbeat(clientId: string, ownerToken: string): Promise<void>;
 	/** Hardened public download in main: DNS/IP/redirects/body limits; never uses browser cookies. */
 	webFetch(request: OpenideWebFetchRequest): Promise<OpenideWebFetchResponse>;
+	/**
+	 * Reads, WITHOUT copying anything, where a provider credential could come from besides
+	 * OpenIDE's own store: the user's real shell environment and the credential files of the
+	 * agent tools they already use (openideCredentialSources.ts).
+	 *
+	 * It lives in main because that is where both live: the login shell's environment is resolved
+	 * here (a GUI launch does not inherit it), and reading another app's file is filesystem work.
+	 * `envNames` is what the renderer asks for, so the rest of the environment — which holds the
+	 * user's whole machine — never crosses the wire.
+	 */
+	readCredentialSources(envNames: readonly string[]): Promise<ICredentialSourcesSnapshot>;
 	/** Runs a shell hook with JSON stdin. NEVER rejects: failures are reported in the result (fail-open on the browser side). */
 	execHook(clientId: string, ownerToken: string, req: HookExecRequest): Promise<HookExecResult>;
 	/** Loopback OAuth (Google-style): starts an ephemeral http server on 127.0.0.1 that waits for

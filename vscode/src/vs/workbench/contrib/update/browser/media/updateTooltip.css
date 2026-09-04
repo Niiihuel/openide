@@ -46,44 +46,40 @@
 
 /* Product block ----------------------------------------------------------------------------- */
 
-/* A framed row, not four loose lines. The frame is what separates "which build you are on" from
-   the state message underneath, which is the only part that changes between checks. */
+/* A plain identity row, NOT a framed box. The card is already a box; a second bordered, tinted
+   rectangle inside it was a card within a card -- the one thing the rest of the product never
+   does (Settings, the chat cards and the welcome all separate with a hairline or with space).
+   The rule under it does the separating the frame used to do. */
 .update-tooltip .product-info {
 	display: flex;
 	align-items: center;
 	gap: 12px;
-	padding: 10px;
-	border: 1px solid var(--oi-border-soft, rgba(128, 128, 128, 0.14));
-	border-radius: var(--oi-radius-md, 6px);
-	background: var(--oi-tint-1, rgba(128, 128, 128, 0.04));
+	padding: 0 0 12px;
+	border-bottom: 1px solid var(--oi-border-soft, rgba(128, 128, 128, 0.14));
 }
 
-/* Masked over the foreground rather than drawn as an image. The product mark is a dark figure, so
-   as a plain background it disappears into a dark theme -- and as a light one into a light theme.
-   A mask makes it the text colour, which is right in both, and in high contrast. */
+/* The REAL product mark, not a silhouette of it. It used to be `code-icon.svg` painted through a
+   mask, which flattens the logo into one solid colour -- a filled white blob with none of the
+   shape the mark actually has. These are the same two PNGs the editor watermark uses, so the
+   header of the update card and the empty editor show the same logo. */
 .update-tooltip .product-logo {
-	width: 36px;
-	height: 36px;
-	flex: 0 0 36px;
-	background-color: var(--oi-text, var(--vscode-foreground));
-	-webkit-mask: url('../../../../browser/media/code-icon.svg') center / contain no-repeat;
-	mask: url('../../../../browser/media/code-icon.svg') center / contain no-repeat;
+	width: 32px;
+	height: 32px;
+	flex: 0 0 32px;
+	background-image: url('../../../../browser/parts/editor/media/openide-watermark-black.png');
+	background-size: contain;
+	background-position: center;
+	background-repeat: no-repeat;
 }
 
-/* The product mark is a SILHOUETTE, so it wants the polarity of the theme and not its foreground:
-   `--vscode-foreground` is #cccccc on dark and #1f1f1f on light -- greys that make the mark look
-   faded next to real white or real black. The workbench puts exactly one of `vs` / `vs-dark` /
-   `hc-black` / `hc-light` on its container, which is the only reliable statement of polarity a
-   stylesheet gets (a theme's `type` never reaches CSS). The rule above stays as the default, so a
-   surface mounted outside that container still gets a legible mark instead of none. */
+/* The mark is drawn for a light ground; on a dark theme the white one is the legible half. The
+   workbench puts exactly one of `vs` / `vs-dark` / `hc-black` / `hc-light` on its container, which
+   is the only reliable statement of polarity a stylesheet gets (a theme's `type` never reaches
+   CSS). The rule above stays as the default, so a surface mounted outside that container still
+   gets a legible mark instead of none. */
 .monaco-workbench.vs-dark .update-tooltip .product-logo,
 .monaco-workbench.hc-black .update-tooltip .product-logo {
-	background-color: #ffffff;
-}
-
-.monaco-workbench.vs .update-tooltip .product-logo,
-.monaco-workbench.hc-light .update-tooltip .product-logo {
-	background-color: #000000;
+	background-image: url('../../../../browser/parts/editor/media/openide-watermark-white.png');
 }
 
 .update-tooltip .product-details {

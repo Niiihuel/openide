@@ -63,6 +63,22 @@ export function openideAskImageNames(count: number, alreadyAttached: number): st
 	return Array.from({ length: count }, (_, index) => `image-${alreadyAttached + index + 1}`);
 }
 
+/**
+ * A recorded browser flow as the transcript keeps it: paths and the step list, nothing heavy.
+ * The chat card reads the files from disk when it mounts.
+ */
+export interface IPersistedFlowVideo {
+	readonly label: string;
+	readonly dir: string;
+	/** Empty when the build could not encode video; the sheet and the frames still exist. */
+	readonly videoPath: string;
+	readonly sheetPath: string;
+	readonly durationMs: number;
+	readonly width: number;
+	readonly height: number;
+	readonly steps: readonly { readonly file: string; readonly t: number; readonly label: string; readonly kind: string }[];
+}
+
 export interface IChatMessage {
 	role: ChatRole;
 	content: string;
@@ -97,6 +113,9 @@ export interface IChatMessage {
 	/** Only on 'tool' messages from write_file/edit_file: the persisted diff of that edit, used to
 	 *  rebuild the styled edit card in the transcript when restoring the session (Ctrl+R). */
 	fileDiff?: IPersistedFileDiff;
+	/** Only on 'tool' messages from browser_record_stop: where the flow's files are, so the video
+	 *  card comes back on restore. Paths only — the pictures live on disk. */
+	video?: IPersistedFlowVideo;
 	/** Gemini/Antigravity only: model-turn parts exactly as the API returned them (includes thoughtSignature). */
 	geminiParts?: Record<string, unknown>[];
 	/** Anthropic only: signed thinking/redacted_thinking blocks that must be resent unchanged before tool_use. */
@@ -389,6 +408,8 @@ export type AgentLoopEvent =
 	| { type: 'terminalData'; id: string; data: string }
 	// Screenshot (browser_screenshot / navigate): the UI shows it as an inline image card.
 	| { type: 'screenshot'; id: string; mimeType: string; data: string }
+	// A recorded flow (browser_record_stop): the UI shows it as a playable video card.
+	| { type: 'video'; id: string; video: IPersistedFlowVideo }
 	| {
 		type: 'usage';
 		inputTokens?: number; outputTokens?: number;

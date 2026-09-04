@@ -52,6 +52,25 @@ suite('OpenIDE agent common', () => {
 		assert.strictEqual(classifyProviderError('maximum context length exceeded').shouldCompact, true);
 		assert.strictEqual(classifyProviderError('HTTP 429: service temporarily overloaded').reason, 'overloaded');
 		assert.strictEqual(classifyProviderError('This model does not support image input').shouldDropImages, true);
+	});
+
+	test('a 403 the ACCOUNT has to clear is not blamed on the credential', () => {
+		// Real answer from OpenCode Zen routing through OpenRouter. The key is valid; the account
+		// has an unconfirmed gate. Classifying it as `auth` made the run refresh the token and fail
+		// over to another provider, and told the user to reconnect a credential that was fine.
+		const policy = classifyProviderError('HTTP 403: This model requires you to complete the following before use: 18+ age confirmation. Confirm at https://openrouter.ai/settings/preferences.');
+		assert.strictEqual(policy.kind, 'fatal');
+		assert.strictEqual(policy.reason, 'account-policy');
+		// A 403 that really is about the credential still reads as auth.
+		assert.strictEqual(classifyProviderError('HTTP 403: invalid api key').kind, 'auth');
+		assert.strictEqual(classifyProviderError('HTTP 401 unauthorized').kind, 'auth');
+
+		// Real answer from OpenCode Zen for a model the workspace cannot pay for: a 401 whose body
+		// is about MONEY. The key is valid; the account has no payment method. Read as auth it sent
+		// the user to redo a good key and quietly failed over to another provider.
+		const credits = classifyProviderError('HTTP 401: {"type":"error","error":{"type":"CreditsError","message":"No payment method. Add a payment method here: https://opencode.ai/workspace/wrk_1/billing"}}');
+		assert.strictEqual(credits.kind, 'billing');
+		assert.strictEqual(credits.reason, 'billing');
 		assert.strictEqual(classifyProviderError('HTTP 404: Requested entity was not found.', { status: 404, providerId: 'antigravity-oauth', model: 'gemini-old', stage: 'streamGenerateContent' }).reason, 'model-not-found');
 		assert.strictEqual(classifyProviderError('HTTP 404: project does not exist', { status: 404, stage: 'loadCodeAssist' }).reason, 'project-not-found');
 		assert.strictEqual(classifyProviderError('HTTP 404: model retired', { status: 404, model: 'old' }).reason, 'model-retired');

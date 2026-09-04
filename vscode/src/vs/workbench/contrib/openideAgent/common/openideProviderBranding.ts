@@ -8,34 +8,18 @@
  *  chat, status bar, Settings and Usage never resolve the same account differently.
  *--------------------------------------------------------------------------------------------*/
 
-export type ProviderBrandAsset =
-	| 'antigravity.svg'
-	| 'anthropic.svg'
-	| 'claude.svg'
-	| 'github-copilot.svg'
-	| 'grok.svg'
-	| 'openai.svg'
-	| 'openrouter.svg'
-	| 'groq.svg'
-	| 'deepseek.svg'
-	| 'mistral.svg'
-	| 'gemini.svg'
-	| 'cerebras.svg'
-	| 'perplexity.svg'
-	| 'kimi.svg'
-	| 'qwen.svg'
-	| 'nvidia.svg'
-	| 'cohere.svg'
-	| 'ollama.svg'
-	| 'lmstudio.svg'
-	| 'together.svg'
-	| 'fireworks.svg'
-	| 'zai.svg'
-	| 'minimax.svg'
-	| 'opencode.svg'
-	| 'cursor.svg'
-	| 'vscode.svg'
-	| 'droid.svg';
+import { OPENIDE_REGISTRY_PROVIDER_BRANDS } from './openideProviderBrandsRegistry.js';
+
+/**
+ * File name of the mark, relative to `media/providerIcons/`.
+ *
+ * A plain string and not a union any more: the generated registry map
+ * (`openideProviderBrandsRegistry.ts`) names 193 of these, and a union that size is a wall nobody
+ * reads for a guarantee it never gave — that the name is spelled right, not that the file exists.
+ * `test/node/openideProviderIcons.test.ts` checks the stronger thing instead: every asset either
+ * map names is actually on disk.
+ */
+export type ProviderBrandAsset = string;
 
 /**
  * How a mark is painted.
@@ -136,6 +120,13 @@ export function resolveProviderBrand(providerId: string, label = ''): IProviderB
 	const direct = OPENIDE_PROVIDER_BRANDS[providerId];
 	if (direct) {
 		return direct;
+	}
+	// The registry's own marks, keyed by its ids. AFTER the curated map so a hand-tuned entry (its
+	// tint, its chosen mark — Claude's spark rather than Anthropic's wordmark) always wins, and
+	// BEFORE the aliases so an exact id is never resolved by a substring guess.
+	const fromRegistry = OPENIDE_REGISTRY_PROVIDER_BRANDS[providerId];
+	if (fromRegistry) {
+		return fromRegistry;
 	}
 	const value = `${providerId} ${label}`.toLowerCase();
 	const aliases: readonly [RegExp, string][] = [

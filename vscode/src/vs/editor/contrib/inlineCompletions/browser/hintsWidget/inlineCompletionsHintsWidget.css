@@ -25,15 +25,14 @@
 	color: var(--vscode-foreground) !important;
 }
 
+/* OpenIDE: the keys are the watermark's keys — `.monaco-keybinding-key` at its own size, with the
+   theme's keybindingLabel colours (set where the widget is built). The overrides that used to live
+   here shrank them to 8px and dimmed the whole group to 0.6, and at that size the border and the
+   fill collapsed into a smudge: the shortcut stopped reading as something you press. Only the gap
+   to the label is ours. */
 .monaco-editor .inlineSuggestionsHints .keybinding {
 	display: flex;
-	margin-left: 4px;
-	opacity: 0.6;
-}
-
-.monaco-editor .inlineSuggestionsHints .keybinding .monaco-keybinding-key {
-	font-size: 8px;
-	padding: 2px 3px;
+	margin-left: 6px;
 }
 
 .monaco-editor .inlineSuggestionsHints .availableSuggestionCount a {
@@ -42,6 +41,11 @@
 	justify-content: center;
 }
 
+/* OpenIDE: the label and its keys sit on one centre line. The keys are taller than the text now
+   (see `.keybinding` above), and an inline label lets them hang from the baseline, so "Accept"
+   floated above its Tab chip. */
 .monaco-editor .inlineSuggestionStatusBarItemLabel {
+	display: inline-flex;
+	align-items: center;
 	margin-right: 2px;
 }

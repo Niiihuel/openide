@@ -614,7 +614,7 @@
 .openide-chat-reference-chip {
 	height: 18px; max-width: min(260px, 100%); display: inline-flex; align-items: center; gap: 4px;
 	padding: 0 2px 0 4px;
-	border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-background, transparent));
+	border: 1px solid var(--oi-border);
 	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: var(--vscode-foreground); font-size: 12px;
@@ -631,7 +631,7 @@
 	min-width: 0;
 	display: flex;
 	flex-direction: column;
-	border: 1px solid var(--vscode-chat-requestBorder, var(--oi-border));
+	border: 1px solid var(--oi-border);
 	border-radius: var(--oi-radius-md);
 	background: var(--oi-tint-1);
 	overflow: hidden;
@@ -676,7 +676,7 @@
 .openide-chat-link-chip {
 	height: 18px; max-width: min(280px, 100%); display: inline-flex; align-items: center; gap: 4px;
 	padding: 0 2px 0 4px;
-	border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-background, transparent));
+	border: 1px solid var(--oi-border);
 	border-radius: var(--oi-radius-sm);
 	background: transparent;
 	color: var(--vscode-foreground); font: 12px/1 var(--vscode-font-family);
@@ -918,7 +918,7 @@
 	width: 1px;
 	height: 12px;
 	margin: 0 4px;
-	background: var(--vscode-chat-requestBorder, var(--oi-border-strong));
+	background: var(--oi-border-strong);
 	flex: 0 0 auto;
 }
 .openide-chat-footer-spacer { flex: 1 1 auto; }

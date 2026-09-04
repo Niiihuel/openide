@@ -21,7 +21,9 @@ import { EditorInput } from '../../../common/editor/editorInput.js';
 export type OpenideDiagramPayload =
 	| { readonly kind: 'source'; readonly source: string }
 	| { readonly kind: 'image'; readonly uri: string; readonly alt?: string }
-	| { readonly kind: 'html'; readonly html: string };
+	| { readonly kind: 'html'; readonly html: string }
+	/** A recorded flow: `uri` is a blob/data URI the card already holds; `poster` shows until play. */
+	| { readonly kind: 'video'; readonly uri: string; readonly poster?: string };
 
 /**
  * Accepts what the `openide.diagram.fullscreen` command receives: the typed payload, or one of
@@ -39,6 +41,10 @@ export function toOpenideDiagramPayload(value: unknown): OpenideDiagramPayload |
 		}
 		if (candidate.kind === 'html' && typeof candidate.html === 'string' && candidate.html) {
 			return { kind: 'html', html: candidate.html };
+		}
+		if (candidate.kind === 'video' && typeof candidate.uri === 'string' && candidate.uri) {
+			const poster = (candidate as { poster?: unknown }).poster;
+			return { kind: 'video', uri: candidate.uri, poster: typeof poster === 'string' ? poster : undefined };
 		}
 		return undefined;
 	}

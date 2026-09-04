@@ -1215,7 +1215,14 @@ export class CodeApplication extends Disposable {
 		//  - openideAgentHost: cliente MCP + hooks de shell + OAuth loopback (Google/Antigravity).
 		//  - openideRequest: HTTP through main. Streams SSE token by token (the native one buffers).
 		//  - openideBrowser: automation of the hidden BrowserWindow (agent browser_* + pick).
-		const openideAgentHostChannel = ProxyChannel.fromService(new OpenideAgentHostMainService(this.logService, this.environmentMainService), disposables);
+		const openideAgentHostChannel = ProxyChannel.fromService(new OpenideAgentHostMainService(
+			this.logService,
+			this.environmentMainService,
+			// The LOGIN shell's environment, cached by `getResolvedShellEnv` itself: a provider key
+			// exported in the user's shell profile is invisible to a GUI launch otherwise, and that
+			// is precisely the case OpenIDE now resolves credentials from.
+			() => getResolvedShellEnv(this.configurationService, this.logService, this.environmentMainService.args, process.env),
+		), disposables);
 		mainProcessElectronServer.registerChannel(OPENIDE_AGENT_HOST_CHANNEL, openideAgentHostChannel);
 
 		const openideRequestService = disposables.add(new NodeRequestService('local', this.configurationService, this.environmentMainService, this.logService));

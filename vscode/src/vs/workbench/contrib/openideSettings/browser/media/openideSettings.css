@@ -59,16 +59,32 @@
 	color: var(--oi-text-muted);
 }
 .openide-settings-search-kbd.hidden { display: none; }
-/* Account block over the sidebar: the initial in a round chip, the account (or the product) on the
-   first line, the profile on the second. Text only — it names, it does not act. */
-.openide-settings-profile {
+/* Account block over the sidebar: the initial in a round chip, the account on the first line, the
+   profile on the second — and, when there is no account, the way to get one. Two rows stacked, so
+   the padding that used to sit on the identity row belongs to the block and the button lines up
+   with it. */
+.openide-settings-profile-block {
 	flex: 0 0 auto;
 	display: flex;
-	align-items: center;
+	flex-direction: column;
 	gap: 10px;
 	min-width: 0;
 	padding: 16px 12px 4px;
 }
+.openide-settings-profile {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+}
+/* Full width of the sidebar's column, not content-width: it is the only action in the block, and
+   a short pill floating under a 36px avatar reads as debris. `.oi-btn`'s quiet fill alone is a
+   shade of the same plane the sidebar already is, so it carries the soft hairline to read as a
+   control; it stays secondary — a filled accent block above fifty nav rows would out-shout the
+   map it sits on top of. */
+.openide-settings-profile-signin { width: 100%; justify-content: center; border: 1px solid var(--oi-border-soft); }
+.openide-settings-profile-signin .codicon { font-size: var(--oi-text-md); }
+.openide-settings-profile-signin.hidden { display: none; }
 .openide-settings-profile-avatar {
 	flex: 0 0 auto;
 	display: inline-flex;
@@ -85,6 +101,8 @@
 	position: relative;
 	overflow: hidden;
 }
+/* The generic mark that stands in for the initial while there is no account to take one from. */
+.openide-settings-profile-avatar .codicon { font-size: 18px; color: var(--oi-text-muted); }
 /* GitHub's avatar for the signed-in login sits over the initial and hides it while it shows. */
 .openide-settings-profile-image {
 	position: absolute;
@@ -496,7 +514,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 }
 @media (max-width: 700px) {
 	.openide-settings-body { grid-template-columns: 1fr; }
-	.openide-settings-profile { display: none; }
+	.openide-settings-profile-block { display: none; }
 	.openide-settings-nav { display: flex; gap: 3px; overflow-x: auto; padding: 7px; }
 	.openide-settings-nav-separator { display: none; }
 	.openide-settings-nav-item { width: auto; flex: 0 0 auto; }

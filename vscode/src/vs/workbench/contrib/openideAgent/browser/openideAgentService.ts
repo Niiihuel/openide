@@ -46,6 +46,7 @@ import { IPlaywrightService } from '../../../../platform/browserView/common/play
 import { OPENIDE_REQUEST_CHANNEL, OpenideRequestChannelClient } from '../../../../platform/request/common/openideRequestIpc.js';
 import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { IOpenideAgentHostService, OPENIDE_AGENT_HOST_CHANNEL } from '../../../../platform/openideAgentHost/common/openideAgentHost.js';
+import { ICredentialOrigin } from '../../../../platform/openideAgentHost/common/openideCredentialSources.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
 import { IJSONEditingService } from '../../../services/configuration/common/jsonEditing.js';
@@ -118,7 +119,7 @@ import { IGitProposal, OpenideGitFlow, shq } from './openideGitFlow.js';
 import { normalizeLocalUrl } from '../common/openideLocalUrl.js';
 import { OPENIDE_DIFF_SCHEME, OpenideDiffSnapshotProvider } from './openideDiffSnapshot.js';
 import { OpenideEditReview, ReviewAction } from './openideEditReview.js';
-import { DEFAULT_CONTEXT_LIMIT, IModelReasoning, OpenideModelCatalog } from './openideModelCatalog.js';
+import { DEFAULT_CONTEXT_LIMIT, IModelCatalogStatus, IModelReasoning, IRegistryProvider, OpenideModelCatalog, providerCatalogId } from './openideModelCatalog.js';
 import { IOpenideCodebaseGraph } from './openideCodebaseGraph.js';
 import { IOpenideCodebaseQueryService } from './openideCodebaseQueryService.js';
 import { IOpenideCodebaseContextService } from './openideCodebaseContextService.js';
@@ -144,6 +145,7 @@ import { ISubagentDefinition } from '../common/openideSubagentTypes.js';
 import { serializeSubagentDefinition } from '../common/openideSubagentDefinition.js';
 import { ISubagentWorkspaceService } from './openideSubagentWorkspaceService.js';
 import { OpenideBrowserAutomation, parseScreenshotMarker } from './openideBrowserTools.js';
+import { parseVideoMarker } from '../common/openideBrowserRecorder.js';
 import { OpenideWebResearch } from './openideWebResearch.js';
 import { IBrowserPickResult } from '../../../../platform/openideBrowser/common/openideBrowserAutomation.js';
 import { IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
@@ -267,6 +269,20 @@ export interface IOpenideAgentService {
 	 * what they say. Cheap and idempotent once warm.
 	 */
 	ensureModelCatalog(): Promise<void>;
+	/**
+	 * The providers models.dev publishes that are NOT already in the product's catalog, so the
+	 * page can offer them instead of asking the user to write a `customProviders` entry by hand.
+	 */
+	listRegistryProviders(): Promise<IRegistryProvider[]>;
+	/** Adds one of those as a custom provider (id, label, baseUrl come from the registry). */
+	addRegistryProvider(id: string): Promise<void>;
+	/** Downloads the registry now, ignoring the 6h TTL. Rejects with the reason on failure. */
+	refreshModelCatalog(): Promise<IModelCatalogStatus>;
+	getModelCatalogStatus(): IModelCatalogStatus;
+	/** Where the credential a provider will use comes from — printed on its row. */
+	credentialOrigin(providerId: string): Promise<ICredentialOrigin | undefined>;
+	/** Providers another tool on this machine has connected over OAuth. */
+	oauthElsewhere(providerId: string): Promise<{ readonly sourceId: string; readonly label: string }[]>;
 	getPermissionMode(): string;
 	/**
 	 * The tools OpenIDE offers to an EXTERNAL agent (the CLIs in the dock), and a way to run one.
@@ -285,6 +301,8 @@ export interface IOpenideAgentService {
 	setApiKey(providerId: string, key: string): Promise<void>;
 	clearApiKey(providerId: string): Promise<void>;
 	hasApiKey(providerId: string): Promise<boolean>;
+	/** Only the key OpenIDE itself holds — the one it is allowed to delete. */
+	hasStoredApiKey(providerId: string): Promise<boolean>;
 	/** Starts the OAuth flow (device-code / PKCE) for a provider that supports it. The UI may
 	 *  supply its own interaction (inline code/paste); without it, native modals are used. */
 	signIn(providerId: string, interaction?: IOAuthInteraction): Promise<boolean>;
@@ -602,6 +620,7 @@ You have tools that act on the real workspace (use them instead of guessing):
 - web_search / web_fetch: research the public web without opening the local preview. Cite claims with the returned [S#] and [W#] ids and list their URLs; never invent citations.
 - browser_snapshot / browser_screenshot / browser_console / browser_read_dom / browser_click / browser_type / browser_evaluate / browser_set_style: inspect and drive THAT SAME visible preview with Playwright, never an invisible browser. After UI changes, look at the snapshot or screenshot and at the console. browser_set_style is for prototyping; then carry the validated change into the source.
 - browser_playwright: runs a self-contained Playwright flow against the existing native page when the specific tools are not enough. Do not create another page or browser. browser_dialog answers alerts, prompts or file choosers that interrupt the flow.
+- browser_record_start / browser_record_mark / browser_record_stop: RECORD the preview as video while you drive it. A screenshot shows a state; only a recording shows a transition — use it whenever the question is about an animation, a hover/focus state, a modal opening, a list reordering, a loading sequence, or any flow of two or more steps that has to be checked end to end. Pattern: browser_record_start with a short label → the actions (each browser_click/type/navigate becomes a step automatically; browser_record_mark names a moment no tool produced) → browser_record_stop. You get flow.webm (hand its path to a model or CLI that accepts video), sheet.jpg (every step in ONE image — you receive it as the next message, read it before concluding), and frames/ (one JPEG per step). One flow per recording; keep it under a minute.
 - ask_user: if the request is ambiguous or important information is missing, ask BEFORE guessing (you can group up to 5 questions in one call).
 
 write_file, edit_file and run_command ask the user for approval before running; if the user rejects one, you get an error result and must adapt, not retry the same thing. Read a file before editing it.
@@ -693,7 +712,8 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	/** Short cache of the ping to local providers (avoids hammering the server on every refresh). */
 	private readonly localProbeCache = new Map<string, { at: number; ok: boolean }>();
 	/** Cache of GET /models for providers with dynamicModels (TTL 5 min). */
-	private readonly dynamicModelsCache = new Map<string, { at: number; models: string[] }>();
+	/** Live `GET /models` per provider, for the life of the window. See `resolveProviderModels`. */
+	private readonly dynamicModelsCache = new Map<string, { models: string[] }>();
 	private readonly tools: OpenideToolRegistry;
 	private readonly mcp: OpenideMcpManager;
 	private readonly hooks: OpenideAgentHooks;
@@ -864,6 +884,17 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			cancel: id => hostForOAuth.oauthLoopbackCancel(id),
 		});
 		this.auth = new OpenideAuthManager(this.secretStorage, this.oauth);
+		// The chain's two inputs: what models.dev says a provider's key is called, and how to read
+		// the machine. Wired here because this is the only object that owns both the catalog and
+		// the channel to main — the auth manager stays a credential manager.
+		this.auth.useRegistry(
+			providerId => {
+				const registryId = providerCatalogId(providerId) ?? providerId;
+				return { registryId, envNames: this.catalog.envNamesFor(registryId) };
+			},
+			() => this.catalog.allEnvNames(),
+			envNames => this.agentHost.readCredentialSources(envNames),
+		);
 		this.accounts = new OpenideProviderAccountsService(this.secretStorage);
 		this.tools = this._register(new OpenideToolRegistry(fileService, contextService, searchService, instantiationService, terminalService, markerService, textModelService));
 		this.messageChanges = new OpenideMessageChangeSetService(fileService, contextService);
@@ -903,7 +934,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		this.tools.registerTool(this.browserOpenTool());
 		for (const tool of new OpenideWebResearch(hostForOAuth, this.configurationService).buildTools()) { this.tools.registerTool(tool); }
 		// Playwright drives the same visible native BrowserView; the main channel is left for Pick & Polish.
-		this.browserAutomation = new OpenideBrowserAutomation(mainProcessService, this.configurationService, browserViewService, playwrightService);
+		this.browserAutomation = new OpenideBrowserAutomation(mainProcessService, this.configurationService, browserViewService, playwrightService, fileService, environmentService);
 		this.browserAutomation.registerTools(this.tools);
 		// The user's MCP servers (main process): connects lazily on the first runMessages and
 		// registers/deregisters mcp_* tools in the registry according to each server's state.
@@ -1050,6 +1081,69 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		return this.catalog.ensureFresh();
 	}
 
+	async listRegistryProviders(): Promise<IRegistryProvider[]> {
+		await this.catalog.ensureFresh();
+		// Anything already in the catalog — built-in or custom — is offered by its own row, with
+		// its OAuth, its headers and its blurb. This list is only what has no entry yet.
+		const known = new Set(this.listProviders().map(entry => entry.id.toLowerCase()));
+		return this.catalog.providers().filter(provider => !known.has(provider.id.toLowerCase()));
+	}
+
+	async addRegistryProvider(id: string): Promise<void> {
+		const provider = this.catalog.providers().find(entry => entry.id === id);
+		if (!provider) {
+			throw new Error(`models.dev does not publish a provider called ${id}.`);
+		}
+		if (this.findProvider(provider.id)) {
+			return;
+		}
+		const current = this.customProviders();
+		const custom = Array.isArray(current) ? [...current] : [];
+		// `protocol: 'openai'` because that is what the registry's `api` speaks — every entry it
+		// publishes with a base URL is an OpenAI-compatible endpoint. `auth: 'apiKey'` and not the
+		// default, or `normalizeCustom` would still call it apiKey but the local runtimes among
+		// them would ask for a key they do not want; the ones with no `env` declare none.
+		custom.push({
+			id: provider.id,
+			label: provider.name,
+			company: provider.name,
+			protocol: 'openai',
+			baseUrl: provider.api,
+			auth: provider.env.length ? 'apiKey' : 'none',
+			// The registry's `doc` is where the key is minted, so it belongs in the link slot, not
+			// in the blurb — a bare URL printed as the row's description is not a description.
+			apiKeysUrl: provider.doc,
+		});
+		await this.configurationService.updateValue('openide.agent.customProviders', custom);
+	}
+
+	async refreshModelCatalog(): Promise<IModelCatalogStatus> {
+		await this.catalog.refreshNow();
+		// The registry is only half of where a model comes from: the other half is the provider's
+		// own GET /models, cached for five minutes. Someone pressing "refresh" because a model
+		// they just read about is missing means BOTH — otherwise the registry updates and the
+		// picker still shows the list it asked for four minutes ago.
+		this.dynamicModelsCache.clear();
+		// Same reasoning for a key exported since the window opened.
+		this.auth.forgetExternalCredentials();
+		this._onDidChange.fire();
+		return this.catalog.status();
+	}
+
+	/** Where the credential a provider will actually use comes from (store / env / another tool). */
+	credentialOrigin(providerId: string): Promise<ICredentialOrigin | undefined> {
+		return this.auth.credentialOrigin(providerId);
+	}
+
+	/** Providers a tool on this machine has connected over OAuth — a hint, never a credential. */
+	oauthElsewhere(providerId: string): Promise<{ readonly sourceId: string; readonly label: string }[]> {
+		return this.auth.oauthElsewhere(providerId);
+	}
+
+	getModelCatalogStatus(): IModelCatalogStatus {
+		return this.catalog.status();
+	}
+
 	// ---- picker state (favorites, recents, provider order, collapsed sections) ----
 	// All APPLICATION-scoped: collapsing a provider or starring a model is a preference about the
 	// tool, not about a folder, so it must not reset when the window changes workspace.
@@ -1181,6 +1275,10 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 
 	hasApiKey(providerId: string): Promise<boolean> {
 		return this.auth.hasApiKey(providerId);
+	}
+
+	hasStoredApiKey(providerId: string): Promise<boolean> {
+		return this.auth.hasStoredApiKey(providerId);
 	}
 
 	async signIn(providerId: string, interaction?: IOAuthInteraction): Promise<boolean> {
@@ -1600,8 +1698,17 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		if (!adapter?.listModels && !genericDiscovery) {
 			return fallback();
 		}
+		// Cached for the SESSION, not for five minutes.
+		//
+		// A provider adds a model every few weeks; asking every connected endpoint again every
+		// five minutes of use was polling for something that almost never changes, and with the
+		// registry providers now connectable that is N requests each time the picker opens. The
+		// list is refreshed when something actually happened instead: the window restarted (this
+		// map dies with the process), the provider's credential changed (`setApiKey`/`signOut`
+		// delete their entry), or the user asked for it ("Refresh now" clears the map). A failed
+		// discovery is never cached, so a provider that was down retries on the next look.
 		const cached = this.dynamicModelsCache.get(entry.id);
-		if (cached && Date.now() - cached.at < 300_000) {
+		if (cached) {
 			return cached.models;
 		}
 		try {
@@ -1611,7 +1718,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 					.filter(id => typeof id === 'string' && id.length > 0)
 					.sort((a, b) => a.localeCompare(b));
 				if (ids.length) {
-					this.dynamicModelsCache.set(entry.id, { at: Date.now(), models: ids });
+					this.dynamicModelsCache.set(entry.id, { models: ids });
 					return ids;
 				}
 			}
@@ -1635,7 +1742,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			}
 			const ids = modelIdsFromProviderResponse(JSON.parse(text));
 			if (ids.length) {
-				this.dynamicModelsCache.set(entry.id, { at: Date.now(), models: ids });
+				this.dynamicModelsCache.set(entry.id, { models: ids });
 				return ids;
 			}
 		} catch { /* sin red o API caída: fallback estático */ }
@@ -4397,6 +4504,27 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 						onEvent({ type: 'screenshot', id: call.id, mimeType: shot.mimeType, data: shot.data });
 						messages.push({ role: 'tool', toolCallId: call.id, content: `${shot.note} The image comes in the next message.` });
 						messages.push({ role: 'user', content: `[image: result of ${call.name}]`, images: [{ mimeType: shot.mimeType, data: shot.data }] });
+						continue;
+					}
+					// A recorded flow: the card in the chat plays the file from disk, the transcript
+					// keeps only the paths, and the model receives the contact sheet plus the key
+					// frames the tool attached — as pictures, since no provider takes a video inline.
+					const flow = parseVideoMarker(out);
+					if (flow) {
+						const video = flow.video;
+						const persisted = { label: video.label, dir: video.dir, videoPath: video.videoPath, sheetPath: video.sheetPath, durationMs: video.durationMs, width: video.width, height: video.height, steps: video.keyFrames.map(frame => ({ file: frame.file, t: frame.t, label: frame.label, kind: frame.kind })) };
+						onEvent({ type: 'toolResult', id: call.id, name: call.name, result: flow.note, isError: false });
+						onEvent({ type: 'video', id: call.id, video: persisted });
+						const attached = video.keyFrames.filter(frame => !!frame.data);
+						messages.push({ role: 'tool', toolCallId: call.id, content: `${flow.note}\nThe contact sheet${attached.length ? ` and ${attached.length} key frames` : ''} come in the next message.`, video: persisted });
+						// Hidden: the card already shows the recording, so this carrier of pictures is
+						// for the model only — drawn as a user bubble it read as something the user sent.
+						messages.push({
+							role: 'user',
+							hidden: true,
+							content: `[images: result of ${call.name} — first the contact sheet (every step in one picture)${attached.length ? `, then ${attached.length} key frames in order` : ''}]`,
+							images: [{ mimeType: video.sheet.mimeType, data: video.sheet.data }, ...attached.map(frame => ({ mimeType: 'image/jpeg', data: frame.data! }))],
+						});
 						continue;
 					}
 					out = compactAgentToolResult(call.name, out, contextLimit);

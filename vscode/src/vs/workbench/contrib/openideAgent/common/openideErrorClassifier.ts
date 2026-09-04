@@ -30,6 +30,8 @@ export type ProviderErrorReason =
 	| 'format'
 	| 'network'
 	| 'connection-refused'
+	/** The account has to accept or confirm something at the provider; the credential is fine. */
+	| 'account-policy'
 	| 'fatal';
 
 export interface IProviderErrorContext {
@@ -185,6 +187,24 @@ export function classifyProviderError(message: string, context?: IProviderErrorC
 	// Gemini 3 / Antigravity: missing thoughtSignature when resending the history with tools.
 	if (/thought_signature|thoughtsignature|missing a thought/.test(m)) {
 		return { kind: 'fatal', reason: 'format', hint: t('error.thoughtSignature') };
+	}
+	// Money, whatever the status code says. OpenCode Zen answers a model the workspace cannot pay
+	// for with `401 CreditsError: No payment method` — a perfectly valid key and an unpaid account.
+	// Read as auth (the 401 rule below matches first otherwise) it told the user to reconnect a
+	// credential that was never the problem, and `kind: 'auth'` additionally refreshed the token
+	// and failed over to another provider. The status code is the weakest signal here; the wording
+	// is the strong one.
+	if (/creditserror|no payment method|add a payment method|payment required|credit balance|insufficient.{0,10}(credit|quota|balance)|out of extra usage|quota exceeded/.test(m)) {
+		return { kind: 'billing', reason: 'billing', hint: t('error.billing') };
+	}
+	// A 403 is very often NOT about the credential: the key is valid and the ACCOUNT is missing a
+	// gate the provider requires — OpenRouter's 18+ confirmation, a model whose terms were never
+	// accepted, a region or data-policy setting. Calling that "the credential is invalid" sends the
+	// user to redo a key that was never the problem, and — worse — `kind: 'auth'` makes the run
+	// refresh the token and fail over to another provider behind their back. The provider's own
+	// message names the page to open; ours only has to stop contradicting it.
+	if (/http 403\b/.test(m) && /before use|complete the following|confirm|verification|verify|accept|agree|terms|not enabled|enable .{0,20}(access|model)|request access|privacy/.test(m)) {
+		return { kind: 'fatal', reason: 'account-policy', hint: t('error.accountPolicy') };
 	}
 	if (/http 40[13]\b|invalid.{0,3}api.{0,3}key|authentication|unauthorized|invalid_grant|refresh_token_reused|token.{0,20}(expired|revoked|invalid)|falta la api key|no iniciaste sesi/.test(m)) {
 		return { kind: 'auth', reason: 'authentication', hint: t('error.auth') };

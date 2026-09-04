@@ -13,7 +13,7 @@ import { isWeb } from '../../../../base/common/platform.js';
 import { localize } from '../../../../nls.js';
 import { IActionViewItemService } from '../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, IMenuItem, MenuId, MenuRegistry, registerAction2 } from '../../../../platform/actions/common/actions.js';
-import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
@@ -31,6 +31,20 @@ import './media/updateTitleBarEntry.css';
 import { UpdateTooltip } from './updateTooltip.js';
 
 const UPDATE_TITLE_BAR_ACTION_ID = 'workbench.actions.updateIndicator';
+
+/**
+ * OpenIDE: opens the update popover on demand and reports whether it could.
+ *
+ * "Check for Updates" used to answer with a plain notification built from `updateService.state`
+ * read straight after `checkForUpdates()` -- which returns before the check even starts, so the
+ * toast always said "Checking for updates..." and nothing ever said how it ended. The popover
+ * already narrates every state (checking, available, downloading, up to date, error) in the
+ * product's card, so the command opens THAT and lets it follow the state instead.
+ *
+ * Internal (`_`-prefixed, not in the palette): the user-facing entry point is
+ * `openide.update.check`.
+ */
+export const SHOW_UPDATE_STATUS_COMMAND_ID = '_openide.update.showStatus';
 const UPDATE_TITLE_BAR_CONTEXT = new RawContextKey<boolean>('updateTitleBar', false);
 
 const DISABLED_REMINDER_LAST_SHOWN_KEY = 'update/disabledReminderLastShown';
@@ -136,7 +150,28 @@ export class UpdateTitleBarContribution extends Disposable implements IWorkbench
 			));
 		}
 
+		this._register(CommandsRegistry.registerCommand(SHOW_UPDATE_STATUS_COMMAND_ID, () => this.showUpdateStatus()));
+
 		void this.onStateChange(true);
+	}
+
+	/**
+	 * Shows the update popover for the current state and keeps it open as the state moves.
+	 * Returns false when there is no title bar entry to anchor it to -- on the web, or when the
+	 * user has turned the indicator off -- so the caller can fall back to a notification.
+	 */
+	private showUpdateStatus(): boolean {
+		if (this.configurationService.getValue<boolean>(UPDATE_TITLE_BAR_SETTING) === false) {
+			return false;
+		}
+
+		this.tooltipVisible = true;
+		this.context.set(true);
+		this.tooltip.renderState(this.state);
+		// The entry may not be rendered yet: setting the context above is what puts it in the title
+		// bar, and `createEntry` opens the popover itself when `tooltipVisible` is already set.
+		this.entry?.showTooltip();
+		return true;
 	}
 
 	private createEntry(instantiationService: IInstantiationService, action: IAction, options: IBaseActionViewItemOptions): UpdateTitleBarEntry {
@@ -163,7 +198,11 @@ export class UpdateTitleBarContribution extends Disposable implements IWorkbench
 		if (ACTIONABLE_STATES.includes(this.state.type)) {
 			await this.setContextWhenChatIdle(true);
 		} else {
-			this.context.set(false);
+			// OpenIDE: an open popover keeps the entry it is anchored to. Dropping the context here
+			// removed the entry from the title bar mid-flow -- and with it the hover -- the moment a
+			// check settled on a non-actionable state (up to date, or an error), which is exactly
+			// the answer the user opened it to read. `onUserDismissedTooltip` clears it instead.
+			this.context.set(this.tooltipVisible);
 		}
 
 		if (this.tooltipVisible || !await this.hostService.hadLastFocus()) {

@@ -34,6 +34,7 @@ import { OpenideChatPlanPart } from './parts/openideChatPlanPart.js';
 import { OpenideChatPlanUpdatePart } from './parts/openideChatPlanUpdatePart.js';
 import { OpenideChatProgressPart } from './parts/openideChatProgressPart.js';
 import { OpenideChatScreenshotPart } from './parts/openideChatScreenshotPart.js';
+import { OpenideChatVideoPart } from './parts/openideChatVideoPart.js';
 import { OpenideChatSubagentPart } from './parts/openideChatSubagentPart.js';
 import { OpenideChatTerminalPart } from './parts/openideChatTerminalPart.js';
 import { OpenideChatThinkingPart } from './parts/openideChatThinkingPart.js';
@@ -345,6 +346,9 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		}
 		if (isOpenideChatContentOfKind(content, 'screenshot')) {
 			return this._instantiationService.createInstance(OpenideChatScreenshotPart, content, context);
+		}
+		if (isOpenideChatContentOfKind(content, 'video')) {
+			return this._instantiationService.createInstance(OpenideChatVideoPart, content, context);
 		}
 		// Still unmapped: 'confirmation' and 'ask', the two blocking prompts. They need a way to
 		// answer the promise the agent service is parked on, which no content part owns — the

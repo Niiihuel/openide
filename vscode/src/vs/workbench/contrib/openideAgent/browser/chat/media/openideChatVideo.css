@@ -1,0 +1,189 @@
+/*---------------------------------------------------------------------------------------------
+ *  OpenIDE — native chat: the inline recording card.
+ *
+ *  Same frame as the screenshot card (openideChatScreenshot.css): a header row, the picture
+ *  capped at 260px, and — new here — a strip of step thumbnails that seek the player.
+ *--------------------------------------------------------------------------------------------*/
+
+.openide-chat-video-card {
+	margin: 8px 0;
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
+	border-radius: var(--oi-chat-card-radius);
+	overflow: hidden;
+}
+
+.openide-chat-video-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	padding: 4px 6px 4px 10px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	border-bottom: 1px solid var(--oi-border-soft);
+}
+
+.openide-chat-video-head > .codicon {
+	font-size: 13px;
+}
+
+/* One line, always: the title keeps its words and the numbers yield first, then ellipsize. The
+   first build let the title wrap ("Recordi / ng") because nothing said it could not. */
+.openide-chat-video-title {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--vscode-foreground);
+}
+
+.openide-chat-video-meta {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+
+/* The player's native bar shows what a file player shows — mute, PiP, "more" — none of which
+   means anything for a muted screencast with its own step strip. Only play and the timeline. */
+.openide-chat-video-player::-webkit-media-controls-mute-button,
+.openide-chat-video-player::-webkit-media-controls-volume-slider,
+.openide-chat-video-player::-webkit-media-controls-fullscreen-button,
+.openide-chat-video-player::-webkit-media-controls-overflow-button,
+.openide-chat-video-player::-webkit-media-controls-picture-in-picture-button { display: none; }
+
+.openide-chat-video-actions {
+	display: inline-flex;
+	gap: 2px;
+}
+
+/* The same quiet icon button the settings rows use: no chrome until hovered. */
+.openide-chat-video-iconbtn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	border: 0;
+	border-radius: var(--oi-radius-sm);
+	background: transparent;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	cursor: pointer;
+}
+
+.openide-chat-video-iconbtn:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.openide-chat-video-iconbtn .codicon {
+	font-size: 14px;
+}
+
+.openide-chat-video-body {
+	background: var(--vscode-textCodeBlock-background, var(--oi-tint-1));
+}
+
+/* Capped like the screenshot: a flow at natural size is a screen of chat on its own. Anchored
+   to the top for the same reason — the header of the page is what identifies it. */
+.openide-chat-video-player,
+.openide-chat-video-sheet {
+	display: block;
+	width: 100%;
+	max-height: 260px;
+	object-fit: contain;
+	object-position: top;
+	background: #000;
+}
+
+.openide-chat-video-notice {
+	padding: 6px 10px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* The step strip: one thumbnail per action, scrolling sideways when the flow is long. Hidden
+   entirely when there is nothing in it, so the card ends on the player. */
+.openide-chat-video-steps {
+	display: flex;
+	gap: 6px;
+	padding: 6px 8px;
+	overflow-x: auto;
+	scrollbar-width: none;
+	border-top: 1px solid var(--oi-border-soft);
+}
+
+.openide-chat-video-steps:empty {
+	display: none;
+}
+
+.openide-chat-video-step {
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: inherit;
+	font-size: 10.5px;
+	cursor: pointer;
+}
+
+.openide-chat-video-step img {
+	display: block;
+	height: 54px;
+	width: auto;
+	border-radius: var(--oi-radius-sm);
+	border: 1px solid var(--oi-border-soft);
+	background: #000;
+	transition: border-color 100ms;
+}
+
+.openide-chat-video-step:hover img,
+.openide-chat-video-step:focus-visible img {
+	border-color: var(--vscode-focusBorder);
+}
+
+.openide-chat-video-step:focus-visible {
+	outline: none;
+}
+
+.openide-chat-video-step-caption {
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+/* The full-screen viewer: the player fills the stage's overlay on a black ground, letterboxed to
+   its own aspect, with the native controls. The zoom toolbar is hidden by the stage itself while
+   an overlay is up (`has-overlay`). */
+.openide-diagram-viewer.openide-diagram-viewer-video .openide-diagram-viewer-overlay {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	overflow: hidden;
+	background: #000;
+}
+.openide-diagram-viewer.openide-diagram-viewer-video .openide-diagram-viewer-overlay.hidden { display: none; }
+/* No zoom bar over a player: "250% · Wheel: zoom · Drag: pan" is the picture's vocabulary. */
+.openide-diagram-viewer.openide-diagram-viewer-video .openide-diagram-viewer-bar { display: none; }
+.openide-diagram-video {
+	display: block;
+	width: auto;
+	height: auto;
+	max-width: 100%;
+	max-height: 100%;
+	object-fit: contain;
+	background: #000;
+	outline: none;
+}
+.openide-diagram-video::-webkit-media-controls-mute-button,
+.openide-diagram-video::-webkit-media-controls-volume-slider,
+.openide-diagram-video::-webkit-media-controls-overflow-button,
+.openide-diagram-video::-webkit-media-controls-picture-in-picture-button { display: none; }

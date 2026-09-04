@@ -99,6 +99,12 @@ const NEVER_EXPOSED: readonly string[] = [
  */
 const EXTERNAL_CONTEXT: readonly { readonly match: (name: string) => boolean; readonly text: string }[] = [
 	{
+		// Before the generic browser entry: `find` takes the first match, and a CLI needs to be
+		// TOLD when a recording beats a screenshot — nothing in its own toolbox records anything.
+		match: name => name.startsWith('browser_record_'),
+		text: 'Graba en VIDEO el navegador que el usuario tiene abierto en OpenIDE mientras lo operás (browser_record_start → tus acciones → browser_record_stop). Una captura muestra un estado; una grabación muestra la transición: usala para verificar animaciones, hovers, modales que se abren, listas que se reordenan, secuencias de carga o cualquier flujo de dos o más pasos. Al terminar recibís flow.webm (pasale la ruta a un modelo o CLI que acepte video), sheet.jpg (todos los pasos en UNA imagen, adjunta como imagen: miralo antes de concluir) y frames/ (un JPEG por paso). Cada browser_click/type/navigate queda como paso; browser_record_mark nombra un momento que ninguna tool produjo. Un flujo por grabación, corto.',
+	},
+	{
 		match: name => name.startsWith('browser_'),
 		text: 'Opera el navegador que el usuario tiene ABIERTO dentro de OpenIDE, con su sesión, su login y su estado actual — no es una instancia nueva ni headless. Preferilo antes que levantar tu propio navegador: es la única forma de ver lo mismo que el usuario está viendo.',
 	},

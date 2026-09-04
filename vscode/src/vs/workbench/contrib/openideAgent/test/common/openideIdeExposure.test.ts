@@ -27,6 +27,10 @@ suite('OpenIDE — which tools an external agent sees', () => {
 		assert.ok(isExposedToExternalAgents('browser_navigate'));
 		assert.ok(isExposedToExternalAgents('browser_screenshot'));
 		assert.ok(isExposedToExternalAgents('browser_playwright'));
+		// Recording a flow as video is the clearest case of "only OpenIDE can do this": the CLI's
+		// own Playwright has no window on screen to record.
+		assert.ok(isExposedToExternalAgents('browser_record_start'));
+		assert.ok(isExposedToExternalAgents('browser_record_stop'));
 	});
 
 	test('writing files and running commands NEVER', () => {

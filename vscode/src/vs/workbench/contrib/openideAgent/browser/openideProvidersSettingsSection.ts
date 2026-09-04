@@ -46,6 +46,8 @@ import { IOAuthInteraction } from './openideOAuth.js';
 import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { openideInputBoxStyles } from './openideControlStyles.js';
 import { createProviderIcon } from './openideProviderIcons.js';
+import { IRegistryProvider } from './openideModelCatalog.js';
+import { ICredentialOrigin } from '../../../../platform/openideAgentHost/common/openideCredentialSources.js';
 import { createMenuContent, createMenuRow, IMenuRowOptions, OpenideComposerPopover } from './chat/openideComposerMenu.js';
 import { t } from '../common/openideStrings.js';
 
@@ -56,7 +58,11 @@ interface IProviderView {
 	readonly auth: string;
 	readonly blurb: string;
 	readonly connected: boolean;
+	/** A usable key exists ANYWHERE in the chain — store, environment, another tool. */
 	readonly hasKey: boolean;
+	/** The key is OpenIDE's own, so it is OpenIDE's to delete. */
+	readonly hasStoredKey: boolean;
+	readonly origin?: ICredentialOrigin;
 	readonly supportsUsage: boolean;
 	readonly accounts: readonly { id: string; label: string; isActive?: boolean }[];
 	readonly models: readonly string[];
@@ -94,7 +100,7 @@ interface IUsageState {
 	loaded: boolean;
 }
 
-type ProviderStatus = { connected: boolean; hasKey: boolean };
+type ProviderStatus = { connected: boolean; hasKey: boolean; origin?: ICredentialOrigin };
 type ProviderEntry = { id: string; label: string; company: string; auth: string; blurb?: string; defaultModel?: string };
 
 /** Nav id of a provider's own page. Kept next to the parser so the two never drift. */
@@ -102,6 +108,31 @@ export function providerPageId(providerId: string): string { return 'openideAgen
 export function providerIdFromPage(category: string | undefined): string | undefined {
 	const prefix = 'openideAgent/providers/';
 	return category && category.startsWith(prefix) ? category.slice(prefix.length) : undefined;
+}
+
+/**
+ * Where a credential came from, in words, or nothing when it is the one the user pasted here.
+ *
+ * Silence is deliberate for the store: naming the ordinary case on every row would be noise. The
+ * two that ARE worth a word are the ones nobody would guess — an env var, or another tool.
+ */
+function describeOrigin(origin: ICredentialOrigin | undefined): string | undefined {
+	if (!origin || origin.kind === 'store') {
+		return undefined;
+	}
+	return origin.kind === 'env'
+		? t('openide.providers.fromEnv', origin.label ?? '')
+		: t('openide.providers.fromSource', origin.label ?? origin.detail ?? '');
+}
+
+/** "hace 4 minutos" / "4 minutes ago", coarse on purpose: nobody needs the seconds of a 6h TTL. */
+function describeAge(at: number): string {
+	const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
+	if (minutes < 1) { return t('openide.providers.ageNow'); }
+	if (minutes < 60) { return t('openide.providers.ageMinutes', String(minutes)); }
+	const hours = Math.round(minutes / 60);
+	if (hours < 24) { return t('openide.providers.ageHours', String(hours)); }
+	return t('openide.providers.ageDays', String(Math.round(hours / 24)));
 }
 
 export class OpenideProvidersSettingsSection extends Disposable implements IOpenideSettingsSection {
@@ -130,6 +161,10 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	private statusCache: Map<string, ProviderStatus> | undefined;
 	private statusLoading = false;
 	private statusStale = true;
+	/** models.dev providers with no entry of their own yet. Loaded once and streamed in, like the
+	 *  statuses: the index must paint before a 4MB registry has been read. */
+	private registryCache: readonly IRegistryProvider[] | undefined;
+	private registryLoading = false;
 	/** Detail view of the ONE provider page being shown. The index never pays for models/accounts. */
 	private detailCache: { id: string; view: IProviderView } | undefined;
 	private detailLoading = false;
@@ -240,7 +275,6 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		const entries = this.agentService.listProviders();
 		const statuses = this.statusCache;
 		const activeId = this.agentService.getActiveProviderId();
-		const model = this.agentService.getModel();
 
 		// The h1 above ("AI Providers") is the editor's; the page opens on its one-line explanation.
 		append(root, $('.openide-settings-provider-intro', undefined, t('openide.providers.desc')));
@@ -292,7 +326,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 				// card → group → section: the section is what the filter hides, caption included.
 				groups.push(card.parentElement!.parentElement!);
 				for (const entry of list) {
-					rows.push(this.paintProviderRow(card, entry, statuses.get(entry.id), activeId, model));
+					rows.push(this.paintProviderRow(card, entry, statuses.get(entry.id), activeId));
 				}
 				// The custom-provider row closes the "available" card: it IS one more thing you can
 				// connect, and parking it below the card made it read as an unrelated footer.
@@ -303,14 +337,121 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 				paintGroup(t('openide.providers.groupConnected'), connected, false);
 			}
 			paintGroup(connected.length ? t('openide.providers.groupAvailable') : t('openide.providers.groupAll'), rest, true);
+			this.paintRegistryGroup(root, rows, groups, token);
 			append(root, noMatch);
 		}
 
+		this.paintCatalogFooter(root);
 		this.paintFallbackChain(root);
 
 		if (this.statusStale && !this.statusLoading) {
 			void this.loadStatuses(token);
 		}
+	}
+
+	/**
+	 * The rest of models.dev: every provider the registry publishes that has no entry of its own.
+	 *
+	 * They are the SAME OpenAI-compatible protocol behind another URL — the catalog was designed
+	 * for exactly that ("few protocols, many providers as data"). Until now reaching one meant
+	 * writing a `customProviders` object by hand, with a base URL you had to already know; here
+	 * they are a row you can find with the page's own filter, and connecting one writes that
+	 * object for you.
+	 */
+	private paintRegistryGroup(root: HTMLElement, rows: HTMLElement[], groups: HTMLElement[], token: number): void {
+		const list = this.registryCache;
+		if (!list) {
+			if (!this.registryLoading) { void this.loadRegistry(token); }
+			return;
+		}
+		if (!list.length) {
+			return;
+		}
+		const card = this.ui.card(root, {
+			caption: t('openide.providers.groupRegistry', String(list.length)),
+			footer: t('openide.providers.groupRegistryDesc'),
+			keywords: ['models.dev', 'registry', 'registro', 'catalogo', 'provider', 'proveedor'],
+		});
+		groups.push(card.parentElement!.parentElement!);
+		for (const provider of list) {
+			const logo = createProviderIcon(card.ownerDocument, provider.id, provider.name, 'openide-settings-provider-logo');
+			const value = this.ui.cardRow(card, {
+				leading: logo,
+				label: provider.name,
+				description: t('openide.providers.registryModels', String(provider.modelCount)),
+				keywords: [provider.id, 'models.dev', provider.api],
+				run: () => void this.connectRegistryProvider(provider),
+			});
+			const row = value.parentElement!;
+			row.classList.add('openide-settings-provider-row');
+			row.setAttribute('data-openide-filter', [provider.name, provider.id, provider.api].join(' ').toLowerCase());
+			this.ui.button(value, { label: t('openide.providers.registryAdd'), ghost: true, run: () => void this.connectRegistryProvider(provider) });
+			rows.push(row);
+		}
+	}
+
+	/** Writes the custom entry and lands on the provider's own page, where the key is pasted. */
+	private async connectRegistryProvider(provider: IRegistryProvider): Promise<void> {
+		try {
+			await this.agentService.addRegistryProvider(provider.id);
+			this.navigate?.(providerPageId(provider.id));
+		} catch (error) {
+			this.notificationService.error(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private async loadRegistry(token: number): Promise<void> {
+		this.registryLoading = true;
+		try {
+			this.registryCache = await this.agentService.listRegistryProviders();
+		} catch {
+			// No registry (offline, first run): the group simply does not appear.
+			this.registryCache = [];
+		} finally {
+			this.registryLoading = false;
+		}
+		if (token === this.generation) { this.paint(); }
+	}
+
+	/**
+	 * What the model catalog knows and when it last learned it, with a way to ask again.
+	 *
+	 * The registry refreshes itself on a 6h TTL, evaluated only when something asks for models. A
+	 * model published this morning therefore shows up whenever that timer happens to lapse — and
+	 * this page, where someone comes precisely because a model is missing, had no way to say so or
+	 * to force it.
+	 */
+	private paintCatalogFooter(root: HTMLElement): void {
+		const status = this.agentService.getModelCatalogStatus();
+		const card = this.ui.card(root, {
+			caption: t('openide.providers.catalogTitle'),
+			footer: t('openide.providers.catalogDesc'),
+			keywords: ['models.dev', 'catalogo', 'catalog', 'modelos', 'actualizar', 'refresh'],
+		});
+		const value = this.ui.cardRow(card, {
+			icon: 'database',
+			label: status.updatedAt
+				? t('openide.providers.catalogCount', String(status.providers), String(status.models))
+				: t('openide.providers.catalogEmpty'),
+			description: status.updatedAt ? t('openide.providers.catalogAge', describeAge(status.updatedAt)) : undefined,
+		});
+		const button = this.ui.button(value, {
+			label: t('openide.providers.catalogRefresh'),
+			icon: 'sync',
+			ghost: true,
+			run: async () => {
+				button.enabled = false;
+				try {
+					await this.agentService.refreshModelCatalog();
+					// The registry changed under it: the list of "the rest" has to be built again.
+					this.registryCache = undefined;
+					this.paint();
+				} catch (error) {
+					button.enabled = true;
+					this.notificationService.error(t('openide.providers.catalogFailed', error instanceof Error ? error.message : String(error)));
+				}
+			},
+		});
 	}
 
 	/**
@@ -320,13 +461,18 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	 * "Active" pill; the rest carry a ghost "Connect". The whole row opens the provider's page, so
 	 * the button is a shortcut to the same place, not a second destination.
 	 */
-	private paintProviderRow(card: HTMLElement, entry: ProviderEntry, status: ProviderStatus | undefined, activeId: string, model: string): HTMLElement {
+	private paintProviderRow(card: HTMLElement, entry: ProviderEntry, status: ProviderStatus | undefined, activeId: string): HTMLElement {
 		const isActive = !!status?.connected && entry.id === activeId;
-		const subtitle = isActive
-			? (model ? t('openide.providers.rowActiveModel', model) : t('openide.providers.rowActive'))
-			: status?.connected
-				? t('openide.providers.rowConnected')
-				: this.authLabel(entry.auth);
+		// Connected or not: that is the whole state of a provider on this page. It used to also
+		// say "Active", twice — a pill AND the subtitle — for the one the chat happens to be
+		// pointed at, next to a green dot, inside a card already captioned "Connected". Four marks
+		// for two facts. Which model the chat will use is the composer's job, and it says so
+		// permanently; here the only useful extra is where a credential came from, because that is
+		// the one thing nobody can guess.
+		const source = describeOrigin(status?.origin);
+		const subtitle = status?.connected
+			? (source ? `${t('openide.providers.rowConnected')} · ${source}` : t('openide.providers.rowConnected'))
+			: this.authLabel(entry.auth);
 		const open = () => this.navigate?.(providerPageId(entry.id));
 		const logo = createProviderIcon(card.ownerDocument, entry.id, entry.label, 'openide-settings-provider-logo');
 		const value = this.ui.cardRow(card, {
@@ -351,7 +497,6 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		if (isActive) { row.setAttribute('aria-current', 'true'); }
 
 		if (status?.connected) {
-			if (isActive) { this.pill(value, t('openide.providers.rowActive'), 'ok'); }
 			append(value, $('span.openide-settings-provider-dot.ok', { title: t('openide.providers.stConnected') }));
 		} else {
 			// Filled, in the product's amber: connecting is THE action of an available provider (Cursor
@@ -448,12 +593,20 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			await Promise.all(entries.map(async entry => {
 				const connected = await this.agentService.isConnected(entry.id).catch(() => false);
 				const hasKey = entry.auth === 'apiKey' ? await this.agentService.hasApiKey(entry.id).catch(() => false) : false;
-				next.set(entry.id, { connected, hasKey });
+				// Where the key comes from, not just whether there is one: a provider can now be
+				// connected because of the environment or another tool, and a row that does not say
+				// so leaves "why is it using THAT key?" unanswerable.
+				const origin = hasKey ? await this.agentService.credentialOrigin(entry.id).catch(() => undefined) : undefined;
+				next.set(entry.id, { connected, hasKey, origin });
 			}));
 			this.statusCache = next;
 			this.statusStale = this.invalidation !== invalidation;
 		} finally {
 			this.statusLoading = false;
+		}
+		// Same dead end as `loadDetail`: re-run rather than wait for a paint that will not come.
+		if (this.statusStale) {
+			return this.loadStatuses(this.generation);
 		}
 		if (token === this.generation) { this.paint(); }
 	}
@@ -607,6 +760,8 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 				blurb: entry.blurb ?? '',
 				connected,
 				hasKey: entry.auth === 'apiKey' ? await this.agentService.hasApiKey(entry.id).catch(() => false) : false,
+				hasStoredKey: entry.auth === 'apiKey' ? await this.agentService.hasStoredApiKey(entry.id).catch(() => false) : false,
+				origin: entry.auth === 'apiKey' ? await this.agentService.credentialOrigin(entry.id).catch(() => undefined) : undefined,
 				supportsUsage: connected && providerSupportsUsage(entry),
 				accounts: entry.auth !== 'none' ? await this.agentService.listAccounts(entry.id).catch(() => []) : [],
 				models: resolvedModels,
@@ -620,6 +775,15 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			this.detailStale = this.invalidation !== invalidation;
 		} finally {
 			this.detailLoading = false;
+		}
+		// Something invalidated this WHILE it was in flight — saving a key, finishing a login.
+		// Re-run: the view just computed is already out of date, and nothing else is going to ask.
+		// `paint` only starts a load when one is not already running, and one was; the paint that
+		// follows a load is gated on the generation token, which a repaint in between has moved
+		// past. That dead end is why the chip kept saying "not connected" under a notification
+		// that said the opposite.
+		if (this.detailStale && this.activeProviderId === id) {
+			return this.loadDetail(id, this.generation);
 		}
 		if (token === this.generation && this.activeProviderId === id) { this.paint(); }
 	}
@@ -688,14 +852,11 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		const status = this.statusFor(view, activeId);
 		this.pill(head, status.label, status.tone === 'ok' ? 'ok' : undefined);
 		const actions = append(head, $('.openide-settings-section-actions'));
-		if (view.connected && !isActive) {
-			this.ui.button(actions, {
-				label: t('openide.providers.use'),
-				icon: 'check',
-				primary: true,
-				run: () => void this.activate(view, ''),
-			});
-		} else if (!view.connected && (view.auth === 'none' || (view.auth === 'apiKey' && view.hasKey))) {
+		// No "Use this provider" here. This page answers one question — connected or not — and the
+		// composer's model chip already answers the other one, permanently and where the work
+		// happens: picking a model IS picking its provider. A second way to set it only created a
+		// state the page then had to display ("Active"), which was the redundancy we just removed.
+		if (!view.connected && (view.auth === 'none' || (view.auth === 'apiKey' && view.hasKey))) {
 			this.ui.button(actions, {
 				label: t('openide.providers.retryProbe'),
 				icon: 'sync',
@@ -871,13 +1032,13 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			} else {
 				this.notificationService.notify({ severity: Severity.Warning, message: t('openide.providers.keySavedNoAnswer', view.label) });
 			}
-			this.statusStale = true;
-			this.detailStale = true;
 		} catch (error) {
 			this.fail(error);
 		} finally {
 			this.busyKey = undefined;
-			this.paint();
+			// Saving a key changes what every probe on this page measured: re-run them rather than
+			// redraw the old answers. Same door as the OAuth path, so the two cannot drift.
+			this.recheck();
 		}
 	}
 
@@ -983,11 +1144,21 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 				run: () => void this.agentService.signOut(view.id).then(() => { this.detailStale = true; this.paint(); }),
 			});
 		}
-		if (view.auth === 'apiKey' && view.hasKey) {
+		// `hasStoredKey`, NOT `hasKey`: since the credential chain landed, a provider can be
+		// connected on a key that lives in the environment or in another tool. Offering "delete
+		// the key" for one OpenIDE does not own would be a button that deletes nothing and leaves
+		// the provider still connected. What it gets instead is where the key comes from.
+		if (view.auth === 'apiKey' && view.hasStoredKey) {
 			this.ui.cardRow(card, {
 				label: t('openide.providers.clearKey'), icon: 'trash', danger: true,
 				confirm: t('openide.providers.clearKeyConfirm'),
 				run: () => void this.agentService.clearApiKey(view.id).then(() => { this.detailStale = true; this.paint(); }),
+			});
+		} else if (view.auth === 'apiKey' && view.hasKey && view.origin && view.origin.kind !== 'store') {
+			this.ui.cardRow(card, {
+				icon: view.origin.kind === 'env' ? 'terminal' : 'plug',
+				label: describeOrigin(view.origin) ?? '',
+				description: t('openide.providers.originHint'),
 			});
 		}
 	}
@@ -1121,14 +1292,6 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			return;
 		}
 		this.draftModel.set(view.id, trimmed);
-		this.paint();
-	}
-
-	private async activate(view: IProviderView, fallbackModel: string): Promise<void> {
-		const model = this.draftModel.get(view.id) ?? fallbackModel;
-		await this.agentService.setActiveProvider(view.id);
-		await this.agentService.setModel(model || '');
-		this.draftModel.delete(view.id);
 		this.paint();
 	}
 
@@ -1375,10 +1538,14 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 					const snapshotId = options.mode === 'new' ? undefined : (options.accountId ?? await this.agentService.getActiveAccountId(providerId));
 					await this.agentService.snapshotAccount(providerId, { id: snapshotId, label: options.label });
 					this.oauth = undefined;
-				} else {
-					session.phase = 'error';
-					session.message = t('openide.providers.oauthCancelled');
+					// `recheck` and not `paint`: a repaint alone redraws from the CACHED probes,
+					// which still say "not connected" — the login just changed the very thing they
+					// measured. This is why the chip only flipped after touching something else.
+					this.recheck();
+					return;
 				}
+				session.phase = 'error';
+				session.message = t('openide.providers.oauthCancelled');
 				this.paint();
 			}, error => {
 				if (session.cancelled) { return; }

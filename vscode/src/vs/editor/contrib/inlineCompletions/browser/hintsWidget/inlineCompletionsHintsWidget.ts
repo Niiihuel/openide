@@ -6,7 +6,7 @@
 import { h, n } from '../../../../../base/browser/dom.js';
 import { renderMarkdown } from '../../../../../base/browser/markdownRenderer.js';
 import { ActionViewItem } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
-import { KeybindingLabel, unthemedKeybindingLabelOptions } from '../../../../../base/browser/ui/keybindingLabel/keybindingLabel.js';
+import { KeybindingLabel } from '../../../../../base/browser/ui/keybindingLabel/keybindingLabel.js';
 import { Action, IAction, Separator } from '../../../../../base/common/actions.js';
 import { equals } from '../../../../../base/common/arrays.js';
 import { RunOnceScheduler } from '../../../../../base/common/async.js';
@@ -26,6 +26,7 @@ import { IContextMenuService } from '../../../../../platform/contextview/browser
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
+import { defaultKeybindingLabelStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
 import { registerIcon } from '../../../../../platform/theme/common/iconRegistry.js';
 import { ContentWidgetPositionPreference, ICodeEditor, IContentWidget, IContentWidgetPosition } from '../../../../browser/editorBrowser.js';
 import { EditorOption } from '../../../../common/config/editorOptions.js';
@@ -352,7 +353,13 @@ class StatusBarViewItem extends MenuEntryActionViewItem {
 		if (this.label) {
 			const div = h('div.keybinding').root;
 
-			const k = this._register(new KeybindingLabel(div, OS, { disableTitle: true, ...unthemedKeybindingLabelOptions }));
+			// OpenIDE: the themed keys, not the unthemed ones. This is the same `KeybindingLabel` the
+			// editor watermark ("Show All Commands  Ctrl+Shift+P") draws, and there it reads as a key
+			// you could press; here it used to render with no background and no border, which left
+			// the shortcut looking like grey text that happened to sit next to the label. One
+			// treatment for a keyboard shortcut across the product — see the CSS beside this file,
+			// which no longer shrinks these either.
+			const k = this._register(new KeybindingLabel(div, OS, { disableTitle: true, ...defaultKeybindingLabelStyles }));
 			k.set(kb);
 			this.label.textContent = this._action.label;
 			this.label.appendChild(div);

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
-import { AgentMode, IAskQuestion, IChatImage, ICompactionSnapshot, IPersistedFileDiff, ITodoItem, ToolApprovalDecision, ToolRisk } from '../openideAgentTypes.js';
+import { AgentMode, IAskQuestion, IChatImage, IPersistedFlowVideo, ICompactionSnapshot, IPersistedFileDiff, ITodoItem, ToolApprovalDecision, ToolRisk } from '../openideAgentTypes.js';
 import { ISubagentRun, ISubagentTimelineEvent } from '../openideSubagentTypes.js';
 
 /**
@@ -44,6 +44,7 @@ export type IOpenideChatContent =
 	| IOpenideChatCanvasContent
 	| IOpenideChatModeSuggestionContent
 	| IOpenideChatScreenshotContent
+	| IOpenideChatVideoContent
 	| IOpenideChatProgressContent;
 
 export type OpenideChatContentKind = IOpenideChatContent['kind'];
@@ -303,6 +304,13 @@ export interface IOpenideChatScreenshotContent {
 	readonly image: IChatImage;
 }
 
+/** A recorded browser flow: the card plays the file from disk, so it survives a restore. */
+export interface IOpenideChatVideoContent {
+	readonly kind: 'video';
+	readonly callId: string;
+	readonly video: IPersistedFlowVideo;
+}
+
 /**
  * Single-line fallback ("· read_file"). Stage 1 routes every event without a part here, so the
  * transcript never silently drops an event while the richer parts are still being written.
@@ -319,7 +327,7 @@ export interface IOpenideChatProgressContent {
 export const OPENIDE_CHAT_CONTENT_KINDS = [
 	'markdown', 'thinking', 'tool', 'explore', 'edit', 'terminal', 'confirmation', 'decision',
 	'ask', 'todos', 'plan', 'planUpdate', 'subagent', 'delegation', 'diagram', 'notice',
-	'compaction', 'canvas', 'modeSuggestion', 'screenshot', 'progress', 'accountChoice',
+	'compaction', 'canvas', 'modeSuggestion', 'screenshot', 'video', 'progress', 'accountChoice',
 ] as const satisfies readonly OpenideChatContentKind[];
 
 /** Kinds a part exists for in Stage 1. The factory falls back to 'progress' for the rest. */

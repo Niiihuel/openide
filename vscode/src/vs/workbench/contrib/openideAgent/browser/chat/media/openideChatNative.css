@@ -314,7 +314,6 @@
 .openide-chat-native .openide-chat-approval,
 .openide-chat-native .openide-chat-todos-card,
 .openide-chat-native .openide-chat-term-card,
-.openide-chat-native .openide-chat-terms-tray,
 .openide-chat-native .openide-chat-suggest-card,
 .openide-chat-native .openide-chat-notice-row,
 .openide-chat-native .openide-chat-compaction-card,
@@ -331,7 +330,14 @@
 	border-radius: var(--oi-chat-card-radius);
 	box-shadow: none;
 }
-/* Compactions and delegations are lines, not boxes.
+/* `.openide-chat-terms-tray` is NOT in that list, for the same reason `.openide-chat-ask` carries
+   `.answered`: it does not live in the transcript. The background-terminals tray mounts inside the
+   composer's tray host, where the BLOCK owns the single outline and every tray gives up its own
+   (openideChatComposer.css, "One silhouette: trays + card"). Given the card recipe here — same
+   specificity as that neutraliser, later in the cascade — it drew a second rounded, bordered box
+   one pixel off the block's own edge: the double line above the prompt.
+
+   Compactions and delegations are lines, not boxes.
    The notice used to be in this list on the grounds that upstream's `.chat-notification-widget` is
    "text + icon" — it is not: `chat.css` gives it the request border and a radius, the same box every
    other card gets. Here the two rules ended up fighting: it kept the card BACKGROUND from the block

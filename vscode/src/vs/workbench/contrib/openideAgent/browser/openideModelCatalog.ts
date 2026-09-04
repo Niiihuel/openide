@@ -111,7 +111,7 @@ export function providerCatalogId(providerId: string): string | undefined {
 	if (id === 'together') { return 'togetherai'; }
 	if (id === 'fireworks') { return 'fireworks-ai'; }
 	if (id === 'minimax-oauth') { return 'minimax'; }
-	return ['anthropic', 'deepseek', 'groq', 'mistral', 'minimax', 'cerebras', 'cohere', 'perplexity', 'lmstudio'].includes(id) ? id : undefined;
+	return ['anthropic', 'deepseek', 'groq', 'mistral', 'minimax', 'cerebras', 'cohere', 'perplexity', 'lmstudio', 'opencode'].includes(id) ? id : undefined;
 }
 
 /** models.dev provider whose model list can be offered as this provider's catalog.
@@ -173,6 +173,26 @@ function catalogRef(providerId: string, model: string): { provider: string; mode
 }
 
 /** The models.dev catalog, verbatim. Pure: no network, no storage, no clock. */
+/** A provider as the registry describes it — enough to reach it and to say what it is. */
+export interface IRegistryProvider {
+	readonly id: string;
+	readonly name: string;
+	/** Base URL of its OpenAI-compatible API. */
+	readonly api: string;
+	readonly doc?: string;
+	/** Env vars the registry says carry its key — shown so the user knows which key this wants. */
+	readonly env: readonly string[];
+	readonly modelCount: number;
+}
+
+/** What the Providers page prints about the registry itself. */
+export interface IModelCatalogStatus {
+	/** Epoch ms of the copy in use, 0 when nothing has ever been downloaded. */
+	readonly updatedAt: number;
+	readonly providers: number;
+	readonly models: number;
+}
+
 export class ModelRegistry {
 
 	constructor(private readonly catalog: ModelsDevCatalog) { }
@@ -234,6 +254,32 @@ export class ModelRegistry {
 
 	/** Every non-deprecated model published for this provider, alphabetically. Empty when the
 	 *  provider has no 1:1 registry counterpart. */
+	/**
+	 * Every provider the registry publishes that OpenIDE could actually reach: it names an `api`
+	 * (the base URL) and serves at least one model that is not deprecated.
+	 *
+	 * models.dev publishes 213 providers; the product ships 31 curated entries. The rest are not
+	 * missing capability — they are the same OpenAI-compatible protocol behind a different URL,
+	 * which is exactly the shape this catalog was built for ("few protocols, many providers as
+	 * data"). Handing that list to the UI is what turns them from "write the JSON yourself" into
+	 * something the user can find.
+	 */
+	providers(): IRegistryProvider[] {
+		const out: IRegistryProvider[] = [];
+		for (const [id, provider] of Object.entries(this.catalog)) {
+			const api = provider?.api;
+			if (!id || typeof api !== 'string' || !api.startsWith('http')) {
+				continue;
+			}
+			const models = Object.entries(provider.models ?? {}).filter(([, model]) => model?.status !== 'deprecated');
+			if (!models.length) {
+				continue;
+			}
+			out.push({ id, name: provider.name || id, api, doc: provider.doc, env: [...(provider.env ?? [])], modelCount: models.length });
+		}
+		return out.sort((a, b) => a.name.localeCompare(b.name));
+	}
+
 	modelsFor(providerId: string): string[] {
 		const provider = listableCatalogId(providerId);
 		const models = provider ? this.catalog[provider]?.models : undefined;
@@ -353,6 +399,52 @@ export class OpenideModelCatalog {
 
 	modelsFor(providerId: string): string[] {
 		return this.registry?.modelsFor(providerId) ?? [];
+	}
+
+	/** Every reachable provider in the registry. Empty until `ensureFresh` has loaded a copy. */
+	providers(): IRegistryProvider[] {
+		return this.registry?.providers() ?? [];
+	}
+
+	/**
+	 * The env var names this provider's key is published under. models.dev ships them for all 213
+	 * providers, which is what lets the credential chain read the environment with no code per
+	 * provider — the registry is the data.
+	 */
+	envNamesFor(registryId: string): readonly string[] {
+		return this.registry?.raw[registryId]?.env ?? [];
+	}
+
+	/** Every name any provider uses, so the machine is read once instead of per provider. */
+	allEnvNames(): readonly string[] {
+		const names = new Set<string>();
+		for (const provider of Object.values(this.registry?.raw ?? {})) {
+			for (const name of provider?.env ?? []) { names.add(name); }
+		}
+		return [...names];
+	}
+
+	status(): IModelCatalogStatus {
+		const providers = this.providers();
+		return {
+			updatedAt: this.fetchedAt,
+			providers: providers.length,
+			models: providers.reduce((total, provider) => total + provider.modelCount, 0),
+		};
+	}
+
+	/**
+	 * Downloads the registry now, ignoring the TTL. The Providers page is where someone goes when
+	 * a model they just read about is missing, and until this existed the only answer was to wait
+	 * up to six hours. Throws so the caller can say what went wrong instead of silently doing
+	 * nothing — unlike `ensureFresh`, whose whole job is to never take a surface down.
+	 */
+	async refreshNow(): Promise<void> {
+		if (this.refreshing) {
+			return this.refreshing;
+		}
+		this.refreshing = this.refresh().finally(() => { this.refreshing = undefined; });
+		return this.refreshing;
 	}
 
 	suggestionsFor(model: string, providerId = ''): string[] {

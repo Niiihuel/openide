@@ -3,13 +3,14 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IChatMessage, IPersistedFileDiff, ITodoItem, IToolCall, TodoStatus } from '../openideAgentTypes.js';
+import { IChatMessage, IPersistedFileDiff, IPersistedFlowVideo, ITodoItem, IToolCall, TodoStatus } from '../openideAgentTypes.js';
 import { IOpenideChatDelegationContent, IOpenideChatSubagentContent, OpenideChatSubagentStatus } from './openideChatContent.js';
 import { ISubagentRun } from '../openideSubagentTypes.js';
 import {
 	getOpenideChatContentAt, IOpenideChatDraft, pushOpenideChatContent, setOpenideChatContentAt,
 } from './openideChatReducerState.js';
 import {
+	applyOpenideChatVideo,
 	applyOpenideChatFileDiff, applyOpenideChatToolResult, applyOpenideChatToolStart, ensureOpenideChatDelegation, parseOpenideChatAskAnswers,
 } from './openideChatReducerTools.js';
 import { parseToolArguments } from './openideChatToolMeta.js';
@@ -32,6 +33,8 @@ export interface IOpenideChatRestoredToolResult {
 	readonly isError: boolean;
 	/** Only write_file/edit_file persist one; it is what rebuilds the styled edit card. */
 	readonly fileDiff?: IPersistedFileDiff;
+	/** Only browser_record_stop persists one; it is what brings the video card back. */
+	readonly video?: IPersistedFlowVideo;
 }
 
 /**
@@ -50,7 +53,7 @@ export function indexOpenideChatToolResults(messages: readonly IChatMessage[]): 
 	for (const message of messages) {
 		if (message.role !== 'tool' || !message.toolCallId) { continue; }
 		const content = message.content ?? '';
-		results.set(message.toolCallId, { content, isError: isRestoredToolError(content), fileDiff: message.fileDiff });
+		results.set(message.toolCallId, { content, isError: isRestoredToolError(content), fileDiff: message.fileDiff, video: message.video });
 	}
 	return results;
 }
@@ -256,4 +259,7 @@ export function applyOpenideChatRestoredToolCall(
 		});
 	}
 	applyOpenideChatToolResult(draft, call.id, call.name, result, settled?.isError ?? false);
+	if (settled?.video) {
+		applyOpenideChatVideo(draft, call.id, settled.video);
+	}
 }

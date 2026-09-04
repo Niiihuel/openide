@@ -8,7 +8,7 @@
  *  intentionally does not depend on SettingsEditor2 DOM, trees, widgets or CSS.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, Dimension, append, clearNode } from '../../../../base/browser/dom.js';
+import { $, Dimension, addDisposableListener, append, clearNode } from '../../../../base/browser/dom.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
@@ -52,7 +52,6 @@ import { OpenideLanguageSettingsSection } from './openideLanguageSettingsSection
 import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { openideInputBoxStyles } from '../../openideAgent/browser/openideControlStyles.js';
 import { onDidChangeOpenideLanguage, t } from '../../openideAgent/common/openideStrings.js';
-import { localize } from '../../../../nls.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { IExtensionService } from '../../../services/extensions/common/extensions.js';
 import { IAuthenticationService } from '../../../services/authentication/common/authentication.js';
@@ -101,6 +100,8 @@ export class OpenideSettingsEditor extends EditorPane {
 	/** Bumped per `renderProfile`, so a slow provider cannot paint over a newer answer. */
 	private profileToken = 0;
 	private profileDetail!: HTMLElement;
+	private profileSignIn!: HTMLButtonElement;
+	private profileSignInLabel!: HTMLElement;
 	private readonly modelListeners = this._register(new DisposableStore());
 	/** Hovers of the current page's rows; cleared on every repaint so hints never outlive a row. */
 	private readonly rowHovers = this._register(new DisposableStore());
@@ -162,11 +163,19 @@ export class OpenideSettingsEditor extends EditorPane {
 		// first line the signed-in account (or the product's name when there is none) and the
 		// second the profile these settings are read from. The account comes from the workbench's
 		// own authentication service, so anything an extension signs into shows here.
-		const profile = append(sidebar, $('.openide-settings-profile'));
+		const profileBlock = append(sidebar, $('.openide-settings-profile-block'));
+		const profile = append(profileBlock, $('.openide-settings-profile'));
 		this.profileAvatar = append(profile, $('span.openide-settings-profile-avatar', { 'aria-hidden': 'true' }));
 		const profileCopy = append(profile, $('.openide-settings-profile-copy'));
 		this.profileName = append(profileCopy, $('.openide-settings-profile-name'));
 		this.profileDetail = append(profileCopy, $('.openide-settings-profile-detail'));
+		// The way in, for when there is no account: the block used to name the PRODUCT where the
+		// person goes, which reads as an identity nobody can act on. It runs the same command the
+		// welcome walkthrough's GitHub step does, so there is one sign-in flow, not two.
+		this.profileSignIn = append(profileBlock, $('button.oi-btn.openide-settings-profile-signin.hidden', { type: 'button' })) as HTMLButtonElement;
+		append(this.profileSignIn, $('span.codicon.codicon-github', { 'aria-hidden': 'true' }));
+		this.profileSignInLabel = append(this.profileSignIn, $('span', undefined, t('accounts.signInWithGitHub')));
+		this._register(addDisposableListener(this.profileSignIn, 'click', () => this.signInWithGitHub()));
 		this.renderProfile();
 
 		const searchBlock = append(sidebar, $('.openide-settings-sidebar-block'));
@@ -283,6 +292,12 @@ export class OpenideSettingsEditor extends EditorPane {
 	 * menu fires, so this is the same cost the Accounts menu pays. Other providers are asked only if
 	 * already registered. The avatar is GitHub's public image for the login, with the initial as the
 	 * fallback while it loads or if it cannot.
+	 *
+	 * With no account the block does NOT fall back to the product's name: "OpenIDE · Default
+	 * profile" reads like an identity you are signed in as, when in fact there is nothing to act
+	 * on. It says so plainly and offers the way in instead. The button waits for the answer — while
+	 * the providers are still being asked we do not yet know the user is signed out, and offering
+	 * to sign in to an account they already have is the one thing worse than saying nothing.
 	 */
 	private renderProfile(): void {
 		// A session or profile event can arrive before the pane has built its DOM.
@@ -301,7 +316,16 @@ export class OpenideSettingsEditor extends EditorPane {
 				image.src = avatarUrl;
 			}
 		};
-		paint('OpenIDE', localize('openide.settings.profile', "{0} profile", profileName));
+		/** No account: a generic mark instead of a product initial, and the sign-in only once the
+		 *  providers have answered. */
+		const paintSignedOut = (offerSignIn: boolean) => {
+			this.profileName.textContent = t('accounts.signedOut');
+			this.profileDetail.textContent = t('accounts.profile', profileName);
+			clearNode(this.profileAvatar);
+			append(this.profileAvatar, $('span.codicon.codicon-account'));
+			this.profileSignIn.classList.toggle('hidden', !offerSignIn);
+		};
+		paintSignedOut(false);
 		const token = ++this.profileToken;
 		void this.extensionService.activateByEvent('onAuthenticationRequest:github').then(async () => {
 			const github = this.authenticationService.declaredProviders.find(provider => provider.id === 'github');
@@ -314,13 +338,34 @@ export class OpenideSettingsEditor extends EditorPane {
 					if (token !== this.profileToken || this._store.isDisposed) { return; }
 					const login = accounts[0].label;
 					const avatar = provider.id === 'github' ? `https://avatars.githubusercontent.com/${encodeURIComponent(login)}?s=72` : undefined;
-					paint(login, localize('openide.settings.profileWithAccount', "{0} · {1} profile", provider.label, profileName), avatar);
+					paint(login, t('accounts.profileWithAccount', provider.label, profileName), avatar);
 					return;
 				} catch {
 					// A provider that fails to answer is skipped; the next one may not.
 				}
 			}
+			if (token !== this.profileToken || this._store.isDisposed) { return; }
+			// Nobody answered with an account. Offer the sign-in only if GitHub is a declared
+			// provider: without the extension the flow has nowhere to go, and a button that can
+			// only fail is worse than no button.
+			paintSignedOut(!!github);
 		});
+	}
+
+	/** The welcome walkthrough's GitHub step, from the sidebar. The account block repaints on its
+	 *  own through `onDidChangeSessions`, so this only has to keep the button honest while the
+	 *  browser flow is out there. */
+	private async signInWithGitHub(): Promise<void> {
+		this.profileSignIn.disabled = true;
+		this.profileSignInLabel.textContent = t('accounts.signingIn');
+		try {
+			await this.commandService.executeCommand('openide.signInWithGitHub');
+		} finally {
+			if (!this._store.isDisposed) {
+				this.profileSignIn.disabled = false;
+				this.profileSignInLabel.textContent = t('accounts.signInWithGitHub');
+			}
+		}
 	}
 	private scheduleRender(reset: boolean): void {
 		if (reset) { this.renderLimit = INITIAL_RENDER_LIMIT; }

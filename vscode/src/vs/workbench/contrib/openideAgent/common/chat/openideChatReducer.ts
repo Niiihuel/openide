@@ -18,7 +18,7 @@ import {
 	OPENIDE_CHAT_NO_INDEX, pushOpenideChatContent, removeOpenideChatRetry, setOpenideChatContentAt,
 } from './openideChatReducerState.js';
 import {
-	applyOpenideChatFileDiff, applyOpenideChatScreenshot, applyOpenideChatTerminalData, applyOpenideChatToolResult,
+	applyOpenideChatFileDiff, applyOpenideChatScreenshot, applyOpenideChatTerminalData, applyOpenideChatToolResult, applyOpenideChatVideo,
 	applyOpenideChatToolStart, applyOpenideChatToolWaiting, ensureOpenideChatDelegation,
 } from './openideChatReducerTools.js';
 
@@ -116,6 +116,7 @@ function reduceRootEvent(draft: IOpenideChatDraft, ev: AgentLoopEvent): void {
 		case 'toolWaiting': applyOpenideChatToolWaiting(draft, ev.id, ev.holder); return;
 		case 'terminalData': applyOpenideChatTerminalData(draft, ev.id, ev.data); return;
 		case 'screenshot': applyOpenideChatScreenshot(draft, ev.id, ev.mimeType, ev.data); return;
+		case 'video': applyOpenideChatVideo(draft, ev.id, ev.video); return;
 		case 'fileDiff': applyOpenideChatFileDiff(draft, ev); return;
 		case 'usage':
 			addOpenideChatEffect(draft, {

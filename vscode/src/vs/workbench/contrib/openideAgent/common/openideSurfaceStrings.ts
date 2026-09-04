@@ -46,4 +46,10 @@ export const OPENIDE_SURFACE_STRINGS = {
 	'settingsToc.agentBrowser': { es: 'Navegador', en: 'Browser' },
 	'settingsToc.agentImport': { es: 'Importar configuración', en: 'Import settings' },
 	'settingsToc.agentAdvanced': { es: 'Modelos y avanzado', en: 'Models and advanced' },
+	// ---- Accounts menu (activity bar) and the Settings account block, while signed out
+	'accounts.signInWithGitHub': { es: 'Iniciar sesión con GitHub', en: 'Sign in with GitHub' },
+	'accounts.signedOut': { es: 'Sin sesión iniciada', en: 'Not signed in' },
+	'accounts.signingIn': { es: 'Iniciando sesión…', en: 'Signing in…' },
+	'accounts.profile': { es: 'Perfil {0}', en: '{0} profile' },
+	'accounts.profileWithAccount': { es: '{0} · perfil {1}', en: '{0} · {1} profile' },
 } as const;

@@ -123,8 +123,13 @@ export const OPENIDE_SURFACE_CSS = `
 	/* THE transcript surface. Every card in the chat — the user's bubble, approvals, questions,
 	   terminal, edits, plan, subagents — reads these three, so the dock has one card recipe
 	   instead of the seven rgba(128,128,128,…) variants transcribed from the webview. */
-	--oi-chat-card-bg: var(--vscode-chat-requestBubbleBackground, color-mix(in srgb, var(--vscode-foreground) 4%, transparent));
-	--oi-chat-card-border: var(--vscode-chat-requestBorder, rgba(128, 128, 128, 0.26));
+	/* The user's bubble and every card in the transcript sit on the same neutral lift the rest of
+	   the product uses — a few percent of foreground over the surface — NOT on Copilot's
+	   chat.requestBubbleBackground / chat.requestBorder. Those two are tinted blue by most
+	   themes (they are Copilot's brand inside the theme), so the dock read as a different product
+	   from the Settings, the panels and the editor around it. */
+	--oi-chat-card-bg: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+	--oi-chat-card-border: var(--oi-border);
 	--oi-chat-card-radius: var(--oi-radius-lg);
 }
 

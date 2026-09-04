@@ -44,6 +44,9 @@ import { KeyCode } from '../../../base/common/keyCodes.js';
 import { ACTIVITY_BAR_BADGE_BACKGROUND, ACTIVITY_BAR_BADGE_FOREGROUND } from '../../common/theme.js';
 import { IBaseActionViewItemOptions } from '../../../base/browser/ui/actionbar/actionViewItems.js';
 import { ICommandService } from '../../../platform/commands/common/commands.js';
+// OpenIDE: the Accounts menu offers GitHub sign-in when there is no account, in the product's
+// own vocabulary (the workbench's `localize()` has no entry for a fork-only action).
+import { t } from '../../contrib/openideAgent/common/openideStrings.js';
 
 export class GlobalCompositeBar extends Disposable {
 
@@ -285,7 +288,10 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		@ILogService private readonly logService: ILogService,
 		@IActivityService activityService: IActivityService,
 		@IInstantiationService instantiationService: IInstantiationService,
-		@ICommandService private readonly commandService: ICommandService
+		@ICommandService private readonly commandService: ICommandService,
+		// OpenIDE: to activate the GitHub authentication provider before concluding there is no
+		// account — see `resolveMainMenuActions`.
+		@IExtensionService private readonly extensionService: IExtensionService
 	) {
 		const action = instantiationService.createInstance(CompositeBarAction, {
 			id: ACCOUNTS_ACTIVITY_ID,
@@ -357,6 +363,21 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 
 	protected override async resolveMainMenuActions(accountsMenu: IMenu, disposables: DisposableStore): Promise<IAction[]> {
 		await super.resolveMainMenuActions(accountsMenu, disposables);
+
+		// OpenIDE: an absent provider is not proof of an absent account. The GitHub authentication
+		// extension only registers when something asks for it, so a menu opened before anything did
+		// would list nothing — and then offer to sign in to an account the user already has. Ask for
+		// it here, only while we believe there is nothing to show, and re-read its sessions.
+		if (this.initialized && !this.groupedAccounts.size) {
+			try {
+				await this.extensionService.activateByEvent('onAuthenticationRequest:github');
+				if (this.authenticationService.isAuthenticationProviderRegistered('github')) {
+					await this.addAccountsFromProvider('github');
+				}
+			} catch (e) {
+				this.logService.error(e);
+			}
+		}
 
 		const providers = this.authenticationService.getProviderIds().filter(p => !p.startsWith(INTERNAL_AUTH_PROVIDER_PREFIX));
 		const otherCommands = accountsMenu.getActions();
@@ -482,6 +503,20 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 					menus.push(providerSubMenu);
 				}
 			}
+		}
+
+		// OpenIDE: with no account anywhere, the menu used to open straight onto "Turn on Remote
+		// Tunnel Access…" — a list of things to manage, and no way in. Signing in is the first row
+		// instead, running the same flow the welcome walkthrough does. Gated on GitHub being a
+		// declared provider (the contribution is read at startup, no activation needed), so an
+		// installation without the extension is not offered a sign-in that cannot happen.
+		if (this.initialized && !this.groupedAccounts.size && this.authenticationService.declaredProviders.some(provider => provider.id === 'github')) {
+			menus.unshift(toAction({
+				id: 'openide.accounts.signInWithGitHub',
+				label: t('accounts.signInWithGitHub'),
+				enabled: true,
+				run: () => this.commandService.executeCommand('openide.signInWithGitHub')
+			}));
 		}
 
 		if (menus.length && otherCommands.length) {
@@ -680,7 +715,8 @@ export class SimpleAccountActivityActionViewItem extends AccountsActivityActionV
 		@ILogService logService: ILogService,
 		@IActivityService activityService: IActivityService,
 		@IInstantiationService instantiationService: IInstantiationService,
-		@ICommandService commandService: ICommandService
+		@ICommandService commandService: ICommandService,
+		@IExtensionService extensionService: IExtensionService
 	) {
 		super(() => simpleActivityContextMenuActions(storageService, true),
 			{
@@ -691,7 +727,7 @@ export class SimpleAccountActivityActionViewItem extends AccountsActivityActionV
 				}),
 				hoverOptions,
 				compact: true,
-			}, () => undefined, actions => actions, themeService, lifecycleService, hoverService, contextMenuService, menuService, contextKeyService, authenticationService, environmentService, productService, configurationService, keybindingService, secretStorageService, logService, activityService, instantiationService, commandService);
+			}, () => undefined, actions => actions, themeService, lifecycleService, hoverService, contextMenuService, menuService, contextKeyService, authenticationService, environmentService, productService, configurationService, keybindingService, secretStorageService, logService, activityService, instantiationService, commandService, extensionService);
 	}
 }
 

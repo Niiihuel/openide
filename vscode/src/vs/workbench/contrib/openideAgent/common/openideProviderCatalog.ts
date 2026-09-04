@@ -206,6 +206,17 @@ export const OPENIDE_BUILTIN_PROVIDERS: ReadonlyArray<IProviderEntry> = [
 		defaultModel: 'openai/gpt-5.5',
 	},
 	{
+		// OpenCode Zen: the gateway opencode ships, OpenAI-compatible, one key for models from
+		// several vendors. models.dev publishes it as `opencode` (97 models) and the endpoint
+		// answers GET /models with what THIS account may reach (66 here), so the picker gets the
+		// account's real list and the registry supplies the limits and prices — no model list
+		// belongs in this file.
+		id: 'opencode', label: 'OpenCode Zen', company: 'opencode', protocol: 'openai', baseUrl: 'https://opencode.ai/zen/v1', auth: 'apiKey',
+		apiKeysUrl: 'https://opencode.ai/docs/zen',
+		blurb: 'The opencode gateway: one key for models from several vendors, with a free tier.',
+		defaultModel: 'claude-sonnet-4-6',
+	},
+	{
 		id: 'groq', label: 'Groq', company: 'Groq', protocol: 'openai', baseUrl: 'https://api.groq.com/openai/v1', auth: 'apiKey',
 		apiKeysUrl: 'https://console.groq.com/keys',
 		blurb: 'Very fast inference (LPU) for open-source models.',
@@ -358,6 +369,10 @@ function normalizeCustom(raw: any): IProviderEntry | undefined {
 		protocol,
 		baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : undefined,
 		auth,
+		// Where this provider's key is minted. A custom entry could not carry it before, so a
+		// provider added from the registry had nowhere to put its documentation link except the
+		// blurb — where a bare URL reads as the row's description instead of as a link.
+		apiKeysUrl: typeof raw.apiKeysUrl === 'string' ? raw.apiKeysUrl : undefined,
 		blurb: typeof raw.blurb === 'string' ? raw.blurb : (typeof raw.baseUrl === 'string' ? raw.baseUrl : undefined),
 		defaultModel: typeof raw.defaultModel === 'string' ? raw.defaultModel : undefined,
 		voiceModel: typeof raw.voiceModel === 'string' && raw.voiceModel.trim() ? raw.voiceModel.trim() : undefined,

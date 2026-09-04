@@ -31,7 +31,13 @@
 	flex-direction: column;
 	min-width: min(200px, calc(100vw - 16px));
 	max-width: calc(100vw - 16px);
-	max-height: min(420px, 60vh);
+	/* The ONE height rule for every popover in the product (dropdowns in Settings and the CSS
+	   inspector, the model and mode pickers, the kebab menus): past this the body scrolls
+	   (`.openide-menu-content`). 420px was half the window on a laptop — a list of twenty
+	   `display` values opened as a column from the trigger to the status bar and read as a
+	   panel, not a menu. 320px is about a dozen rows: enough to scan, small enough to stay a
+	   popover; the 50vh keeps it under half of a short window. */
+	max-height: min(320px, 50vh);
 	border-radius: var(--oi-radius-lg);
 	border: 1px solid var(--oi-border);
 	background: var(--oi-overlay);
