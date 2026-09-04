@@ -281,6 +281,14 @@ export interface IFlowVideoResult {
 	readonly sheet: { readonly mimeType: string; readonly data: string };
 	/** The key frames, in order; `data` only for the first `framesToModel` of them. */
 	readonly keyFrames: readonly { readonly file: string; readonly t: number; readonly label: string; readonly kind: string; readonly data?: string }[];
+	/**
+	 * What the tape measured about the MOTION — a stall, a flash, an action that changed nothing.
+	 * Each one carries the millisecond to look at, which is what turns "review this video" into
+	 * "look at 00:04.2". Empty when nothing was found, absent on a build with no OffscreenCanvas.
+	 */
+	readonly findings?: readonly { readonly kind: string; readonly t: number; readonly durationMs?: number; readonly detail: string; readonly severity: number }[];
+	/** What the page measured about ITSELF at the end of the flow: clipped text, contrast, overlap. */
+	readonly lint?: readonly { readonly kind: string; readonly selector: string; readonly detail: string; readonly severity: number }[];
 }
 
 export function videoMarker(result: IFlowVideoResult, note: string): string {

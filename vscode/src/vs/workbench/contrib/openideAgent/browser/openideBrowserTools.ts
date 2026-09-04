@@ -22,7 +22,9 @@ import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../browserVi
 import { normalizeLocalUrl } from '../common/openideLocalUrl.js';
 import { cursorInstallScript, OPENIDE_CURSOR_GLOBAL, stripCursorHost } from '../common/openideBrowserCursor.js';
 import { flowSlug, formatFlowTime, IFlowFrame, IFlowVideoResult, IRecorderStatus, pickKeyFrames, recorderRuntimeSource, videoMarker } from '../common/openideBrowserRecorder.js';
-import { encodeFlowWebm, frameBytes, renderContactSheet } from './openideFlowVideo.js';
+import { encodeFlowWebm, frameBytes, frameSignatures, renderContactSheet } from './openideFlowVideo.js';
+import { analyseFlow, describeFindings, IVisualFinding } from '../common/openideVisualAnalysis.js';
+import { describeLint, IVisualLintReport, visualLintSource } from '../common/openideVisualLint.js';
 import { IAgentTool, IAgentToolContext, OpenideToolRegistry } from './openideTools.js';
 
 /** Prefix of the image marker in tool results (interpreted by the run loop). */
@@ -195,6 +197,15 @@ export class OpenideBrowserAutomation {
 		}
 	}
 
+	/**
+	 * Measures the page itself: clipped text, contrast, overlapping or undersized controls,
+	 * horizontal overflow. The lint runs INSIDE the page — computed styles and real layout are the
+	 * whole point — so it is `page.evaluate` of a serialized function, not a call in the vm.
+	 */
+	private lintCurrentPage(): Promise<IVisualLintReport> {
+		return this.invokeRaw<IVisualLintReport>(`async (page, source) => await page.evaluate(source)`, visualLintSource());
+	}
+
 	/** Where recordings land: beside the other per-user agent data, one folder per flow. */
 	private recordingsRoot() {
 		return joinPath(this.environmentService.userRoamingDataHome, 'openideAgent', 'recordings');
@@ -245,6 +256,19 @@ export class OpenideBrowserAutomation {
 			videoError = error instanceof Error ? error.message : String(error);
 		}
 
+		// The measurements. Neither can stop a recording from being returned: a build without
+		// OffscreenCanvas has no signatures, and a page that navigated away cannot be linted — in
+		// both cases the video and the strip are still the answer, just without the pointer.
+		let findings: IVisualFinding[] = [];
+		try {
+			const signatures = await frameSignatures(frames);
+			findings = [...analyseFlow(signatures, status.marks).findings];
+		} catch { /* measurement is an extra, never the deliverable */ }
+		let lint: IVisualLintReport | undefined;
+		try {
+			lint = await this.lintCurrentPage();
+		} catch { /* idem */ }
+
 		const sheetBytes = await renderContactSheet(keyFrames, { title: label, durationMs });
 		const sheetUri = joinPath(dir, 'sheet.jpg');
 		await this.fileService.writeFile(sheetUri, VSBuffer.wrap(sheetBytes));
@@ -272,6 +296,8 @@ export class OpenideBrowserAutomation {
 			truncated: status.truncated,
 			sheet: { mimeType: 'image/jpeg', data: encodeBase64(VSBuffer.wrap(sheetBytes)) },
 			keyFrames: keyFrameEntries,
+			findings: findings.map(finding => ({ kind: finding.kind, t: finding.t, durationMs: finding.durationMs, detail: finding.detail, severity: finding.severity })),
+			lint: (lint?.findings ?? []).map(finding => ({ kind: finding.kind, selector: finding.selector, detail: finding.detail, severity: finding.severity })),
 		};
 		const manifest = { ...result, sheet: 'sheet.jpg', keyFrames: keyFrameEntries.map(entry => ({ file: entry.file, t: entry.t, label: entry.label, kind: entry.kind })), marks: status.marks };
 		await this.fileService.writeFile(joinPath(dir, 'manifest.json'), VSBuffer.fromString(JSON.stringify(manifest, undefined, 2)));
@@ -285,7 +311,14 @@ export class OpenideBrowserAutomation {
 			`Manifest: ${result.manifestPath}`,
 			'Steps:',
 			steps,
-			'Give the video path to a model that accepts video to review animations and transitions; the sheet and the frames cover the ones that only read images.',
+			'',
+			'Motion (measured from the frame timings, not guessed from the picture):',
+			describeFindings(findings, formatFlowTime),
+			'',
+			'Page at the end of the flow:',
+			lint ? describeLint(lint) : 'not measured (the page was gone when the recording stopped).',
+			'',
+			'Give the video path to a model that accepts video to review animations and transitions; the sheet and the frames cover the ones that only read images. The timestamps above are where to look first.',
 		].join('\n');
 		return videoMarker(result, note);
 	}
@@ -691,7 +724,7 @@ export class OpenideBrowserAutomation {
 				risk: 'safe' as const,
 				def: {
 					name: 'browser_record_start',
-					description: 'Starts recording the native preview as video (screencast of the same visible page). Every browser_click / browser_type / browser_navigate / browser_playwright that follows is marked as a step; browser_record_stop encodes a WebM plus a contact sheet and one key frame per step. Use it to review animations, transitions and multi-step flows — things a single screenshot cannot show. Keep recordings short and focused (one flow per recording).',
+					description: 'Starts recording the native preview as video (screencast of the same visible page). Every browser_click / browser_type / browser_navigate / browser_playwright that follows is marked as a step; browser_record_stop encodes a WebM plus a contact sheet and one key frame per step, AND measures the tape: a stall inside an animation, a one-frame flash, motion that never settles, a layout that shifts with nothing to explain it, an action that changed nothing on screen. Use it whenever the question is about MOTION or about a multi-step flow — an animation that feels wrong, a transition that stutters, a button that seems dead — because none of that survives a screenshot. Keep recordings short and focused (one flow per recording).',
 					parameters: {
 						type: 'object',
 						properties: {
@@ -729,6 +762,22 @@ export class OpenideBrowserAutomation {
 			{
 				risk: 'safe' as const,
 				def: {
+					name: 'browser_check_visual',
+					description: 'Measures the CURRENT page for visual defects and returns them with a selector and a number each: text clipped by an overflow with no ellipsis, images that loaded no pixels, text below the WCAG AA contrast ratio against what is actually behind it, controls under 24x24, controls overlapping each other, and a document wider than its viewport. These are the defects a screenshot contains but a reader cannot reliably measure — use it together with browser_screenshot, not instead of it: this answers "is the text cut off, is the contrast 2.9:1", and the picture answers "does this look right". Safe and read-only; it changes nothing on the page.',
+					parameters: { type: 'object', properties: {} },
+				},
+				invoke: async () => {
+					try {
+						const report = await this.lintCurrentPage();
+						return describeLint(report);
+					} catch (error) {
+						return `Error: ${error instanceof Error ? error.message : String(error)}`;
+					}
+				},
+			},
+			{
+				risk: 'safe' as const,
+				def: {
 					name: 'browser_record_mark',
 					description: 'Adds a named step to the running recording, for moments no tool produced (an animation finished, a state to point at). The browser tools add their own marks automatically.',
 					parameters: { type: 'object', properties: { label: { type: 'string' } }, required: ['label'] },
@@ -749,7 +798,7 @@ export class OpenideBrowserAutomation {
 				risk: 'safe' as const,
 				def: {
 					name: 'browser_record_stop',
-					description: 'Stops the recording and produces: flow.webm (video), sheet.jpg (every step tiled in one image, attached as the next message), frames/ (one JPEG per step) and manifest.json, all under the user\'s OpenIDE data folder. The result lists absolute paths, so a model or CLI that accepts video can be handed the .webm and one that only reads images gets the sheet and the frames.',
+					description: 'Stops the recording and produces: flow.webm (video), sheet.jpg (every step tiled in one image, attached as the next message), frames/ (one JPEG per step) and manifest.json, all under the user\'s OpenIDE data folder. The result also carries two lists of measurements — what the frame timings say about the motion, each with the millisecond to look at, and what the page said about itself at the end (clipped text, contrast, overlap). Read those first and use them to aim: they turn "review this video" into "look at 00:04.2". The result lists absolute paths, so a model or CLI that accepts video can be handed the .webm and one that only reads images gets the sheet and the frames.',
 					parameters: {
 						type: 'object',
 						properties: {

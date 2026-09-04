@@ -77,6 +77,14 @@ export interface IPersistedFlowVideo {
 	readonly width: number;
 	readonly height: number;
 	readonly steps: readonly { readonly file: string; readonly t: number; readonly label: string; readonly kind: string }[];
+	/**
+	 * What the tape measured: a stall, a flash, an action that moved nothing. Each carries the
+	 * millisecond to look at, which is what the card turns into a button that seeks the player —
+	 * the difference between "here is a video" and "here is the second that is wrong".
+	 */
+	readonly findings?: readonly { readonly kind: string; readonly t: number; readonly detail: string; readonly severity: number }[];
+	/** What the page said about itself at the end of the flow. No timestamp: it is a state, not a moment. */
+	readonly lint?: readonly { readonly kind: string; readonly selector: string; readonly detail: string }[];
 }
 
 export interface IChatMessage {

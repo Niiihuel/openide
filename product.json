@@ -2,7 +2,7 @@
 	"nameShort": "OpenIDE",
 	"nameLong": "OpenIDE",
 	"applicationName": "openide",
-	"openideVersion": "1.0.2",
+	"openideVersion": "1.1.0",
 	"dataFolderName": ".openide",
 	"linuxIconName": "openide",
 	"urlProtocol": "openide",

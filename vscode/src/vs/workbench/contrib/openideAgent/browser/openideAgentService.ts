@@ -4519,7 +4519,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 					const flow = parseVideoMarker(out);
 					if (flow) {
 						const video = flow.video;
-						const persisted = { label: video.label, dir: video.dir, videoPath: video.videoPath, sheetPath: video.sheetPath, durationMs: video.durationMs, width: video.width, height: video.height, steps: video.keyFrames.map(frame => ({ file: frame.file, t: frame.t, label: frame.label, kind: frame.kind })) };
+						const persisted = { label: video.label, dir: video.dir, videoPath: video.videoPath, sheetPath: video.sheetPath, durationMs: video.durationMs, width: video.width, height: video.height, steps: video.keyFrames.map(frame => ({ file: frame.file, t: frame.t, label: frame.label, kind: frame.kind })), findings: (video.findings ?? []).map(finding => ({ kind: finding.kind, t: finding.t, detail: finding.detail, severity: finding.severity })), lint: (video.lint ?? []).map(finding => ({ kind: finding.kind, selector: finding.selector, detail: finding.detail })) };
 						onEvent({ type: 'toolResult', id: call.id, name: call.name, result: flow.note, isError: false });
 						onEvent({ type: 'video', id: call.id, video: persisted });
 						const attached = video.keyFrames.filter(frame => !!frame.data);

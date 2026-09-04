@@ -187,3 +187,48 @@
 .openide-diagram-video::-webkit-media-controls-volume-slider,
 .openide-diagram-video::-webkit-media-controls-overflow-button,
 .openide-diagram-video::-webkit-media-controls-picture-in-picture-button { display: none; }
+
+/* ---- What the tape measured -----------------------------------------------------------------
+   A row of chips between the player and the step strip. Motion findings seek; page findings are
+   a state, not a moment, so they are labels. Warning colour rather than error: a finding is a
+   place to look, and calling it a failure before anyone has looked would be the tool overreaching. */
+.openide-chat-video-findings {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 8px 10px 0;
+}
+
+.openide-chat-video-findings.hidden {
+	display: none;
+}
+
+.openide-chat-video-finding {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	max-width: 100%;
+	padding: 3px 8px;
+	border: 1px solid color-mix(in srgb, var(--vscode-editorWarning-foreground) 38%, transparent);
+	border-radius: var(--oi-radius-sm);
+	background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 10%, transparent);
+	color: var(--vscode-foreground);
+	font-family: inherit;
+	font-size: 11.5px;
+	line-height: 1.4;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.openide-chat-video-finding.static {
+	cursor: default;
+}
+
+.openide-chat-video-finding:not(.static):hover {
+	background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 18%, transparent);
+}
+
+.monaco-workbench .openide-chat-video-finding .codicon[class*="codicon-"] {
+	font-size: 12px;
+	color: var(--vscode-editorWarning-foreground);
+}

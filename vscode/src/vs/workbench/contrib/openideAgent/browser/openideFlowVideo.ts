@@ -18,6 +18,7 @@
 
 import { decodeBase64 } from '../../../../base/common/buffer.js';
 import { IFlowFrame, IKeyFrame, formatFlowTime } from '../common/openideBrowserRecorder.js';
+import { IFrameSignature } from '../common/openideVisualAnalysis.js';
 import { IWebmChunk, muxWebm } from '../common/openideWebm.js';
 
 export interface IEncodedFlow {
@@ -152,6 +153,76 @@ export async function encodeFlowWebm(frames: readonly IFlowFrame[], fps: number)
 	chunks.sort((a, b) => a.timeMs - b.timeMs);
 	const durationMs = Math.round(lastT + framePeriodMs);
 	return { webm: muxWebm(chunks, { codec: picked.codec, width, height, durationMs }), codec: picked.codec, width, height, durationMs };
+}
+
+// ---- Frame signatures ----------------------------------------------------------------------
+
+/** The grid every frame is reduced to. 32x18 is 576 cells: coarse enough to ignore JPEG noise and
+ *  text antialiasing, fine enough to tell a spinner in a corner from the whole page repainting. */
+const SIGNATURE_WIDTH = 32;
+const SIGNATURE_HEIGHT = 18;
+
+/** Above this, signatures are computed on an even sample. 900 frames is 75 s of a 12 fps capture;
+ *  past it the decode starts to cost more than the answer is worth, and the answer does not
+ *  improve — every finding here is about stretches of time, not about individual frames. */
+const SIGNATURE_MAX_FRAMES = 900;
+
+/** Decodes in small batches: a thousand `createImageBitmap` calls at once will exhaust the
+ *  decoder's queue on a machine that is also running the encode. */
+const SIGNATURE_BATCH = 8;
+
+/**
+ * A frame reduced to a luma grid, for `analyseFlow`.
+ *
+ * The resize is asked of `createImageBitmap` rather than done on the canvas: the decoder can scale
+ * while it decodes, which is the difference between decoding a 1280x800 JPEG and decoding a
+ * thumbnail. It is the only reason measuring a whole recording is affordable at all.
+ */
+async function signatureOf(frame: IFlowFrame, ctx: OffscreenCanvasRenderingContext2D): Promise<IFrameSignature> {
+	const bitmap = await createImageBitmap(bytesToBlob(frameBytes(frame), 'image/jpeg'), {
+		resizeWidth: SIGNATURE_WIDTH,
+		resizeHeight: SIGNATURE_HEIGHT,
+		resizeQuality: 'low',
+	});
+	ctx.drawImage(bitmap, 0, 0, SIGNATURE_WIDTH, SIGNATURE_HEIGHT);
+	bitmap.close();
+	const { data } = ctx.getImageData(0, 0, SIGNATURE_WIDTH, SIGNATURE_HEIGHT);
+	const cells = new Uint8Array(SIGNATURE_WIDTH * SIGNATURE_HEIGHT);
+	for (let i = 0; i < cells.length; i++) {
+		const p = i * 4;
+		// Rec. 709 luma. Colour is not what any of the motion checks ask about, and one channel
+		// per cell is four times less to compare.
+		cells[i] = (0.2126 * data[p] + 0.7152 * data[p + 1] + 0.0722 * data[p + 2]) | 0;
+	}
+	return { t: frame.t, gw: SIGNATURE_WIDTH, gh: SIGNATURE_HEIGHT, cells };
+}
+
+/** Signatures for a recording, in time order. Returns [] when the platform has no OffscreenCanvas
+ *  — the video and the sheet still ship; only the measurements are missing. */
+export async function frameSignatures(frames: readonly IFlowFrame[]): Promise<IFrameSignature[]> {
+	if (typeof OffscreenCanvas === 'undefined' || frames.length < 3) {
+		return [];
+	}
+	const sampled = thin(frames, SIGNATURE_MAX_FRAMES);
+	const canvas = new OffscreenCanvas(SIGNATURE_WIDTH, SIGNATURE_HEIGHT);
+	const ctx = canvas.getContext('2d', { willReadFrequently: true });
+	if (!ctx) {
+		return [];
+	}
+	const out: IFrameSignature[] = [];
+	for (let i = 0; i < sampled.length; i += SIGNATURE_BATCH) {
+		const batch = sampled.slice(i, i + SIGNATURE_BATCH);
+		// Sequential inside the batch: they share one canvas, and a shared canvas cannot be drawn
+		// into concurrently. The batching is there to keep the loop yielding, not to parallelise.
+		for (const frame of batch) {
+			try {
+				out.push(await signatureOf(frame, ctx));
+			} catch {
+				// A corrupt frame is one missing measurement, not a failed recording.
+			}
+		}
+	}
+	return out;
 }
 
 // ---- Contact sheet -------------------------------------------------------------------------

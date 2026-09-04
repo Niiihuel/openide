@@ -38,6 +38,7 @@ export class OpenideChatVideoPart extends OpenideChatContentPart {
 	private _content: IOpenideChatVideoContent;
 	private readonly _body: HTMLElement;
 	private readonly _steps: HTMLElement;
+	private readonly _findings: HTMLElement;
 	private readonly _title: HTMLElement;
 	private readonly _meta: HTMLElement;
 	private _video: HTMLVideoElement | undefined;
@@ -74,6 +75,7 @@ export class OpenideChatVideoPart extends OpenideChatContentPart {
 		this._register(addDisposableListener(enlarge, 'click', () => this._openFullscreen()));
 
 		this._body = append(this.domNode, $('div.openide-chat-video-body'));
+		this._findings = append(this.domNode, $('div.openide-chat-video-findings'));
 		this._steps = append(this.domNode, $('div.openide-chat-video-steps'));
 
 		this._render();
@@ -93,6 +95,7 @@ export class OpenideChatVideoPart extends OpenideChatContentPart {
 		const generation = ++this._generation;
 		this._revokeAll();
 		clearNode(this._body);
+		this._paintFindings();
 		clearNode(this._steps);
 		const video = this._content.video;
 
@@ -154,6 +157,38 @@ export class OpenideChatVideoPart extends OpenideChatContentPart {
 			this._register(addDisposableListener(button, 'click', () => this._seek(step.t)));
 		}
 		this._onDidChangeHeight.fire();
+	}
+
+	/**
+	 * The measured problems, as buttons that seek. This is the whole reason the recorder measures
+	 * anything: a reviewer handed ninety seconds of video does not find a 400 ms stall, and does
+	 * not have to — the tape already knows when it happened, so the card offers the second.
+	 *
+	 * Page findings have no timestamp (they describe the state at the end, not a moment), so they
+	 * are listed without a seek rather than sent to an arbitrary time.
+	 */
+	private _paintFindings(): void {
+		clearNode(this._findings);
+		const video = this._content.video;
+		const motion = video.findings ?? [];
+		const page = video.lint ?? [];
+		this._findings.classList.toggle('hidden', !motion.length && !page.length);
+		if (!motion.length && !page.length) {
+			return;
+		}
+		for (const finding of motion) {
+			const chip = append(this._findings, $('button.openide-chat-video-finding', { type: 'button' })) as HTMLButtonElement;
+			append(chip, $('span.codicon.codicon-warning'));
+			append(chip, $('span', undefined, `${formatFlowTime(finding.t)} · ${finding.kind}`));
+			this._register(setupChatTooltip(this._hoverService, chip, () => finding.detail));
+			this._register(addDisposableListener(chip, 'click', () => this._seek(finding.t)));
+		}
+		for (const finding of page) {
+			const chip = append(this._findings, $('span.openide-chat-video-finding.static'));
+			append(chip, $('span.codicon.codicon-eye'));
+			append(chip, $('span', undefined, finding.kind));
+			this._register(setupChatTooltip(this._hoverService, chip, () => `${finding.selector}\n${finding.detail}`));
+		}
 	}
 
 	private _seek(t: number): void {

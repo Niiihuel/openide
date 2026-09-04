@@ -85,13 +85,31 @@ suite('OpenIDE — which tools an external agent sees', () => {
 		const external = externalToolDescription('browser_click', original);
 		assert.ok(external.endsWith(original));
 		assert.ok(external.length > original.length);
-		assert.ok(/ABIERTO|usuario/.test(external));
+		assert.ok(/OPEN inside OpenIDE|the user is actually looking at/.test(external));
+	});
+
+	test('the recorder tells an external agent it MEASURES, not just that it records', () => {
+		// A CLI has no recorder of its own, so it has no prior for what one returns. Left as "records
+		// video" it would take the tape and squint at it; the findings are the reason it is better
+		// than a screenshot, and an agent only uses what the description promises.
+		const external = externalToolDescription('browser_record_stop', 'Stops the recording.');
+		assert.ok(/MEASURES/.test(external), external);
+		assert.ok(/millisecond to look at/.test(external));
+		assert.ok(/place to look, not a verdict/.test(external));
+	});
+
+	test('browser_check_visual says what it answers that a screenshot cannot', () => {
+		const external = externalToolDescription('browser_check_visual', 'Measures the page.');
+		assert.ok(/WCAG AA/.test(external), external);
+		assert.ok(/ALONGSIDE browser_screenshot/.test(external));
+		// It must not fall through to the generic browser blurb, which says nothing about measuring.
+		assert.ok(!/not a fresh instance/.test(external));
 	});
 
 	test('plan_save warns that it blocks and that it comes back edited', () => {
 		const external = externalToolDescription('plan_save', 'Guarda el plan.');
-		assert.ok(/BLOQUEANTE/.test(external));
-		assert.ok(/DESPUÉS de sus ediciones/.test(external));
+		assert.ok(/BLOCKING/.test(external));
+		assert.ok(/AFTER their edits/.test(external));
 	});
 
 	test('a tool with no extra context is left unchanged', () => {
@@ -118,7 +136,7 @@ suite('OpenIDE — which tools an external agent sees', () => {
 		// behaviour is bought in the description or it is not bought at all.
 		const external = externalToolDescription('memory', 'Memoria persistente.');
 		assert.ok(/MEMORY\.md/.test(external));
-		assert.ok(/otros CLI|harness/.test(external));
+		assert.ok(/other CLIs|harness/.test(external));
 		assert.ok(/openide_memory_read/.test(external));
 	});
 
