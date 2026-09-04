@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../../../base/common/lifecycle.js';
+import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
 import { IOpenideAgentService, IVoiceCapability } from '../openideAgentService.js';
 import { t } from '../../common/openideStrings.js';
 
@@ -42,6 +43,7 @@ export class OpenideChatComposerVoice extends Disposable {
 
 	constructor(
 		private readonly agentService: IOpenideAgentService,
+		private readonly accessibilitySignalService: IAccessibilitySignalService,
 		private readonly targetWindow: Window,
 		private readonly onDidChangeState: (state: VoiceState) => void,
 		private readonly onDidTranscribe: (text: string) => void,
@@ -97,8 +99,26 @@ export class OpenideChatComposerVoice extends Disposable {
 		}
 	}
 
+	/**
+	 * The one funnel every transition goes through, and therefore where the microphone is announced.
+	 *
+	 * Upstream plays these two on its speech session boundaries
+	 * (`SpeechAccessibilitySignalContribution`), and the reason applies here unchanged: recording is
+	 * otherwise signalled by a colour on a 20px button, so someone who does not see it has no way to
+	 * know the microphone is live. Of all the states this composer has, that is the one that keeps
+	 * doing something after the user has looked away.
+	 *
+	 * The edges are guarded rather than fired on every call: `starting` -> `recording` -> `busy` is
+	 * one recording, and the pair should be one start and one stop, not one per repaint.
+	 */
 	private _setState(state: VoiceState): void {
+		const previous = this._state;
 		this._state = state;
+		if (state === 'recording' && previous !== 'recording') {
+			this.accessibilitySignalService.playSignal(AccessibilitySignal.voiceRecordingStarted);
+		} else if (previous === 'recording' && state !== 'recording') {
+			this.accessibilitySignalService.playSignal(AccessibilitySignal.voiceRecordingStopped);
+		}
 		this.onDidChangeState(state);
 	}
 

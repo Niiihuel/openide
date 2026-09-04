@@ -660,6 +660,12 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-row.danger .openide-settings-setting-title,
 .monaco-workbench .openide-settings .openide-settings-row.danger .openide-settings-row-glyph.codicon[class*="codicon-"] { color: var(--oi-danger); }
 .openide-settings-row.armed { background: color-mix(in srgb, var(--oi-danger) 14%, transparent); }
+/* The row that holds the current value of a choice (the voice model, today). The trailing check is
+   the mark -- the same one the settings dropdown puts on its selected option -- and the tint only
+   has to make the row findable when scrolling a card of twenty. Deliberately quieter than `armed`:
+   this is a state, not a warning. */
+.openide-settings-row.selected { background: color-mix(in srgb, var(--oi-accent) 8%, transparent); }
+.monaco-workbench .openide-settings .openide-settings-row.selected .openide-settings-row-glyph.codicon[class*="codicon-"] { color: var(--oi-accent); }
 /* The trailing glyph of a row IS a control affordance: 16px, muted, like every action glyph. */
 .monaco-workbench .openide-settings .openide-settings-row-glyph.codicon[class*="codicon-"] { font-size: 16px; color: var(--oi-text-muted); }
 .openide-settings-row .oi-pill { font-size: var(--oi-text-xs); }

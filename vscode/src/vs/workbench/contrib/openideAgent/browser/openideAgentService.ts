@@ -95,6 +95,7 @@ import { buildCompactionTranscript, buildDeterministicFallbackSummary, buildStru
 import { OpenideToolCallGuard, repairToolArgumentsJson, validateToolArguments } from '../common/openideToolGuardrails.js';
 import { resolveStreamStaleTimeoutSeconds } from '../common/openideReasoningTimeouts.js';
 import { fallbackStepKey, parseFallbackChain, parseProviderModelTarget } from '../common/openideFallback.js';
+import { IVoiceModelSelection, parseVoiceSetting, selectVoiceModels } from '../common/openideVoiceModels.js';
 import { describeCooldown, IModelTarget, isModelCoolingDown, isModelHealthSignal, planModelRun } from '../common/openideModelHealth.js';
 import { t } from '../common/openideStrings.js';
 import { normalizeModelForProvider } from '../common/openideModelNormalize.js';
@@ -364,6 +365,11 @@ export interface IOpenideAgentService {
 	reportPickedElement(result: IBrowserPickResult): void;
 	/** Effective dictation capability. In automatic mode it depends solely on the active provider. */
 	getVoiceCapability(): Promise<IVoiceCapability>;
+	/**
+	 * Every connected model that can be dictated to, and every connected provider that cannot,
+	 * with its reason. What the Settings selector offers instead of a text box.
+	 */
+	listVoiceModels(): Promise<IVoiceModelSelection<IOpenidePickerModel>>;
 	/** Voice dictation: transcribes a WAV with the target pinned when recording started. */
 	transcribeAudio(wavBase64: string, providerId?: string, model?: string): Promise<string>;
 	/**
@@ -3310,17 +3316,16 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	// ---- Dictado por voz ----
 
 	private async resolveVoiceTarget(providerId?: string, model?: string): Promise<{ capability: IVoiceCapability; entry?: IProviderEntry }> {
-		const configured = String(this.configurationService.getValue('openide.agent.voiceModel') ?? '').trim();
+		const configured = parseVoiceSetting(String(this.configurationService.getValue('openide.agent.voiceModel') ?? ''));
 		let targetProvider = providerId?.trim() ?? '';
 		let targetModel = model?.trim() ?? '';
 		let overridden = false;
-		if (!targetProvider && !targetModel && configured) {
-			const slash = configured.indexOf('/');
-			if (slash <= 0 || slash === configured.length - 1) {
+		if (!targetProvider && !targetModel && configured.kind !== 'auto') {
+			if (configured.kind === 'invalid') {
 				return { capability: { available: false, reason: t('agentSurface.voice.settingFormat') } };
 			}
-			targetProvider = configured.slice(0, slash);
-			targetModel = configured.slice(slash + 1);
+			targetProvider = configured.providerId;
+			targetModel = configured.model;
 			overridden = true;
 		}
 		if (!targetProvider) {
@@ -3347,6 +3352,19 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 
 	async getVoiceCapability(): Promise<IVoiceCapability> {
 		return (await this.resolveVoiceTarget()).capability;
+	}
+
+	/**
+	 * The connected models that can hear, grouped as the picker groups them.
+	 *
+	 * Built on `getConnectedModelGroups` rather than on a query of its own: dictation must offer
+	 * what the chat offers, minus what cannot carry audio. A second enumeration would drift from
+	 * the first the day discovery changes, and the user would be looking at two different ideas of
+	 * "the models you have".
+	 */
+	async listVoiceModels(): Promise<IVoiceModelSelection<IOpenidePickerModel>> {
+		const groups = await this.getConnectedModelGroups();
+		return selectVoiceModels(groups, providerId => this.findProvider(providerId)?.protocol);
 	}
 
 	async transcribeAudio(wavBase64: string, providerId?: string, model?: string): Promise<string> {

@@ -25,6 +25,7 @@ export const OPENIDE_COMMAND_STRINGS = {
 	'contrib.msg.pick.done': { es: 'Elemento adjuntado al chat: contale al agente qué querés cambiar.', en: 'Element attached to the chat: tell the agent what you want to change.' },
 	'contrib.cmd.agent.undoAccountFailover': { es: 'Agente IA: Volver a la cuenta anterior', en: 'AI Agent: Go back to the previous account' },
 	'contrib.cmd.agent.openProviders': { es: 'Agente IA: Conectar proveedor…', en: 'AI Agent: Connect a provider…' },
+	'contrib.cmd.agent.openVoiceSettings': { es: 'Agente IA: Ajustes de dictado por voz', en: 'AI Agent: Voice dictation settings' },
 	'contrib.editor.skillInstaller': { es: 'Instalar Skill', en: 'Install Skill' },
 	'contrib.cmd.agent.openExtensions': { es: 'Agente IA: Skills', en: 'AI Agent: Skills' },
 	'contrib.editor.diagram': { es: 'Diagrama', en: 'Diagram' },

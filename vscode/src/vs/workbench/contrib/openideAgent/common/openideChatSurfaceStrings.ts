@@ -35,6 +35,8 @@ export const OPENIDE_CHAT_SURFACE_STRINGS = {
 
 	// ---- voice dictation
 	'chatSurface.voice.unsupported': { es: 'El proveedor activo no permite dictado por voz.', en: 'The active provider does not support voice dictation.' },
+	'chatSurface.voice.usingModel': { es: '{0} · {1} · {2}', en: '{0} · {1} · {2}' },
+	'chatSurface.voice.configure': { es: 'Configurar el dictado', en: 'Set up dictation' },
 	'chatSurface.voice.startFailed': { es: 'No se pudo iniciar el dictado', en: 'Could not start dictation' },
 	'chatSurface.voice.label': { es: 'Dictado', en: 'Dictation' },
 

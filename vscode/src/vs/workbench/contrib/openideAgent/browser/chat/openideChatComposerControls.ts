@@ -108,7 +108,7 @@ export class OpenideChatComposerControls extends Disposable {
 		row: HTMLElement,
 		private readonly agentService: IOpenideAgentService,
 		contextViewService: IContextViewService,
-		commandService: ICommandService,
+		private readonly commandService: ICommandService,
 		hoverService: IHoverService,
 		private readonly voice: OpenideChatComposerVoice,
 		private readonly actions: IComposerActions,
@@ -176,10 +176,16 @@ export class OpenideChatComposerControls extends Disposable {
 		// Toggle vs hold-to-talk (the removed chat webview): the click only counts in toggle mode,
 		// and the pointer pair only in hold mode, so a setting change mid-session never double-fires.
 		this._register(addDisposableListener(this._micButton, 'click', () => {
+			// Dictation off: `toggle()` returns in silence, which is how this button spent its life
+			// looking broken. The reason is already in the tooltip; the click is the way to fix it.
+			if (!this.voice.capability.available) {
+				void this.commandService.executeCommand('openide.agent.openVoiceSettings');
+				return;
+			}
 			if (this._voiceMode === 'toggle') { this.voice.toggle(); }
 		}));
 		this._register(addDisposableListener(this._micButton, 'pointerdown', (event: PointerEvent) => {
-			if (this._voiceMode !== 'holdToTalk') { return; }
+			if (this._voiceMode !== 'holdToTalk' || !this.voice.capability.available) { return; }
 			event.preventDefault();
 			this._holding = this.voice.beginHold();
 		}));
@@ -257,12 +263,27 @@ export class OpenideChatComposerControls extends Disposable {
 	}
 
 	/** What the microphone is doing right now, in the language the IDE is in right now. */
+	/**
+	 * What the microphone says about itself.
+	 *
+	 * While it is doing something the state is the whole answer. At rest it also names the model
+	 * that will hear -- the dictation model is chosen in Settings and can differ from the model
+	 * answering in the chat, so a tooltip that only said "Dictate" left the user with no way to
+	 * know which of the two was about to be billed. When dictation is off it says WHY, and the
+	 * click (see the handler above) goes to the page that fixes it.
+	 */
 	private _voiceLabel(): string {
-		return this._voiceState === 'recording' ? (this._voiceMode === 'holdToTalk' ? t('chat.voice.release') : t('chat.voice.stop'))
-			: this._voiceState === 'busy' ? t('chat.voice.transcribing')
-				: this._voiceState === 'starting' ? t('chat.voice.preparing')
-					: this._voiceMode === 'holdToTalk' ? t('chat.voice.hold')
-						: t('chat.voice.dictate');
+		if (this._voiceState === 'recording') { return this._voiceMode === 'holdToTalk' ? t('chat.voice.release') : t('chat.voice.stop'); }
+		if (this._voiceState === 'busy') { return t('chat.voice.transcribing'); }
+		if (this._voiceState === 'starting') { return t('chat.voice.preparing'); }
+		const base = this._voiceMode === 'holdToTalk' ? t('chat.voice.hold') : t('chat.voice.dictate');
+		const capability = this.voice.capability;
+		if (!capability.available) {
+			return `${capability.reason ?? t('chatSurface.voice.unsupported')} — ${t('chatSurface.voice.configure')}`;
+		}
+		return capability.providerLabel && capability.model
+			? t('chatSurface.voice.usingModel', base, capability.providerLabel, capability.model)
+			: base;
 	}
 
 	/**
@@ -348,6 +369,8 @@ export class OpenideChatComposerControls extends Disposable {
 			this._effortButton.classList.toggle('unset', !effort);
 			this._effortTooltip.update();
 		}
+		// The mic tooltip names the dictation model, which `refreshCapability` may have just changed.
+		this._micTooltip.update();
 		this._updateSlot();
 	}
 

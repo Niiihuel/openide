@@ -42,6 +42,7 @@ import { OpenideHooksSettingsSection } from '../../openideAgent/browser/openideH
 import { OpenideQuickCommandsSettingsSection } from '../../openideAgent/browser/openideQuickCommandsSettingsSection.js';
 import { OpenideMcpSettingsSection } from '../../openideAgent/browser/openideMcpSettingsSection.js';
 import { OpenideProvidersSettingsSection } from '../../openideAgent/browser/openideProvidersSettingsSection.js';
+import { OpenideVoiceSettingsSection } from '../../openideAgent/browser/openideVoiceSettingsSection.js';
 import { OpenideProjectMapSettingsSection } from '../../openideAgent/browser/openideProjectMapSettingsSection.js';
 import { OpenideImportSettingsSection } from '../../openideAgent/browser/openideImportSettingsSection.js';
 import { OpenideRulesSettingsSection } from '../../openideAgent/browser/openideRulesSettingsSection.js';
@@ -80,6 +81,7 @@ const SECTION_FACTORIES: ReadonlyMap<string, new (...args: any[]) => IOpenideSet
 	['openideAgent/quickCommands', OpenideQuickCommandsSettingsSection],
 	['openideAgent/mcp', OpenideMcpSettingsSection],
 	['openideAgent/providers', OpenideProvidersSettingsSection],
+	['openideAgent/voice', OpenideVoiceSettingsSection],
 	['workbench/language', OpenideLanguageSettingsSection],
 ]);
 

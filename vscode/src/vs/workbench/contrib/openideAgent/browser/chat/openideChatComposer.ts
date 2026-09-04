@@ -15,6 +15,7 @@ import { IConfigurationService } from '../../../../../platform/configuration/com
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
+import { IAccessibilitySignalService } from '../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
 import { IStorageService } from '../../../../../platform/storage/common/storage.js';
 import { COMPACT_COMMAND, IOpenideChatSuggestSources } from '../../common/chat/openideChatSlashCommands.js';
 import { AgentMode, IChatCapabilityMention, IChatImage } from '../../common/openideAgentTypes.js';
@@ -171,6 +172,7 @@ export class OpenideChatComposer extends Disposable {
 		@IStorageService storageService: IStorageService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IHoverService hoverService: IHoverService,
+		@IAccessibilitySignalService accessibilitySignalService: IAccessibilitySignalService,
 		@IFileService fileService: IFileService,
 	) {
 		super();
@@ -265,6 +267,7 @@ export class OpenideChatComposer extends Disposable {
 		));
 		this._voice = this._register(new OpenideChatComposerVoice(
 			agentService,
+			accessibilitySignalService,
 			getWindow(parent),
 			state => this._controls.applyVoiceState(state),
 			text => this._appendTranscription(text),

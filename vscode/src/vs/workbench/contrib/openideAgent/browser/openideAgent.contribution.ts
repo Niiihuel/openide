@@ -680,6 +680,28 @@ registerAction2(class extends Action2 {
 	}
 });
 
+// Where the microphone sends someone it cannot serve. The dictation model is chosen in Settings,
+// and a dead button with a tooltip explaining why is only half an answer: the other half is the
+// way to fix it, one click away.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'openide.agent.openVoiceSettings',
+			title: { value: t('contrib.cmd.agent.openVoiceSettings'), original: 'AI Agent: Voice dictation settings' },
+			category: Categories.Preferences,
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const preferencesService = accessor.get(IPreferencesService);
+		const pane = await preferencesService.openSettings({ jsonEditor: false, query: '' });
+		if (pane instanceof OpenideSettingsEditor) {
+			await pane.showSettingsCategory('openideAgent/voice');
+		}
+	}
+});
+
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
 	EditorPaneDescriptor.create(OpenideSkillInstallerEditor, OpenideSkillInstallerEditor.ID, t('contrib.editor.skillInstaller')),
 	[new SyncDescriptor(OpenideSkillInstallerInput)]
