@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <policyDefinitions revision="1.1" schemaVersion="1.0">
 	<policyNamespaces>
-		<target prefix="CodeOSS" namespace="Microsoft.Policies.CodeOSS" />
+		<target prefix="CodeOSS" namespace="OpenIDE.Policies.CodeOSS" />
 	</policyNamespaces>
 	<resources minRequiredRevision="1.0" />
 	<supportedOn>
@@ -22,7 +22,7 @@
 		<category displayName="$(string.Category_updateConfigurationTitle)" name="updateConfigurationTitle"><parentCategory ref="Application" /></category>
 	</categories>
 	<policies>
-		<policy name="ChatAgentExtensionTools" class="Both" displayName="$(string.ChatAgentExtensionTools)" explainText="$(string.ChatAgentExtensionTools_chat_extensionToolsEnabled)" key="Software\Policies\Microsoft\CodeOSS" presentation="$(presentation.ChatAgentExtensionTools)">
+		<policy name="ChatAgentExtensionTools" class="Both" displayName="$(string.ChatAgentExtensionTools)" explainText="$(string.ChatAgentExtensionTools_chat_extensionToolsEnabled)" key="Software\Policies\OpenIDE\CodeOSS" presentation="$(presentation.ChatAgentExtensionTools)">
 			<parentCategory ref="interactiveSessionConfigurationTitle" />
 			<supportedOn ref="Supported_1_99" />
 			<elements>
@@ -31,7 +31,7 @@
 		</boolean>
 			</elements>
 		</policy>
-		<policy name="ChatAgentMode" class="Both" displayName="$(string.ChatAgentMode)" explainText="$(string.ChatAgentMode_chat_agent_enabled_description)" key="Software\Policies\Microsoft\CodeOSS" presentation="$(presentation.ChatAgentMode)">
+		<policy name="ChatAgentMode" class="Both" displayName="$(string.ChatAgentMode)" explainText="$(string.ChatAgentMode_chat_agent_enabled_description)" key="Software\Policies\OpenIDE\CodeOSS" presentation="$(presentation.ChatAgentMode)">
 			<parentCategory ref="interactiveSessionConfigurationTitle" />
 			<supportedOn ref="Supported_1_99" />
 			<elements>
@@ -40,7 +40,7 @@
 		</boolean>
 			</elements>
 		</policy>
-		<policy name="ChatMCP" class="Both" displayName="$(string.ChatMCP)" explainText="$(string.ChatMCP_chat_mcp_access)" key="Software\Policies\Microsoft\CodeOSS" presentation="$(presentation.ChatMCP)">
+		<policy name="ChatMCP" class="Both" displayName="$(string.ChatMCP)" explainText="$(string.ChatMCP_chat_mcp_access)" key="Software\Policies\OpenIDE\CodeOSS" presentation="$(presentation.ChatMCP)">
 			<parentCategory ref="interactiveSessionConfigurationTitle" />
 			<supportedOn ref="Supported_1_99" />
 			<elements>
@@ -51,7 +51,7 @@
 		</enum>
 			</elements>
 		</policy>
-		<policy name="ChatPromptFiles" class="Both" displayName="$(string.ChatPromptFiles)" explainText="$(string.ChatPromptFiles_chat_promptFiles_policy)" key="Software\Policies\Microsoft\CodeOSS" presentation="$(presentation.ChatPromptFiles)">
+		<policy name="ChatPromptFiles" class="Both" displayName="$(string.ChatPromptFiles)" explainText="$(string.ChatPromptFiles_chat_promptFiles_policy)" key="Software\Policies\OpenIDE\CodeOSS" presentation="$(presentation.ChatPromptFiles)">
 			<parentCategory ref="interactiveSessionConfigurationTitle" />
 			<supportedOn ref="Supported_1_99" />
 			<elements>
@@ -60,7 +60,7 @@
 		</boolean>
 			</elements>
 		</policy>
-		<policy name="ChatToolsAutoApprove" class="Both" displayName="$(string.ChatToolsAutoApprove)" explainText="$(string.ChatToolsAutoApprove_autoApprove2_description)" key="Software\Policies\Microsoft\CodeOSS" presentation="$(presentation.ChatToolsAutoApprove)">
+		<policy name="ChatToolsAutoApprove" class="Both" displayName="$(string.ChatToolsAutoApprove)" explainText="$(string.ChatToolsAutoApprove_autoApprove2_description)" key="Software\Policies\OpenIDE\CodeOSS" presentation="$(presentation.ChatToolsAutoApprove)">
 			<parentCategory ref="interactiveSessionConfigurationTitle" />
 			<supportedOn ref="Supported_1_99" />
 			<elements>
@@ -69,28 +69,28 @@
 		</boolean>
 			</elements>
 		</policy>
-		<policy name="McpGalleryServiceUrl" class="Both" displayName="$(string.McpGalleryServiceUrl)" explainText="$(string.McpGalleryServiceUrl_mcp_gallery_serviceUrl)" key="Software\Policies\Microsoft\CodeOSS" presentation="$(presentation.McpGalleryServiceUrl)">
+		<policy name="McpGalleryServiceUrl" class="Both" displayName="$(string.McpGalleryServiceUrl)" explainText="$(string.McpGalleryServiceUrl_mcp_gallery_serviceUrl)" key="Software\Policies\OpenIDE\CodeOSS" presentation="$(presentation.McpGalleryServiceUrl)">
 			<parentCategory ref="interactiveSessionConfigurationTitle" />
 			<supportedOn ref="Supported_1_101" />
 			<elements>
 		<text id="McpGalleryServiceUrl" valueName="McpGalleryServiceUrl" required="true" />
 			</elements>
 		</policy>
-		<policy name="AllowedExtensions" class="Both" displayName="$(string.AllowedExtensions)" explainText="$(string.AllowedExtensions_extensions_allowed_policy)" key="Software\Policies\Microsoft\CodeOSS" presentation="$(presentation.AllowedExtensions)">
+		<policy name="AllowedExtensions" class="Both" displayName="$(string.AllowedExtensions)" explainText="$(string.AllowedExtensions_extensions_allowed_policy)" key="Software\Policies\OpenIDE\CodeOSS" presentation="$(presentation.AllowedExtensions)">
 			<parentCategory ref="extensionsConfigurationTitle" />
 			<supportedOn ref="Supported_1_96" />
 			<elements>
 		<multiText id="AllowedExtensions" valueName="AllowedExtensions" required="true" />
 			</elements>
 		</policy>
-		<policy name="ExtensionGalleryServiceUrl" class="Both" displayName="$(string.ExtensionGalleryServiceUrl)" explainText="$(string.ExtensionGalleryServiceUrl_extensions_gallery_serviceUrl)" key="Software\Policies\Microsoft\CodeOSS" presentation="$(presentation.ExtensionGalleryServiceUrl)">
+		<policy name="ExtensionGalleryServiceUrl" class="Both" displayName="$(string.ExtensionGalleryServiceUrl)" explainText="$(string.ExtensionGalleryServiceUrl_extensions_gallery_serviceUrl)" key="Software\Policies\OpenIDE\CodeOSS" presentation="$(presentation.ExtensionGalleryServiceUrl)">
 			<parentCategory ref="extensionsConfigurationTitle" />
 			<supportedOn ref="Supported_1_99" />
 			<elements>
 		<text id="ExtensionGalleryServiceUrl" valueName="ExtensionGalleryServiceUrl" required="true" />
 			</elements>
 		</policy>
-		<policy name="ChatToolsTerminalEnableAutoApprove" class="Both" displayName="$(string.ChatToolsTerminalEnableAutoApprove)" explainText="$(string.ChatToolsTerminalEnableAutoApprove_autoApproveMode_description)" key="Software\Policies\Microsoft\CodeOSS" presentation="$(presentation.ChatToolsTerminalEnableAutoApprove)">
+		<policy name="ChatToolsTerminalEnableAutoApprove" class="Both" displayName="$(string.ChatToolsTerminalEnableAutoApprove)" explainText="$(string.ChatToolsTerminalEnableAutoApprove_autoApproveMode_description)" key="Software\Policies\OpenIDE\CodeOSS" presentation="$(presentation.ChatToolsTerminalEnableAutoApprove)">
 			<parentCategory ref="terminalIntegratedConfigurationTitle" />
 			<supportedOn ref="Supported_1_104" />
 			<elements>
@@ -99,7 +99,7 @@
 		</boolean>
 			</elements>
 		</policy>
-		<policy name="EnableFeedback" class="Both" displayName="$(string.EnableFeedback)" explainText="$(string.EnableFeedback_telemetry_feedback_enabled)" key="Software\Policies\Microsoft\CodeOSS" presentation="$(presentation.EnableFeedback)">
+		<policy name="EnableFeedback" class="Both" displayName="$(string.EnableFeedback)" explainText="$(string.EnableFeedback_telemetry_feedback_enabled)" key="Software\Policies\OpenIDE\CodeOSS" presentation="$(presentation.EnableFeedback)">
 			<parentCategory ref="telemetryConfigurationTitle" />
 			<supportedOn ref="Supported_1_99" />
 			<elements>
@@ -108,7 +108,7 @@
 		</boolean>
 			</elements>
 		</policy>
-		<policy name="TelemetryLevel" class="Both" displayName="$(string.TelemetryLevel)" explainText="$(string.TelemetryLevel_telemetry_telemetryLevel_policyDescription)" key="Software\Policies\Microsoft\CodeOSS" presentation="$(presentation.TelemetryLevel)">
+		<policy name="TelemetryLevel" class="Both" displayName="$(string.TelemetryLevel)" explainText="$(string.TelemetryLevel_telemetry_telemetryLevel_policyDescription)" key="Software\Policies\OpenIDE\CodeOSS" presentation="$(presentation.TelemetryLevel)">
 			<parentCategory ref="telemetryConfigurationTitle" />
 			<supportedOn ref="Supported_1_99" />
 			<elements>
@@ -120,7 +120,7 @@
 		</enum>
 			</elements>
 		</policy>
-		<policy name="UpdateMode" class="Both" displayName="$(string.UpdateMode)" explainText="$(string.UpdateMode_updateMode)" key="Software\Policies\Microsoft\CodeOSS" presentation="$(presentation.UpdateMode)">
+		<policy name="UpdateMode" class="Both" displayName="$(string.UpdateMode)" explainText="$(string.UpdateMode_updateMode)" key="Software\Policies\OpenIDE\CodeOSS" presentation="$(presentation.UpdateMode)">
 			<parentCategory ref="updateConfigurationTitle" />
 			<supportedOn ref="Supported_1_67" />
 			<elements>

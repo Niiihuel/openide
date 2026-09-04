@@ -42,13 +42,13 @@
 			</dict>
 		</array>
 		<key>PayloadDescription</key>
-		<string>This profile manages Code - OSS. For more information see https://code.visualstudio.com/docs/setup/enterprise</string>
+		<string>This profile manages Code - OSS. For more information see https://github.com/Niiihuel/openide</string>
 		<key>PayloadDisplayName</key>
 		<string>Code - OSS</string>
 		<key>PayloadIdentifier</key>
 		<string>com.visualstudio.code.oss</string>
 		<key>PayloadOrganization</key>
-		<string>Microsoft</string>
+		<string>OpenIDE</string>
 		<key>PayloadType</key>
 		<string>Configuration</string>
 		<key>PayloadUUID</key>

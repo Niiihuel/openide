@@ -47,7 +47,7 @@ export function renderADMX(regKey: string, versions: string[], categories: Categ
 	return `<?xml version="1.0" encoding="utf-8"?>
 <policyDefinitions revision="1.1" schemaVersion="1.0">
 	<policyNamespaces>
-		<target prefix="${regKey}" namespace="Nihuel Prieto Rellan.Policies.${regKey}" />
+		<target prefix="${regKey}" namespace="OpenIDE.Policies.${regKey}" />
 	</policyNamespaces>
 	<resources minRequiredRevision="1.0" />
 	<supportedOn>
@@ -165,7 +165,7 @@ export function renderProfileManifest(appName: string, bundleIdentifier: string,
 		</dict>
 		<dict>
 			<key>pfm_default</key>
-			<string>Nihuel Prieto Rellan</string>
+			<string>OpenIDE</string>
 			<key>pfm_name</key>
 			<string>PayloadOrganization</string>
 			<key>pfm_title</key>
@@ -183,11 +183,11 @@ export function renderProfileManifest(appName: string, bundleIdentifier: string,
 <plist version="1.0">
 <dict>
     <key>pfm_app_url</key>
-    <string>https://github.com/VSCodium/vscodium</string>
+    <string>https://github.com/Niiihuel/openide</string>
     <key>pfm_description</key>
     <string>${appName} Managed Settings</string>
     <key>pfm_documentation_url</key>
-    <string>https://github.com/VSCodium/vscodium</string>
+    <string>https://github.com/Niiihuel/openide</string>
     <key>pfm_domain</key>
     <string>${bundleIdentifier}</string>
     <key>pfm_format_version</key>
@@ -253,13 +253,13 @@ ${policyEntries}
 			</dict>
 		</array>
 		<key>PayloadDescription</key>
-		<string>This profile manages ${appName}. For more information see https://github.com/VSCodium/vscodium</string>
+		<string>This profile manages ${appName}. For more information see https://github.com/Niiihuel/openide</string>
 		<key>PayloadDisplayName</key>
 		<string>${appName}</string>
 		<key>PayloadIdentifier</key>
 		<string>${bundleIdentifier}</string>
 		<key>PayloadOrganization</key>
-		<string>Nihuel Prieto Rellan</string>
+		<string>OpenIDE</string>
 		<key>PayloadType</key>
 		<string>Configuration</string>
 		<key>PayloadUUID</key>
