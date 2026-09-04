@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 2,
+  "product": "openide",
+  "channel": "stable",
+  "platform": "win32",
+  "architecture": "x64",
+  "target": "user",
+  "productVersion": "1.1.0",
+  "buildVersion": "224b088cbe81f4a2521fdd8b6be6509ded79605d",
+  "codeOssVersion": "1.121.0",
+  "publishedAt": "2026-09-04T15:54:03.000Z",
+  "minimumUpdaterVersion": 1,
+  "artifact": {
+    "url": "https://github.com/Niiihuel/openide/releases/download/v1.1.0/OpenIDEUserSetup-x64-1.1.0.exe",
+    "size": 145629923,
+    "sha256": "5e4285ead44b761b525b79145cc4d0e53fcac8f09dfc946014f89e565198d00d"
+  },
+  "releaseNotesUrl": "https://github.com/Niiihuel/openide/releases/tag/v1.1.0",
+  "rollout": {
+    "percentage": 100,
+    "seed": "1.1.0-stable"
+  }
+}
