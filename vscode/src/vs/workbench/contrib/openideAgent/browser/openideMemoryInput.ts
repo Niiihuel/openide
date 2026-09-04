@@ -8,9 +8,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { URI } from '../../../../base/common/uri.js';
-import { localize } from '../../../../nls.js';
 import { EditorInputCapabilities, IEditorSerializer, IUntypedEditorInput } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
+import { t } from '../common/openideStrings.js';
 
 export class OpenideMemoryInput extends EditorInput {
 
@@ -25,7 +25,7 @@ export class OpenideMemoryInput extends EditorInput {
 	}
 
 	override getName(): string {
-		return localize('openide.memory.title', "Project Map");
+		return t('chatSurface.editor.projectMap');
 	}
 
 	override matches(other: EditorInput | IUntypedEditorInput): boolean {

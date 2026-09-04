@@ -12,7 +12,6 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { FuzzyScore } from '../../../../../base/common/filters.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { ScrollEvent } from '../../../../../base/common/scrollable.js';
-import { localize } from '../../../../../nls.js';
 import { t } from '../../common/openideStrings.js';
 import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
@@ -43,20 +42,20 @@ const AT_BOTTOM_TOLERANCE = 2;
 class OpenideChatListAccessibilityProvider implements IListAccessibilityProvider<IOpenideChatItem> {
 
 	getWidgetAriaLabel(): string {
-		return localize('openide.chat.list.widget', "OpenIDE chat transcript");
+		return t('chatSurface.list.widget');
 	}
 
 	/** Only the two kinds Stage 1 renders speak; the rest degrade to the turn's prose. */
 	getAriaLabel(element: IOpenideChatItem): string {
 		if (isOpenideChatRequestItem(element)) {
-			return localize('openide.chat.list.request', "You: {0}", element.displayText ?? element.text);
+			return t('chatSurface.list.request', element.displayText ?? element.text);
 		}
 		const spoken = element.content
 			.map(content => isOpenideChatMarkdownContent(content) ? content.value.value
 				: isOpenideChatProgressContent(content) ? content.text : '')
 			.filter(text => text.length > 0)
 			.join('\n');
-		return localize('openide.chat.list.response', "Assistant: {0}", spoken);
+		return t('chatSurface.list.response', spoken);
 	}
 }
 

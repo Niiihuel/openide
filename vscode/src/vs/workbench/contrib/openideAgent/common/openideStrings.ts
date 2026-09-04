@@ -11,6 +11,7 @@ import { OPENIDE_WELCOME_STRINGS } from './openideWelcomeStrings.js';
 import { OPENIDE_SURFACE_STRINGS } from './openideSurfaceStrings.js';
 import { OPENIDE_SERVICE_STRINGS } from './openideServiceStrings.js';
 import { OPENIDE_AGENT_SURFACE_STRINGS } from './openideAgentSurfaceStrings.js';
+import { OPENIDE_CHAT_SURFACE_STRINGS } from './openideChatSurfaceStrings.js';
 
 /**
  * The fork's own UI strings (chat dock, settings, project map, plan, providers), in the two
@@ -47,6 +48,10 @@ const STRINGS = {
 	...OPENIDE_SURFACE_STRINGS,
 	...OPENIDE_SERVICE_STRINGS,
 	...OPENIDE_AGENT_SURFACE_STRINGS,
+	// The chat dock, the inline edit review, the plan's Build split, the usage popover and the
+	// contribution's commands: the surfaces that were still on `localize()`, where the default text
+	// was the only text any locale ever got.
+	...OPENIDE_CHAT_SURFACE_STRINGS,
 	// ---- chat composer footer / session info (upstream chat-secondary-toolbar + ChatContextUsageDetails)
 	'chat.slash.agent': { es: 'Ejecuta la tarea en modo Agent', en: 'Runs the task in Agent mode' },
 	'chat.slash.plan': { es: 'Crea un plan de implementación revisable', en: 'Drafts an implementation plan you can review' },

@@ -5,7 +5,6 @@
 
 import { $, append } from '../../../../../../base/browser/dom.js';
 import { DisposableStore } from '../../../../../../base/common/lifecycle.js';
-import { localize } from '../../../../../../nls.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IOpenideChatContent, IOpenideChatExploreContent, IOpenideChatExploreEntry, isOpenideChatContentOfKind } from '../../../common/chat/openideChatContent.js';
 import { isOpenideChatExploreActive, openideChatExploreLabel } from '../../../common/chat/openideChatExploreGroup.js';
@@ -24,6 +23,7 @@ import {
 	renderOpenideChatActivityLine,
 } from './openideChatActivityRow.js';
 import '../media/openideChatActivity.css';
+import { t } from '../../../common/openideStrings.js';
 
 export const OPENIDE_CHAT_ACTIVITY_GROUP_CLASS = 'openide-chat-activity-group';
 
@@ -49,7 +49,7 @@ interface IRenderedEntry {
 function entryLine(entry: IOpenideChatExploreEntry): string {
 	const meta = getOpenideToolMeta(entry.tool);
 	if (entry.state === 'error') {
-		return localize('openide.chat.explore.error', "{0} — error", meta.done || entry.tool);
+		return t('chatSurface.explore.error', meta.done || entry.tool);
 	}
 	const verb = entry.state === 'running' ? meta.verb : (meta.done || meta.verb);
 	return activityLine(meta, verb, entry.target);

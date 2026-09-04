@@ -7,19 +7,26 @@
  *  OpenIDE — effort normalization for OpenAI-compatible endpoints.
  *--------------------------------------------------------------------------------------------*/
 
+import type { OpenideStringKey } from './openideStrings.js';
+
 export type OpenideReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 /** Levels offered in the UI, in order. `''` = whatever the model decides. It lives here so the
- *  chat menu and the plan menu cannot offer different lists for the same setting. */
-export const OPENIDE_REASONING_EFFORTS: readonly (readonly [string, string])[] = [
-	['', 'Default del modelo'],
-	['none', 'Sin razonamiento'],
-	['minimal', 'Minimal'],
-	['low', 'Low'],
-	['medium', 'Medium'],
-	['high', 'High'],
-	['xhigh', 'Extra High'],
-	['max', 'Max'],
+ *  chat menu and the plan menu cannot offer different lists for the same setting.
+ *
+ *  The second slot is a DICTIONARY KEY, not a label: the two levels that are prose ("Model
+ *  default", "No reasoning") were written here as Spanish literals and reached an English IDE
+ *  untranslated, next to the five that are the API's own values and read the same in both
+ *  languages. Keys keep the resolution at render time, where the locale is known. */
+export const OPENIDE_REASONING_EFFORTS: readonly (readonly [string, OpenideStringKey])[] = [
+	['', 'chatSurface.effort.default'],
+	['none', 'chatSurface.effort.none'],
+	['minimal', 'chatSurface.effort.minimal'],
+	['low', 'chatSurface.effort.low'],
+	['medium', 'chatSurface.effort.medium'],
+	['high', 'chatSurface.effort.high'],
+	['xhigh', 'chatSurface.effort.xhigh'],
+	['max', 'chatSurface.effort.max'],
 ];
 
 export function normalizeReasoningEffort(value: string | undefined): OpenideReasoningEffort | undefined {

@@ -5,7 +5,6 @@
 
 import { addDisposableListener, clearNode } from '../../../../../base/browser/dom.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
-import { localize } from '../../../../../nls.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { AgentMode } from '../../common/openideAgentTypes.js';
 import { IOpenideAgentService } from '../openideAgentService.js';
@@ -22,10 +21,10 @@ export interface IAgentModeEntry {
 
 /** The four modes of the webview, in its order. `debug` borrows the workbench's own debug glyph. */
 export const OPENIDE_AGENT_MODES: readonly IAgentModeEntry[] = [
-	{ id: 'agent', icon: 'openide-mode-agent', label: 'Agent', description: localize('openide.chat.mode.agent', "Edit and run") },
-	{ id: 'plan', icon: 'openide-mode-plan', label: 'Plan', description: localize('openide.chat.mode.plan', "Read-only planning") },
-	{ id: 'ask', icon: 'openide-mode-ask', label: 'Ask', description: localize('openide.chat.mode.ask', "Read-only Q&A") },
-	{ id: 'debug', icon: 'debug', label: 'Debug', description: localize('openide.chat.mode.debug', "Reproduce and fix") },
+	{ id: 'agent', icon: 'openide-mode-agent', label: 'Agent', description: t('chatSurface.mode.agent') },
+	{ id: 'plan', icon: 'openide-mode-plan', label: 'Plan', description: t('chatSurface.mode.plan') },
+	{ id: 'ask', icon: 'openide-mode-ask', label: 'Ask', description: t('chatSurface.mode.ask') },
+	{ id: 'debug', icon: 'debug', label: 'Debug', description: t('chatSurface.mode.debug') },
 ];
 
 export interface IPermissionEntry {
@@ -38,9 +37,9 @@ export interface IPermissionEntry {
 /** Approval policy. It is a SEPARATE axis from the mode, which is why it hangs off a submenu
  *  instead of sitting among the four modes as a fifth choice. */
 export const PERMISSIONS: readonly IPermissionEntry[] = [
-	{ id: 'ask', icon: 'shield', label: localize('openide.chat.permission.ask', "Preguntar siempre"), description: t('chat.permission.ask.desc') },
-	{ id: 'auto-edit', icon: 'edit', label: localize('openide.chat.permission.autoEdit', "Auto-aprobar ediciones"), description: localize('openide.chat.permission.autoEdit.desc', "Las ediciones de archivo se aplican solas; la terminal sigue preguntando.") },
-	{ id: 'auto-all', icon: 'zap', label: localize('openide.chat.permission.autoAll', "Auto-aprobar todo"), description: localize('openide.chat.permission.autoAll.desc', "Todo se ejecuta sin preguntar, salvo lo peligroso y los archivos sensibles.") },
+	{ id: 'ask', icon: 'shield', label: t('chatSurface.permission.ask'), description: t('chat.permission.ask.desc') },
+	{ id: 'auto-edit', icon: 'edit', label: t('chatSurface.permission.autoEdit'), description: t('chatSurface.permission.autoEditDesc') },
+	{ id: 'auto-all', icon: 'zap', label: t('chatSurface.permission.autoAll'), description: t('chatSurface.permission.autoAllDesc') },
 ];
 
 export function agentModeEntry(id: string): IAgentModeEntry {
@@ -100,7 +99,7 @@ export class OpenideChatModePicker extends Disposable {
 	private _renderModes(content: HTMLElement, store: DisposableStore): void {
 		const document = content.ownerDocument;
 		clearNode(content);
-		content.appendChild(createMenuSection(document, localize('openide.chat.mode.section', "Modo")));
+		content.appendChild(createMenuSection(document, t('chatSurface.mode.section')));
 		for (const entry of OPENIDE_AGENT_MODES) {
 			// The active row keeps its own glyph and is marked by the persistent tint instead;
 			// the description travels as the tooltip because narrow docks clipped it.
@@ -119,7 +118,7 @@ export class OpenideChatModePicker extends Disposable {
 		content.appendChild(createMenuSeparator(document));
 		const permission = createMenuRow(document, {
 			icon: 'shield',
-			label: localize('openide.chat.permission.section', "Permisos"),
+			label: t('chatSurface.permission.section'),
 			detail: permissionLabel(this.agentService.getPermissionMode()),
 			tooltip: t('chat.permission.tip'),
 			submenu: true,
@@ -135,13 +134,13 @@ export class OpenideChatModePicker extends Disposable {
 	private _renderPermissions(content: HTMLElement, store: DisposableStore): void {
 		const document = content.ownerDocument;
 		clearNode(content);
-		const back = createMenuRow(document, { icon: 'arrow-left', label: localize('openide.chat.mode.section', "Modo"), muted: true });
+		const back = createMenuRow(document, { icon: 'arrow-left', label: t('chatSurface.mode.section'), muted: true });
 		store.add(addDisposableListener(back, 'click', event => {
 			event.stopPropagation();
 			this._renderModes(content, store);
 		}));
 		content.appendChild(back);
-		content.appendChild(createMenuSection(document, localize('openide.chat.permission.section', "Permisos")));
+		content.appendChild(createMenuSection(document, t('chatSurface.permission.section')));
 		const current = this.agentService.getPermissionMode() || 'ask';
 		for (const entry of PERMISSIONS) {
 			const row = createMenuRow(document, {

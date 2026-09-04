@@ -75,20 +75,20 @@ suite('OpenIDE ChatConfirmationPart', () => {
 
 	test('offers the four decisions the service understands', () => {
 		const { part } = create();
-		assert.deepStrictEqual(labels(part), ['Permitir', t('chat.approval.session'), 'Permitir siempre', 'Rechazar']);
+		assert.deepStrictEqual(labels(part), [t('chatSurface.approval.allow'), t('chat.approval.session'), t('chatSurface.approval.always'), t('chatSurface.approval.deny')]);
 	});
 
 	test('a sensitive path never offers "always"', () => {
 		// The whole point of marking a path sensitive is that the answer is given again next time.
 		const { part } = create({ sensitive: true });
-		assert.deepStrictEqual(labels(part), ['Permitir', t('chat.approval.session'), 'Rechazar']);
+		assert.deepStrictEqual(labels(part), [t('chatSurface.approval.allow'), t('chat.approval.session'), t('chatSurface.approval.deny')]);
 	});
 
 	/**
 	 * The decision strings are the service's vocabulary, and a wrong one fails SILENTLY.
 	 *
 	 * `resolveApproval` accepts `once` | `session` | `always` and maps anything else to `deny`. The
-	 * primary button used to send `allow`, so "Permitir" told the agent the user had refused — no
+	 * primary button used to send `allow`, so "Allow" told the agent the user had refused — no
 	 * error, no log, the tool just never ran. This is the assert that caught it.
 	 */
 	test('each button resolves the run with a decision the service accepts', () => {
@@ -117,11 +117,11 @@ suite('OpenIDE ChatConfirmationPart', () => {
 		buttons(part)[2].click();
 		assert.strictEqual(part.domNode.classList.contains('decided'), true);
 		assert.strictEqual(offerHidden(part), true);
-		assert.strictEqual(status(part), 'Permitido siempre');
+		assert.strictEqual(status(part), t('chatSurface.approval.allowedAlways'));
 	});
 
 	test('each decision reads back differently, including "this session"', () => {
-		for (const [index, label] of [[0, 'Permitido'], [1, t('chat.approval.allowedSession')], [2, 'Permitido siempre'], [3, 'Rechazado']] as const) {
+		for (const [index, label] of [[0, t('chatSurface.approval.allowed')], [1, t('chat.approval.allowedSession')], [2, t('chatSurface.approval.allowedAlways')], [3, t('chatSurface.approval.denied')]] as const) {
 			const { part } = create();
 			buttons(part)[index].click();
 			assert.strictEqual(status(part), label);
@@ -132,7 +132,7 @@ suite('OpenIDE ChatConfirmationPart', () => {
 		// The card must not blink out and back while the run continues, so the same part absorbs it.
 		const { part } = create();
 		assert.strictEqual(part.hasSameContent(content({ decision: 'once' })), true);
-		assert.strictEqual(status(part), 'Permitido');
+		assert.strictEqual(status(part), t('chatSurface.approval.allowed'));
 		assert.strictEqual(offerHidden(part), true);
 	});
 
@@ -145,6 +145,6 @@ suite('OpenIDE ChatConfirmationPart', () => {
 		const { part } = create({ command: undefined, detail: undefined });
 		assert.strictEqual(part.domNode.querySelector('.openide-chat-approval-cmd'), null);
 		assert.strictEqual(part.domNode.querySelector('.openide-chat-approval-title')?.textContent, 'Ejecutar comando');
-		assert.deepStrictEqual(labels(part), ['Permitir', t('chat.approval.session'), 'Permitir siempre', 'Rechazar']);
+		assert.deepStrictEqual(labels(part), [t('chatSurface.approval.allow'), t('chat.approval.session'), t('chatSurface.approval.always'), t('chatSurface.approval.deny')]);
 	});
 });

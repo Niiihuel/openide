@@ -27,13 +27,13 @@ import { DetailedLineRangeMapping } from '../../../../editor/common/diff/rangeMa
 import { LineRange } from '../../../../editor/common/core/ranges/lineRange.js';
 import { EditorOption } from '../../../../editor/common/config/editorOptions.js';
 import { IModelDeltaDecoration, ITextModel, OverviewRulerLane } from '../../../../editor/common/model.js';
-import { localize } from '../../../../nls.js';
 import { IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { DEFAULT_EDITOR_ASSOCIATION } from '../../../common/editor.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ITextFileService, TextFileResolveReason } from '../../../services/textfile/common/textfiles.js';
 import { OpenideDiffSnapshotProvider } from './openideDiffSnapshot.js';
 import { applyOpenideSurfaceCss } from './openideSurfaceStyle.js';
+import { t } from '../common/openideStrings.js';
 
 const DIFF_OPTIONS = { ignoreTrimWhitespace: false, maxComputationTimeMs: 5000, computeMoves: false };
 
@@ -800,14 +800,14 @@ class ReviewBlockWidget extends Disposable implements IContentWidget {
 		stepper.className = 'oreview-block-stepper';
 		this.label.className = 'oreview-block-count';
 		stepper.append(
-			icon('chevron-up', localize('openide.review.prevBlock', "Previous block"), actions.prevBlock),
+			icon('chevron-up', t('chatSurface.review.prevBlock'), actions.prevBlock),
 			this.label,
-			icon('chevron-down', localize('openide.review.nextBlock', "Next block"), actions.nextBlock),
+			icon('chevron-down', t('chatSurface.review.nextBlock'), actions.nextBlock),
 		);
 		this.dom.append(
 			stepper,
-			action(localize('openide.review.undoBlock', "Undo"), 'Ctrl+N', false, actions.undoBlock),
-			action(localize('openide.review.keepBlock', "Keep"), 'Ctrl+Y', true, actions.keepBlock),
+			action(t('chatSurface.review.undoBlock'), 'Ctrl+N', false, actions.undoBlock),
+			action(t('chatSurface.review.keepBlock'), 'Ctrl+Y', true, actions.keepBlock),
 		);
 		this.editor.addContentWidget(this);
 		this._register({ dispose: () => this.editor.removeContentWidget(this) });
@@ -927,18 +927,18 @@ class ReviewHeaderWidget extends Disposable implements IOverlayWidget {
 
 		const blockNav = document.createElement('div');
 		blockNav.className = 'oreview-stepper';
-		blockNav.appendChild(mkIcon('oreview-chev', 'chevron-up', localize('openide.review.prevBlock', "Previous block"), actions.prevBlock));
+		blockNav.appendChild(mkIcon('oreview-chev', 'chevron-up', t('chatSurface.review.prevBlock'), actions.prevBlock));
 		this.blockLabel = document.createElement('span');
 		this.blockLabel.className = 'oreview-count';
 		blockNav.appendChild(this.blockLabel);
-		blockNav.appendChild(mkIcon('oreview-chev', 'chevron-down', localize('openide.review.nextBlock', "Next block"), actions.nextBlock));
+		blockNav.appendChild(mkIcon('oreview-chev', 'chevron-down', t('chatSurface.review.nextBlock'), actions.nextBlock));
 
 		const fileNav = document.createElement('div');
 		fileNav.className = 'oreview-file-nav';
-		const prevF = mkIcon('openide-review-nav', 'chevron-left', localize('openide.review.prevFile', "Previous file"), actions.prevFile);
+		const prevF = mkIcon('openide-review-nav', 'chevron-left', t('chatSurface.review.prevFile'), actions.prevFile);
 		this.fileLabel = document.createElement('span');
 		this.fileLabel.className = 'oreview-file-label';
-		const nextF = mkIcon('openide-review-nav', 'chevron-right', localize('openide.review.nextFile', "Next file"), actions.nextFile);
+		const nextF = mkIcon('openide-review-nav', 'chevron-right', t('chatSurface.review.nextFile'), actions.nextFile);
 		fileNav.appendChild(prevF);
 		fileNav.appendChild(this.fileLabel);
 		fileNav.appendChild(nextF);
@@ -947,8 +947,8 @@ class ReviewHeaderWidget extends Disposable implements IOverlayWidget {
 		sep.className = 'openide-review-sep';
 		const sep2 = document.createElement('span');
 		sep2.className = 'openide-review-sep';
-		const undo = mkAction('openide-review-btn', localize('openide.review.undoFile', "Undo File"), localize('openide.review.undoFileTip', "Undo all agent changes in this file"), actions.undoFile);
-		const keep = mkAction('openide-review-btn primary', localize('openide.review.keepFile', "Keep File"), localize('openide.review.keepFileTip', "Keep all agent changes in this file"), actions.keepFile, 'Ctrl+Enter');
+		const undo = mkAction('openide-review-btn', t('chatSurface.review.undoFile'), t('chatSurface.review.undoFileTip'), actions.undoFile);
+		const keep = mkAction('openide-review-btn primary', t('chatSurface.review.keepFile'), t('chatSurface.review.keepFileTip'), actions.keepFile, 'Ctrl+Enter');
 		for (const n of [blockNav, sep, fileNav, sep2, undo, keep]) {
 			this.dom.appendChild(n);
 		}
@@ -1054,14 +1054,14 @@ class ReviewHeaderWidget extends Disposable implements IOverlayWidget {
 		const idx = pendingPaths.indexOf(path);
 		const totalFiles = Math.max(1, pendingPaths.length);
 		this.fileLabel.textContent = totalFiles > 1
-			? localize('openide.review.fileOf', "{0} of {1} Files", (idx >= 0 ? idx + 1 : 1), totalFiles)
-			: localize('openide.review.oneFile', "1 of 1 File");
+			? t('chatSurface.review.fileOf', (idx >= 0 ? idx + 1 : 1), totalFiles)
+			: t('chatSurface.review.oneFile');
 		for (const button of this.fileNavButtons) {
 			button.disabled = totalFiles < 2;
 		}
 		this.blockLabel.textContent = blocks > 0
-			? localize('openide.review.blockOf', "{0} of {1}", Math.max(0, currentBlock) + 1, blocks)
-			: localize('openide.review.noBlocks', "0 of 0");
+			? t('chatSurface.review.blockOf', Math.max(0, currentBlock) + 1, blocks)
+			: t('chatSurface.review.noBlocks');
 		this.remount();
 	}
 }

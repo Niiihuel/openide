@@ -9,7 +9,6 @@ import { IListVirtualDelegate } from '../../../../../base/browser/ui/list/list.j
 import { IListStyles, List } from '../../../../../base/browser/ui/list/listWidget.js';
 import { KeyCode } from '../../../../../base/common/keyCodes.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
-import { localize } from '../../../../../nls.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { AnchorAlignment, AnchorPosition } from '../../../../../base/browser/ui/contextview/contextview.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
@@ -184,7 +183,7 @@ export class OpenideChatModelPicker extends Disposable {
 		const input = document.createElement('input');
 		input.type = 'text';
 		input.className = 'openide-menu-search';
-		input.placeholder = localize('openide.chat.model.search', "Buscar modelos…");
+		input.placeholder = t('chatSurface.model.search');
 		input.value = this._search;
 		searchRow.appendChild(input);
 		content.appendChild(searchRow);
@@ -278,8 +277,8 @@ export class OpenideChatModelPicker extends Disposable {
 			if (collapsed.includes(key)) { return; }
 			for (const hit of hits) { rows.push(entry(hit.group, hit.model)); }
 		};
-		pinned('favorites', localize('openide.chat.model.favorites', "Favoritos"), 'star-full', favorites);
-		pinned('recent', localize('openide.chat.model.recents', "Recientes"), 'history', this.agentService.getPickerRecents());
+		pinned('favorites', t('chatSurface.model.favorites'), 'star-full', favorites);
+		pinned('recent', t('chatSurface.model.recents'), 'history', this.agentService.getPickerRecents());
 		for (const group of this._groups) {
 			const models = group.models.filter(model => matches(model, group, query));
 			if (!models.length) { continue; }
@@ -321,8 +320,8 @@ export class OpenideChatModelPicker extends Disposable {
 		}
 		if (!rows.length && this._loaded) {
 			empty.appendChild(createMenuEmpty(host.ownerDocument, this._groups.length
-				? localize('openide.chat.model.noResults', "Sin resultados")
-				: localize('openide.chat.model.noProviders', "Sin proveedores conectados")));
+				? t('chatSurface.model.noResults')
+				: t('chatSurface.model.noProviders')));
 		}
 		const contentHeight = rows.reduce((total, row) => total + (row.kind === 'section' ? MODEL_SECTION_HEIGHT : PICKER_ROW_HEIGHT), 0);
 		const height = Math.min(contentHeight, this._listBudget(host));

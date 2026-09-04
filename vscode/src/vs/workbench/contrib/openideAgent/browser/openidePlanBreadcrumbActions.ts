@@ -7,7 +7,6 @@ import { $, addDisposableListener, append, clearNode } from '../../../../base/br
 import { AnchorAlignment, AnchorPosition } from '../../../../base/browser/ui/contextview/contextview.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
-import { localize } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
@@ -119,7 +118,7 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 
 		// ---- model chip: the composer's trigger, verbatim
 		const button = append(this.domNode, $('button.openide-composer-trigger.openide-composer-model.openide-plan-model-chip', { type: 'button' })) as HTMLButtonElement;
-		button.title = localize('openide.plan.modelPicker', "Modelo con el que se ejecuta el plan");
+		button.title = t('chatSurface.plan.modelPicker');
 		const icon = append(button, document.createElement('span'));
 		icon.className = 'openide-composer-provider-icon';
 		const label = append(button, $('span.openide-composer-trigger-label'));
@@ -138,7 +137,7 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 				try {
 					await this._agentService.setPlanExecutionModel(resource, model.id, group.id);
 				} catch (error) {
-					this._notificationService.error(localize('openide.plan.modelSaveError', "No se pudo guardar el modelo del plan: {0}", error instanceof Error ? error.message : String(error)));
+					this._notificationService.error(t('chatSurface.plan.modelSaveError', error instanceof Error ? error.message : String(error)));
 				}
 			},
 		});
@@ -162,7 +161,7 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 			const providerId = target.providerId || this._agentService.getActiveProviderId();
 			const entry = this._agentService.findProvider(providerId);
 			const described = target.model ? this._agentService.describeModel(providerId, target.model) : undefined;
-			label.textContent = described?.name || target.model || localize('openide.plan.model.unset', "Elegir modelo");
+			label.textContent = described?.name || target.model || t('chatSurface.plan.modelUnset');
 			button.classList.toggle('unset', !target.model);
 			applyProviderIcon(icon, providerId, entry?.label ?? '');
 			icon.classList.add('openide-composer-provider-icon');
@@ -209,7 +208,7 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 			split.classList.add('running');
 			button.disabled = true;
 			icon.className = 'openide-chat-plan-spinner';
-			text.textContent = localize('openide.plan.running', "Ejecutando…");
+			text.textContent = t('chatSurface.plan.running');
 			text.classList.add('openide-chat-shimmer');
 			button.title = t('plan.runningTitle');
 			return;
@@ -220,7 +219,7 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 			split.classList.add('completed');
 			button.disabled = true;
 			icon.className = 'codicon codicon-check';
-			text.textContent = localize('openide.plan.completed', "Finalizado");
+			text.textContent = t('chatSurface.plan.completed');
 			button.title = t('plan.completedTitle');
 			this._completedTimer = setTimeout(() => { this._completedTimer = undefined; this._paint(); }, COMPLETED_HOLD_MS - (Date.now() - this._completedShownAt));
 			return;
@@ -235,7 +234,7 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 		appendKbd(button, PRIMARY_ENTER_HINT);
 		button.title = completed
 			? t('plan.runAgainTitle')
-			: localize('openide.plan.build', "Ejecutar el plan");
+			: t('chatSurface.plan.build');
 		this._renderStore.add(addDisposableListener(button, 'click', () => this._launch(resource, completed)));
 
 		const more = append(split, $('button.oi-split-more', { type: 'button' })) as HTMLButtonElement;
@@ -248,12 +247,12 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 				const content = createMenuContent(container.ownerDocument);
 				container.appendChild(content);
 				const build = createMenuRow(container.ownerDocument, {
-					icon: 'play', label: completed ? localize('openide.plan.runAgain', "Ejecutar de nuevo") : t('chat.plan.build'),
+					icon: 'play', label: completed ? t('chatSurface.plan.runAgain') : t('chat.plan.build'),
 					keybinding: PRIMARY_ENTER_HINT, active: true,
 				});
 				store.add(addDisposableListener(build, 'click', () => { this._morePopover.close(); this._launch(resource, completed); }));
 				content.appendChild(build);
-				const chat = createMenuRow(container.ownerDocument, { icon: 'comment-discussion', label: localize('openide.plan.openChat', "Abrir el chat") });
+				const chat = createMenuRow(container.ownerDocument, { icon: 'comment-discussion', label: t('chatSurface.plan.openChat') });
 				store.add(addDisposableListener(chat, 'click', () => { this._morePopover.close(); void this._commandService.executeCommand('workbench.view.openideChat.view.focus'); }));
 				content.appendChild(chat);
 			},

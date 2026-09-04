@@ -9,7 +9,6 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { FuzzyScore } from '../../../../../base/common/filters.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { IObservable } from '../../../../../base/common/observable.js';
-import { localize } from '../../../../../nls.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
@@ -44,6 +43,7 @@ import { OpenideChatAccountChoicePart } from './parts/openideChatAccountChoicePa
 import { OpenideChatTodosPart } from './parts/openideChatTodosPart.js';
 import { OpenideChatToolPart } from './parts/openideChatToolPart.js';
 import { OpenideChatUnrenderedContentPart } from './parts/openideChatUnrenderedPart.js';
+import { t } from '../../common/openideStrings.js';
 
 export interface IOpenideChatItemHeightChange {
 	readonly element: IOpenideChatItem;
@@ -196,7 +196,7 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		const message = failed
 			? element.errorMessage!
 			: element.isCanceled
-				? localize('openide.chat.response.canceled', "Turn cancelled.")
+				? t('chatSurface.response.cancelled')
 				: '';
 		reset(template.footer, message);
 		template.footer.classList.toggle('hidden', message.length === 0);

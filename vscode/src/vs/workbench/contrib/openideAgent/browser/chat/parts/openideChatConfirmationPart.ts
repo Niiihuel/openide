@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, append, clearNode } from '../../../../../../base/browser/dom.js';
-import { localize } from '../../../../../../nls.js';
 import { IOpenideChatConfirmationContent, IOpenideChatContent } from '../../../common/chat/openideChatContent.js';
 import { ToolApprovalDecision } from '../../../common/openideAgentTypes.js';
 import { toolVisualKind } from '../../../common/chat/openideChatToolMeta.js';
@@ -85,16 +84,16 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 			this._register(this._onClick(button, decision));
 		};
 
-		choice(localize('openide.chat.approval.allow', "Permitir"), 'check', 'once', '.primary');
+		choice(t('chatSurface.approval.allow'), 'check', 'once', '.primary');
 		// "This session" was missing entirely: without it the only way to stop being asked about a
 		// command you are running in a loop was to allow it FOREVER, in the persisted allowlist.
 		choice(t('chat.approval.session'), 'history', 'session', '');
 		// A sensitive path never offers "always": the whole point of marking it sensitive is that
 		// the answer must be given again next time.
 		if (!content.sensitive) {
-			choice(localize('openide.chat.approval.always', "Permitir siempre"), 'shield', 'always', '');
+			choice(t('chatSurface.approval.always'), 'shield', 'always', '');
 		}
-		choice(localize('openide.chat.approval.deny', "Rechazar"), 'close', 'deny', '.deny');
+		choice(t('chatSurface.approval.deny'), 'close', 'deny', '.deny');
 	}
 
 	private _onClick(button: HTMLButtonElement, decision: ToolApprovalDecision) {
@@ -133,12 +132,12 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 		append(this._status, $(`span.codicon.codicon-${denied ? 'close' : 'check'}`));
 		const text = append(this._status, $('span'));
 		text.textContent = denied
-			? localize('openide.chat.approval.denied', "Rechazado")
+			? t('chatSurface.approval.denied')
 			: decision === 'always'
-				? localize('openide.chat.approval.allowedAlways', "Permitido siempre")
+				? t('chatSurface.approval.allowedAlways')
 				: decision === 'session'
 					? t('chat.approval.allowedSession')
-					: localize('openide.chat.approval.allowed', "Permitido");
+					: t('chatSurface.approval.allowed');
 		this._status.classList.toggle('denied', denied);
 		if (notify) { this._onDidChangeHeight.fire(); }
 	}

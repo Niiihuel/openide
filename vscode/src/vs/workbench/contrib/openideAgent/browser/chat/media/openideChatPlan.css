@@ -223,10 +223,14 @@
    made the button read as a different control depending on the panel width. Under pressure the
    ghost "View plan" beside it ellipsizes first. */
 
-/* Same surface, no longer a button: a build already running must not read as an offer to build. */
-.openide-chat-plan-build-status {
+/* Same surface, no longer a button: a build already running must not read as an offer to build.
+   The gap is not cosmetic: the base recipe sets `gap: 0` because the button it was written for
+   holds a word and a `.oi-kbd`, and the kbd brings its own margin. The running variant holds a
+   word and a RING, which then sat flush against the last letter and read as one smudged glyph. */
+.openide-chat-plan-wrap .openide-chat-plan-card .openide-chat-plan-build-status {
 	cursor: default;
 	pointer-events: none;
+	gap: 6px;
 }
 
 /* `.openide-chat-plan-spinner` and its keyframes live in `browser/media/openideChat.css`: the plan

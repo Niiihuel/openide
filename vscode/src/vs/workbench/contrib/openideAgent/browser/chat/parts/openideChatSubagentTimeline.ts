@@ -6,11 +6,11 @@
 import { $, append } from '../../../../../../base/browser/dom.js';
 import { DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
-import { localize } from '../../../../../../nls.js';
 import { getOpenideToolMeta, parseToolArguments, toolDetailFor } from '../../../common/chat/openideChatToolMeta.js';
 import { ISubagentTimelineEvent } from '../../../common/openideSubagentTypes.js';
 import { setupChatTooltip } from '../openideChatHover.js';
 import { setOpenideChatActivityIcon } from './openideChatActivityRow.js';
+import { t } from '../../../common/openideStrings.js';
 
 /**
  * Body of a specialist card: the `.sub-tool` / `.sub-text` rows of `onSubagentEvent`
@@ -140,7 +140,7 @@ export function appendSubagentTimelineEvent(
 			existing.classList.add('openide-chat-sub-tool-error');
 			return undefined;
 		}
-		return { node: appendText(body, event.message || localize('openide.chat.subagent.toolFailed', "A tool failed")) };
+		return { node: appendText(body, event.message || t('chatSurface.subagent.toolFailed')) };
 	}
 
 	if (event.type === 'permissionDenied' || event.type === 'error') {
@@ -149,8 +149,8 @@ export function appendSubagentTimelineEvent(
 			existing.classList.add('openide-chat-sub-tool-error');
 		}
 		const message = event.message || (event.type === 'permissionDenied'
-			? localize('openide.chat.subagent.denied', "Permission denied")
-			: localize('openide.chat.subagent.failed', "The specialist failed"));
+			? t('chatSurface.subagent.denied')
+			: t('chatSurface.subagent.failed'));
 		return { node: appendText(body, message) };
 	}
 

@@ -7,13 +7,13 @@ import { addDisposableListener, append, clearNode } from '../../../../../base/br
 import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent.js';
 import { KeyCode } from '../../../../../base/common/keyCodes.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
-import { localize } from '../../../../../nls.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IOpenideChatFileSuggestion, IOpenideChatSlashSuggestion, IOpenideChatSuggestSources } from '../../common/chat/openideChatSlashCommands.js';
 import { HoverPosition } from '../../../../../base/browser/ui/hover/hoverWidget.js';
 import { setupChatTooltip } from './openideChatHover.js';
 import { createCodicon, createMenuContent, OpenideComposerPopover } from './openideComposerMenu.js';
+import { t } from '../../common/openideStrings.js';
 
 /** Same debounce as the webview's `updateMentionMenu` / `updateSlashMenu` (the removed chat webview, 5975). */
 const QUERY_DEBOUNCE_MS = 120;
@@ -442,7 +442,7 @@ export class OpenideChatComposerSuggest extends Disposable {
 				const hint = append(row, container.ownerDocument.createElement('span'));
 				hint.className = 'openide-menu-detail';
 				hint.textContent = ghost.hint;
-				row.setAttribute('aria-label', localize('openide.chat.suggest.hint', "/{0} {1}", ghost.slug, ghost.hint));
+				row.setAttribute('aria-label', t('chatSurface.composer.suggestHint', ghost.slug, ghost.hint));
 			},
 		});
 	}

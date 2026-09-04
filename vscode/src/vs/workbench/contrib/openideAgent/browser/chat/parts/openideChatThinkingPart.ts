@@ -5,12 +5,12 @@
 
 import { $, append, getWindow, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
 import { MutableDisposable } from '../../../../../../base/common/lifecycle.js';
-import { localize } from '../../../../../../nls.js';
 import { IOpenideChatContent, IOpenideChatThinkingContent, isOpenideChatThinkingContent } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
 import { OPENIDE_CHAT_SHIMMER_CLASS, setOpenideChatShimmer } from './openideChatActivityRow.js';
 import '../media/openideChatActivity.css';
+import { t } from '../../../common/openideStrings.js';
 
 export const OPENIDE_CHAT_REASONING_CLASS = 'openide-chat-reasoning';
 
@@ -22,12 +22,12 @@ export const OPENIDE_CHAT_REASONING_CLASS = 'openide-chat-reasoning';
  */
 function thinkingLabel(content: IOpenideChatThinkingContent): string {
 	if (!content.isComplete) {
-		return localize('openide.chat.thinking', "Thinking");
+		return t('chatSurface.thinking');
 	}
 	const seconds = Math.max(1, Math.round((content.durationMs ?? 0) / 1000));
 	return seconds < 2
-		? localize('openide.chat.thoughtBriefly', "Thought briefly")
-		: localize('openide.chat.thoughtFor', "Thought for {0}s", seconds);
+		? t('chatSurface.thoughtBriefly')
+		: t('chatSurface.thoughtFor', seconds);
 }
 
 /**

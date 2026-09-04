@@ -48,6 +48,9 @@ jobs:
       - name: Audit prompt language
         run: node dev/audit-prompt-language.mjs
 
+      - name: Audit fork localize()
+        run: node dev/audit-fork-localize.mjs
+
       - name: Audit surface tokens
         run: |
           node dev/audit-surface-tokens.mjs

@@ -23,7 +23,6 @@ import { IContextViewService } from '../../../../platform/contextview/browser/co
 import { defaultButtonStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { openideInputBoxStyles } from '../../openideAgent/browser/openideControlStyles.js';
 import { DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
-import { localize } from '../../../../nls.js';
 import { plainSettingsQuery } from './openideSettingsSearch.js';
 
 /** Text a block can be found by. The renderer emits it and `pruneSections` consumes it: that way
@@ -43,6 +42,7 @@ function searchText(parts: readonly (string | undefined)[]): string {
  *  search retire the heading together with its last item. */
 import { OpenideSettingsDropdown } from './openideSettingsDropdown.js';
 import { OpenideSettingsToggle } from './openideSettingsToggle.js';
+import { t } from '../../openideAgent/common/openideStrings.js';
 export function markSectionGroup(element: HTMLElement): HTMLElement {
 	element.setAttribute(GROUP_ATTR, '');
 	return element;
@@ -377,7 +377,7 @@ export class OpenideSectionRenderer {
 		append(wrap, $('span.codicon.codicon-search.openide-settings-search-icon'));
 		const clear = append(wrap, $('button.openide-settings-search-clear.hidden', {
 			type: 'button',
-			title: spec.clearLabel ?? localize('openide.settings.filter.clear', "Clear the search"),
+			title: spec.clearLabel ?? t('settings.filter.clear'),
 		})) as HTMLButtonElement;
 		append(clear, $('span.codicon.codicon-close'));
 		const count = append(wrap, $('span.openide-settings-filter-count.hidden'));
@@ -604,8 +604,8 @@ export class OpenideSectionRenderer {
 			const keyHost = append(line, $('.openide-settings-fieldhost'));
 			const key = this.store.add(new InputBox(keyHost, undefined, {
 				inputBoxStyles: openideInputBoxStyles,
-				placeholder: localize('openide.section.kvName', "NAME"),
-				ariaLabel: localize('openide.section.kvName', "NAME"),
+				placeholder: t('settings.kv.name'),
+				ariaLabel: t('settings.kv.name'),
 			}));
 			key.element.classList.add('openide-settings-mono');
 			key.value = entry.k;
@@ -615,12 +615,12 @@ export class OpenideSectionRenderer {
 			const value = this.store.add(new InputBox(valueHost, undefined, {
 				inputBoxStyles: openideInputBoxStyles,
 				type: spec.secret ? 'password' : 'text',
-				placeholder: masked ? localize('openide.section.kvMasked', "(saved — type to replace)") : localize('openide.section.kvValue', "value"),
-				ariaLabel: localize('openide.section.kvValue', "value"),
+				placeholder: masked ? t('settings.kv.masked') : t('settings.kv.value'),
+				ariaLabel: t('settings.kv.value'),
 			}));
 			value.value = masked ? '' : entry.v;
-			this.store.add(value.onDidChange(next => { entry.v = next; value.setPlaceHolder(localize('openide.section.kvValue', "value")); }));
-			this.iconButton(line, { label: localize('openide.section.kvRemove', "Quitar"), icon: 'close', run: () => { spec.rows.splice(index, 1); spec.changed(); } });
+			this.store.add(value.onDidChange(next => { entry.v = next; value.setPlaceHolder(t('settings.kv.value')); }));
+			this.iconButton(line, { label: t('settings.kv.remove'), icon: 'close', run: () => { spec.rows.splice(index, 1); spec.changed(); } });
 		});
 		this.button(box, { label: spec.addLabel, icon: 'add', run: () => { spec.rows.push({ k: '', v: '' }); spec.changed(); } });
 		return box;

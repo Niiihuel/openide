@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../../../base/common/lifecycle.js';
-import { localize } from '../../../../../nls.js';
 import { IOpenideAgentService, IVoiceCapability } from '../openideAgentService.js';
 import { t } from '../../common/openideStrings.js';
 
@@ -111,7 +110,7 @@ export class OpenideChatComposerVoice extends Disposable {
 			const capability = await this.agentService.getVoiceCapability();
 			this._capability = capability;
 			if (!capability.available || !capability.providerId || !capability.model) {
-				throw new Error(capability.reason ?? localize('openide.chat.voice.unsupported', "El proveedor activo no permite dictado por voz."));
+				throw new Error(capability.reason ?? t('chatSurface.voice.unsupported'));
 			}
 			if (!navigator.mediaDevices?.getUserMedia) {
 				throw new Error(t('chat.voice.noCapture'));
@@ -141,7 +140,7 @@ export class OpenideChatComposerVoice extends Disposable {
 		} catch (error) {
 			pending?.getTracks().forEach(track => track.stop());
 			this._setState('idle');
-			this.onDidFail(`${localize('openide.chat.voice.startFailed', "No se pudo iniciar el dictado")}: ${error instanceof Error ? error.message : String(error)}`);
+			this.onDidFail(`${t('chatSurface.voice.startFailed')}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 
@@ -176,7 +175,7 @@ export class OpenideChatComposerVoice extends Disposable {
 		} catch (error) {
 			recording.stream.getTracks().forEach(track => track.stop());
 			if (generation === this._generation) {
-				this.onDidFail(`${localize('openide.chat.voice.label', "Dictado")}: ${error instanceof Error ? error.message : String(error)}`);
+				this.onDidFail(`${t('chatSurface.voice.label')}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		} finally {
 			if (generation === this._generation) { this._setState('idle'); }

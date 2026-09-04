@@ -17,7 +17,6 @@
 
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
-import { localize } from '../../../../nls.js';
 import { isHardlineDeniedCommand, isSensitiveToolPath, toolApprovalAllowKey } from '../common/openideApprovalPolicy.js';
 import { IToolApprovalRequest, ToolApprovalDecision } from '../common/openideAgentTypes.js';
 import { t } from '../common/openideStrings.js';
@@ -85,14 +84,14 @@ export class OpenideApprovalManager {
 	/** Decision prompt with a native QuickPick (fallback when there is no inline UI). */
 	private async pickNative(req: IToolApprovalRequest, sensitive: boolean): Promise<ToolApprovalDecision> {
 		const items: (IQuickPickItem & { id: ToolApprovalDecision })[] = [
-			{ id: 'once', label: localize('openide.approve.once', "$(check) Permitir una vez"), iconClasses: [] },
+			{ id: 'once', label: t('chatSurface.approve.once'), iconClasses: [] },
 			{ id: 'session', label: t('approve.session') },
-			{ id: 'always', label: localize('openide.approve.always', "$(star-full) Permitir siempre"), description: sensitive ? localize('openide.approve.sensitiveNote', "(no disponible: path sensible)") : undefined },
-			{ id: 'deny', label: localize('openide.approve.deny', "$(x) Rechazar") },
+			{ id: 'always', label: t('chatSurface.approve.always'), description: sensitive ? t('chatSurface.approve.sensitiveNote') : undefined },
+			{ id: 'deny', label: t('chatSurface.approve.deny') },
 		];
 		const placeHolder = req.command
-			? localize('openide.approve.execPh', "El agente quiere ejecutar: {0}", req.command)
-			: req.detail || localize('openide.approve.defPh', "El agente quiere usar {0}", req.tool);
+			? t('chatSurface.approve.execPlaceholder', req.command)
+			: req.detail || t('chatSurface.approve.usePlaceholder', req.tool);
 		const picked = await this.quickInputService.pick(items, { title: req.title, placeHolder, ignoreFocusLost: true });
 		return picked ? picked.id : 'deny';
 	}

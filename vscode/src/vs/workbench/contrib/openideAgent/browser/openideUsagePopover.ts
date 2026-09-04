@@ -26,7 +26,6 @@ import { DomScrollableElement } from '../../../../base/browser/ui/scrollbar/scro
 import { AnchorPosition } from '../../../../base/common/layout.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { ScrollbarVisibility } from '../../../../base/common/scrollable.js';
-import { localize } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IContextViewService, IOpenContextView } from '../../../../platform/contextview/browser/contextView.js';
 import { IRateLimitWindow, usageStatusOf } from '../common/openideUsage.js';
@@ -93,14 +92,14 @@ export class OpenideUsagePopover extends Disposable {
 		const host = container;
 		container = append(host, $('.openide-menu.openide-usage-menu'));
 		container.setAttribute('role', 'dialog');
-		container.setAttribute('aria-label', localize('openide.usage.title', "Uso"));
+		container.setAttribute('aria-label', t('chatSurface.usage.title'));
 
 		// `.openide-menu-section` is the family's small muted heading; the freshness line and the
 		// refresh action ride in it instead of in a header of this popover's own invention.
 		const header = append(container, $('.openide-menu-section.openide-usage-header'));
-		append(header, $('span.openide-usage-header-title', undefined, localize('openide.usage.title', "Uso")));
+		append(header, $('span.openide-usage-header-title', undefined, t('chatSurface.usage.title')));
 		this.updated = append(header, $('span.openide-usage-updated'));
-		this.refreshButton = append(header, $('button.openide-usage-refresh', { type: 'button', title: localize('openide.usage.refresh', "Actualizar ahora") })) as HTMLButtonElement;
+		this.refreshButton = append(header, $('button.openide-usage-refresh', { type: 'button', title: t('chatSurface.usage.refresh') })) as HTMLButtonElement;
 		append(this.refreshButton, menuIcon('refresh'));
 		store.add(addDisposableListener(this.refreshButton, 'click', () => void this.monitor.refresh('manual')));
 
@@ -121,8 +120,8 @@ export class OpenideUsagePopover extends Disposable {
 				void this.commandService.executeCommand(command);
 			}));
 		};
-		addFooterAction('graph', localize('openide.usage.details', "Detalles de uso"), 'openide.agent.openProviders');
-		addFooterAction('account', localize('openide.usage.accounts', "Administrar cuentas…"), 'openide.agent.openProviders');
+		addFooterAction('graph', t('chatSurface.usage.details'), 'openide.agent.openProviders');
+		addFooterAction('account', t('chatSurface.usage.accounts'), 'openide.agent.openProviders');
 
 		// Live while open: the monitor switches to its visible cadence and every change repaints.
 		store.add(this.monitor.holdVisible());
@@ -150,9 +149,9 @@ export class OpenideUsagePopover extends Disposable {
 	private renderUpdated(snapshot: IOpenideUsageSnapshot): void {
 		if (!this.updated) { return; }
 		this.updated.textContent = snapshot.fetching
-			? localize('openide.usage.updating', "actualizando…")
+			? t('chatSurface.usage.updating')
 			: snapshot.updatedAt
-				? localize('openide.usage.updatedAgo', "actualizado {0}", formatUsageUpdatedAgo(snapshot.updatedAt))
+				? t('chatSurface.usage.updatedAgo', formatUsageUpdatedAgo(snapshot.updatedAt))
 				: '';
 		this.refreshButton?.classList.toggle('loading', snapshot.fetching);
 		this.refreshButton?.toggleAttribute('disabled', snapshot.fetching);
@@ -166,8 +165,8 @@ export class OpenideUsagePopover extends Disposable {
 			append(this.list, $('.openide-menu-empty.openide-usage-empty', undefined, t('usage.disabled')));
 		} else if (!snapshot.accounts.length) {
 			append(this.list, $('.openide-menu-empty.openide-usage-empty', undefined, snapshot.fetching
-				? localize('openide.usage.loading', "Consultando las cuentas…")
-				: localize('openide.usage.noAccounts', "No hay cuentas conectadas.")));
+				? t('chatSurface.usage.loading')
+				: t('chatSurface.usage.noAccounts')));
 		} else {
 			for (const account of snapshot.accounts) {
 				this.list.appendChild(this.renderAccount(account));
@@ -215,10 +214,10 @@ export class OpenideUsagePopover extends Disposable {
 			if (usage.credits) {
 				const credits = usage.credits;
 				const line = append(windows, $('.openide-usage-metric.openide-usage-credits'));
-				append(line, $('span.openide-usage-window-label', undefined, localize('openide.usage.balance', "Saldo")));
+				append(line, $('span.openide-usage-window-label', undefined, t('chatSurface.usage.balance')));
 				const text = credits.remaining != null
 					? formatUsageCredits(credits.remaining, credits.currency) + (credits.total != null ? ` / ${formatUsageCredits(credits.total, credits.currency)}` : '')
-					: credits.used != null ? localize('openide.usage.spent', "{0} gastados", formatUsageCredits(credits.used, credits.currency)) : '—';
+					: credits.used != null ? t('chatSurface.usage.spent', formatUsageCredits(credits.used, credits.currency)) : '—';
 				append(line, $('span.openide-usage-credits-value', undefined, text));
 			}
 			if (account.staleness === 'stale') {
@@ -229,11 +228,11 @@ export class OpenideUsagePopover extends Disposable {
 				append(row, $('.openide-usage-note.error', undefined, usage.error));
 			}
 		} else if (status === 'unavailable') {
-			append(row, $('.openide-usage-note', undefined, `${localize('openide.usage.noData', "Sin datos de uso")} · ${usage?.error ?? ''}`));
+			append(row, $('.openide-usage-note', undefined, `${t('chatSurface.usage.noData')} · ${usage?.error ?? ''}`));
 		} else if (usage) {
 			const note = append(row, $('.openide-usage-note.error', undefined, usage.error ?? t('usage.failed')));
 			if (usage.retryAt && usage.retryAt > Date.now()) {
-				note.textContent += ` · ${localize('openide.usage.retry', "reintenta {0}", formatUsageReset(usage.retryAt)?.replace('se reinicia', '') ?? '')}`;
+				note.textContent += ` · ${t('chatSurface.usage.retry', formatUsageReset(usage.retryAt)?.replace('se reinicia', '') ?? '')}`;
 			}
 		} else if (!account.fetching) {
 			append(row, $('.openide-usage-note', undefined, t('usage.pending')));

@@ -249,16 +249,16 @@ export class OpenideChatViewPane extends ViewPane {
 		// showing a default model that cannot answer).
 		const status: IStatusbarEntry = this._statusConnected || this._busy ? {
 			name: 'OpenIDE Agent',
-			text: this._busy ? '$(loading~spin) Trabajando…' : model,
-			ariaLabel: this._busy ? 'OpenIDE Agent: trabajando' : `OpenIDE Agent: ${model}`,
-			tooltip: `OpenIDE Agent — ${this._statusProvider || 'sin proveedor'}${this._statusModel ? `\n${this._statusModel}` : ''}`,
+			text: this._busy ? `$(loading~spin) ${t('chatSurface.status.working')}` : model,
+			ariaLabel: this._busy ? t('chatSurface.status.workingAria') : `OpenIDE Agent: ${model}`,
+			tooltip: `OpenIDE Agent — ${this._statusProvider || t('chatSurface.status.noProviderShort')}${this._statusModel ? `\n${this._statusModel}` : ''}`,
 			command: 'workbench.view.openideChat.view.focus',
 			content: this._statusBrandIcon,
 		} : {
 			name: 'OpenIDE Agent',
-			text: '$(plug) Conectar proveedor de IA',
-			ariaLabel: 'OpenIDE Agent: sin proveedor conectado',
-			tooltip: 'No hay proveedor de IA conectado — abrí la página de proveedores para conectar una cuenta o API key.',
+			text: `$(plug) ${t('chatSurface.status.connect')}`,
+			ariaLabel: t('chatSurface.status.connectAria'),
+			tooltip: t('chatSurface.status.connectTooltip'),
 			command: 'openide.agent.openProviders',
 			content: this._statusBrandIcon,
 		};

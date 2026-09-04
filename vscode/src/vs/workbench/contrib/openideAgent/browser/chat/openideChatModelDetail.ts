@@ -5,8 +5,8 @@
 
 import { clearNode, getWindow } from '../../../../../base/browser/dom.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
-import { localize } from '../../../../../nls.js';
 import { IOpenidePickerGroup, IOpenidePickerModel } from '../openideAgentService.js';
+import { t } from '../../common/openideStrings.js';
 
 /** Delay before the panel appears, so sweeping the list with ↑↓ does not flash a card per row. */
 const DETAIL_DELAY = 260;
@@ -106,14 +106,14 @@ export class OpenideChatModelDetail extends Disposable {
 		head.append(name, id);
 		element.appendChild(head);
 		const capabilities: string[] = [];
-		if (model.toolCall) { capabilities.push(localize('openide.chat.model.tools', "Uso de herramientas")); }
-		if (model.reasoning) { capabilities.push(localize('openide.chat.model.reasoning', "Razonamiento")); }
-		if (capabilities.length) { element.appendChild(detailRow(document, localize('openide.chat.model.capabilities', "Capacidades"), capabilities.join(', '))); }
-		if (model.input.length) { element.appendChild(detailRow(document, localize('openide.chat.model.input', "Entrada"), model.input.join(', '))); }
-		if (model.output.length) { element.appendChild(detailRow(document, localize('openide.chat.model.output', "Salida"), model.output.join(', '))); }
+		if (model.toolCall) { capabilities.push(t('chatSurface.model.tools')); }
+		if (model.reasoning) { capabilities.push(t('chatSurface.model.reasoning')); }
+		if (capabilities.length) { element.appendChild(detailRow(document, t('chatSurface.model.capabilities'), capabilities.join(', '))); }
+		if (model.input.length) { element.appendChild(detailRow(document, t('chatSurface.model.input'), model.input.join(', '))); }
+		if (model.output.length) { element.appendChild(detailRow(document, t('chatSurface.model.output'), model.output.join(', '))); }
 		// Subscriptions and local runtimes publish no price: an "In — · Out —" row would read as
 		// "free", so the row is omitted entirely.
-		if (model.hasCost) { element.appendChild(detailRow(document, localize('openide.chat.model.cost', "Costo ($/1M tokens)"), `In ${model.costIn} · Out ${model.costOut}`)); }
+		if (model.hasCost) { element.appendChild(detailRow(document, t('chatSurface.model.cost'), `In ${model.costIn} · Out ${model.costOut}`)); }
 		element.hidden = element.childElementCount <= 1;
 		if (!element.hidden) {
 			this._place(host, anchor, element);

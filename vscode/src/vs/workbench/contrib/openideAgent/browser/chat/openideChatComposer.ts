@@ -10,7 +10,6 @@ import { KeyCode } from '../../../../../base/common/keyCodes.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { IObservable, ISettableObservable, observableValue } from '../../../../../base/common/observable.js';
-import { localize } from '../../../../../nls.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
@@ -218,8 +217,8 @@ export class OpenideChatComposer extends Disposable {
 		this._scrollIdle = this._register(new RunOnceScheduler(() => this._prompt.classList.remove('scrolling'), PROMPT_SCROLLBAR_LINGER));
 		this._register(addDisposableListener(this._prompt, 'scroll', () => this._armScrollIndicator()));
 		this._prompt.rows = 1;
-		this._prompt.placeholder = localize('openide.chat.composer.placeholder', "Plan, Build, / for skills, @ for context");
-		this._prompt.setAttribute('aria-label', localize('openide.chat.composer.aria', "OpenIDE chat message"));
+		this._prompt.placeholder = t('chatSurface.composer.placeholder');
+		this._prompt.setAttribute('aria-label', t('chatSurface.composer.aria'));
 		const row = append(this._card, $('.openide-chat-input-row'));
 
 		this._attachments = this._register(new OpenideChatComposerAttachments(attachStrip, this._card, hoverService, fileService, () => {

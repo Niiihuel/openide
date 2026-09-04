@@ -3864,6 +3864,13 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			const baseline = this.diffSnapshot.getBaseline(e.path) ?? oldContent;
 			const { added, removed } = countDiff(baseline, newContent);
 			this.diffSnapshot.markPending(e.path, added + removed > 0, added, removed);
+			// The tray over the composer listens to this, and nothing else fed it: the inline review
+			// only reports a pending TRANSITION, and `markPending` above has already made the
+			// transition happen, so by the time the review recomputes it returns false and stays
+			// quiet. The tray was therefore empty for every ordinary agent edit — the one case it
+			// exists for. Firing here also covers the file whose editor is closed, which the review
+			// never sees at all.
+			this._onDidChangeFileDiff.fire({ path: e.path, added, removed });
 			const per = countDiff(oldContent, newContent);
 			const created = this.diffSnapshot.getSnapshot(e.path)?.existed === false;
 			const diffLines = buildDiffPreview(oldContent, newContent);

@@ -9,7 +9,6 @@
 
 import { ConfigurationTarget, getConfigValueInTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { ConfigurationScope } from '../../../../platform/configuration/common/configurationRegistry.js';
-import { localize } from '../../../../nls.js';
 import { ISetting, ISettingsGroup, SettingValueType } from '../../../services/preferences/common/preferences.js';
 import { Settings2EditorModel } from '../../../services/preferences/common/preferencesModels.js';
 import { getCommonlyUsedData, ITOCEntry, tocData } from '../../preferences/browser/settingsLayout.js';
@@ -241,9 +240,9 @@ export class OpenideSettingsModel {
 	editableScopeLabel(item: IOpenideSettingItem): string {
 		const scope = item.scope ?? ConfigurationScope.WINDOW;
 		if (scope === ConfigurationScope.APPLICATION || scope === ConfigurationScope.MACHINE || scope === ConfigurationScope.APPLICATION_MACHINE) {
-			return localize('openide.settings.scopeUserOnly', "Usuario");
+			return t('settings.scope.userOnly');
 		}
-		return localize('openide.settings.scopeUserOrWorkspace', "Usuario o Workspace");
+		return t('settings.scope.userOrWorkspace');
 	}
 
 	private filteredItems(ignoreCategory: boolean): IOpenideSettingItem[] {

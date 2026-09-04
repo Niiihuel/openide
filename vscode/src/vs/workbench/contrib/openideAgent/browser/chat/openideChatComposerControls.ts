@@ -5,7 +5,6 @@
 
 import { addDisposableListener, append, clearNode } from '../../../../../base/browser/dom.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
-import { localize } from '../../../../../nls.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
@@ -137,7 +136,7 @@ export class OpenideChatComposerControls extends Disposable {
 		this._modelIcon.className = 'openide-composer-provider-icon';
 		this._modelIcon.hidden = true;
 		this._modelLabel = append(model.button, model.label);
-		this._modelLabel.textContent = localize('openide.chat.model.unset', "Seleccionar modelo");
+		this._modelLabel.textContent = t('chatSurface.model.unset');
 		model.button.appendChild(createCodicon(document, 'chevron-down', 'openide-composer-chevron'));
 		this._register(addDisposableListener(model.button, 'click', () => this._modelPicker.toggle(model.button)));
 
@@ -329,8 +328,8 @@ export class OpenideChatComposerControls extends Disposable {
 		// The composer shows the same friendly name as the picker, never the raw id.
 		const described = model ? this.agentService.describeModel(providerId, model) : undefined;
 		const chosen = connected
-			? (described?.name || model || entry?.label || localize('openide.chat.model.fallback', "Modelo"))
-			: localize('openide.chat.model.unset', "Seleccionar modelo");
+			? (described?.name || model || entry?.label || t('chatSurface.model.fallback'))
+			: t('chatSurface.model.unset');
 		const route = this._modelRoute;
 		const running = route ? (this.agentService.describeModel(route.providerId, route.model)?.name || route.model) : undefined;
 		this._modelLabel.textContent = running ? `${chosen} → ${running}` : chosen;

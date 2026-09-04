@@ -6,10 +6,10 @@
 import { addDisposableListener, append, clearNode } from '../../../../../base/browser/dom.js';
 import { IListRenderer, IListVirtualDelegate } from '../../../../../base/browser/ui/list/list.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
-import { localize } from '../../../../../nls.js';
 import { IOpenidePickerGroup, IOpenidePickerModel } from '../openideAgentService.js';
 import { createProviderIcon } from '../openideProviderIcons.js';
 import { createCodicon } from './openideComposerMenu.js';
+import { t } from '../../common/openideStrings.js';
 
 /** Collapsible header: favourites, recents or one provider. */
 export interface IModelSectionRow {
@@ -171,8 +171,8 @@ export class ModelRowRenderer implements IListRenderer<IModelEntryRow, IModelRow
 		templateData.star.classList.toggle('on', element.favorite);
 		templateData.star.appendChild(createCodicon(document, element.favorite ? 'star-full' : 'star-empty'));
 		templateData.star.title = element.favorite
-			? localize('openide.chat.model.unstar', "Quitar de favoritos")
-			: localize('openide.chat.model.star', "Marcar como favorito");
+			? t('chatSurface.model.unstar')
+			: t('chatSurface.model.star');
 	}
 
 	disposeTemplate(templateData: IModelRowTemplate): void {

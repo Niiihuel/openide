@@ -7,7 +7,6 @@ import { $, addDisposableListener, append, clearNode } from '../../../../../base
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { basename } from '../../../../../base/common/path.js';
-import { localize } from '../../../../../nls.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { AgentMode, IChatCapabilityMention, IChatImage } from '../../common/openideAgentTypes.js';
@@ -50,7 +49,7 @@ function entryLabel(entry: IComposerQueueEntry): string {
 	return text
 		|| entry.links.map(linkLabel).join(', ')
 		|| entry.references.map(reference => basename(reference.path)).join(', ')
-		|| localize('openide.chat.queue.image', "(imagen)");
+		|| t('chatSurface.queue.image');
 }
 
 /**
@@ -192,8 +191,8 @@ export class OpenideChatComposerQueue extends Disposable {
 		const wasHidden = this.domNode.classList.contains('hidden');
 		this.domNode.classList.toggle('hidden', hidden);
 		this._count.textContent = queue.length === 1
-			? localize('openide.chat.queue.one', "1 pendiente")
-			: localize('openide.chat.queue.many', "{0} pendientes", queue.length);
+			? t('chatSurface.queue.one')
+			: t('chatSurface.queue.many', queue.length);
 		this._chevron.className = `codicon codicon-${this._expanded ? 'chevron-down' : 'chevron-right'}`;
 		this._body.classList.toggle('hidden', !this._expanded);
 		if (!hidden && this._expanded) {

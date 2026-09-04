@@ -12,7 +12,6 @@
 import './media/openideChat.css';
 import { FileAccess } from '../../../../base/common/network.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
-import { localize, localize2 } from '../../../../nls.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
@@ -316,9 +315,9 @@ class OpenideLanguageMigrationContribution extends Disposable implements IWorkbe
 		}
 		this.notificationService.prompt(
 			Severity.Info,
-			localize('openide.language.migrate', "OpenIDE now uses a single display language for the whole interface. Switch the IDE to {0}?", pack.label),
+			t('chatSurface.language.migrate', pack.label),
 			[{
-				label: localize('openide.language.migrate.yes', "Change display language"),
+				label: t('chatSurface.language.migrateYes'),
 				run: () => void this.localeService.setLocale(pack),
 			}],
 			// Sticky: a one-time offer that ends in a window reload. The default Info toast hides
@@ -469,7 +468,7 @@ registerIcon('openide-mode-ask', { fontCharacter: String.fromCodePoint(openidePr
 
 const openideChatContainer: ViewContainer = Registry.as<IViewContainersRegistry>(ViewExtensions.ViewContainersRegistry).registerViewContainer({
 	id: OPENIDE_CHAT_CONTAINER_ID,
-	title: localize2('openide.chat.container', "OpenIDE Chat"),
+	title: { value: t('chatSurface.container.chat'), original: 'OpenIDE Chat' },
 	icon: openideChatIcon,
 	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [OPENIDE_CHAT_CONTAINER_ID, { mergeViewWithContainerWhenSingleView: true }]),
 	storageId: OPENIDE_CHAT_CONTAINER_ID,
@@ -479,7 +478,7 @@ const openideChatContainer: ViewContainer = Registry.as<IViewContainersRegistry>
 
 const openideChatViewDescriptor: IViewDescriptor = {
 	id: OPENIDE_CHAT_VIEW_ID,
-	name: localize2('openide.chat.view', "OpenIDE Chat"),
+	name: { value: t('chatSurface.container.chat'), original: 'OpenIDE Chat' },
 	containerIcon: openideChatIcon,
 	ctorDescriptor: new SyncDescriptor(OpenideChatViewPane),
 	canToggleVisibility: false,
@@ -530,7 +529,7 @@ Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViewWelcomeCon
 // Project Map: native graph editor (canvas + workbench panels) over the same index the agent tools use.
 Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(OpenideMemoryInput.ID, OpenideMemoryInputSerializer);
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
-	EditorPaneDescriptor.create(OpenideProjectMapEditor, OpenideProjectMapEditor.ID, localize('openide.memory.editorName', "Project Map")),
+	EditorPaneDescriptor.create(OpenideProjectMapEditor, OpenideProjectMapEditor.ID, t('chatSurface.editor.projectMap')),
 	[new SyncDescriptor(OpenideMemoryInput)]
 );
 
@@ -539,7 +538,7 @@ registerAction2(class extends Action2 {
 	constructor() {
 		super({
 			id: 'openide.memory.open',
-			title: localize2('openide.memory.open', 'OpenIDE: Open Project Map'),
+			title: { value: t('chatSurface.cmd.memoryOpen'), original: 'OpenIDE: Open Project Map' },
 			category: Categories.View,
 			f1: true,
 		});
@@ -553,15 +552,15 @@ registerAction2(class extends Action2 {
 });
 
 registerAction2(class extends Action2 {
-	constructor() { super({ id: 'openide.memory.rebuild', title: localize2('openide.memory.rebuild', 'OpenIDE: Rebuild Codebase Memory'), category: Categories.View, f1: true }); }
+	constructor() { super({ id: 'openide.memory.rebuild', title: { value: t('chatSurface.cmd.memoryRebuild'), original: 'OpenIDE: Rebuild Codebase Memory' }, category: Categories.View, f1: true }); }
 	async run(accessor: ServicesAccessor): Promise<void> { await accessor.get(ICodebaseMemoryService).rebuildFull(); }
 });
 registerAction2(class extends Action2 {
-	constructor() { super({ id: 'openide.memory.clear', title: localize2('openide.memory.clear', 'OpenIDE: Clear Codebase Memory'), category: Categories.View, f1: true }); }
+	constructor() { super({ id: 'openide.memory.clear', title: { value: t('chatSurface.cmd.memoryClear'), original: 'OpenIDE: Clear Codebase Memory' }, category: Categories.View, f1: true }); }
 	async run(accessor: ServicesAccessor): Promise<void> { await accessor.get(ICodebaseMemoryService).clear(); }
 });
 registerAction2(class extends Action2 {
-	constructor() { super({ id: 'openide.memory.status', title: localize2('openide.memory.status', 'OpenIDE: Codebase Memory Status'), category: Categories.View, f1: true }); }
+	constructor() { super({ id: 'openide.memory.status', title: { value: t('chatSurface.cmd.memoryStatus'), original: 'OpenIDE: Codebase Memory Status' }, category: Categories.View, f1: true }); }
 	async run(accessor: ServicesAccessor): Promise<void> { const version = await accessor.get(ICodebaseMemoryService).getVersion(); accessor.get(INotificationService).info(version ? `Project Map: ${version.nodeCount} nodos, ${version.edgeCount} relaciones, versión ${version.version}.` : 'Project Map: índice aún no construido.'); }
 });
 
@@ -811,7 +810,7 @@ const PLAN_GLOB = '**/.openide/plans/*.md';
 // through the resolver (opening the file from the explorer uses it too); "Open as text" in the
 // editor toolbar forces the native text editor (override DEFAULT_EDITOR_ASSOCIATION).
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
-	EditorPaneDescriptor.create(OpenidePlanEditor, OpenidePlanEditor.ID, localize('openide.plan.editorName', "Plan")),
+	EditorPaneDescriptor.create(OpenidePlanEditor, OpenidePlanEditor.ID, t('chatSurface.editor.plan')),
 	[new SyncDescriptor(OpenidePlanInput)]
 );
 class OpenidePlanEditorResolverContribution implements IWorkbenchContribution {
@@ -830,7 +829,7 @@ PlatformRegistry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workben
 
 // Subagentes: editor especializado para definiciones Markdown del workspace/importadas.
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
-	EditorPaneDescriptor.create(OpenideSubagentEditor, OpenideSubagentEditor.ID, localize('openide.subagent.editorName', "Subagent")),
+	EditorPaneDescriptor.create(OpenideSubagentEditor, OpenideSubagentEditor.ID, t('chatSurface.editor.subagent')),
 	[new SyncDescriptor(OpenideSubagentInput)]
 );
 class OpenideSubagentEditorResolverContribution implements IWorkbenchContribution {
@@ -842,7 +841,7 @@ class OpenideSubagentEditorResolverContribution implements IWorkbenchContributio
 }
 PlatformRegistry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(OpenideSubagentEditorResolverContribution, LifecyclePhase.Restored);
 registerAction2(class extends Action2 {
-	constructor() { super({ id: 'openide.subagent.create', title: localize2('openide.subagent.create', 'OpenIDE: Create Subagent'), f1: true }); }
+	constructor() { super({ id: 'openide.subagent.create', title: { value: t('chatSurface.cmd.subagentCreate'), original: 'OpenIDE: Create Subagent' }, f1: true }); }
 	async run(accessor: ServicesAccessor): Promise<void> {
 		const quick = accessor.get(IQuickInputService); const files = accessor.get(IFileService); const editors = accessor.get(IEditorService);
 		const name = (await quick.input({ title: 'Create Subagent', prompt: 'Nombre en kebab-case' }))?.trim(); if (!name || !/^[a-z0-9][a-z0-9-]*$/.test(name)) { return; }
@@ -854,11 +853,11 @@ registerAction2(class extends Action2 {
 	}
 });
 registerAction2(class extends Action2 {
-	constructor() { super({ id: 'openide.subagent.openEditor', title: localize2('openide.subagent.openEditor', 'OpenIDE: Open Subagent Editor'), f1: true }); }
+	constructor() { super({ id: 'openide.subagent.openEditor', title: { value: t('chatSurface.cmd.subagentOpenEditor'), original: 'OpenIDE: Open Subagent Editor' }, f1: true }); }
 	async run(accessor: ServicesAccessor, resourceArg?: URI): Promise<void> { const editors = accessor.get(IEditorService); const resource = resourceArg instanceof URI ? resourceArg : editors.activeEditor?.resource; if (resource) { await editors.openEditor({ resource, options: { override: OpenideSubagentInput.EDITOR_ID, pinned: true } }); } }
 });
 registerAction2(class extends Action2 {
-	constructor() { super({ id: 'openide.subagent.openText', title: localize2('openide.subagent.openText', 'OpenIDE: Open Subagent as Text'), f1: true }); }
+	constructor() { super({ id: 'openide.subagent.openText', title: { value: t('chatSurface.cmd.subagentOpenText'), original: 'OpenIDE: Open Subagent as Text' }, f1: true }); }
 	async run(accessor: ServicesAccessor, resourceArg?: URI): Promise<void> { const editors = accessor.get(IEditorService); const resource = resourceArg instanceof URI ? resourceArg : editors.activeEditor?.resource; if (resource) { await editors.openEditor({ resource, options: { override: 'default', pinned: true } }); } }
 });
 
@@ -866,7 +865,7 @@ registerAction2(class extends Action2 {
 const CANVAS_GLOB = '**/.openide/canvases/*.canvas.tsx';
 Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(OpenideCanvasInput.ID, OpenideCanvasInputSerializer);
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
-	EditorPaneDescriptor.create(OpenideCanvasEditor, OpenideCanvasEditor.ID, localize('openide.canvas.editorName', "Canvas")),
+	EditorPaneDescriptor.create(OpenideCanvasEditor, OpenideCanvasEditor.ID, t('chatSurface.editor.canvas')),
 	[new SyncDescriptor(OpenideCanvasInput)]
 );
 class OpenideCanvasEditorResolverContribution implements IWorkbenchContribution {
@@ -1227,8 +1226,8 @@ configurationRegistry.registerConfiguration({
 			type: 'string',
 			enum: ['auto', 'es', 'en'],
 			order: 0,
-			description: localize('openide.language', "Deprecated. OpenIDE now renders its own screens in the display language, so Settings › Language moves the whole interface at once."),
-			deprecationMessage: localize('openide.language.deprecated', "Use the display language instead (Settings › Language). OpenIDE follows it for its own screens."),
+			description: t('chatSurface.language.deprecatedDesc'),
+			deprecationMessage: t('chatSurface.language.deprecatedMessage'),
 		},
 		[OPENIDE_IDE_SERVER_SETTING]: { type: 'boolean', default: true, description: t('contrib.config.ideServer.enabled') },
 		'openide.subagents.enabled': { type: 'boolean', default: true, description: t('contrib.config.subagents.enabled') },
@@ -1683,7 +1682,7 @@ registerAction2(class extends Action2 {
 		const agent = accessor.get(IOpenideAgentService);
 		const notificationService = accessor.get(INotificationService);
 		try {
-			notificationService.info(localize('openide.agent.reloadMcp.done', "MCP: {0}", await agent.reloadMcpServers()));
+			notificationService.info(t('chatSurface.mcp.reloadDone', await agent.reloadMcpServers()));
 		} catch (e) {
 			notificationService.error(t('contrib.msg.reloadMcp.err', e instanceof Error ? e.message : String(e)));
 		}

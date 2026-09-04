@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $ } from '../../../../../../base/browser/dom.js';
-import { localize } from '../../../../../../nls.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IOpenideChatContent, IOpenideChatToolContent, isOpenideChatToolContent } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
@@ -24,6 +23,7 @@ import {
 	renderOpenideChatActivityLine,
 } from './openideChatActivityRow.js';
 import '../media/openideChatActivity.css';
+import { t } from '../../../common/openideStrings.js';
 
 /**
  * Verb shown for a call, by state.
@@ -113,8 +113,8 @@ export class OpenideChatToolPart extends OpenideChatContentPart {
 		}
 		const firstLine = (content.resultText ?? '').split(/\r?\n/).map(line => line.trim()).find(line => line.length > 0);
 		note.textContent = content.state === 'cancelled'
-			? localize('openide.chat.tool.note.cancelled', "Cancelled")
-			: (firstLine ? firstLine.slice(0, 120) : localize('openide.chat.tool.note.error', "Failed"));
+			? t('chatSurface.tool.cancelled')
+			: (firstLine ? firstLine.slice(0, 120) : t('chatSurface.tool.failed'));
 		note.title = content.resultText?.trim() ?? '';
 		note.classList.remove('hidden');
 	}
@@ -146,7 +146,7 @@ export class OpenideChatToolPart extends OpenideChatContentPart {
 		this._row.root.classList.toggle('openide-chat-part-cancelled', content.state === 'cancelled');
 		this._paintNote(content);
 
-		renderOpenideChatActivityResult(this._row, content.resultText, localize('openide.chat.tool.result', "Result"));
+		renderOpenideChatActivityResult(this._row, content.resultText, t('chatSurface.tool.result'));
 		this._applyLive();
 	}
 

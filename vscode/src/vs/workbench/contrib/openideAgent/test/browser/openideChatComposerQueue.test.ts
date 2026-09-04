@@ -31,7 +31,7 @@ suite('OpenIDE ChatComposerQueue', () => {
 		assert.strictEqual(queue.push(entry('hola')), true);
 		assert.ok(!queue.domNode.classList.contains('hidden'));
 		assert.strictEqual(host.querySelectorAll('.openide-chat-queue-row').length, 1);
-		assert.strictEqual(host.querySelector('.openide-chat-queue-count')?.textContent, '1 pendiente');
+		assert.strictEqual(host.querySelector('.openide-chat-queue-count')?.textContent, t('chatSurface.queue.one'));
 		assert.strictEqual(host.querySelector('.openide-chat-queue-text')?.textContent, 'hola');
 	});
 
@@ -97,6 +97,6 @@ suite('OpenIDE ChatComposerQueue', () => {
 		queue.push(entry('x'));
 		host.querySelector<HTMLButtonElement>('.openide-chat-queue-toggle')!.click();
 		assert.ok(host.querySelector('.openide-chat-queue-body')!.classList.contains('hidden'));
-		assert.strictEqual(host.querySelector('.openide-chat-queue-count')?.textContent, '1 pendiente');
+		assert.strictEqual(host.querySelector('.openide-chat-queue-count')?.textContent, t('chatSurface.queue.one'));
 	});
 });

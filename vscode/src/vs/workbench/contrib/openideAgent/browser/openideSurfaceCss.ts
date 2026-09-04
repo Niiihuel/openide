@@ -182,7 +182,10 @@ export const OPENIDE_SURFACE_CSS = `
 .oi-split > .oi-split-more { padding: 0 5px; border-left: 1px solid color-mix(in srgb, var(--vscode-button-foreground) 28%, transparent); }
 .monaco-workbench .oi-split > .oi-split-more .codicon[class*="codicon-"] { font-size: 12px; color: inherit; }
 .monaco-workbench .oi-split > button .codicon[class*="codicon-"] { font-size: 13px; color: inherit; }
-.oi-split > button .codicon + span, .oi-split > button .openide-chat-plan-spinner + span { margin-left: 5px; }
+.oi-split > button .codicon + span, .oi-split > button .openide-chat-plan-spinner + span { margin-left: 6px; }
+/* And the mirror: the running plan puts its ring AFTER the word in the chat card, where nothing
+   was separating them. A spinner needs air on whichever side it lands on. */
+.oi-split > button span + .openide-chat-plan-spinner { margin-left: 6px; }
 /* Focus: the workbench paints "button:focus" with a 1px outline, which on a half of the split shows
    as a box cut by the pill's rounded clip. A pointer press leaves no ring (modernUI's rule for the
    parts, applied here too); keyboard focus draws ONE ring around the whole pill. */

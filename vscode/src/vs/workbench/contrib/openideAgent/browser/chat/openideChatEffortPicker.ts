@@ -5,13 +5,13 @@
 
 import { addDisposableListener } from '../../../../../base/browser/dom.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
-import { localize } from '../../../../../nls.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { OPENIDE_GLYPH_THINKING } from '../../common/openideGlyphs.js';
 import { OPENIDE_REASONING_EFFORTS } from '../../common/openideReasoning.js';
 import { IOpenideAgentService } from '../openideAgentService.js';
 import { IModelReasoning } from '../openideModelCatalog.js';
 import { createMenuContent, createMenuRow, createMenuSection, OpenideComposerPopover } from './openideComposerMenu.js';
+import { OpenideStringKey, t } from '../../common/openideStrings.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -45,8 +45,10 @@ export function createThinkingGlyph(document: Document): Element {
 	return svg;
 }
 
+/** The level's label in the IDE's language. The list stores keys, so this is where the locale
+ *  is applied — once, at the two places that draw a level. */
 export function reasoningEffortLabel(value: string): string {
-	return OPENIDE_REASONING_EFFORTS.find(entry => entry[0] === value)?.[1] ?? OPENIDE_REASONING_EFFORTS[0][1];
+	return t(OPENIDE_REASONING_EFFORTS.find(entry => entry[0] === value)?.[1] ?? OPENIDE_REASONING_EFFORTS[0][1]);
 }
 
 /**
@@ -54,7 +56,7 @@ export function reasoningEffortLabel(value: string): string {
  * everything is offered: hiding a level the model does support is worse than showing one it
  * silently clamps.
  */
-export function availableReasoningEfforts(published: IModelReasoning | undefined): readonly (readonly [string, string])[] {
+export function availableReasoningEfforts(published: IModelReasoning | undefined): readonly (readonly [string, OpenideStringKey])[] {
 	if (!published) {
 		return OPENIDE_REASONING_EFFORTS;
 	}
@@ -89,7 +91,7 @@ export class OpenideChatEffortPicker extends Disposable {
 		this._published = published;
 	}
 
-	get options(): readonly (readonly [string, string])[] {
+	get options(): readonly (readonly [string, OpenideStringKey])[] {
 		return availableReasoningEfforts(this._published);
 	}
 
@@ -100,12 +102,12 @@ export class OpenideChatEffortPicker extends Disposable {
 				const document = container.ownerDocument;
 				const content = createMenuContent(document);
 				container.appendChild(content);
-				content.appendChild(createMenuSection(document, localize('openide.chat.effort.section', "Razonamiento")));
+				content.appendChild(createMenuSection(document, t('chatSurface.effort.section')));
 				const current = this.agentService.getReasoningEffort() || '';
-				for (const [value, label] of this.options) {
+				for (const [value, labelKey] of this.options) {
 					// No glyphs at all: the persistent tint on the active row is the only mark,
 					// and the hover reads above it.
-					const row = createMenuRow(document, { label, active: value === current });
+					const row = createMenuRow(document, { label: t(labelKey), active: value === current });
 					store.add(addDisposableListener(row, 'click', () => {
 						this._popover.close();
 						void this.agentService.setReasoningEffort(value);

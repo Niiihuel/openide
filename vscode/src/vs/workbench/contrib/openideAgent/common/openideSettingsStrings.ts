@@ -426,4 +426,14 @@ export const OPENIDE_SETTINGS_STRINGS = {
 	'openide.skills.importExists': { es: 'Ya existe la skill "{0}". ¿Reemplazarla?', en: 'The skill "{0}" already exists. Replace it?' },
 	'openide.skills.replace': { es: 'Reemplazar', en: 'Replace' },
 	'openide.skills.importOk': { es: 'Skill "{0}" importada. Entra al índice en el próximo mensaje.', en: 'Skill "{0}" imported. It enters the index on the next message.' },
+
+	// ---- The settings surface's own chrome, which was still on `localize()`: a fork-added key no
+	// language pack translates, so its default was what every locale got.
+	'settings.scope.userOnly': { es: 'Usuario', en: 'User' },
+	'settings.scope.userOrWorkspace': { es: 'Usuario o Workspace', en: 'User or Workspace' },
+	'settings.filter.clear': { es: 'Limpiar la búsqueda', en: 'Clear the search' },
+	'settings.kv.name': { es: 'NOMBRE', en: 'NAME' },
+	'settings.kv.value': { es: 'valor', en: 'value' },
+	'settings.kv.masked': { es: '(guardado — escribí para reemplazar)', en: '(saved — type to replace)' },
+	'settings.kv.remove': { es: 'Quitar', en: 'Remove' },
 } as const;
