@@ -18,6 +18,12 @@ import { SHOW_UPDATE_STATUS_COMMAND_ID } from '../../update/browser/updateTitleB
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { raceTimeout } from '../../../../base/common/async.js';
+import { Registry } from '../../../../platform/registry/common/platform.js';
+import { IWorkbenchContributionsRegistry, Extensions as WorkbenchExtensions } from '../../../common/contributions.js';
+import { LifecyclePhase } from '../../../services/lifecycle/common/lifecycle.js';
+import { OpenideUpdateNotificationContribution } from './openideUpdateNotification.js';
+
+Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(OpenideUpdateNotificationContribution, LifecyclePhase.Restored);
 
 function statusMessage(state: IUpdateService['state'], product: IProductService): string {
 	switch (state.type) {

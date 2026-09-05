@@ -23,6 +23,8 @@ export const OPENIDE_SURFACE_STRINGS = {
 	// ---- Update status notifications
 	'update.status.checking': { es: 'Buscando actualizaciones de {0}…', en: 'Checking for {0} updates…' },
 	'update.status.available': { es: '{0} {1} está disponible.', en: '{0} {1} is available.' },
+	'update.notification.source': { es: 'Actualizaciones de OpenIDE', en: 'OpenIDE Updates' },
+	'update.notification.show': { es: 'Ver actualización', en: 'View Update' },
 	'update.status.downloading': { es: 'Descargando {0}…', en: 'Downloading {0}…' },
 	'update.status.verifying': { es: 'Verificando firma y SHA-256…', en: 'Verifying signature and SHA-256…' },
 	'update.status.downloaded': { es: 'Actualización descargada y verificada.', en: 'Update downloaded and verified.' },
