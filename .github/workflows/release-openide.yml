@@ -66,7 +66,6 @@ jobs:
       # `else` branch and every Windows and macOS runner tried to build a Linux .deb, dying on
       # `fakeroot is not recognized`. It describes the matrix row, so it belongs to the whole job.
       OS_NAME: ${{ matrix.platform == 'win32' && 'windows' || matrix.platform == 'darwin' && 'osx' || 'linux' }}
-      OPENIDE_UPDATE_PRIVATE_KEY_CONTENT: ${{ secrets.OPENIDE_UPDATE_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         # The checkout token is written into `.git/config` and this job uploads artifacts: without
@@ -93,7 +92,6 @@ jobs:
         run: |
           set -euo pipefail
           missing=()
-          [[ -n "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" ]] || missing+=(OPENIDE_UPDATE_PRIVATE_KEY)
           if [[ '${{ matrix.platform }}' == darwin ]]; then
             for name in APPLE_DEVELOPER_ID APPLE_TEAM_ID APPLE_NOTARY_PROFILE; do
               [[ -n "${!name}" ]] || missing+=("$name")
@@ -113,9 +111,6 @@ jobs:
             echo "Missing repository secrets for ${{ matrix.platform }}: ${missing[*]}" >&2
             exit 1
           fi
-      - name: Materialize update signing key
-        shell: bash
-        run: printf '%s' "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" > "$RUNNER_TEMP/openide-update.pem" && chmod 600 "$RUNNER_TEMP/openide-update.pem"
       - name: Install Linux dependencies
         if: matrix.platform == 'linux'
         run: sudo apt-get update -y && sudo apt-get install -y libkrb5-dev
@@ -278,27 +273,28 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-22.04
-    # The only job that writes: it creates the release and publishes the signed feed.
     permissions:
       contents: write
     steps:
-      # This one KEEPS its credentials, unlike every other checkout in the repository. The release
-      # is published with `gh`, but `dev/publish-update-feed.sh` also does a real `git push` to the
-      # `updates` branch that carries the signed feed — the branch the IDE polls for updates. Take
-      # the credentials away and the release still gets created and the feed still gets built, and
-      # then the push fails at the very last step: shipped binaries nobody can update to.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with: { node-version-file: .nvmrc, package-manager-cache: false }
       # Pinned to the commit for the same reason as the upload above.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: { path: release-assets, merge-multiple: true }
-      - name: Publish draft release and signed feeds
+      - name: Prepare draft release and signed feeds
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           OPENIDE_UPDATE_PRIVATE_KEY_CONTENT: ${{ secrets.OPENIDE_UPDATE_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           . ./version.sh
+          [[ -n "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" ]]
+          umask 077
           printf '%s' "$OPENIDE_UPDATE_PRIVATE_KEY_CONTENT" > "$RUNNER_TEMP/openide-update.pem"
+          trap 'rm -f "$RUNNER_TEMP/openide-update.pem"' EXIT
 
           # Each build job left a fragment naming the one file of its output the updater installs.
           # Merged BEFORE the release is created, and then moved out of the way: they are build
@@ -314,9 +310,17 @@ jobs:
           }
           rm -f release-assets/manifest-input-*.json
 
-          gh release create "v${RELEASE_VERSION}" release-assets/* --draft --verify-tag --title "OpenIDE ${RELEASE_VERSION}"
+          gh release create "v${RELEASE_VERSION}" release-assets/* --draft --verify-tag --title "OpenIDE ${RELEASE_VERSION}" --notes-file "docs/releases/${RELEASE_VERSION}.md"
           jq -c '.[]' feed-inputs/manifest-inputs.json | while read -r row; do
             asset=$(jq -r .asset <<<"$row"); platform=$(jq -r .platform <<<"$row"); arch=$(jq -r .arch <<<"$row"); target=$(jq -r .target <<<"$row")
             OPENIDE_UPDATE_PRIVATE_KEY="$RUNNER_TEMP/openide-update.pem" ./dev/generate-update-manifest.sh "$platform" "$arch" "release-assets/$asset" update-feed "$target"
           done
-          ./dev/publish-update-feed.sh update-feed updates
+          node dev/verify-release-feed.mjs update-feed release-assets "v${RELEASE_VERSION}"
+      # A draft asset is private. Promote publishes the release before advancing the stable feed.
+      - name: Retain verified feed for promotion
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: openide-update-feed
+          path: update-feed/
+          if-no-files-found: error
+          retention-days: 30

@@ -36,6 +36,9 @@ jobs:
           node dev/check-reliability-gates.mjs
           node --test dev/reliability-gates.test.mjs
 
+      - name: Test release feed verification
+        run: node --test dev/verify-release-feed.test.mjs
+
       - name: Test upstream synchronization
         run: node --test dev/codeoss-sync.test.mjs
 
@@ -82,6 +85,10 @@ jobs:
           out/vs/platform/update/test/node/openideUpdateVerifier.test.js
           out/vs/platform/update/test/electron-main/openideAppImageUpdater.test.js
 
+      - name: Test binary request transport
+        working-directory: vscode
+        run: node test/unit/node/index.js --runGlob 'vs/platform/request/test/node/*.test.js'
+
       - name: Test OpenIDE agent common
         working-directory: vscode
         run: >-
@@ -121,6 +128,13 @@ jobs:
           xvfb-run -a .build/electron/openide test/unit/electron/index.js
           --no-sandbox --disable-gpu --ozone-platform=x11
           --runGlob 'vs/workbench/contrib/browserView/test/electron-browser/**/*.test.js'
+
+      - name: Test update popover
+        working-directory: vscode
+        run: >-
+          xvfb-run -a .build/electron/openide test/unit/electron/index.js
+          --no-sandbox --disable-gpu --ozone-platform=x11
+          --runGlob 'vs/workbench/contrib/update/test/electron-browser/openideUpdateAnnouncement.test.js'
 
       - name: Verify welcome, chat and Zen mode in the running IDE
         env:

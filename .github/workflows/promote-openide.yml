@@ -2,33 +2,43 @@ name: Promote OpenIDE Stable
 on:
   workflow_dispatch:
     inputs:
-      tag: { description: 'Signed draft tag (vX.Y.Z)', required: true }
-permissions: { contents: write }
+      tag: { description: 'Verified release tag (vX.Y.Z)', required: true }
+permissions: { contents: write, actions: read }
+concurrency:
+  group: openide-stable-promotion
+  cancel-in-progress: false
 jobs:
   promote:
     runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      INPUT_TAG: ${{ inputs.tag }}
     steps:
+      - name: Validate tag input
+        run: '[[ "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
+      # Check out the release's scripts, trusted key and metadata. Credentials are needed for
+      # the final push of the verified stable feed; this job never uploads the working tree.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        # None of these jobs push: without this the checkout token is written into `.git/config`
-        # and can travel inside an artifact.
-        with: { persist-credentials: false }
-      - name: Verify complete signed release
-        # The tag arrives through `env`, NOT interpolated into the script. `${{ }}` expands while
-        # the shell is being ASSEMBLED, before a single line runs, so the regex check below arrives
-        # too late: a value containing a quote would already have closed the assignment and injected
-        # its own commands into the workflow that publishes releases. Through `env` the value is
-        # data to bash, never part of the program, and then the regex is what decides.
-        env:
-          GH_TOKEN: '${{ github.token }}'
-          INPUT_TAG: '${{ inputs.tag }}'
+        with: { ref: '${{ inputs.tag }}' }
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with: { node-version-file: .nvmrc, package-manager-cache: false }
+      - name: Download successful build and release assets
         run: |
           set -euo pipefail
-          tag="$INPUT_TAG"; [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          gh release view "$tag" --json isDraft,isPrerelease --jq 'select(.isDraft == true and .isPrerelease == false)' >/dev/null
-          assets=$(gh release view "$tag" --json assets --jq '[.assets[].name]')
-          # PLATFORM COUNT: mirrors the build matrix of release-openide.yml — every row, whether or
-          # not it feeds the updater, because this checks what people can DOWNLOAD. macOS is out
-          # until the signing keychain is provisioned; add darwin-x64 and darwin-arm64 back
-          # together with it, or a release with no mac build gets promoted as if it were complete.
-          for required in linux-x64 linux-arm64 win32-x64 win32-arm64; do jq -e --arg p "$required" 'any(.[]; contains($p))' <<<"$assets" >/dev/null; done
-          gh release edit "$tag" --draft=false --latest
+          sha=$(git rev-parse HEAD)
+          run=$(gh run list --workflow release-openide.yml --commit "$sha" --status success --json databaseId --jq '.[0].databaseId')
+          [[ "$run" =~ ^[0-9]+$ ]] || { echo 'No successful release build for this tag.' >&2; exit 1; }
+          gh run download "$run" --name openide-update-feed --dir update-feed
+          gh release view "$INPUT_TAG" --json isPrerelease | jq -e '.isPrerelease == false'
+          gh release download "$INPUT_TAG" --dir release-assets
+          node dev/verify-release-feed.mjs update-feed release-assets "$INPUT_TAG"
+      - name: Publish release before announcing the update
+        run: |
+          set -euo pipefail
+          gh release edit "$INPUT_TAG" --draft=false --latest
+          # Confirm public access without the workflow token before touching the feed.
+          for manifest in update-feed/stable/*/*/*/latest.json; do
+            curl --fail --silent --show-error --location --head --retry 5 --retry-all-errors "$(jq -er '.artifact.url' "$manifest")" >/dev/null
+          done
+          ./dev/publish-update-feed.sh update-feed updates

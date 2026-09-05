@@ -80,3 +80,24 @@ public key has to change and everyone with OpenIDE installed must reinstall by
 hand. `.gitignore` ignores `*.pem`, `*.p12`, `*.pfx` and `*.key` so a slip does
 not publish it — a committed key is not erased by the next commit, it stays in
 history and has to be rotated.
+
+## Stable promotion order
+
+The release workflow builds a draft and retains its signed feed as the
+`openide-update-feed` workflow artifact for 30 days. It does not advance the
+`updates` branch while the release is private.
+
+Run **Promote OpenIDE Stable** with the release tag after the release build
+succeeds. Promotion checks out that tag, finds its successful build, downloads
+the feed and release assets, verifies the trusted signature and each installer's
+size and SHA-256, and checks that all supported platforms are present. It then
+publishes the release, confirms unauthenticated access to the installer URLs,
+and finally advances the stable feed. If the final push fails, rerun promotion;
+it accepts an already public stable release and repeats verification.
+
+Installed builds check automatically after about 30 seconds when `update.mode`
+is `default` or `start`. The title-bar popover announces a detected version once
+per window session without taking keyboard focus; an inactive window defers it
+until focus returns. `update.titleBar: false` disables that indicator. Development
+builds intentionally disable application updates, so use the installed AppImage
+or Windows user installer when testing an upgrade from the previous version.

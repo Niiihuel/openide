@@ -85,7 +85,7 @@ The OpenIDE agent lives as a native workbench contribution
 
 | Field | Value |
 |---|---|
-| OpenIDE version | `1.1.0` |
+| OpenIDE version | `1.2.0` |
 | VS Code API version | `1.136.1` |
 | Code OSS base | `1.136.1` |
 | Channel | `stable` |

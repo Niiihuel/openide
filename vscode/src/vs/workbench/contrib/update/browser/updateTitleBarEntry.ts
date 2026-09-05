@@ -98,6 +98,7 @@ export class UpdateTitleBarContribution extends Disposable implements IWorkbench
 	private entry: UpdateTitleBarEntry | undefined;
 	private tooltipVisible = false;
 	private tooltipFocused = false;
+	private readonly announcedVersions = new Set<string>();
 
 	constructor(
 		@IActionViewItemService actionViewItemService: IActionViewItemService,
@@ -127,6 +128,9 @@ export class UpdateTitleBarContribution extends Disposable implements IWorkbench
 		this._register(updateService.onStateChange((state) => {
 			this.state = state;
 			this.onStateChange();
+		}));
+		this._register(this.hostService.onDidChangeFocus(focused => {
+			if (focused) { void this.onStateChange(); }
 		}));
 
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
@@ -209,7 +213,11 @@ export class UpdateTitleBarContribution extends Disposable implements IWorkbench
 		}
 
 		// Tooltip already shown or window not last focused: only sync content and indicator visibility.
-		if (this.tooltipVisible || !await this.hostService.hadLastFocus()) {
+		const hadLastFocus = await this.hostService.hadLastFocus();
+		if (this.tooltipVisible || !hadLastFocus) {
+			if (this.tooltipVisible && 'update' in this.state && this.state.update) {
+				this.announcedVersions.add(this.state.update.productVersion || this.state.update.version);
+			}
 			this.context.set(this.tooltipVisible || ACTIONABLE_STATES.includes(this.state.type));
 			this.tooltip.renderState(this.state);
 			return;
@@ -222,6 +230,14 @@ export class UpdateTitleBarContribution extends Disposable implements IWorkbench
 		let context = ACTIONABLE_STATES.includes(this.state.type);
 		let showTooltip = false;
 		switch (this.state.type) {
+			case StateType.AvailableForDownload:
+			case StateType.Downloaded:
+			case StateType.Ready: {
+				const version = this.state.update.productVersion || this.state.update.version;
+				showTooltip = !this.announcedVersions.has(version);
+				this.announcedVersions.add(version);
+				break;
+			}
 			case StateType.Disabled:
 				if (startup) {
 					const reason = this.state.reason;

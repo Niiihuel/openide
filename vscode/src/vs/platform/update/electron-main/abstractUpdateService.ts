@@ -61,7 +61,7 @@ export function getUpdateRequestHeaders(productVersion: string): Record<string, 
 	if (isMacintosh) {
 		const darwinVersion = os.release();
 		return {
-			'User-Agent': `Code/${productVersion} Darwin/${darwinVersion}`
+			'User-Agent': `OpenIDE/${productVersion} Darwin/${darwinVersion}`
 		};
 	}
 
@@ -69,7 +69,7 @@ export function getUpdateRequestHeaders(productVersion: string): Record<string, 
 		const match = getWindowsReleaseSync().match(/^(\d+\.\d+)/);
 		if (match) {
 			return {
-				'User-Agent': `Code/${productVersion} Electron/${process.versions.electron} Windows NT ${match[1]}`
+				'User-Agent': `OpenIDE/${productVersion} Electron/${process.versions.electron} Windows NT ${match[1]}`
 			};
 		}
 	}
@@ -80,7 +80,7 @@ export function getUpdateRequestHeaders(productVersion: string): Record<string, 
 export type UpdateErrorClassification = {
 	owner: 'joaomoreno';
 	messageHash: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The hash of the error message.' };
-	comment: 'This is used to know how often VS Code updates have failed.';
+	comment: 'This is used to know how often OpenIDE updates have failed.';
 };
 
 /**
