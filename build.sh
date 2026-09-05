@@ -105,6 +105,8 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
     VSCODE_PLATFORM="linux"
   fi
 
+  node ../dev/audit-bootstrap-imports.mjs out-vscode-min
+
   if [[ "${SHOULD_BUILD_REH}" != "no" ]]; then
     npm run gulp minify-vscode-reh
     npm run gulp "vscode-reh-${VSCODE_PLATFORM}-${VSCODE_ARCH}-min-ci"

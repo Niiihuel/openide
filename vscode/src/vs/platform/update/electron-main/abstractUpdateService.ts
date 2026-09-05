@@ -5,7 +5,7 @@
 
 import * as os from 'os';
 import * as crypto from 'crypto';
-import * as semver from 'semver';
+import * as semver from '../../../base/common/semver/semver.js';
 import { listenStream } from '../../../base/common/stream.js';
 import { getOpenideVersion } from '../../product/common/openideVersion.js';
 import { asJson, NO_FETCH_TELEMETRY } from '../../request/common/request.js';

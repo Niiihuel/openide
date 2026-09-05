@@ -1,6 +1,7 @@
 // Run after the client typecheck, transpilation, built-in extensions and icon build.
 // On NixOS: ./result-fhs/bin/openide-build -c 'node dev/smoke-upgrade.mjs'
 // Under Xvfb, unset WAYLAND_DISPLAY so Electron uses the isolated display.
+// Set OPENIDE_TEST_EXECUTABLE to validate a packaged build with the same checks.
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -16,14 +17,19 @@ const profile = mkdtempSync(path.join(output, 'profile-'));
 mkdirSync(path.join(profile, 'User'), { recursive: true });
 writeFileSync(path.join(profile, 'User', 'settings.json'), JSON.stringify({ 'zenMode.fullScreen': false }));
 const errors = [];
+const packagedExecutable = process.env.OPENIDE_TEST_EXECUTABLE;
+const env = { ...process.env };
+delete env.ELECTRON_RUN_AS_NODE;
+if (packagedExecutable) { delete env.VSCODE_DEV; }
+else { env.VSCODE_DEV = '1'; }
 let app;
 try {
 	app = await _electron.launch({
-		executablePath: path.join(source, '.build/electron/openide'),
-		args: [source, '--no-sandbox', '--disable-gpu', '--skip-welcome', '--skip-release-notes',
+		executablePath: packagedExecutable || path.join(source, '.build/electron/openide'),
+		args: [...(packagedExecutable ? [] : [source]), '--no-sandbox', '--disable-gpu', '--skip-welcome', '--skip-release-notes',
 			'--user-data-dir', profile, '--extensions-dir', path.join(profile, 'extensions'),
 			...(process.env.XDG_SESSION_TYPE === 'x11' ? ['--ozone-platform=x11'] : [])],
-		env: { ...process.env, VSCODE_DEV: '1' }, timeout: 45000,
+		env, timeout: 45000,
 	});
 	const page = await app.firstWindow();
 	page.on('pageerror', error => errors.push(error.message));
