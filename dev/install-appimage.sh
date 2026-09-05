@@ -124,6 +124,7 @@ if [ -f "\${MARKER}" ] && [ -f "\${PREVIOUS}" ] && [ ! -f "\${HEALTHY}" ]; then
 fi
 rm -f "\${HEALTHY}"
 export OPENIDE_APPIMAGE_PATH="\${APPIMAGE}"
+export OPENIDE_APPIMAGE_LAUNCHER="${BIN_DIR}/openide"
 # See dev/install-appimage.sh: appimage-run's FHS environment has no libxkbfile.so.1, which
 # native-keymap needs to read the keyboard layout.
 export LD_LIBRARY_PATH="${EXTRA_LIB_PATH}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}"

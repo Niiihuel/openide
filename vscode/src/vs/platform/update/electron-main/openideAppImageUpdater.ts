@@ -8,7 +8,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { chmod, copyFile, link, open, readFile, rename, rm, stat, writeFile } from 'fs/promises';
-import { dirname } from 'path';
+import { dirname, isAbsolute, join } from 'path';
+import { accessSync, constants } from 'fs';
 import { verifyOpenideArtifact } from '../node/openideUpdateVerifier.js';
 import { CancellationToken } from '../../../base/common/cancellation.js';
 
@@ -30,6 +31,7 @@ export async function stageOpenideAppImage(downloadedPath: string, paths: IOpeni
 	if (token.isCancellationRequested) { return false; }
 	await rm(paths.pending, { force: true });
 	await copyFile(downloadedPath, paths.pending); await chmod(paths.pending, 0o755); await syncFile(paths.pending);
+	if (token.isCancellationRequested) { await rm(paths.pending, { force: true }); return false; }
 	await rm(paths.previous, { force: true });
 	try { await link(paths.current, paths.previous); } catch { await copyFile(paths.current, paths.previous); }
 	await syncFile(paths.previous);
@@ -58,7 +60,29 @@ export async function recoverOpenideAppImage(paths: IOpenideAppImagePaths): Prom
 	await rename(paths.previous, paths.current); await rm(paths.marker, { force: true }); await syncDirectory(paths.current); return true;
 }
 
-export async function markOpenideAppImageHealthy(paths: IOpenideAppImagePaths): Promise<void> { await rm(paths.marker, { force: true }); await rm(paths.previous, { force: true }); }
+/** Relaunch the mutable entry point, never the old binary in an extracted AppImage cache. */
+export function getOpenideAppImageLauncher(current: string, applicationName: string, launcher?: string): string {
+	for (const candidate of [launcher, join(dirname(current), applicationName)]) {
+		if (!candidate || !isAbsolute(candidate)) { continue; }
+		try { accessSync(candidate, constants.X_OK); return candidate; } catch { /* Try the AppImage itself. */ }
+	}
+	return current;
+}
+
+/** An older running window must not acknowledge a newly staged binary as healthy. */
+export async function markOpenideAppImageHealthy(paths: IOpenideAppImagePaths, runningVersion: string): Promise<boolean> {
+	const lock = await open(paths.lock, 'wx', 0o600).catch(() => undefined);
+	if (!lock) { return false; }
+	try {
+		const marker = await readOpenideAppImageMarker(paths);
+		if (!marker || marker.version !== runningVersion) { return false; }
+		await verifyOpenideArtifact(paths.current, (await stat(paths.current)).size, marker.sha256);
+		await rm(paths.marker, { force: true });
+		await rm(paths.previous, { force: true });
+		await syncDirectory(paths.current);
+		return true;
+	} finally { await lock.close(); await rm(paths.lock, { force: true }); }
+}
 
 export async function readOpenideAppImageMarker(paths: IOpenideAppImagePaths): Promise<IOpenideAppImageMarker | undefined> {
 	try {

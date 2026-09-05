@@ -129,6 +129,9 @@ jobs:
           --no-sandbox --disable-gpu --ozone-platform=x11
           --runGlob 'vs/workbench/contrib/browserView/test/electron-browser/**/*.test.js'
 
+      - name: Test updater main process lifecycle
+        run: xvfb-run -a vscode/.build/electron/openide dev/test-updater-main.mjs --no-sandbox --ozone-platform=x11
+
       - name: Test update popover
         working-directory: vscode
         run: >-

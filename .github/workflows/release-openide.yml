@@ -123,9 +123,10 @@ jobs:
       - name: Free disk space
         if: matrix.platform == 'linux'
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost || true
           sudo apt-get clean || true
           df -h /
+          node --version
 
       # Both Linux builds die in the same place -- the last line of `bundle-vscode`, the peak of the
       # whole build -- and neither dies reliably: arm64 failed two runs out of three, x64 one out of
