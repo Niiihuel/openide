@@ -62,6 +62,9 @@ jobs:
           node dev/audit-surface-tokens.mjs
           node --test dev/audit-surface-tokens.test.mjs
 
+      - name: Audit production regular expressions
+        run: node dev/audit-production-regex.mjs
+
       - name: Audit script permissions
         run: node dev/audit-script-permissions.mjs
 
