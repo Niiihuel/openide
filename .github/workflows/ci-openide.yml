@@ -10,6 +10,19 @@ permissions:
   contents: read
 
 jobs:
+  cli-check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with: { persist-credentials: false }
+      - name: Install CLI build dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y pkg-config libssl-dev
+      - name: Check native CLI integration
+        working-directory: vscode/cli
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+        run: cargo check --locked --bin code
+
   compile-and-test:
     runs-on: ubuntu-22.04
     steps:
