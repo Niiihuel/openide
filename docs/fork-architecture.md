@@ -75,7 +75,7 @@ can.
 The anchor is `openide-version.json`:
 
 ```json
-"codeOss": { "version": "1.121.0", "commit": "987c9597..." }
+"codeOss": { "version": "1.136.1", "commit": "a44adf7f..." }
 ```
 
 That commit is **which upstream version this tree came from**. Without it there

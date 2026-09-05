@@ -61,7 +61,7 @@ let
   libsDev = builtins.map (p: p.dev or p) libs;
 
   tools = with pkgs; [
-    nodejs_22
+    (import ./nodejs.nix { inherit pkgs; })
     python3
     gcc
     gnumake

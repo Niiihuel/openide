@@ -4,8 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import es from 'event-stream';
-import gulp from 'gulp';
-import filter from 'gulp-filter';
+import { gulp, filter, sourcemaps, svgmin } from './gulp/facade.ts';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -13,11 +12,9 @@ import pump from 'pump';
 import VinylFile from 'vinyl';
 import * as bundle from './bundle.ts';
 import esbuild from 'esbuild';
-import sourcemaps from 'gulp-sourcemaps';
 import fancyLog from 'fancy-log';
 import ansiColors from 'ansi-colors';
 import { getTargetStringFromTsConfig } from './tsconfigUtils.ts';
-import svgmin from 'gulp-svgmin';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);

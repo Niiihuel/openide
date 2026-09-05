@@ -86,8 +86,8 @@ The OpenIDE agent lives as a native workbench contribution
 | Field | Value |
 |---|---|
 | OpenIDE version | `1.1.0` |
-| VS Code API version | `1.121.0` |
-| Code OSS base | `1.121.0` |
+| VS Code API version | `1.136.1` |
+| Code OSS base | `1.136.1` |
 | Channel | `stable` |
 
 The two versions answer different questions. **OpenIDE version** is what the
@@ -123,8 +123,8 @@ Quick iteration on NixOS:
 
 ```sh
 nix-build dev/openide-fhs.nix -o result-fhs
-./result-fhs/bin/openide-build -c 'cd vscode && npm run compile'
-./result-fhs/bin/openide-build -c 'cd vscode && ./scripts/code.sh'
+./result-fhs/bin/openide-build -c 'cd vscode && npm ci && npm run typecheck-client && npm run gulp copy-codicons && npm run transpile-client && npm run gulp compile-extensions compile-extension-media && npm run electron'
+./result-fhs/bin/openide-build -c 'cd vscode && VSCODE_SKIP_PRELAUNCH=1 ./scripts/code.sh'
 ```
 
 ## Contributing

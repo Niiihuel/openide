@@ -10,9 +10,13 @@ const require = createRequire(import.meta.url);
 const opentype = require(path.join(root, 'node_modules/opentype.js'));
 const mapping = JSON.parse(fs.readFileSync(path.join(root, 'node_modules/@vscode/codicons/src/template/mapping.json'), 'utf8'));
 const upstreamCss = fs.readFileSync(path.join(root, 'node_modules/@vscode/codicons/dist/codicon.css'), 'utf8');
-const base = opentype.loadSync(path.join(root, 'node_modules/@vscode/codicons/dist/codicon.ttf'));
-const regular = opentype.loadSync(path.join(root, 'resources/openide-icons/openide-codicon.ttf'));
-const filled = opentype.loadSync(path.join(root, 'resources/openide-icons/openide-codicon-filled.ttf'));
+const loadFont = file => {
+	const bytes = fs.readFileSync(file);
+	return opentype.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+};
+const base = loadFont(path.join(root, 'node_modules/@vscode/codicons/dist/codicon.ttf'));
+const regular = loadFont(path.join(root, 'resources/openide-icons/openide-codicon.ttf'));
+const filled = loadFont(path.join(root, 'resources/openide-icons/openide-codicon-filled.ttf'));
 const reference = JSON.parse(fs.readFileSync(path.join(root, 'resources/openide-icons/reicon-reference.json'), 'utf8'));
 const overrides = JSON.parse(fs.readFileSync(path.join(root, 'resources/openide-icons/openide-icon-overrides.json'), 'utf8'));
 const policy = JSON.parse(fs.readFileSync(path.join(root, 'resources/openide-icons/openide-icon-policy.json'), 'utf8'));

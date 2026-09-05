@@ -10,17 +10,19 @@ import { Schemas } from '../../../../../base/common/network.js';
 import { joinPath } from '../../../../../base/common/resources.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
-import { BrowserViewCommandId, IElementData } from '../../../../../platform/browserView/common/browserView.js';
+import { BrowserViewCommandId, IBrowserViewRect } from '../../../../../platform/browserView/common/browserView.js';
 import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IFileDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
-import { BrowserElementSelectionPurpose, IBrowserViewModel } from '../../common/browserView.js';
+import { IBrowserViewModel } from '../../common/browserView.js';
 import { BrowserEditor, BrowserEditorContribution, CONTEXT_BROWSER_HAS_ERROR, CONTEXT_BROWSER_HAS_URL } from '../browserEditor.js';
 import { BROWSER_EDITOR_ACTIVE, BrowserActionCategory, BrowserActionGroup } from '../browserViewActions.js';
 
 class BrowserScreenshotContribution extends BrowserEditorContribution {
+	private pickingArea = false;
+
 	constructor(
 		editor: BrowserEditor,
 		@IFileDialogService private readonly fileDialogService: IFileDialogService,
@@ -29,18 +31,22 @@ class BrowserScreenshotContribution extends BrowserEditorContribution {
 		super(editor);
 	}
 
-	protected override subscribeToModel(model: IBrowserViewModel, store: DisposableStore): void {
-		store.add(model.onDidSelectElement(data => {
-			if (model.elementSelectionPurpose === BrowserElementSelectionPurpose.Screenshot) {
-				void this.captureSelection(model, data);
-			}
+	protected override onModelAttached(model: IBrowserViewModel, store: DisposableStore): void {
+		store.add(model.onDidPickArea(rect => {
+			if (!this.pickingArea) { return; }
+			this.pickingArea = false;
+			if (rect) { void this.captureSelection(model, rect); }
 		}));
+	}
+
+	override onModelDetached(): void {
+		this.pickingArea = false;
 	}
 
 	async takeScreenshot(): Promise<void> {
 		const model = this.editor.model;
 		if (model) {
-			await this.save(await model.captureScreenshot({ quality: 100 }), 'viewport');
+			await this.save(await model.captureScreenshot({ format: 'png' }), 'viewport');
 		}
 	}
 
@@ -50,21 +56,21 @@ class BrowserScreenshotContribution extends BrowserEditorContribution {
 			return;
 		}
 		this.editor.ensureBrowserFocus();
-		void model.toggleElementSelection(undefined, BrowserElementSelectionPurpose.Screenshot);
+		this.pickingArea = true;
+		void model.toggleAreaSelection(true);
 	}
 
-	private async captureSelection(model: IBrowserViewModel, data: IElementData): Promise<void> {
-		const rect = data.selectionRect ?? data.bounds;
+	private async captureSelection(model: IBrowserViewModel, rect: IBrowserViewRect): Promise<void> {
 		if (rect.width <= 0 || rect.height <= 0) {
 			return;
 		}
-		await this.save(await model.captureScreenshot({ quality: 100, pageRect: rect }), 'area');
+		await this.save(await model.captureScreenshot({ format: 'png', pageRect: rect, awaitNextPaint: true }), 'area');
 	}
 
 	private async save(buffer: VSBuffer, kind: 'viewport' | 'area'): Promise<void> {
 		const defaultFolder = await this.fileDialogService.defaultFilePath(Schemas.file);
 		const host = (() => {
-			try { return new URL(this.editor.getUrl() ?? '').hostname; } catch { return 'page'; }
+			try { return new URL(this.editor.model?.url ?? '').hostname; } catch { return 'page'; }
 		})();
 		const destination = await this.fileDialogService.showSaveDialog({
 			availableFileSystems: [Schemas.file],

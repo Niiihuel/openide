@@ -168,6 +168,17 @@ pub enum TargetKind {
 	Cli,
 }
 
+impl TargetKind {
+	fn download_segment(&self, platform: Platform) -> Option<String> {
+		match *self {
+			TargetKind::Server => platform.headless(),
+			TargetKind::Archive => platform.archive(),
+			TargetKind::Web => platform.web(),
+			TargetKind::Cli => Some(platform.cli()),
+		}
+	}
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Platform {
 	LinuxAlpineX64,
@@ -211,6 +222,39 @@ impl Platform {
 		.to_owned()
 	}
 
+	pub fn archive(&self) -> Option<String> {
+		match self {
+			Platform::LinuxX64 => Some("linux-x64".to_owned()),
+			Platform::LinuxARM64 => Some("linux-arm64".to_owned()),
+			Platform::LinuxARM32 => Some("linux-armhf".to_owned()),
+			Platform::DarwinX64 => Some("darwin".to_owned()),
+			Platform::DarwinARM64 => Some("darwin-arm64".to_owned()),
+			Platform::WindowsX64 => Some("win32-x64-archive".to_owned()),
+			Platform::WindowsX86 => Some("win32-archive".to_owned()),
+			Platform::WindowsARM64 => Some("win32-arm64-archive".to_owned()),
+			_ => None,
+		}
+	}
+	pub fn headless(&self) -> Option<String> {
+		let name = match self {
+			Platform::LinuxAlpineARM64 => "server-alpine-arm64",
+			Platform::LinuxAlpineX64 => "server-linux-alpine",
+			Platform::LinuxX64 => "server-linux-x64",
+			Platform::LinuxX64Legacy => "server-linux-legacy-x64",
+			Platform::LinuxARM64 => "server-linux-arm64",
+			Platform::LinuxARM64Legacy => "server-linux-legacy-arm64",
+			// No remote server is built for arm32 since Node.js dropped
+			// 32-bit Linux on armv7 in v24.
+			Platform::LinuxARM32 | Platform::LinuxARM32Legacy => return None,
+			Platform::DarwinX64 => "server-darwin",
+			Platform::DarwinARM64 => "server-darwin-arm64",
+			Platform::WindowsX64 => "server-win32-x64",
+			Platform::WindowsX86 => "server-win32",
+			Platform::WindowsARM64 => "server-win32-arm64",
+		};
+		Some(name.to_owned())
+	}
+
 	pub fn os(&self) -> String {
 		match self {
 			Platform::LinuxAlpineARM64 => "alpine",
@@ -231,6 +275,10 @@ impl Platform {
 			Platform::WindowsARM64 => "win32",
 		}
 		.to_owned()
+	}
+
+	pub fn web(&self) -> Option<String> {
+		self.headless().map(|h| format!("{h}-web"))
 	}
 
 	pub fn env_default() -> Option<Platform> {

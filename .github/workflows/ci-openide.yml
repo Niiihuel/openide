@@ -25,7 +25,7 @@ jobs:
           cache-dependency-path: vscode/package-lock.json
 
       - name: Install native dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y libkrb5-dev
+        run: sudo apt-get update -y && sudo apt-get install -y libkrb5-dev libx11-dev libxkbfile-dev libsecret-1-dev
 
       - name: Install JavaScript dependencies
         working-directory: vscode
@@ -35,6 +35,9 @@ jobs:
         run: |
           node dev/check-reliability-gates.mjs
           node --test dev/reliability-gates.test.mjs
+
+      - name: Test upstream synchronization
+        run: node --test dev/codeoss-sync.test.mjs
 
       - name: Audit version consistency
         run: node dev/audit-version-consistency.mjs
@@ -59,9 +62,17 @@ jobs:
       - name: Audit script permissions
         run: node dev/audit-script-permissions.mjs
 
-      - name: Compile canonical source
+      - name: Typecheck canonical source
         working-directory: vscode
-        run: npm run compile
+        run: npm run typecheck-client
+
+      - name: Transpile canonical source
+        working-directory: vscode
+        run: npm run gulp copy-codicons && npm run transpile-client
+
+      - name: Build bundled extensions and fetch Electron
+        working-directory: vscode
+        run: npm run gulp compile-extensions compile-extension-media && npm run electron
 
       - name: Test signed updater contract
         working-directory: vscode
@@ -103,3 +114,15 @@ jobs:
           npm run test-browser-no-install --
           --runGlob 'vs/workbench/contrib/openideAgent/test/browser/*.test.js'
           --browser chromium
+
+      - name: Test Electron browser integration
+        working-directory: vscode
+        run: >-
+          xvfb-run -a .build/electron/openide test/unit/electron/index.js
+          --no-sandbox --disable-gpu --ozone-platform=x11
+          --runGlob 'vs/workbench/contrib/browserView/test/electron-browser/**/*.test.js'
+
+      - name: Verify welcome, chat and Zen mode in the running IDE
+        env:
+          XDG_SESSION_TYPE: x11
+        run: xvfb-run -a node dev/smoke-upgrade.mjs

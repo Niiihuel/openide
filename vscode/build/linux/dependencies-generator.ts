@@ -10,7 +10,7 @@ import { generatePackageDeps as generatePackageDepsRpm } from './rpm/calculate-d
 import { referenceGeneratedDepsByArch as debianGeneratedDeps } from './debian/dep-lists.ts';
 import { referenceGeneratedDepsByArch as rpmGeneratedDeps } from './rpm/dep-lists.ts';
 import { type DebianArchString, isDebianArchString } from './debian/types.ts';
-import { isRpmArchString, type RpmArchString } from './rpm/types.ts';
+import { isRpmArchString } from './rpm/types.ts';
 // import product from '../../product.json' with { type: 'json' };
 
 // A flag that can easily be toggled.
@@ -22,7 +22,7 @@ import { isRpmArchString, type RpmArchString } from './rpm/types.ts';
 // are valid, are in dep-lists.ts
 const FAIL_BUILD_FOR_NEW_DEPENDENCIES: boolean = false;
 
-// Based on https://source.chromium.org/chromium/chromium/src/+/refs/tags/142.0.7444.265:chrome/installer/linux/BUILD.gn;l=64-80
+// Based on https://source.chromium.org/chromium/chromium/src/+/refs/tags/148.0.7778.280:chrome/installer/linux/BUILD.gn;l=64-80
 // and the Linux Archive build
 // Shared library dependencies that we already bundle.
 const bundledDeps = [
@@ -30,7 +30,7 @@ const bundledDeps = [
 	'libGLESv2.so',
 	'libvulkan.so.1',
 	'libvk_swiftshader.so',
-	'libffmpeg.so'
+	'libffmpeg.so',
 ];
 
 export async function getDependencies(packageType: 'deb' | 'rpm', buildDir: string, applicationName: string, arch: string): Promise<string[]> {
@@ -44,8 +44,8 @@ export async function getDependencies(packageType: 'deb' | 'rpm', buildDir: stri
 	}
 
 	// Get the files for which we want to find dependencies.
-	const canAsar = false; // TODO@esm ASAR disabled in ESM
-	const nativeModulesPath = path.join(buildDir, 'resources', 'app', canAsar ? 'node_modules.asar.unpacked' : 'node_modules');
+	// Native modules are unpacked next to the ASAR archive in `node_modules.asar.unpacked`.
+	const nativeModulesPath = path.join(buildDir, 'resources', 'app', 'node_modules.asar.unpacked');
 	const findResult = spawnSync('find', [nativeModulesPath, '-name', '*.node']);
 	if (findResult.status) {
 		console.error('Error finding files:');
@@ -83,8 +83,9 @@ export async function getDependencies(packageType: 'deb' | 'rpm', buildDir: stri
 	}).sort();
 
 	const referenceGeneratedDeps = packageType === 'deb' ?
-		debianGeneratedDeps[arch as DebianArchString] :
-		rpmGeneratedDeps[arch as RpmArchString];
+		(debianGeneratedDeps as Record<string, string[]>)[arch === 'ppc64le' ? 'ppc64el' : arch] :
+		(rpmGeneratedDeps as Record<string, string[]>)[arch];
+	if (!referenceGeneratedDeps) { throw new Error(`No pinned ${packageType} dependency list for ${arch}`); }
 	if (JSON.stringify(sortedDependencies) !== JSON.stringify(referenceGeneratedDeps)) {
 		const failMessage = 'The dependencies list has changed.'
 			+ '\nOld:\n' + referenceGeneratedDeps.join('\n')

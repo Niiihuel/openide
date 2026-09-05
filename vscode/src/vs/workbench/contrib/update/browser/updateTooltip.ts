@@ -12,7 +12,6 @@ import { IClipboardService } from '../../../../platform/clipboard/common/clipboa
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
-import { IMeteredConnectionService } from '../../../../platform/meteredConnection/common/meteredConnection.js';
 import { IProductService } from '../../../../platform/product/common/productService.js';
 import { getOpenideDisplayVersion, getOpenideVersion } from '../../../../platform/product/common/openideVersion.js';
 import { AvailableForDownload, Disabled, DisablementReason, Downloaded, Downloading, Idle, IUpdate, Overwriting, Ready, Restarting, State, StateType, Updating } from '../../../../platform/update/common/update.js';
@@ -34,8 +33,10 @@ export class UpdateTooltip extends Disposable {
 	private readonly productNameNode: HTMLElement;
 	private readonly currentVersionNode: HTMLElement;
 	private readonly currentVersionCopyValue: { value: string };
+	private readonly currentVersionCopyButton: HTMLElement;
 	private readonly latestVersionNode: HTMLElement;
 	private readonly latestVersionCopyValue: { value: string };
+	private readonly latestVersionCopyButton: HTMLElement;
 	private readonly releaseDateNode: HTMLElement;
 
 	// Progress section
@@ -64,7 +65,6 @@ export class UpdateTooltip extends Disposable {
 		@ICommandService private readonly commandService: ICommandService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IHoverService private readonly hoverService: IHoverService,
-		@IMeteredConnectionService private readonly meteredConnectionService: IMeteredConnectionService,
 		@IProductService private readonly productService: IProductService,
 	) {
 		super();
@@ -90,10 +90,12 @@ export class UpdateTooltip extends Disposable {
 		const currentVersionRow = this.createVersionRow(details);
 		this.currentVersionNode = currentVersionRow.label;
 		this.currentVersionCopyValue = currentVersionRow.copyValue;
+		this.currentVersionCopyButton = currentVersionRow.copyButton;
 
 		const latestVersionRow = this.createVersionRow(details);
 		this.latestVersionNode = latestVersionRow.label;
 		this.latestVersionCopyValue = latestVersionRow.copyValue;
+		this.latestVersionCopyButton = latestVersionRow.copyButton;
 
 		this.releaseDateNode = dom.append(details, dom.$('.product-release-date'));
 
@@ -146,8 +148,10 @@ export class UpdateTooltip extends Disposable {
 				: localize('updateTooltip.currentVersionLabel', "Current Version: {0}", productVersion);
 			this.currentVersionCopyValue.value = currentCommitId ? `${productVersion} (${this.productService.commit})` : productVersion;
 			this.currentVersionNode.parentElement!.style.display = '';
+			this.currentVersionCopyButton.tabIndex = 0;
 		} else {
 			this.currentVersionNode.parentElement!.style.display = 'none';
+			this.currentVersionCopyButton.tabIndex = -1;
 		}
 	}
 
@@ -158,6 +162,7 @@ export class UpdateTooltip extends Disposable {
 		this.timeRemainingNode.textContent = '';
 		this.messageNode.style.display = 'none';
 		this.actionButton.style.display = 'none';
+		this.actionButton.tabIndex = -1;
 		this.actionButton.dataset.commandId = '';
 		this.releaseNotesButton.style.marginRight = '';
 	}
@@ -194,6 +199,9 @@ export class UpdateTooltip extends Disposable {
 				break;
 			case StateType.Overwriting:
 				this.renderOverwriting(state);
+				break;
+			case StateType.Cancelling:
+				this.renderCancelling();
 				break;
 			case StateType.Restarting:
 				this.renderRestarting(state);
@@ -266,8 +274,9 @@ export class UpdateTooltip extends Disposable {
 			return;
 		}
 
+		const updateMode = this.configurationService.getValue<string>('update.mode');
 		this.renderTitleAndInfo(localize('updateTooltip.upToDateTitle', "Up to Date"));
-		switch (this.configurationService.getValue<string>('update.mode')) {
+		switch (updateMode) {
 			case 'none':
 				this.renderMessage(localize('updateTooltip.autoUpdateNone', "Automatic updates are disabled."), Codicon.warning);
 				break;
@@ -278,15 +287,9 @@ export class UpdateTooltip extends Disposable {
 				this.renderMessage(localize('updateTooltip.autoUpdateStart', "Updates will be applied on restart."));
 				break;
 			case 'default':
-				if (this.meteredConnectionService.isConnectionMetered) {
-					this.renderMessage(
-						localize('updateTooltip.meteredConnectionMessage', "Automatic updates are paused because the network connection is metered."),
-						Codicon.radioTower);
-				} else {
-					this.renderMessage(
-						localize('updateTooltip.autoUpdateDefault', "Automatic updates are enabled."),
-						Codicon.check);
-				}
+				this.renderMessage(
+					localize('updateTooltip.autoUpdateDefault', "Automatic updates are enabled."),
+					Codicon.check);
 				break;
 		}
 	}
@@ -366,6 +369,11 @@ export class UpdateTooltip extends Disposable {
 		this.renderMessage(localize('updateTooltip.restartingPleaseWait', "Restarting to update, please wait..."));
 	}
 
+	private renderCancelling() {
+		this.renderTitleAndInfo(localize('updateTooltip.cancellingTitle', "Cancelling Update"));
+		this.renderMessage(localize('updateTooltip.cancellingPleaseWait', "Cancelling update, please wait..."));
+	}
+
 	private renderTitleAndInfo(title: string, update?: IUpdate) {
 		this.titleNode.textContent = title;
 
@@ -378,8 +386,10 @@ export class UpdateTooltip extends Disposable {
 				: localize('updateTooltip.latestVersionLabel', "Latest Version: {0}", version);
 			this.latestVersionCopyValue.value = updateCommitId ? `${version} (${update.version})` : version;
 			this.latestVersionNode.parentElement!.style.display = '';
+			this.latestVersionCopyButton.tabIndex = 0;
 		} else {
 			this.latestVersionNode.parentElement!.style.display = 'none';
+			this.latestVersionCopyButton.tabIndex = -1;
 		}
 
 		// Release date
@@ -394,6 +404,7 @@ export class UpdateTooltip extends Disposable {
 		// Release notes button
 		this.releaseNotesVersion = version ?? getOpenideVersion(this.productService);
 		this.releaseNotesButton.style.display = this.releaseNotesVersion ? '' : 'none';
+		this.releaseNotesButton.tabIndex = this.releaseNotesVersion ? 0 : -1;
 		this.releaseNotesButton.style.marginRight = this.releaseNotesVersion ? 'auto' : '';
 		this.buttonBar.style.display = this.releaseNotesVersion ? '' : 'none';
 	}
@@ -402,6 +413,7 @@ export class UpdateTooltip extends Disposable {
 		this.actionButton.textContent = label;
 		this.actionButton.dataset.commandId = commandId;
 		this.actionButton.style.display = '';
+		this.actionButton.tabIndex = 0;
 	}
 
 	private renderMessage(message: string, icon?: ThemeIcon) {
@@ -414,7 +426,7 @@ export class UpdateTooltip extends Disposable {
 		this.messageNode.style.display = '';
 	}
 
-	private createVersionRow(parent: HTMLElement): { label: HTMLElement; copyValue: { value: string } } {
+	private createVersionRow(parent: HTMLElement): { label: HTMLElement; copyValue: { value: string }; copyButton: HTMLElement } {
 		const row = dom.append(parent, dom.$('.product-version'));
 		const label = dom.append(row, dom.$('span'));
 		const copyValue = { value: '' };
@@ -436,7 +448,7 @@ export class UpdateTooltip extends Disposable {
 			}
 		}));
 
-		return { label, copyValue };
+		return { label, copyValue, copyButton };
 	}
 
 	private runCommandAndClose(command: string, ...args: unknown[]) {

@@ -9,7 +9,7 @@ OpenIDE carries two version numbers, declared together in `openide-version.json`
 | | Where it lives | What it is for |
 | --- | --- | --- |
 | **Product version** | `product.json.openideVersion` | What OpenIDE calls itself: installer names, update feed, About dialog. Currently `1.1.0`. |
-| **VS Code API version** | `vscode/package.json.version` | The extension API this build implements. Every `engines.vscode` range is validated against it, so it tracks Code OSS. Currently `1.121.0`. |
+| **VS Code API version** | `vscode/package.json.version` | The extension API this build implements. Every `engines.vscode` range is validated against it, so it tracks Code OSS. Currently `1.136.1`. |
 
 Neither is edited by hand in those files — `build.sh` derives both from
 `openide-version.json`, and `dev/audit-version-consistency.mjs` fails the build
@@ -81,6 +81,10 @@ cargo --version
 git --version
 ```
 
+Development uses **Node 24.18.0**. Electron **42.10.0** embeds Node **24.18.1**;
+these are separate runtimes. On NixOS, `dev/nodejs.nix` pins the development
+binary and its checksum independently of the nixpkgs Node release.
+
 ## Quick iteration
 
 This is the loop you want for day-to-day work — it compiles TypeScript and
@@ -89,8 +93,12 @@ launches a development instance without producing a packaged product:
 ```sh
 cd vscode
 npm ci          # first checkout only
-npm run compile
-./scripts/code.sh
+npm run typecheck-client
+npm run gulp copy-codicons
+npm run transpile-client
+npm run gulp compile-extensions compile-extension-media
+npm run electron
+VSCODE_SKIP_PRELAUNCH=1 ./scripts/code.sh
 ```
 
 Run `npm run watch` in a second terminal for incremental rebuilds.
@@ -147,8 +155,8 @@ nix-build dev/openide-fhs.nix -o result-fhs
 Then run any of the commands above inside it:
 
 ```sh
-./result-fhs/bin/openide-build -c 'cd vscode && npm run compile'
-./result-fhs/bin/openide-build -c 'cd vscode && ./scripts/code.sh'
+./result-fhs/bin/openide-build -c 'cd vscode && npm run typecheck-client && npm run gulp copy-codicons && npm run transpile-client && npm run gulp compile-extensions compile-extension-media && npm run electron'
+./result-fhs/bin/openide-build -c 'cd vscode && VSCODE_SKIP_PRELAUNCH=1 ./scripts/code.sh'
 ./result-fhs/bin/openide-build -c '. dev/build.sh'
 ```
 

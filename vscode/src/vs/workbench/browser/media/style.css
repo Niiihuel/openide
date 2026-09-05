@@ -61,7 +61,6 @@ body {
 	--vscode-shadow-md: 0 0 6px rgba(0, 0, 0, 0.08);
 	--vscode-shadow-lg: 0 0 12px rgba(0, 0, 0, 0.14);
 	--vscode-shadow-xl: 0 0 20px rgba(0, 0, 0, 0.15);
-	--vscode-shadow-hover: 0 0 8px rgba(0, 0, 0, 0.12);
 	--vscode-shadow-active-tab: 0 8px 12px rgba(0, 0, 0, 0.02);
 	/* Dropdown that hangs off a bar (the menubar). Offset down and pulled in with a negative
 	   spread so the blur starts BELOW the dropdown's top edge instead of bleeding up over the

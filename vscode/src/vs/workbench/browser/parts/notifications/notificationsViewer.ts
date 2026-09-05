@@ -25,7 +25,7 @@ import { ThemeIcon } from '../../../../base/common/themables.js';
 import { DropdownMenuActionViewItem } from '../../../../base/browser/ui/dropdown/dropdownActionViewItem.js';
 import { DomEmitter } from '../../../../base/browser/event.js';
 import { Gesture, EventType as GestureEventType } from '../../../../base/browser/touch.js';
-import { Event } from '../../../../base/common/event.js';
+import { Emitter, Event } from '../../../../base/common/event.js';
 import { defaultButtonStyles, defaultProgressBarStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
@@ -34,18 +34,25 @@ import type { IManagedHover } from '../../../../base/browser/ui/hover/hover.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 
-/** Notification row height (px) of the classic workbench. */
+/** Default height (px) of a single notification row. */
 export const DEFAULT_NOTIFICATION_ROW_HEIGHT = 42;
 
-/** Notification row height (px) under Modern UI, which runs a denser list. */
+/** Compact height (px) of a single notification row. */
 export const COMPACT_NOTIFICATION_ROW_HEIGHT = 34;
 
 /** Current height (px) of a single notification row; overridable via {@link setNotificationRowHeight}. */
 let notificationRowHeight = DEFAULT_NOTIFICATION_ROW_HEIGHT;
+const onDidChangeNotificationRowHeightEmitter = new Emitter<number>();
+export const onDidChangeNotificationRowHeight = onDidChangeNotificationRowHeightEmitter.event;
 
-/** Overrides the height every notification row is measured at. */
+/**
+ * Overrides the height (px) of a single notification row.
+ */
 export function setNotificationRowHeight(height: number): void {
-	notificationRowHeight = height;
+	if (height !== notificationRowHeight) {
+		notificationRowHeight = height;
+		onDidChangeNotificationRowHeightEmitter.fire(height);
+	}
 }
 
 export class NotificationsListDelegate implements IListVirtualDelegate<INotificationViewItem> {

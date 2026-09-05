@@ -326,13 +326,13 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 
 	override get sidePanelElements(): readonly HTMLElement[] { return [this.panel.element]; }
 
-	override layout(_width: number): void {
+	override onPaneResized(_width: number): void {
 		this.componentsHeight = this.clampComponentsHeight(this.componentsHeight);
 		this.applyComponentsHeight();
 		this.layoutScrollbars();
 	}
 
-	protected override subscribeToModel(model: IBrowserViewModel, store: DisposableStore): void {
+	protected override onModelAttached(model: IBrowserViewModel, store: DisposableStore): void {
 		this.model = model;
 		this.updateSelecting(model);
 		store.add(model.onDidChangeElementSelectionActive(() => this.updateSelecting(model)));
@@ -358,7 +358,7 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		}));
 	}
 
-	override clear(): void {
+	override onModelDetached(): void {
 		this.model = undefined;
 		this.data = undefined;
 		this.forgetEdits();
@@ -391,7 +391,7 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		this.panel.setVisible(visible);
 		this.visibleContext.set(visible);
 		if (visible) {
-			this.editor.window.requestAnimationFrame(() => this.layout(0));
+			this.editor.window.requestAnimationFrame(() => this.onPaneResized(0));
 		}
 	}
 

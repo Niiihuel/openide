@@ -19,7 +19,6 @@ export SKIP_BUILD="no"
 # refuses a quality that disagrees with the channel in `openide-version.json` — but it would fail
 # well after the checkout, blaming the version file for something this line did.
 export VSCODE_QUALITY="${VSCODE_QUALITY:-stable}"
-export VSCODE_SKIP_NODE_VERSION_CHECK="yes"
 
 while getopts ":iop" opt; do
   case "$opt" in

@@ -32,7 +32,14 @@
    to the label is ours. */
 .monaco-editor .inlineSuggestionsHints .keybinding {
 	display: flex;
+	align-items: center;
 	margin-left: 6px;
+	opacity: 0.6;
+}
+
+.monaco-editor .inlineSuggestionsHints .keybinding .monaco-keybinding-key {
+	font-size: 8px;
+	padding: 2px 3px;
 }
 
 .monaco-editor .inlineSuggestionsHints .availableSuggestionCount a {

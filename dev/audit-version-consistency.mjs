@@ -88,6 +88,13 @@ if (lock && apiVersion) {
 	}
 }
 
+// Both entry points must build against the same Node ABI.
+const requiredNode = fs.readFileSync(path.join(root, 'vscode/.nvmrc'), 'utf8').trim();
+const buildNode = fs.readFileSync(path.join(root, '.nvmrc'), 'utf8').trim();
+if (requiredNode !== buildNode) {
+	problems.push(`.nvmrc declares ${buildNode}, but Code OSS requires ${requiredNode}.`);
+}
+
 // The product version must reach both product.json files, or About and the installers disagree.
 for (const [name, product] of products) {
 	if (!product || !productVersion) {

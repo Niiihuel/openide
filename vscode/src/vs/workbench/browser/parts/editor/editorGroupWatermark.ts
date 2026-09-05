@@ -10,10 +10,13 @@ import { splitRecentLabel } from '../../../../base/common/labels.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { isMacintosh, isWeb, OS } from '../../../../base/common/platform.js';
 import { localize } from '../../../../nls.js';
+import { MenuId } from '../../../../platform/actions/common/actions.js';
+import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../platform/actions/browser/toolbar.js';
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr, ContextKeyExpression, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { IStorageService, StorageScope, StorageTarget, WillSaveStateReason } from '../../../../platform/storage/common/storage.js';
 import { ILabelService, Verbosity } from '../../../../platform/label/common/label.js';
@@ -83,6 +86,7 @@ export class EditorGroupWatermark extends Disposable {
 	private readonly emptyLauncher: HTMLElement;
 	private readonly root: HTMLElement;
 	private readonly brandSubtitle: HTMLElement;
+	private readonly toolbarContainer: HTMLElement;
 	private readonly transientDisposables = this._register(new DisposableStore());
 	private readonly keybindingLabels = this._register(new DisposableStore());
 
@@ -100,23 +104,27 @@ export class EditorGroupWatermark extends Disposable {
 		@IWorkspacesService private readonly workspacesService: IWorkspacesService,
 		@ILabelService private readonly labelService: ILabelService,
 		@IHostService private readonly hostService: IHostService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService
 	) {
 		super();
 
 		this.cachedWhen = this.storageService.getObject(EditorGroupWatermark.CACHED_WHEN, StorageScope.PROFILE, Object.create(null));
 		this.workbenchState = this.contextService.getWorkbenchState();
 
-		const elements = h('.editor-group-watermark', [
-			h('.watermark-container', [
-				h('.watermark-brand', [
-					h('.letterpress'),
-					h('.watermark-brand-copy', [
-						h('.watermark-brand-title', ['OpenIDE']),
-						h('.watermark-brand-subtitle'),
+		const elements = h('.editor-group-watermark-wrapper', [
+			h('.editor-group-watermark-toolbar-container@toolbarContainer'),
+			h('.editor-group-watermark', [
+				h('.watermark-container', [
+					h('.watermark-brand', [
+						h('.letterpress'),
+						h('.watermark-brand-copy', [
+							h('.watermark-brand-title', ['OpenIDE']),
+							h('.watermark-brand-subtitle'),
+						]),
 					]),
-				]),
-				h('.watermark-empty-launcher@emptyLauncher'),
-				h('.shortcuts@shortcuts'),
+					h('.watermark-empty-launcher@emptyLauncher'),
+					h('.shortcuts@shortcuts'),
+				])
 			])
 		]);
 
@@ -125,6 +133,13 @@ export class EditorGroupWatermark extends Disposable {
 		this.shortcuts = elements.shortcuts;
 		this.emptyLauncher = elements.emptyLauncher;
 		this.brandSubtitle = elements.root.querySelector<HTMLElement>('.watermark-brand-subtitle')!;
+		this.toolbarContainer = elements.toolbarContainer;
+
+		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, this.toolbarContainer, MenuId.EditorGroupWatermarkToolbar, {
+			hiddenItemStrategy: HiddenItemStrategy.NoHide,
+			highlightToggledItems: true,
+			menuOptions: { shouldForwardArgs: true }
+		}));
 
 		this.registerListeners();
 

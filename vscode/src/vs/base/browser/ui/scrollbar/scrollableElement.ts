@@ -21,20 +21,26 @@ import './media/scrollbars.css';
 
 const HIDE_TIMEOUT = 500;
 
-/** Scrollbar thickness (px) used when a caller does not ask for a specific one. */
-export const DEFAULT_SCROLLBAR_SIZE = 10;
-let globalDefaultScrollbarSize = DEFAULT_SCROLLBAR_SIZE;
-
-/**
- * Overrides the thickness every scrollbar gets by default. Modern UI runs thinner
- * scrollbars than the classic workbench; existing elements keep the size they were
- * created with, so this is applied before the workbench renders.
- */
-export function setGlobalDefaultScrollbarSize(size: number): void {
-	globalDefaultScrollbarSize = size;
-}
 const SCROLL_WHEEL_SENSITIVITY = 50;
 const SCROLL_WHEEL_SMOOTH_SCROLL_ENABLED = true;
+
+/** The default size (px) used when a scrollbar element does not pass an explicit size. */
+export const DEFAULT_SCROLLBAR_SIZE = 10;
+let globalDefaultScrollbarSize = DEFAULT_SCROLLBAR_SIZE;
+const _onDidChangeDefaultScrollbarSizeEmitter = new Emitter<number>();
+export const onDidChangeDefaultScrollbarSize: Event<number> = _onDidChangeDefaultScrollbarSizeEmitter.event;
+
+/**
+ * Update the default scrollbar size used by all scrollable elements that were
+ * created without an explicit horizontal/vertical scrollbar size option.
+ * Elements with explicit sizes (e.g. the editor, menus) are unaffected.
+ */
+export function setGlobalDefaultScrollbarSize(size: number): void {
+	if (size !== globalDefaultScrollbarSize) {
+		globalDefaultScrollbarSize = size;
+		_onDidChangeDefaultScrollbarSizeEmitter.fire(size);
+	}
+}
 
 export interface IOverviewRulerLayoutInfo {
 	parent: HTMLElement;
@@ -283,6 +289,20 @@ export abstract class AbstractScrollableElement extends Widget {
 		this._shouldRender = true;
 
 		this._revealOnScroll = true;
+
+		// Subscribe to global default size changes, but only for axes whose size
+		// was NOT explicitly provided. Elements with explicit sizes (editor,
+		// menus, peek, chat input, etc.) use a fixed size and must not be updated.
+		const hSizeExplicit = typeof options.horizontalScrollbarSize !== 'undefined';
+		const vSizeExplicit = typeof options.verticalScrollbarSize !== 'undefined';
+		if (!hSizeExplicit || !vSizeExplicit) {
+			this._register(onDidChangeDefaultScrollbarSize(newSize => {
+				this.updateOptions({
+					...(!hSizeExplicit ? { horizontalScrollbarSize: newSize } : {}),
+					...(!vSizeExplicit ? { verticalScrollbarSize: newSize } : {}),
+				});
+			}));
+		}
 	}
 
 	public override dispose(): void {

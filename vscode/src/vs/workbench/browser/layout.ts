@@ -5,6 +5,7 @@
 
 import { Disposable, DisposableMap, DisposableStore, IDisposable, toDisposable } from '../../base/common/lifecycle.js';
 import { Event, Emitter } from '../../base/common/event.js';
+import { alert } from '../../base/browser/ui/aria/aria.js';
 import { EventType, addDisposableListener, getClientArea, size, IDimension, isAncestorUsingFlowTo, computeScreenAwareSize, getActiveDocument, getWindows, getActiveWindow, isActiveDocument, getWindow, getWindowId, getActiveElement, Dimension } from '../../base/browser/dom.js';
 import { onDidChangeFullscreen, isFullscreen, isWCOEnabled } from '../../base/browser/browser.js';
 import { isWindows, isLinux, isMacintosh, isWeb, isIOS } from '../../base/common/platform.js';
@@ -15,6 +16,7 @@ import { Position, Parts, PartOpensMaximizedOptions, IWorkbenchLayoutService, po
 import { isTemporaryWorkspace, IWorkspaceContextService, WorkbenchState } from '../../platform/workspace/common/workspace.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../platform/storage/common/storage.js';
 import { IConfigurationChangeEvent, IConfigurationService, isConfigured } from '../../platform/configuration/common/configuration.js';
+import { ChatAIDisabledSettingId } from '../../platform/chat/common/chatSettings.js';
 import { ITitleService } from '../services/title/browser/titleService.js';
 import { ServicesAccessor } from '../../platform/instantiation/common/instantiation.js';
 import { StartupKind, ILifecycleService } from '../services/lifecycle/common/lifecycle.js';
@@ -32,6 +34,7 @@ import { coalesce } from '../../base/common/arrays.js';
 import { assertReturnsDefined } from '../../base/common/types.js';
 import { INotificationService, NotificationsFilter } from '../../platform/notification/common/notification.js';
 import { IThemeService } from '../../platform/theme/common/themeService.js';
+import { isHighContrast } from '../../platform/theme/common/theme.js';
 import { WINDOW_ACTIVE_BORDER, WINDOW_INACTIVE_BORDER } from '../common/theme.js';
 import { LineNumbersType } from '../../editor/common/config/editorOptions.js';
 import { URI } from '../../base/common/uri.js';
@@ -47,6 +50,7 @@ import { AuxiliaryBarPart } from './parts/auxiliarybar/auxiliaryBarPart.js';
 import { ITelemetryService } from '../../platform/telemetry/common/telemetry.js';
 import { IAuxiliaryWindowService } from '../services/auxiliaryWindow/browser/auxiliaryWindowService.js';
 import { CodeWindow, mainWindow } from '../../base/browser/window.js';
+import { localize } from '../../nls.js';
 
 //#region Layout Implementation
 
@@ -113,6 +117,7 @@ enum LayoutClasses {
 	 * flash unstyled for a frame.
 	 */
 	MODERN_UI = 'modern-ui',
+	MODERN_UI_COMPACT = 'modern-ui-compact',
 	MODERN_UI_TABS = 'modern-ui-tabs'
 }
 
@@ -449,6 +454,11 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 				this.updateShadows();
 			}
 
+			// Modern UI Update (floating panels presentation)
+			if (e.affectsConfiguration(LayoutSettings.MODERN_UI) || e.affectsConfiguration(LayoutSettings.MODERN_UI_DENSITY)) {
+				this.updateFloatingPanels();
+			}
+
 			// Auxiliary Sidebar
 			if (e.affectsConfiguration(WorkbenchLayoutSettings.AUXILIARYBAR_FORCE_MAXIMIZED)) {
 				const forceMaximized = this.configurationService.getValue(WorkbenchLayoutSettings.AUXILIARYBAR_FORCE_MAXIMIZED);
@@ -633,8 +643,19 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 		return true;
 	}
 
-	private updateTopWindowEdgeClass(): void {
-		this.mainContainer.classList.toggle(LayoutClasses.TOP_WINDOW_EDGE, isFloatingTopEdgeExposed(this, mainWindow));
+
+	isModernUICompact(): boolean {
+		return false; // OpenIDE keeps its established density and user font scaling.
+	}
+
+	private updateFloatingPanels(): void {
+		// Floating panels is a main-window concept: only the main container hosts
+		// the side bars and bottom panel. Scope the class (and therefore the CSS
+		// card margins) to the main container so auxiliary windows — whose parts do
+		// not apply the matching content insets in code — are left untouched.
+		this.mainContainer.classList.toggle(LayoutClasses.FLOATING_PANELS, this.isFloatingPanelsEnabled());
+		this.mainContainer.classList.toggle(LayoutClasses.MODERN_UI_COMPACT, this.isModernUICompact());
+		this.updateWindowBorder();
 	}
 
 	private setSideBarPosition(position: Position): void {
@@ -671,6 +692,10 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 	}
 
 	private updateWindowBorder(skipLayout = false) {
+		const theme = this.themeService.getColorTheme();
+		const didHaveMainWindowBorder = this.hasMainWindowBorder();
+		const suppressMainWindowBorder = this.isFloatingPanelsEnabled() && !isHighContrast(theme.type);
+
 		if (
 			isWeb ||
 			isWindows || 											// not working well with zooming (border often not visible)
@@ -683,24 +708,22 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 			return;
 		}
 
-		const theme = this.themeService.getColorTheme();
-
 		const activeBorder = theme.getColor(WINDOW_ACTIVE_BORDER);
 		const inactiveBorder = theme.getColor(WINDOW_INACTIVE_BORDER);
-
-		const didHaveMainWindowBorder = this.hasMainWindowBorder();
 
 		for (const container of this.containers) {
 			const isMainContainer = container === this.mainContainer;
 			const isActiveContainer = this.activeContainer === container;
 
 			let windowBorder = false;
-			if (!this.state.runtime.mainWindowFullscreen && (activeBorder || inactiveBorder)) {
+			if (!(isMainContainer && suppressMainWindowBorder) && !this.state.runtime.mainWindowFullscreen && (activeBorder || inactiveBorder)) {
 				windowBorder = true;
 
 				// If the inactive color is missing, fallback to the active one
 				const borderColor = isActiveContainer && this.state.runtime.hasFocus ? activeBorder : inactiveBorder ?? activeBorder;
 				container.style.setProperty('--window-border-color', borderColor?.toString() ?? 'transparent');
+			} else {
+				container.style.removeProperty('--window-border-color');
 			}
 
 			if (isMainContainer) {
@@ -1742,6 +1765,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 				this.parent,				// in that case the workbench will span the entire site
 				this.contextService.getWorkbenchState() === WorkbenchState.EMPTY ? DEFAULT_EMPTY_WINDOW_DIMENSIONS : DEFAULT_WORKSPACE_WINDOW_DIMENSIONS // running with fallback to ensure no error is thrown (https://github.com/microsoft/vscode/issues/240242)
 			);
+
 			this.logService.trace(`Layout#layout, height: ${this._mainContainerDimension.height}, width: ${this._mainContainerDimension.width}`);
 
 			size(this.mainContainer, this._mainContainerDimension.width, this._mainContainerDimension.height);
@@ -1920,7 +1944,9 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 			this.state.runtime.mainWindowFullscreen ? LayoutClasses.FULLSCREEN : undefined,
 			this.isShadowsDisabled() ? LayoutClasses.NO_SHADOWS : undefined,
 			this.isFloatingPanelsEnabled() ? LayoutClasses.FLOATING_PANELS : undefined,
+			// Also seed the modern-ui class here (see `LayoutClasses.MODERN_UI`).
 			this.isFloatingPanelsEnabled() ? LayoutClasses.MODERN_UI : undefined,
+			this.isModernUICompact() ? LayoutClasses.MODERN_UI_COMPACT : undefined,
 			this.isFloatingPanelsEnabled() ? LayoutClasses.MODERN_UI_TABS : undefined,
 			`panel-position-${positionToString(this.getPanelPosition())}`,
 			`panel-alignment-${this.getPanelAlignment()}`
@@ -2327,6 +2353,18 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 		}
 	}
 
+	toggleSecondarySideBar(): void {
+		const visible = !this.isSecondarySideBarVisible();
+		this.setPartHidden(!visible, Parts.AUXILIARYBAR_PART);
+		alert(visible
+			? localize('auxiliaryBarVisible', "Secondary Side Bar shown")
+			: localize('auxiliaryBarHidden', "Secondary Side Bar hidden"));
+	}
+
+	isSecondarySideBarVisible(): boolean {
+		return this.isVisible(Parts.AUXILIARYBAR_PART);
+	}
+
 	hasMainWindowBorder(): boolean {
 		return this.state.runtime.mainWindowBorder;
 	}
@@ -2356,6 +2394,10 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 		if (shouldShowTitleBar !== titlebarVisible) {
 			this.workbenchGrid.setViewVisible(this.titleBarPartView, shouldShowTitleBar);
 		}
+	}
+
+	private updateTopWindowEdgeClass(): void {
+		this.mainContainer.classList.toggle(LayoutClasses.TOP_WINDOW_EDGE, isFloatingTopEdgeExposed(this, mainWindow));
 	}
 
 	toggleMenuBar(): void {
@@ -3014,11 +3056,12 @@ class LayoutStateModel extends Disposable {
 				return true;
 			}
 
-			// New users: Show auxiliary bar even in empty workspaces
-			// but not if the user explicitly hides it
+			// New users: Show auxiliary bar even in empty workspaces,
+			// but not if the user explicitly hides it or AI features are disabled.
 			if (
 				this.isNew[StorageScope.APPLICATION] &&
-				configuration.value !== 'hidden'
+				configuration.value !== 'hidden' &&
+				!this.configurationService.getValue<boolean>(ChatAIDisabledSettingId)
 			) {
 				return false;
 			}

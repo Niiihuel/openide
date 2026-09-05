@@ -19,7 +19,7 @@ import { contrastBorder, activeContrastBorder } from '../../../../platform/theme
 import { EventHelper, addDisposableListener, EventType, clearNode, getWindow, isHTMLElement, $ } from '../../../../base/browser/dom.js';
 import { createStyleSheet } from '../../../../base/browser/domStylesheets.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
-import { Parts, IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
+import { Parts, IWorkbenchLayoutService, LayoutSettings } from '../../../services/layout/browser/layoutService.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { equals } from '../../../../base/common/arrays.js';
 import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
@@ -127,12 +127,22 @@ class StatusbarPart extends Part implements IStatusbarEntryContainer {
 	 * layout so its items remain centered. The part grows by this amount and
 	 * the matching padding is applied in `floatingPanels.css`.
 	 */
+
+	/**
+	 * Vertical padding reserved around the main status bar under the floating panels
+	 * experiment so its items remain centered. The part grows by this amount and
+	 * the matching padding is applied in `floatingPanels.css`.
+	 */
 	static readonly FLOATING_BOTTOM_PADDING = 6;
+	static readonly COMPACT_DENSITY_FLOATING_BOTTOM_PADDING = 4;
 
 	//#region IView
 
 	private get floatingBottomPadding(): number {
-		return this.getId() === Parts.STATUSBAR_PART && this.layoutService.isFloatingPanelsEnabled() ? StatusbarPart.FLOATING_BOTTOM_PADDING : 0;
+		if (this.getId() !== Parts.STATUSBAR_PART || !this.layoutService.isFloatingPanelsEnabled()) {
+			return 0;
+		}
+		return this.layoutService.isModernUICompact() ? StatusbarPart.COMPACT_DENSITY_FLOATING_BOTTOM_PADDING : StatusbarPart.FLOATING_BOTTOM_PADDING;
 	}
 
 	readonly minimumWidth: number = 0;
@@ -228,6 +238,18 @@ class StatusbarPart extends Part implements IStatusbarEntryContainer {
 
 		// Workbench state changes
 		this._register(this.contextService.onDidChangeWorkbenchState(() => this.updateStyles()));
+
+		// Floating panels changes the reserved bottom padding (and therefore the
+		// part height) for the main status bar only: signal the grid that the size
+		// constraint changed.
+		this._register(this.configurationService.onDidChangeConfiguration(e => {
+			if (this.getId() === Parts.STATUSBAR_PART && (e.affectsConfiguration(LayoutSettings.MODERN_UI) || e.affectsConfiguration(LayoutSettings.MODERN_UI_DENSITY))) {
+				this._onDidChange.fire(undefined);
+				if (this.element) {
+					this.updateStyles();
+				}
+			}
+		}));
 	}
 
 	overrideEntry(id: string, override: Partial<IStatusbarEntry>): IDisposable {
@@ -330,7 +352,11 @@ class StatusbarPart extends Part implements IStatusbarEntryContainer {
 		const accessor: IStatusbarEntryAccessor = {
 			update: entry => {
 				lastEntry = entry;
+				const hadBackgroundColor = itemContainer.classList.contains('has-background-color');
 				item.update(this.withEntryOverride(entry, id));
+				if (hadBackgroundColor !== itemContainer.classList.contains('has-background-color')) {
+					this.updateVisibleBackgroundColorNeighbors();
+				}
 			},
 			dispose: () => {
 				const { needsFullRefresh } = this.doAddOrRemoveModelEntry(viewModelEntry, false);
@@ -624,6 +650,38 @@ class StatusbarPart extends Part implements IStatusbarEntryContainer {
 					}));
 				}
 			}
+		}
+
+		this.updateVisibleBackgroundColorNeighbors();
+	}
+
+	private updateVisibleBackgroundColorNeighbors(): void {
+		this.doUpdateVisibleBackgroundColorNeighbors(this.viewModel.getEntries(StatusbarAlignment.LEFT), StatusbarAlignment.LEFT);
+		this.doUpdateVisibleBackgroundColorNeighbors(this.viewModel.getEntries(StatusbarAlignment.RIGHT).reverse(), StatusbarAlignment.RIGHT);
+	}
+
+	private doUpdateVisibleBackgroundColorNeighbors(entries: IStatusbarViewModelEntry[], alignment: StatusbarAlignment): void {
+		let previousVisibleEntry: IStatusbarViewModelEntry | undefined;
+
+		for (const entry of entries) {
+			entry.container.classList.remove('visible-background-color-neighbor');
+
+			if (this.viewModel.isHidden(entry.id)) {
+				continue;
+			}
+
+			const isCompactNeighbor = alignment === StatusbarAlignment.LEFT
+				? previousVisibleEntry?.container.classList.contains('compact-right') && entry.container.classList.contains('compact-left')
+				: previousVisibleEntry?.container.classList.contains('compact-left') && entry.container.classList.contains('compact-right');
+			if (
+				previousVisibleEntry?.container.classList.contains('has-background-color') &&
+				entry.container.classList.contains('has-background-color') &&
+				!isCompactNeighbor
+			) {
+				entry.container.classList.add('visible-background-color-neighbor');
+			}
+
+			previousVisibleEntry = entry;
 		}
 	}
 

@@ -142,6 +142,24 @@
 	transition: none;
 }
 
+.update-tooltip .button-bar button {
+	padding: 4px 12px;
+	border-radius: var(--vscode-cornerRadius-small);
+	font-size: var(--vscode-bodyFontSize-small);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.update-tooltip .release-notes-button {
+	background-color: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-button-border, transparent));
+}
+
+.update-tooltip .release-notes-button:hover {
+	background-color: var(--vscode-button-secondaryHoverBackground);
+}
+
 /* Progress ---------------------------------------------------------------------------------- */
 
 .update-tooltip .progress-container {

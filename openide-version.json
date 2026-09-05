@@ -11,7 +11,7 @@
     "publicKey": "MCowBQYDK2VwAyEAncmywsS7Ph9n1QHN7NIYLa1CLuemUjrN6asibvMS4ys="
   },
   "codeOss": {
-    "version": "1.121.0",
-    "commit": "987c9597516278c9fcf10d963a0592ce1384ab93"
+    "version": "1.136.1",
+    "commit": "a44adf7f53e00964ab890f9f8758a334f1fc15bc"
   }
 }

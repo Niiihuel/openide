@@ -1,0 +1,10 @@
+{
+  "description": "Upstream surfaces intentionally replaced by OpenIDE; shared agent-host code remains vendored but upstream providers are not registered by the product entry points.",
+  "paths": [
+    "extensions/copilot",
+    "src/vs/workbench/contrib/welcomeOnboarding",
+    "src/vs/workbench/contrib/preferences/test/browser/settingsEditor2.test.ts",
+    "src/vs/workbench/contrib/preferences/test/browser/settingsEditorSettingIndicators.test.ts",
+    "src/vs/workbench/contrib/preferences/test/browser/settingsTree.test.ts"
+  ]
+}

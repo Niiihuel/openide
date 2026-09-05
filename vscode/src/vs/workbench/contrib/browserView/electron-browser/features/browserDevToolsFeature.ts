@@ -16,8 +16,7 @@ import { KeybindingWeight } from '../../../../../platform/keybinding/common/keyb
 import { IStorageService } from '../../../../../platform/storage/common/storage.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IBrowserViewModel } from '../../common/browserView.js';
-import { BrowserEditor, BrowserEditorContribution, CONTEXT_BROWSER_HAS_ERROR, CONTEXT_BROWSER_HAS_URL } from '../browserEditor.js';
-import { BROWSER_EDITOR_ACTIVE, BrowserActionCategory } from '../browserViewActions.js';
+import { BrowserEditor, BrowserEditorContribution, BROWSER_EDITOR_ACTIVE, BrowserActionCategory, CONTEXT_BROWSER_HAS_ERROR, CONTEXT_BROWSER_HAS_URL } from '../browserEditor.js';
 import { BrowserResizableSidePanel } from './browserResizableSidePanel.js';
 
 const CONTEXT_BROWSER_DEVTOOLS_VISIBLE = new RawContextKey<boolean>('browserDevToolsVisible', false, localize('browser.devToolsVisible', "Whether Chromium DevTools are docked in the integrated browser"));
@@ -52,13 +51,13 @@ export class BrowserDevToolsContribution extends BrowserEditorContribution {
 		return this.host;
 	}
 
-	protected override subscribeToModel(model: IBrowserViewModel, store: DisposableStore): void {
+	protected override onModelAttached(model: IBrowserViewModel, store: DisposableStore): void {
 		this.model = model;
 		this.syncVisibility(model.isDevToolsOpen);
 		store.add(model.onDidChangeDevToolsState(event => this.syncVisibility(event.isDevToolsOpen)));
 	}
 
-	override clear(): void {
+	override onModelDetached(): void {
 		this.model = undefined;
 		this.syncVisibility(false);
 	}
@@ -94,7 +93,7 @@ class ToggleBrowserDevToolsAction extends Action2 {
 			id: BrowserViewCommandId.ToggleDevTools,
 			title: localize2('browser.toggleDevToolsAction', 'Toggle Browser DevTools'),
 			category: BrowserActionCategory,
-			icon: Codicon.terminal,
+			icon: Codicon.developerTools,
 			f1: true,
 			precondition: ContextKeyExpr.and(BROWSER_EDITOR_ACTIVE, CONTEXT_BROWSER_HAS_URL, CONTEXT_BROWSER_HAS_ERROR.negate()),
 			toggled: CONTEXT_BROWSER_DEVTOOLS_VISIBLE,

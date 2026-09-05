@@ -49,7 +49,6 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
   if [[ "${CI_BUILD}" != "no" || ! -d node_modules ]]; then
     export ELECTRON_SKIP_BINARY_DOWNLOAD=1
     export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-    export VSCODE_SKIP_NODE_VERSION_CHECK=1
     node build/npm/preinstall.ts
     npm ci
   fi
