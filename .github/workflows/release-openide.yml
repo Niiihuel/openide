@@ -115,6 +115,38 @@ jobs:
         if: matrix.platform == 'linux'
         run: sudo apt-get update -y && sudo apt-get install -y libkrb5-dev xvfb
 
+      # Code OSS uses signtool while patching native dependencies, even when the
+      # final installer is unsigned. The SDK is installed on hosted Windows
+      # runners, but its versioned bin directory is not on PATH by default.
+      - name: Locate Windows SDK tools
+        if: matrix.platform == 'win32'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $roots = @(${env:ProgramFiles(x86)}, $env:ProgramFiles) |
+            Where-Object { $_ } |
+            ForEach-Object { Join-Path $_ 'Windows Kits\10\bin' } |
+            Select-Object -Unique
+          $versions = @($roots | ForEach-Object {
+            if (Test-Path $_) { Get-ChildItem $_ -Directory }
+          } | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+            Sort-Object { [version]$_.Name } -Descending)
+          $architectures = if ($env:RUNNER_ARCH -eq 'ARM64') { @('arm64', 'x64', 'x86') } else { @('x64', 'x86') }
+          $sdkBin = $null
+          foreach ($architecture in $architectures) {
+            foreach ($version in $versions) {
+              $candidate = Join-Path $version.FullName $architecture
+              if (Test-Path (Join-Path $candidate 'signtool.exe')) {
+                $sdkBin = $candidate
+                break
+              }
+            }
+            if ($sdkBin) { break }
+          }
+          if (-not $sdkBin) { throw 'Windows SDK signtool.exe was not found. Install the Windows 10/11 SDK before building.' }
+          $sdkBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "Windows SDK tools: $sdkBin"
+
       # Two Linux runners died mid-build with no logs uploaded — the shape of a runner that ran out
       # of room, not of a build that failed. A GitHub runner starts with ~14 GB free, and this job
       # produces out-build, out-vscode, out-vscode-min, the REH bundles, the packaged app and then

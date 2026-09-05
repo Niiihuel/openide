@@ -65,6 +65,11 @@ version from [`.nvmrc`](.nvmrc), or download from
 tools"** enabled so native addons can compile. Restart your shell after
 installing rustup so `cargo` is on the `PATH`.
 
+Install the Windows 10/11 SDK and add its versioned `bin/<architecture>` directory
+to `PATH` so `signtool.exe` is available. Code OSS uses it when repackaging native
+dependencies even if the final installer is unsigned. The release workflow
+discovers this directory before starting the build.
+
 Packaging `.msi` installers additionally needs
 [WiX Toolset v3](https://wixtoolset.org/releases/), with `candle.exe` and
 `light.exe` on the `PATH`.
