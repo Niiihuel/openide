@@ -4,6 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { createHash } from 'crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { newWriteableBufferStream, VSBuffer } from '../../../../base/common/buffer.js';
 import { DeferredPromise, timeout } from '../../../../base/common/async.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { CancellationError } from '../../../../base/common/errors.js';
@@ -33,7 +38,7 @@ class TestLinuxUpdateService extends LinuxUpdateService {
 	}
 	beginCheck(): void { this.quality = 'stable'; this.doCheckForUpdates(false); }
 	cancel(): Promise<void> { return this.cancelUpdate(); }
-	download(): Promise<void> { return this.doDownloadUpdate(State.AvailableForDownload({ version: 'build', productVersion: '1.2.0', url: 'https://example.test/update', size: 3, sha256hash: 'a'.repeat(64) })); }
+	download(content = 'new'): Promise<void> { return this.doDownloadUpdate(State.AvailableForDownload({ version: 'build', productVersion: '1.2.0', url: 'https://example.test/update', size: Buffer.byteLength(content), sha256hash: createHash('sha256').update(content).digest('hex') })); }
 }
 
 suite('OpenIDE Linux update lifecycle', () => {
@@ -52,6 +57,58 @@ suite('OpenIDE Linux update lifecycle', () => {
 			new class extends mock<IMeteredConnectionService>() { override readonly onDidChangeIsConnectionMetered = Event.None; },
 			new class extends mock<IWindowsMainService>() { override getWindows() { return []; } override readonly onDidSignalReadyWindow = Event.None; },
 		));
+	}
+
+	for (const scenario of ['success', 'truncated', 'oversized', 'cancelled', 'stream error'] as const) {
+		test(`streams VSBuffer downloads: ${scenario}`, async () => {
+			const dir = await mkdtemp(join(tmpdir(), 'openide-download-test-'));
+			const current = join(dir, 'OpenIDE.AppImage');
+			const previous = process.env['OPENIDE_APPIMAGE_PATH'];
+			process.env['OPENIDE_APPIMAGE_PATH'] = current;
+			const stream = newWriteableBufferStream();
+			try {
+				await writeFile(current, 'old');
+				const requested = new DeferredPromise<void>();
+				const updater = service(new class extends mock<IRequestService>() {
+					override async request() {
+						requested.complete();
+						return { res: { statusCode: 200, headers: {} }, stream };
+					}
+				});
+				const states: State[] = [];
+				store.add(updater.onStateChange(state => states.push(state)));
+				// Large chunks also exercise pause/drain backpressure, including buffered data.
+				const content = 'new'.repeat(100_000);
+				const download = updater.download(content);
+				const outcome = download.then(() => undefined, error => error as Error);
+				await requested.p;
+				if (scenario === 'cancelled') {
+					await updater.cancel();
+				} else if (scenario === 'stream error') {
+					stream.error(new Error('connection lost'));
+				} else {
+					stream.write(VSBuffer.fromString(content.slice(0, 100_000)));
+					stream.end(VSBuffer.fromString(content.slice(100_000, scenario === 'truncated' ? -1 : undefined) + (scenario === 'oversized' ? '!' : '')));
+				}
+				const error = await outcome;
+				if (scenario === 'success') {
+					assert.strictEqual(error, undefined);
+					assert.strictEqual(updater.state.type, StateType.Ready);
+					assert.strictEqual(await readFile(current, 'utf8'), content);
+					assert.strictEqual(await readFile(`${current}.previous`, 'utf8'), 'old');
+					assert.ok(states.some(state => state.type === StateType.Downloading && state.downloadedBytes === content.length));
+				} else {
+					assert.strictEqual(updater.state.type, StateType.Idle);
+					assert.strictEqual(await readFile(current, 'utf8'), 'old');
+					if (scenario !== 'cancelled') { assert.ok(error instanceof Error); }
+				}
+			} finally {
+				stream.destroy();
+				if (previous === undefined) { delete process.env['OPENIDE_APPIMAGE_PATH']; }
+				else { process.env['OPENIDE_APPIMAGE_PATH'] = previous; }
+				await rm(dir, { recursive: true, force: true });
+			}
+		});
 	}
 
 	test('cancels the manifest request and ignores a late response', async () => {

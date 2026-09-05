@@ -15,6 +15,7 @@ import { listenStream } from '../../../base/common/stream.js';
 import { CancellationTokenSource } from '../../../base/common/cancellation.js';
 import { DeferredPromise } from '../../../base/common/async.js';
 import { Event } from '../../../base/common/event.js';
+import { CancellationError } from '../../../base/common/errors.js';
 import { app } from 'electron';
 import { getOpenideVersion } from '../../product/common/openideVersion.js';
 import { IWindowsMainService } from '../../windows/electron-main/windows.js';
@@ -23,6 +24,7 @@ import { mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { finished } from 'stream/promises';
+import { localize } from '../../../nls.js';
 import { getOpenideAppImageLauncher, getOpenideAppImagePaths, markOpenideAppImageHealthy, recoverOpenideAppImage, stageOpenideAppImage } from './openideAppImageUpdater.js';
 import { IApplicationStorageMainService } from '../../storage/electron-main/storageMainService.js';
 import { ITelemetryService } from '../../telemetry/common/telemetry.js';
@@ -119,26 +121,81 @@ export class LinuxUpdateService extends AbstractUpdateService {
 		}
 		if (this.downloadCts) { return; }
 		const downloadFinished = this.downloadFinished = new DeferredPromise<void>();
-		const operationCts = new CancellationTokenSource(); this.downloadCts = operationCts; this.setState(State.Downloading(state.update, true, false, 0, state.update.size, Date.now()));
+		const operationCts = new CancellationTokenSource();
+		this.downloadCts = operationCts;
+		const startedAt = Date.now();
+		this.setState(State.Downloading(state.update, true, false, 0, state.update.size, startedAt));
 		let dir: string | undefined;
 		try {
-			const paths = getOpenideAppImagePaths(current); dir = await mkdtemp(join(tmpdir(), 'openide-update-')); const download = join(dir, 'OpenIDE.AppImage');
+			const paths = getOpenideAppImagePaths(current);
+			dir = await mkdtemp(join(tmpdir(), 'openide-update-'));
+			const download = join(dir, 'OpenIDE.AppImage');
 			if (operationCts.token.isCancellationRequested) { this.setState(State.Idle(UpdateType.Archive)); return; }
-			const context = await this.requestService.request({ url: state.update.url, callSite: NO_FETCH_TELEMETRY }, operationCts.token);
-			if (!context.res.statusCode || context.res.statusCode < 200 || context.res.statusCode >= 300) { throw new Error(`Descarga HTTP ${context.res.statusCode ?? 'sin status'}.`); }
-			const output = createWriteStream(download, { mode: 0o700, flags: 'wx' }); const completed = finished(output); completed.catch(() => undefined); let received = 0;
-			await new Promise<void>((resolve, reject) => { let settled = false; output.once('error', error => { if (!settled) { settled = true; context.stream.destroy(); reject(error); } }); listenStream(context.stream, {
-				onData: chunk => { if (settled) { return; } received += chunk.byteLength; if (received > state.update.size!) { settled = true; context.stream.destroy(); output.destroy(); reject(new Error('La descarga excede el tamaño firmado.')); return; } if (!output.write(Buffer.from(chunk as unknown as Uint8Array))) { context.stream.pause(); output.once('drain', () => context.stream.resume()); } },
-				onError: error => { if (!settled) { settled = true; output.destroy(); reject(error); } },
-				onEnd: () => { if (!settled) { settled = true; output.end(); resolve(); } },
-			}); });
+			const context = await this.requestService.request({ url: state.update.url, timeout: 30_000, callSite: NO_FETCH_TELEMETRY }, operationCts.token);
+			if (!context.res.statusCode || context.res.statusCode < 200 || context.res.statusCode >= 300) {
+				context.stream.destroy();
+				throw new Error(`Descarga HTTP ${context.res.statusCode ?? 'sin status'}.`);
+			}
+			const output = createWriteStream(download, { mode: 0o700, flags: 'wx' });
+			const completed = finished(output);
+			completed.catch(() => undefined);
+			let received = 0;
+			let lastProgressAt = startedAt;
+			await new Promise<void>((resolve, reject) => {
+				let settled = false;
+				const fail = (error: Error) => {
+					if (settled) { return; }
+					settled = true;
+					clearTimeout(stalled);
+					cancellation.dispose();
+					context.stream.destroy();
+					output.destroy();
+					reject(error);
+				};
+				const onStalled = () => fail(new Error(localize('openide.update.downloadStalled', "The update download received no data for 30 seconds. Please try again.")));
+				let stalled = setTimeout(onStalled, 30_000);
+				const cancellation = operationCts.token.onCancellationRequested(() => fail(new CancellationError()));
+				output.once('error', fail);
+				if (operationCts.token.isCancellationRequested) { fail(new CancellationError()); return; }
+				listenStream(context.stream, {
+					onData: chunk => {
+						if (settled) { return; }
+						try {
+							clearTimeout(stalled);
+							stalled = setTimeout(onStalled, 30_000);
+							received += chunk.byteLength;
+							if (received > state.update.size!) { throw new Error('La descarga excede el tamaño firmado.'); }
+							// IRequestService yields VSBuffer; its buffer holds the actual bytes.
+							if (!output.write(chunk.buffer)) {
+								context.stream.pause();
+								output.once('drain', () => { if (!settled) { context.stream.resume(); } });
+							}
+							const now = Date.now();
+							if (now - lastProgressAt >= 100 || received === state.update.size) {
+								lastProgressAt = now;
+								this.setState(State.Downloading(state.update, true, false, received, state.update.size, startedAt));
+							}
+						} catch (error) { fail(error instanceof Error ? error : new Error(String(error))); }
+					},
+					onError: fail,
+					onEnd: () => {
+						if (settled) { return; }
+						settled = true;
+						clearTimeout(stalled);
+						cancellation.dispose();
+						output.end();
+						resolve();
+					},
+				});
+			});
 			await completed; if (received !== state.update.size) { throw new Error('La descarga quedó truncada.'); }
 			if (operationCts.token.isCancellationRequested) { this.setState(State.Idle(UpdateType.Archive)); return; }
 			this.setState(State.Verifying(state.update, true));
 			const staged = await stageOpenideAppImage(download, paths, state.update.productVersion ?? state.update.version, state.update.size!, state.update.sha256hash!, operationCts.token);
 			this.setState(staged ? State.Ready(state.update, true, false) : State.Idle(UpdateType.Archive));
 		} catch (error) {
-			if (operationCts.token.isCancellationRequested) { return; }
+			if (operationCts.token.isCancellationRequested) { this.setState(State.Idle(UpdateType.Archive)); return; }
+			this.logService.error('update#AppImage download failed', error);
 			this.setState(State.Idle(UpdateType.Archive, error instanceof Error ? error.message : String(error))); throw error;
 		} finally { if (dir) { await rm(dir, { recursive: true, force: true }).catch(error => this.logService.warn('No se pudo limpiar temporal de update', error)); } if (this.downloadCts === operationCts) { this.downloadCts = undefined; } operationCts.dispose(); this.downloadFinished = undefined; downloadFinished.complete(); }
 	}
