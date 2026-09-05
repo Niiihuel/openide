@@ -1,0 +1,87 @@
+1
+00:00:00,000 --> 00:00:03,500
+Meet OpenIDE. Your code, your AI agent,
+
+2
+00:00:03,500 --> 00:00:07,000
+and your running app, together in one workspace.
+
+3
+00:00:07,000 --> 00:00:11,000
+Choose a connected model,
+then describe the change you want.
+
+4
+00:00:11,000 --> 00:00:15,000
+OpenIDE brings the editor context
+into the conversation.
+
+5
+00:00:15,000 --> 00:00:20,000
+Project Map connects files,
+symbols, and dependencies.
+
+6
+00:00:20,000 --> 00:00:24,000
+Shared memory keeps the conventions
+and decisions that matter,
+
+7
+00:00:24,000 --> 00:00:27,000
+so each session has a useful starting point.
+
+8
+00:00:27,000 --> 00:00:32,000
+Review the plan, refine the details,
+and decide what happens next.
+
+9
+00:00:32,000 --> 00:00:39,000
+The plan stays in your project,
+ready to revisit.
+
+10
+00:00:39,000 --> 00:00:44,000
+Watch the changes arrive in your editor.
+
+11
+00:00:44,000 --> 00:00:51,000
+Inspect the diff, review affected files,
+and keep the work you want.
+
+12
+00:00:51,000 --> 00:00:56,000
+Then check the result
+in the built-in browser.
+
+13
+00:00:56,000 --> 00:01:00,000
+The agent can inspect the page
+and capture what you see,
+
+14
+00:01:00,000 --> 00:01:04,000
+using the session already open.
+
+15
+00:01:04,000 --> 00:01:08,000
+Prefer a coding CLI? Supported integrations
+
+16
+00:01:08,000 --> 00:01:12,000
+can use OpenIDE's browser, project context,
+
+17
+00:01:12,000 --> 00:01:16,000
+memory, and plan review,
+while keeping their own workflow.
+
+18
+00:01:16,000 --> 00:01:23,000
+Save the convention you learned,
+and carry it into the next session.
+
+19
+00:01:23,000 --> 00:01:28,000
+OpenIDE. Explore the source,
+and make it yours.
