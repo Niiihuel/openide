@@ -113,7 +113,7 @@ jobs:
           fi
       - name: Install Linux dependencies
         if: matrix.platform == 'linux'
-        run: sudo apt-get update -y && sudo apt-get install -y libkrb5-dev
+        run: sudo apt-get update -y && sudo apt-get install -y libkrb5-dev xvfb
 
       # Two Linux runners died mid-build with no logs uploaded — the shape of a runner that ran out
       # of room, not of a build that failed. A GitHub runner starts with ~14 GB free, and this job
@@ -223,6 +223,13 @@ jobs:
       - name: Build canonical product
         shell: bash
         run: ./dev/build.sh
+      - name: Smoke test packaged Linux workbench
+        if: matrix.platform == 'linux'
+        timeout-minutes: 3
+        env:
+          OPENIDE_TEST_EXECUTABLE: ${{ github.workspace }}/VSCode-linux-${{ matrix.arch }}/openide
+          XDG_SESSION_TYPE: x11
+        run: xvfb-run --auto-servernum node dev/smoke-upgrade.mjs
       - name: Resources after build
         if: always()
         shell: bash

@@ -418,6 +418,8 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 			api,
 			telemetry,
 			sources,
+			// The welcome workbench uses this SVG on every desktop platform.
+			gulp.src('resources/linux/code.svg', { base: '.' }),
 			deps
 		];
 		let all = es.merge(...mergeStreams);

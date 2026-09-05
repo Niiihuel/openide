@@ -2,6 +2,8 @@
 // On NixOS: ./result-fhs/bin/openide-build -c 'node dev/smoke-upgrade.mjs'
 // Under Xvfb, unset WAYLAND_DISPLAY so Electron uses the isolated display.
 // Set OPENIDE_TEST_EXECUTABLE to validate a packaged build with the same checks.
+// Optionally set OPENIDE_TEST_UPDATE_FROM to simulate an older product version
+// in the isolated profile and check the real stable feed without downloading.
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -18,8 +20,17 @@ mkdirSync(path.join(profile, 'User'), { recursive: true });
 writeFileSync(path.join(profile, 'User', 'settings.json'), JSON.stringify({ 'zenMode.fullScreen': false }));
 const errors = [];
 const packagedExecutable = process.env.OPENIDE_TEST_EXECUTABLE;
+const updateFrom = process.env.OPENIDE_TEST_UPDATE_FROM;
+if (updateFrom) {
+	assert(packagedExecutable, 'Update announcements require a packaged build');
+	assert(/^\d+\.\d+\.\d+$/.test(updateFrom), 'Expected an older X.Y.Z product version');
+	writeFileSync(path.join(profile, 'product.json'), JSON.stringify({ openideVersion: updateFrom }));
+}
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
+// A smoke test must never acknowledge an unrelated installation's health marker.
+delete env.OPENIDE_APPIMAGE_PATH;
+delete env.APPIMAGE;
 if (packagedExecutable) { delete env.VSCODE_DEV; }
 else { env.VSCODE_DEV = '1'; }
 let app;
@@ -65,6 +76,16 @@ try {
 	await page.locator('.part.statusbar').waitFor({ state: 'visible' });
 	await composer.waitFor({ state: 'visible' });
 	assert.equal(await composer.inputValue(), 'Upgrade smoke test draft');
+	if (updateFrom) {
+		await composer.focus();
+		const tooltip = page.locator('.update-tooltip').first();
+		await tooltip.waitFor({ state: 'visible', timeout: 60000 });
+		assert.match(await tooltip.innerText(), /Download/, 'Expected an actionable update from the stable feed');
+		assert(await composer.evaluate(element => document.activeElement === element), 'Update announcement stole keyboard focus');
+		assert.equal(await composer.inputValue(), 'Upgrade smoke test draft');
+		await page.screenshot({ path: path.join(output, 'automatic-update.png') });
+		console.log('PASS: automatic signed update announcement preserves composer focus and draft');
+	}
 	const runtime = await app.evaluate(({ app }) => ({ name: app.getName(), electron: process.versions.electron, node: process.versions.node }));
 	writeFileSync(path.join(output, 'result.json'), JSON.stringify({ runtime, geometry, errors }, null, 2));
 	assert.deepEqual(errors, [], 'Workbench reported errors');
