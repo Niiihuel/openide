@@ -2,9 +2,15 @@
 
 Production brief: **English, 60–90 seconds, real product footage.**
 Target cut: 88 seconds, 16:9, 1920×1080, 30 fps, with English narration and
-captions. This is the shooting script; footage and narration have not yet been
-recorded. The [caption file](./openide-90s-en.srt) is a timing draft to align with
-the final voice track.
+captions. The first [recorded walkthrough](./recordings/1.2.0/index.html) is ready, with
+[captioned video](./recordings/1.2.0/openide-demo-en.mp4), a clean master and
+[verification results](./recordings/1.2.0/verification.md). It uses real UI and MCP
+checks with synthetic English narration. It does not show live model generation
+or a third-party CLI conversation.
+
+The original storyboard below remains the plan for that broader agent-driven
+take. Its [draft captions](./openide-90s-en.srt) are separate from the
+[recorded cut captions](./recordings/1.2.0/openide-demo-en.srt).
 
 ## Story
 
@@ -99,5 +105,7 @@ should stay below the voice; use only audio licensed for the intended release.
 - Final verification of narration/caption alignment, readable code, audio level,
   browser result, repository URL and playback on a second player.
 
-The storyboard and draft captions are ready. Capture, voice recording, editing
-and final export remain production work after the stable build is available.
+The first scripted product walkthrough has been recorded and exported. The
+broader connected-model/CLI storyboard above remains a separate future take.
+See the recorded cut’s verification report for exact coverage and the diff
+acknowledgement issue discovered during capture.

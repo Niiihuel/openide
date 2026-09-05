@@ -1,0 +1,65 @@
+[
+  {
+    "chapter": "Your project. One workspace.",
+    "start": 0,
+    "duration": 7,
+    "rawDuration": 7.366667,
+    "speed": 1.052381
+  },
+  {
+    "chapter": "Start with a clear request",
+    "start": 7,
+    "duration": 8,
+    "rawDuration": 6.8,
+    "speed": 1.0
+  },
+  {
+    "chapter": "Context that carries forward",
+    "start": 15,
+    "duration": 12,
+    "rawDuration": 9.566667,
+    "speed": 1.0
+  },
+  {
+    "chapter": "Review the plan",
+    "start": 27,
+    "duration": 12,
+    "rawDuration": 8.8,
+    "speed": 1.0
+  },
+  {
+    "chapter": "Changes you can review",
+    "start": 39,
+    "duration": 12,
+    "rawDuration": 7.933333,
+    "speed": 1.0
+  },
+  {
+    "chapter": "Check the running app",
+    "start": 51,
+    "duration": 13,
+    "rawDuration": 10.433333,
+    "speed": 1.0
+  },
+  {
+    "chapter": "Real tools. Verifiable results.",
+    "start": 64,
+    "duration": 12,
+    "rawDuration": 9.766016,
+    "speed": 1.0
+  },
+  {
+    "chapter": "Keep what you learn",
+    "start": 76,
+    "duration": 7,
+    "rawDuration": 5.966667,
+    "speed": 1.0
+  },
+  {
+    "chapter": "OpenIDE \u00b7 github.com/Niiihuel/openide",
+    "start": 83,
+    "duration": 5,
+    "rawDuration": 5.133333,
+    "speed": 1.0266666
+  }
+]
