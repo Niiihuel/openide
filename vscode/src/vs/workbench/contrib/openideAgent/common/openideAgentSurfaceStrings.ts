@@ -60,6 +60,8 @@ export const OPENIDE_AGENT_SURFACE_STRINGS = {
 	'agentSurface.voice.notAvailable': { es: 'El proveedor activo no permite dictado por voz.', en: 'The active provider does not support voice dictation.' },
 	'agentSurface.voice.transcriptionFailed': { es: 'La transcripción falló (HTTP {0}){1}', en: 'Transcription failed (HTTP {0}){1}' },
 	'agentSurface.voice.emptyTranscription': { es: 'El modelo no devolvió transcripción.', en: 'The model returned no transcription.' },
+	'agentSurface.voice.modelUnsupported': { es: '{0} en {1} no tiene un formato de dictado compatible. Elegí un modelo de audio en Ajustes → Voz.', en: '{0} on {1} has no compatible dictation format. Choose an audio model in Settings → Voice.' },
+	'agentSurface.voice.providerRejected': { es: 'El proveedor rechazó el audio o no pudo transcribirlo. Revisá el modelo en Ajustes → Voz.', en: 'The provider rejected the audio or could not transcribe it. Check the model in Settings → Voice.' },
 
 	// ---- chat info/error cards
 	'agentSurface.chat.staleTimeout': { es: 'el provider no emitió eventos durante {0}s ({1}).', en: 'the provider emitted no events for {0}s ({1}).' },

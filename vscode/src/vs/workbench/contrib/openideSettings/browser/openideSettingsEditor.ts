@@ -9,8 +9,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, Dimension, addDisposableListener, append, clearNode } from '../../../../base/browser/dom.js';
+import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
-import { DisposableStore } from '../../../../base/common/lifecycle.js';
+import { DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
@@ -42,6 +43,7 @@ import { OpenideHooksSettingsSection } from '../../openideAgent/browser/openideH
 import { OpenideQuickCommandsSettingsSection } from '../../openideAgent/browser/openideQuickCommandsSettingsSection.js';
 import { OpenideMcpSettingsSection } from '../../openideAgent/browser/openideMcpSettingsSection.js';
 import { OpenideProvidersSettingsSection } from '../../openideAgent/browser/openideProvidersSettingsSection.js';
+import { OpenideVoiceSettingsSection } from '../../openideAgent/browser/openideVoiceSettingsSection.js';
 import { OpenideProjectMapSettingsSection } from '../../openideAgent/browser/openideProjectMapSettingsSection.js';
 import { OpenideImportSettingsSection } from '../../openideAgent/browser/openideImportSettingsSection.js';
 import { OpenideRulesSettingsSection } from '../../openideAgent/browser/openideRulesSettingsSection.js';
@@ -80,6 +82,7 @@ const SECTION_FACTORIES: ReadonlyMap<string, new (...args: any[]) => IOpenideSet
 	['openideAgent/quickCommands', OpenideQuickCommandsSettingsSection],
 	['openideAgent/mcp', OpenideMcpSettingsSection],
 	['openideAgent/providers', OpenideProvidersSettingsSection],
+	['openideAgent/voice', OpenideVoiceSettingsSection],
 	['workbench/language', OpenideLanguageSettingsSection],
 ]);
 
@@ -108,6 +111,8 @@ export class OpenideSettingsEditor extends EditorPane {
 	/** Widgets built per row (InputBox, the switch, the dropdown): they own DOM and listeners, so
 	 *  they are disposed with the rows they belong to, not leaked across renders. */
 	private readonly rowWidgets = this._register(new DisposableStore());
+	private readonly renderedSection = this._register(new MutableDisposable<IDisposable>());
+	private sectionNeedsRender = false;
 	private readonly settingsModel: OpenideSettingsModel;
 	private renderLimit = INITIAL_RENDER_LIMIT;
 	/** Shape of the rows currently in the sidebar, so a re-render that changes nothing skips the
@@ -115,6 +120,7 @@ export class OpenideSettingsEditor extends EditorPane {
 	private navigationSignature: string | undefined;
 	private _searchBox!: InputBox;
 	private renderHandle: number | undefined;
+	private readonly searchRender = this._register(new RunOnceScheduler(() => this.renderAll(), 100));
 	private readonly sections = new Map<string, IOpenideSettingsSection>();
 
 	constructor(
@@ -136,14 +142,17 @@ export class OpenideSettingsEditor extends EditorPane {
 	) {
 		super(OpenideSettingsEditor.ID, group, telemetryService, themeService, storageService);
 		this.settingsModel = new OpenideSettingsModel(configurationService);
+		this._register(toDisposable(() => {
+			if (this.renderHandle !== undefined) { cancelAnimationFrame(this.renderHandle); }
+		}));
 		CONTEXT_SETTINGS_EDITOR.bindTo(contextKeyService).set(true);
-		this._register(configurationService.onDidChangeConfiguration(() => this.scheduleRender(false)));
-		this._register(userDataProfileService.onDidChangeCurrentProfile(() => { this.renderProfile(); this.scheduleRender(true); }));
+		this._register(configurationService.onDidChangeConfiguration(() => { this.settingsModel.invalidate(); this.scheduleRender(false); }));
+		this._register(userDataProfileService.onDidChangeCurrentProfile(() => { this.settingsModel.invalidate(); this.renderProfile(); this.scheduleRender(true); }));
 		// Signing in or out anywhere in the workbench changes what the account block says.
 		this._register(authenticationService.onDidChangeSessions(() => this.renderProfile()));
 		this._register(authenticationService.onDidRegisterAuthenticationProvider(() => this.renderProfile()));
 		// `openide.language` repaints the whole shell: nav labels, search, hints, buttons.
-		this._register(onDidChangeOpenideLanguage(() => this.scheduleRender(true)));
+		this._register(onDidChangeOpenideLanguage(() => { this.settingsModel.invalidate(); this.scheduleRender(true); }));
 	}
 
 	override get minimumWidth(): number { return 620; }
@@ -239,7 +248,7 @@ export class OpenideSettingsEditor extends EditorPane {
 		// rows apart, and up here it only competed with the words.
 		this.title = append(pageTitles, $('h1.openide-settings-page-title'));
 		this.content = append(column, $('.openide-settings-list'));
-		this.search.addEventListener('input', () => this.applySearch());
+		this.search.addEventListener('input', () => this.applySearch(true));
 		this.search.addEventListener('focus', () => CONTEXT_SETTINGS_SEARCH_FOCUS.bindTo(this.rootContextKeyService()).set(true));
 	}
 
@@ -252,7 +261,7 @@ export class OpenideSettingsEditor extends EditorPane {
 		this.settingsModel.setModel(model);
 		this.settingsModel.setState({ target: options?.target ?? ConfigurationTarget.USER_LOCAL, folderUri: options?.folderUri, query: options?.query || '', category: 'home' });
 		this.search.value = options?.query || '';
-		this.modelListeners.clear(); this.modelListeners.add(model.onDidChangeGroups(() => this.scheduleRender(true)));
+		this.modelListeners.clear(); this.modelListeners.add(model.onDidChangeGroups(() => { this.settingsModel.invalidate(); this.scheduleRender(true); }));
 		this.renderAll();
 		if (options?.focusSearch !== false) { this.search.focus(); }
 	}
@@ -268,7 +277,7 @@ export class OpenideSettingsEditor extends EditorPane {
 	focusTOC(): void { (this.navigation.querySelector('button') as HTMLElement | null)?.focus(); }
 	switchToSettingsFile(): Promise<void> { return this.openJson(); }
 
-	private applySearch(): void {
+	private applySearch(defer = false): void {
 		this.renderLimit = INITIAL_RENDER_LIMIT;
 		// Search always starts from "All settings": the text filters both the options and the tree,
 		// without being accidentally constrained by the previously selected category.
@@ -279,7 +288,8 @@ export class OpenideSettingsEditor extends EditorPane {
 		this.settingsModel.setState({ query: normalizeSettingsQuery(this.search.value), category: filtersInPlace ? category : 'home' });
 		this._searchClear?.classList.toggle('hidden', !this.search.value);
 		this._searchHint?.classList.toggle('hidden', !!this.search.value);
-		this.renderAll();
+		// Let the input paint and coalesce quick keystrokes before rebuilding result controls.
+		if (defer) { this.searchRender.schedule(); } else { this.renderAll(); }
 	}
 
 	/**
@@ -368,6 +378,7 @@ export class OpenideSettingsEditor extends EditorPane {
 		}
 	}
 	private scheduleRender(reset: boolean): void {
+		if (!this.root || !this.input) { return; }
 		if (reset) { this.renderLimit = INITIAL_RENDER_LIMIT; }
 		if (this.renderHandle !== undefined) { cancelAnimationFrame(this.renderHandle); }
 		this.renderHandle = requestAnimationFrame(() => { this.renderHandle = undefined; this.renderAll(); });
@@ -383,6 +394,7 @@ export class OpenideSettingsEditor extends EditorPane {
 	}
 
 	private renderAll(): void {
+		this.searchRender.cancel();
 		// Rebuilt per render, not once in the constructor: its titles go through `t()` and a map
 		// built at construction would keep whatever language was active back then.
 		this.settingsModel.setSurfaceSearch(openideSettingsSurfaceSearch());
@@ -502,6 +514,7 @@ export class OpenideSettingsEditor extends EditorPane {
 	}
 
 	private renderItems(): void {
+		this.renderedSection.clear();
 		this.rowHovers.clear();
 		this.rowWidgets.clear();
 		clearNode(this.content);
@@ -524,14 +537,16 @@ export class OpenideSettingsEditor extends EditorPane {
 		// hairlines. The groups are the TOC one level under the page (see `groupItems`); when the
 		// page yields a single group, the caption is dropped — the title above already says it.
 		const groups = this.settingsModel.groupItems(items.slice(0, this.renderLimit));
+		const rowsHost = this.content.ownerDocument.createDocumentFragment();
 		for (const group of groups) {
-			const block = append(this.content, $('.openide-settings-group'));
+			const block = rowsHost.appendChild($('.openide-settings-group'));
 			if (groups.length > 1) { append(block, $('.openide-settings-group-caption', undefined, group.label)); }
 			const card = append(block, $('.openide-settings-card'));
 			for (const item of group.items) {
 				this.renderRow(card, item);
 			}
 		}
+		this.content.appendChild(rowsHost);
 		if (items.length > this.renderLimit) {
 			const more = append(this.content, $('button.openide-settings-more')) as HTMLButtonElement; more.type = 'button'; more.textContent = t('settings.item.showMore', Math.min(INITIAL_RENDER_LIMIT, items.length - this.renderLimit));
 			more.addEventListener('click', () => { this.renderLimit += INITIAL_RENDER_LIMIT; this.renderItems(); });
@@ -543,12 +558,13 @@ export class OpenideSettingsEditor extends EditorPane {
 		// Without the `@…` filters: the section searches by text, and `@modified` is not text that
 		// exists in a skill list — letting it through emptied the whole page.
 		const query = this.settingsModel.surfaceMatchesQuery(this.settingsModel.viewState.category) ? '' : plainSettingsQuery(this.settingsModel.viewState.query);
-		section.render(this.content, {
+		const renderedSection = section.render(this.content, {
 			scope: this.settingsModel.viewState.target === ConfigurationTarget.WORKSPACE || this.settingsModel.viewState.target === ConfigurationTarget.WORKSPACE_FOLDER ? 'workspace' : 'user',
 			query,
 			category: this.settingsModel.viewState.category,
 			navigate: category => { this.settingsModel.setState({ category }); this.renderAll(); },
 		});
+		this.renderedSection.value = renderedSection || undefined;
 		// And whatever the section did not filter itself (whole blocks, rows from another list) is
 		// filtered by the renderer, in one place and using the declared keywords.
 		OpenideSectionRenderer.prune(this.content, query);
@@ -638,6 +654,26 @@ export class OpenideSettingsEditor extends EditorPane {
 
 	private async openJson(key?: string): Promise<void> {
 		await this.preferencesService.openSettings({ jsonEditor: true, target: this.settingsModel.viewState.target, folderUri: this.settingsModel.viewState.folderUri, revealSetting: key ? { key, edit: true } : undefined });
+	}
+
+	protected override setEditorVisible(visible: boolean): void {
+		super.setEditorVisible(visible);
+		if (!visible && this.renderedSection.value) {
+			this.sectionNeedsRender = true;
+			this.renderedSection.clear();
+		} else if (visible && this.sectionNeedsRender) {
+			this.sectionNeedsRender = false;
+			this.renderItems();
+		}
+	}
+
+	override clearInput(): void {
+		this.searchRender.cancel();
+		if (this.renderHandle !== undefined) { cancelAnimationFrame(this.renderHandle); this.renderHandle = undefined; }
+		this.modelListeners.clear();
+		this.settingsModel.setModel(undefined);
+		this.renderedSection.clear();
+		super.clearInput();
 	}
 
 	override layout(dimension: Dimension): void { this.root.style.width = `${dimension.width}px`; this.root.style.height = `${dimension.height}px`; }

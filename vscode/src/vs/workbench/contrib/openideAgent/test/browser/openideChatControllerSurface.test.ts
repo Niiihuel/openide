@@ -60,6 +60,8 @@ suite('OpenIDE ChatController — plan and canvas wiring', () => {
 		let settleRun: ((error?: Error) => void) | undefined;
 
 		const agentService = {
+			onDidChangePlanFollow: store.add(new Emitter<boolean>()).event,
+			isPlanFollowEnabled: () => false,
 			onDidCreatePlan: onDidCreatePlan.event,
 			onDidChangePlanDraft: onDidChangePlanDraft.event,
 			onDidChangeCanvas: onDidChangeCanvas.event,

@@ -1208,11 +1208,14 @@ export class OpenideToolRegistry extends Disposable {
 
 	/** Shows the agent's shared terminal without stealing focus from the composer. Creating the same
 	 *  instance before the invoke avoids races between the location event and run_command. */
-	async followAgentTerminal(shell?: string): Promise<void> {
+	async followAgentTerminal(shell?: string, token: CancellationToken = CancellationToken.None): Promise<void> {
 		// "Follow the agent" is a UI action like the other two: it means the terminal being watched.
 		const term = await this.getAgentTerminal(shell ?? this.resolveUiShell() ?? SHARED_SHELL);
+		if (token.isCancellationRequested) { return; }
 		await term.processReady;
+		if (token.isCancellationRequested) { return; }
 		await this.terminalService.showBackgroundTerminal(term);
+		if (token.isCancellationRequested) { return; }
 		this.terminalService.setActiveInstance(term);
 	}
 

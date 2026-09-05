@@ -20,10 +20,13 @@ import { DisposableStore, IDisposable } from '../../../../../base/common/lifecyc
 import { applyFontInfo } from '../../../../../editor/browser/config/domFontInfo.js';
 import { IEditorOptions } from '../../../../../editor/common/config/editorOptions.js';
 import { createBareFontInfoFromRawSettings } from '../../../../../editor/common/config/fontInfoFromSettings.js';
-import { TokenizationRegistry } from '../../../../../editor/common/languages.js';
+import { LanguageId } from '../../../../../editor/common/encodedTokenAttributes.js';
+import { IState, TokenizationRegistry } from '../../../../../editor/common/languages.js';
 import { ILanguageService } from '../../../../../editor/common/languages/language.js';
 import { PLAINTEXT_LANGUAGE_ID } from '../../../../../editor/common/languages/modesRegistry.js';
-import { tokenizeToStringSync } from '../../../../../editor/common/languages/textToHtmlTokenizer.js';
+import { NullState, nullTokenizeEncoded } from '../../../../../editor/common/languages/nullTokenize.js';
+import { LineTokens } from '../../../../../editor/common/tokens/lineTokens.js';
+import { splitLines } from '../../../../../base/common/strings.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IMarkdownRenderer, IMarkdownRendererService, openLinkFromMarkdown } from '../../../../../platform/markdown/browser/markdownRenderer.js';
@@ -170,23 +173,58 @@ class OpenideChatCodeBlockTokenizer {
 			() => { this._loading.delete(languageId); });
 	}
 
+	/**
+	 * The tokenized fence, built as NODES.
+	 *
+	 * It used to call `tokenizeToStringSync` and parse the HTML string it returns. That threw on
+	 * every single fenced block: `DOMParser.parseFromString(..., 'text/html')` IS a Trusted Types
+	 * sink, and the workbench enforces `require-trusted-types-for 'script'` — the previous comment
+	 * here asserted the opposite and was simply wrong. The throw escaped through `renderMarkdown`,
+	 * so an assistant turn containing a fence rendered as NOTHING: an empty row keeping whatever
+	 * height the list had guessed, which is what made a restored conversation look blank and scroll
+	 * to places with no content in them.
+	 *
+	 * Upstream's own renderer gets past the sink with the `tokenizeToString` policy, and that route
+	 * is closed here: the policy already exists (its module creates it at load) and a second one by
+	 * that name throws, while any other name is refused by the CSP allow-list.
+	 *
+	 * So the string never happens. This is `_tokenizeToString` (textToHtmlTokenizer.ts:141) with
+	 * `createElement`/`textContent` where it concatenates and escapes — same tokens, same class
+	 * names, same `<br>` between lines — and it skips a serialize, a parse and an import per fence.
+	 */
 	private _tokenize(value: string, languageId: string): HTMLElement {
-		// `tokenizeToStringSync` falls back to a plain tokenizer for a language that is not loaded.
-		const html = tokenizeToStringSync(this._languageService, value, languageId);
-		// Parsed by `DOMParser` and not written through `innerHTML`: the workbench runs under a
-		// Trusted Types policy list, and the parser is not one of its sinks. The markup is ours.
-		const parsed = new DOMParser().parseFromString(html, 'text/html');
-		// eslint-disable-next-line no-restricted-syntax
-		const source = parsed.body.querySelector('.monaco-tokenized-source');
 		const root = document.createElement('span');
-		if (!isHTMLElement(source)) {
-			return root;
+		const source = document.createElement('div');
+		source.className = 'monaco-tokenized-source';
+		root.appendChild(source);
+		// Null support = the plain tokenizer, which is what `tokenizeToStringSync` falls back to
+		// for a language whose grammar has not loaded yet.
+		const support = TokenizationRegistry.get(languageId);
+		const codec = this._languageService.languageIdCodec;
+		const lines = splitLines(value);
+		let state: IState = support ? support.getInitialState() : NullState;
+		for (let index = 0; index < lines.length; index++) {
+			const line = lines[index];
+			if (index > 0) {
+				source.appendChild(document.createElement('br'));
+			}
+			const tokenized = support ? support.tokenizeEncoded(line, true, state) : nullTokenizeEncoded(LanguageId.Null, state);
+			LineTokens.convertToEndOffset(tokenized.tokens, line.length);
+			const tokens = new LineTokens(tokenized.tokens, line, codec).inflate();
+			let start = 0;
+			for (let token = 0, count = tokens.getCount(); token < count; token++) {
+				const end = tokens.getEndOffset(token);
+				const span = document.createElement('span');
+				span.className = tokens.getClassName(token);
+				span.textContent = line.substring(start, end);
+				source.appendChild(span);
+				start = end;
+			}
+			state = tokenized.endState;
 		}
-		const adopted = document.importNode(source, true);
-		applyFontInfo(adopted, createBareFontInfoFromRawSettings({
+		applyFontInfo(source, createBareFontInfoFromRawSettings({
 			fontFamily: this._configurationService.getValue<IEditorOptions>('editor')?.fontFamily,
 		}, 1));
-		root.appendChild(adopted);
 		return root;
 	}
 }

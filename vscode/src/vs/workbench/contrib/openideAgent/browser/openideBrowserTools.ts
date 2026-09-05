@@ -342,7 +342,7 @@ export class OpenideBrowserAutomation {
 			throw new Error('No preview is connected. Use browser_navigate or browser_open first.');
 		}
 		const model = await input.resolve();
-		await this.playwrightService.startTrackingPage(input.id);
+		await model.shareWithAgentSession(this.playwrightSessionId);
 		return { pageId: input.id, model };
 	}
 
@@ -387,9 +387,9 @@ export class OpenideBrowserAutomation {
 					if (!url) {
 						return 'Error: URL not allowed — the built-in browser is for local apps only.';
 					}
-					const input = await this.browserViewService.openPreview(url);
+					const input = await this.browserViewService.openPreview(url, undefined, { preserveFocus: true });
 					const model = await input.resolve();
-					await this.playwrightService.startTrackingPage(input.id);
+					await model.shareWithAgentSession(this.playwrightSessionId);
 					const result = await this.playwrightService.invokeFunctionRaw<{ url: string; title: string }>(this.playwrightSessionId, input.id, `async (page, timeoutMs, cursorScript) => {
 						await page.waitForLoadState('domcontentloaded', { timeout: timeoutMs }).catch(() => {});
 						// Navigation takes the overlay away: reinstalling it here leaves the event mirror

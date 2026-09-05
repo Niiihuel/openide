@@ -808,17 +808,17 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 
 		this.paintDetailHead(root, view, activeId, isActive);
 
-		if (!view.connected) {
+		if (!view.connected && !view.accounts.length) {
 			// Not connected: connecting IS the page. One card, one primary action — the opencode
 			// flow. Everything else (models greyed below) is preview.
 			this.paintConnectCard(root, view);
-		} else if (view.auth === 'apiKey' || this.oauth?.providerId === view.id) {
+		} else if (view.connected && (view.auth === 'apiKey' || this.oauth?.providerId === view.id)) {
 			// A connected OAuth provider with no flow in progress has nothing to manage here: its
 			// actions (reconnect / sign out) live under Session, its identity under Accounts.
 			this.paintAuthCard(root, view);
 		}
 
-		if (view.auth !== 'none' && view.connected) {
+		if (view.auth !== 'none' && (view.connected || view.accounts.length > 0)) {
 			this.paintAccountsCard(root, view);
 		}
 
@@ -1194,6 +1194,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			const group = card.parentElement!;
 			const search = this.ui.filter(group, {
 				placeholder: t('openide.providers.modelSearch'),
+				value: this.modelQuery.get(view.id) ?? '',
 				change: query => { this.modelQuery.set(view.id, query); redrawList?.(); },
 			});
 			search.element.classList.add('openide-settings-provider-modelsearch');
@@ -1216,6 +1217,14 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			const visible = filterProviderModels(infos, query);
 			if (!visible.length) {
 				this.ui.cardRow(card, { label: t('openide.providers.modelNoResults', query.trim()) });
+				this.ui.cardRow(card, {
+					label: t('openide.providers.catalogRefresh'), icon: 'refresh',
+					run: async () => {
+						try { await this.agentService.refreshModelCatalog(); }
+						catch (error) { this.fail(error); }
+						finally { this.recheck(); }
+					},
+				});
 			}
 			for (const info of visible) {
 				this.paintModelRow(card, view, info, info.id === effectiveSelected, isActiveProvider, redraw);

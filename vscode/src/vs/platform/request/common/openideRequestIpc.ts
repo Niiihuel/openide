@@ -14,7 +14,7 @@
  *  traffic goes through here.
  *--------------------------------------------------------------------------------------------*/
 
-import { VSBuffer, newWriteableBufferStream } from '../../../base/common/buffer.js';
+import { VSBuffer, decodeBase64, newWriteableBufferStream } from '../../../base/common/buffer.js';
 import { CancellationToken, CancellationTokenSource } from '../../../base/common/cancellation.js';
 import { CancellationError } from '../../../base/common/errors.js';
 import { Emitter, Event } from '../../../base/common/event.js';
@@ -24,6 +24,11 @@ import { IChannel, IServerChannel } from '../../../base/parts/ipc/common/ipc.js'
 import { AuthInfo, Credentials, IRequestService } from './request.js';
 
 export const OPENIDE_REQUEST_CHANNEL = 'openideRequest';
+
+export interface IOpenideRequestOptions extends IRequestOptions {
+	/** Binary body encoded for JSON IPC; decoded once in main before Node writes the bytes. */
+	readonly dataBase64?: string;
+}
 
 /** Control messages (travel as JSON). Data chunks do NOT go here: the ipc.ts serializer only
  *  handles native VSBuffer at the TOP LEVEL of the payload — nested inside an object it goes
@@ -44,7 +49,7 @@ export class OpenideRequestChannel implements IServerChannel {
 		if (event !== 'request') {
 			throw new Error(`Evento desconocido: ${event}`);
 		}
-		const options = arg as IRequestOptions;
+		const options = arg as IOpenideRequestOptions;
 		const cts = new CancellationTokenSource();
 		const emitter = new Emitter<StreamMessage | VSBuffer>({
 			onWillAddFirstListener: () => { this.run(options, emitter, cts.token); },
@@ -53,9 +58,11 @@ export class OpenideRequestChannel implements IServerChannel {
 		return emitter.event;
 	}
 
-	private async run(options: IRequestOptions, emitter: Emitter<StreamMessage | VSBuffer>, token: CancellationToken): Promise<void> {
+	private async run(options: IOpenideRequestOptions, emitter: Emitter<StreamMessage | VSBuffer>, token: CancellationToken): Promise<void> {
 		try {
-			const ctx = await this.service.request(options, token);
+			const { dataBase64, ...request } = options;
+			const payload = dataBase64 === undefined ? request : { ...request, data: undefined, dataBuffer: decodeBase64(dataBase64) };
+			const ctx = await this.service.request(payload, token);
 			emitter.fire({ type: 'res', statusCode: ctx.res.statusCode, headers: ctx.res.headers as any });
 			listenStream(ctx.stream, {
 				onData: chunk => emitter.fire(chunk), // VSBuffer pelado: serialización nativa
@@ -87,7 +94,7 @@ export class OpenideRequestChannelClient implements IRequestService {
 	async lookupKerberosAuthorization(_url: string): Promise<string | undefined> { return undefined; }
 	async loadCertificates(): Promise<string[]> { return []; }
 
-	request(options: IRequestOptions, token: CancellationToken): Promise<IRequestContext> {
+	request(options: IOpenideRequestOptions, token: CancellationToken): Promise<IRequestContext> {
 		return new Promise<IRequestContext>((resolve, reject) => {
 			const stream = newWriteableBufferStream();
 			let resolved = false;

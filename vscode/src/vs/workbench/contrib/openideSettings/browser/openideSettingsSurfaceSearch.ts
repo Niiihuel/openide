@@ -59,6 +59,9 @@ export function openideSettingsSurfaceSearch(): ReadonlyMap<string, readonly IOp
 		['openideAgent/mcp', [
 			{ title: t('settings.nav.agent.mcp'), description: t('settings.surface.mcp.desc'), keywords: ['mcp', 'model context protocol', 'servidor', 'server', 'herramienta', 'tool', 'stdio', 'sse', 'http'] },
 		]],
+		['openideAgent/voice', [
+			{ title: t('settings.nav.agent.voice'), description: t('settings.surface.voice.desc'), keywords: ['voz', 'voice', 'dictado', 'dictation', 'dictar', 'dictate', 'microfono', 'micrófono', 'microphone', 'mic', 'hablar', 'speech', 'transcripcion', 'transcripción', 'transcription', 'audio', 'whisper', 'stt'] },
+		]],
 		['workbench/language', [
 			{ title: t('settings.nav.language'), description: t('settings.surface.language.desc'), keywords: ['idioma', 'language', 'locale', 'español', 'spanish', 'english', 'inglés', 'ingles', 'paquete de idioma', 'language pack', 'traduccion', 'traducción'] },
 		]],

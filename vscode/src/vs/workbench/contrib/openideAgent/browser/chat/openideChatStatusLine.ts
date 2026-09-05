@@ -30,8 +30,8 @@ import { OPENIDE_CHAT_SHIMMER_CLASS } from './parts/openideChatActivityRow.js';
  * where the rule is `animation: none`. Here the reduced-motion branch is an explicit early commit.
  */
 
-const EXIT_MS = 120;
-const ENTER_MS = 180;
+const EXIT_MS = 60;
+const ENTER_MS = 100;
 /** The 4px of the snippet: enough to read as motion, not enough to read as the row jumping. */
 const SHIFT_PX = 4;
 const EASING = 'cubic-bezier(0.4, 0, 0.2, 1)';
@@ -45,7 +45,7 @@ const EASING = 'cubic-bezier(0.4, 0, 0.2, 1)';
  * a trip to it. A step is held for this long and any newer step waits its turn; when several pile
  * up, only the LAST one is shown, so the line stays on the present rather than replaying a queue.
  */
-export const OPENIDE_CHAT_STEP_MIN_MS = 1000;
+export const OPENIDE_CHAT_STEP_MIN_MS = 150;
 
 /**
  * How long a step is held before the line is allowed to fall back to the generic wait.
@@ -57,7 +57,7 @@ export const OPENIDE_CHAT_STEP_MIN_MS = 1000;
  * the pause is long enough to actually BE a pause — and then the generic wait is honest, because
  * the agent really is between things.
  */
-export const OPENIDE_CHAT_IDLE_GRACE_MS = 1600;
+export const OPENIDE_CHAT_IDLE_GRACE_MS = 500;
 
 export interface IOpenideChatStatusLineTiming {
 	readonly stepMinMs?: number;
@@ -194,9 +194,11 @@ export class OpenideChatStatusLine extends Disposable {
 		const animation = this._label.animate(keyframes, { duration, easing: EASING, fill: 'forwards' });
 		this._animation = animation;
 		animation.onfinish = () => {
-			if (this._animation === animation) {
-				this._animation = undefined;
-			}
+			if (this._animation !== animation) { return; }
+			this._animation = undefined;
+			animation.onfinish = null;
+			animation.oncancel = null;
+			animation.cancel();
 			if (!this._disposed) {
 				onDone();
 			}

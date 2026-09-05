@@ -998,58 +998,9 @@
 	background-color: var(--vscode-panel-background);
 }
 
-/* ==== DIVERGENCIA DEL FORK (no borrar en el próximo rebase) ================================
- *
- * Todo el tratamiento de píldora de arriba cuelga de un hijo `.tab-fill` que **no existe en
- * 1.121**: el tab del editor de nuestra base usa `tab-border-top-container` /
- * `tab-border-bottom-container`. Verificado en el DOM real: `document.querySelectorAll('.tab-fill')`
- * devuelve 0.
- *
- * Consecuencia medida, y es una regresión que el port introdujo en silencio: las reglas de arriba
- * transparentan el fondo del tab con `!important` porque esperan que la píldora lo pinte, y como la
- * píldora nunca se crea, el tab ACTIVO quedaba sin fondo y sin borde — distinguido sólo por el
- * color del texto (`background: rgba(0,0,0,0)`, borde superior e inferior transparentes).
- *
- * Esto NO revive las reglas muertas ni backportea `vs/sessions`: reproduce el mismo diseño con un
- * pseudo-elemento, que es el nodo que sí tenemos. Mismos tokens, mismo `inset`, mismo radio y la
- * misma exclusión de alto contraste que usa el bloque original, para que el día que la anatomía
- * nueva llegue los dos caminos digan lo mismo.
- *
- * El dock del chat (`openide-chat-tab`) usa esta misma técnica: es lo que hace que los dos
- * sistemas de tabs sean uno solo.
- */
-.modern-ui-tabs.monaco-workbench .part.editor .tabs-container > .tab::before {
-	content: '';
-	position: absolute;
-	/* Inset on ALL FOUR sides, not just left and right. With `0` on top and bottom the pill filled
-	   the whole 32px row and sat flush against the island's rounded top edge, while the dock's tab
-	   — same design, 28px inside the same 32px row — kept 2px of air above it. Two tab strips in
-	   two islands, a gap apart, with different vertical rhythms. Upstream gets those 2px from the
-	   container's padding plus a 24px tab; this fork's tab element is the full row, so the pill is
-	   where the inset has to live. */
-	inset: var(--vscode-spacing-size20);
-	z-index: 0;
-	border-radius: var(--vscode-cornerRadius-small);
-	background-color: var(--modern-ui-editor-tab-inactive-background);
-	pointer-events: none;
-}
-
-.modern-ui-tabs.monaco-workbench .part.editor .tabs-container > .tab > * {
-	position: relative;
-	z-index: 1;
-}
-
-.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor .tabs-container > .tab:not(.active):hover::before {
-	background-color: var(--modern-ui-editor-tab-hover-background);
-}
-
-.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor .tabs-container > .tab.active::before {
-	background-color: var(--modern-ui-editor-tab-active-background);
-}
-
-.modern-ui-tabs.monaco-workbench:not(:is(.hc-black, .hc-light)) .part.editor .tabs-container > .tab.active:hover::before {
-	background-color: var(--modern-ui-editor-tab-active-hover-background);
-}
+/* Code OSS now supplies .tab-fill. It owns the pill background and theme states;
+ * the 1.121 ::before fallback would paint a second, differently inset background.
+ * Keep pseudo-elements available for the native drag-and-drop indicators. */
 
 /* ==== DIVERGENCIA DEL FORK (no borrar en el próximo rebase) ================================
  * The active tab shows its close action at all times, as the chat dock's tab does: the two strips

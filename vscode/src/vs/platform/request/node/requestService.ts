@@ -7,7 +7,7 @@ import type * as http from 'http';
 import type * as https from 'https';
 import { parse as parseUrl } from 'url';
 import { Promises, timeout } from '../../../base/common/async.js';
-import { streamToBufferReadableStream } from '../../../base/common/buffer.js';
+import { VSBuffer, streamToBufferReadableStream } from '../../../base/common/buffer.js';
 import { CancellationToken } from '../../../base/common/cancellation.js';
 import { CancellationError, getErrorMessage } from '../../../base/common/errors.js';
 import * as streams from '../../../base/common/stream.js';
@@ -46,6 +46,8 @@ export interface IRawRequestFunction {
 }
 
 export interface NodeRequestOptions extends IRequestOptions {
+	/** Binary request bodies (e.g. multipart audio) must bypass string UTF-8 encoding. */
+	dataBuffer?: VSBuffer;
 	agent?: Agent;
 	strictSSL?: boolean;
 	isChromiumNetwork?: boolean;
@@ -275,7 +277,9 @@ async function nodeRequestAttempt(options: NodeRequestOptions, token: Cancellati
 			req.removeHeader('Content-Length');
 		}
 
-		if (options.data) {
+		if (options.dataBuffer) {
+			req.write(options.dataBuffer.buffer);
+		} else if (options.data) {
 			if (typeof options.data === 'string') {
 				req.write(options.data);
 			}

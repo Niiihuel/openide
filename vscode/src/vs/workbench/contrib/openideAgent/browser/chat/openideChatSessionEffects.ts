@@ -9,6 +9,7 @@ import { IOpenideChatSessionEffect, IOpenideChatUsageEffect } from '../../common
 import { IChatMessage } from '../../common/openideAgentTypes.js';
 import { IOpenideAgentService } from '../openideAgentService.js';
 import { IChatSessionUsage, OpenideChatSessions } from '../openideChatSessions.js';
+import { OpenideChatFollowController } from './openideChatFollowController.js';
 
 /**
  * Performs what the reducer refuses to do.
@@ -56,13 +57,14 @@ export class OpenideChatSessionEffects extends Disposable {
 	 * the workbench can reveal: without the chain two locations race and the editor lands on the
 	 * older one.
 	 */
-	private _follow: Promise<void> = Promise.resolve();
+	private readonly _follow: OpenideChatFollowController;
 
 	constructor(
 		private readonly sessions: OpenideChatSessions,
-		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
+		@IOpenideAgentService agentService: IOpenideAgentService,
 	) {
 		super();
+		this._follow = this._register(new OpenideChatFollowController(agentService));
 	}
 
 	/** Which conversation is on screen. Only used to decide whether a specialist's tab may close. */
@@ -70,6 +72,7 @@ export class OpenideChatSessionEffects extends Disposable {
 
 	setVisibleConversation(conversationId: string | undefined): void {
 		this._visibleId = conversationId;
+		this._follow.setVisibleConversation(conversationId);
 	}
 
 	/**
@@ -93,11 +96,7 @@ export class OpenideChatSessionEffects extends Disposable {
 	private applyOne(target: IOpenideChatEffectTarget, effect: IOpenideChatSessionEffect): void {
 		switch (effect.type) {
 			case 'followLocation':
-				this._follow = this._follow
-					.then(() => this.agentService.followAgentLocation(effect.location))
-					// A deleted file or a closed terminal must not break the chain for every later
-					// location; the webview host swallows it the same way (openideChatView.ts:382).
-					.catch(() => undefined);
+				this._follow.follow(target.conversationId, effect.location);
 				return;
 			case 'usage':
 				this.applyUsage(target.conversationId, effect.usage);

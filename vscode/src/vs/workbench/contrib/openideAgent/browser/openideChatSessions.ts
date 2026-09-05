@@ -81,7 +81,7 @@ interface IPersisted {
 
 const STORAGE_KEY = 'openide.chat.sessions.v1';
 const MAX_SESSIONS = 200;
-const TITLE_MAX = 48;
+const TITLE_MAX = 120;
 const MAX_CHANGE_SET_CHARS = 16_000_000;
 
 function normalizeChangeSets(value: unknown, messages: IChatMessage[]): Record<string, IMessageChangeSet> {
@@ -161,9 +161,11 @@ export class OpenideChatSessions {
 			const p: IPersisted = JSON.parse(raw);
 			for (const s of p.sessions || []) {
 				if (!s || typeof s.id !== 'string') { continue; }
+				const messages = Array.isArray(s.messages) ? s.messages : [];
+				const canDeriveTitle = s.kind !== 'cli' && messages.some(message => message.role === 'user') && !messages.some(message => message.compaction);
 				this.sessions.set(s.id, {
 					id: s.id,
-					title: s.title || 'Nuevo chat',
+					title: s.customTitle || (canDeriveTitle ? this.deriveTitle(messages) : s.title) || 'Nuevo chat',
 					customTitle: typeof s.customTitle === 'string' && s.customTitle ? s.customTitle : undefined,
 					updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : 0,
 					archived: !!s.archived,
@@ -285,11 +287,14 @@ export class OpenideChatSessions {
 	}
 
 	private deriveTitle(messages: IChatMessage[]): string {
-		const firstUser = messages.find(m => m.role === 'user');
+		const firstUser = messages.find(m => m.role === 'user' && (m.displayText || m.content || '').trim());
 		// /commands: the title comes from what was TYPED (displayText), not the expanded body
 		const t = (firstUser?.displayText || firstUser?.content || '').trim().replace(/\s+/g, ' ');
 		if (!t) { return 'Nuevo chat'; }
-		return t.length > TITLE_MAX ? t.slice(0, TITLE_MAX) + '…' : t;
+		if (t.length <= TITLE_MAX) { return t; }
+		const prefix = Array.from(t).slice(0, TITLE_MAX).join('');
+		const boundary = prefix.lastIndexOf(' ');
+		return (boundary > TITLE_MAX / 2 ? prefix.slice(0, boundary) : prefix) + '…';
 	}
 
 	/** Sessions open as a tab (in strip order). */
@@ -568,7 +573,9 @@ export class OpenideChatSessions {
 		s.hasError = hasError;
 		// The derived title tracks the FIRST user turn; a manual rename freezes it (VS Code's
 		// `title = customTitle || getDefaultTitle(requests)`).
-		if (!s.customTitle) { s.title = this.deriveTitle(messages); }
+		// Compaction replaces the opening request with a synthetic summary. Keep the
+		// conversation's identity even when only later user turns remain in memory.
+		if (!s.customTitle && !messages.some(message => message.compaction)) { s.title = this.deriveTitle(messages); }
 		this.persist();
 	}
 

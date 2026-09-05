@@ -9,6 +9,7 @@ import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { IOpenidePickerGroup, IOpenidePickerModel } from '../openideAgentService.js';
 import { createProviderIcon } from '../openideProviderIcons.js';
 import { createCodicon } from './openideComposerMenu.js';
+import { reasoningEffortLabel } from './openideChatReasoning.js';
 import { t } from '../../common/openideStrings.js';
 
 /** Collapsible header: favourites, recents or one provider. */
@@ -30,6 +31,10 @@ export interface IModelEntryRow {
 	readonly model: IOpenidePickerModel;
 	readonly active: boolean;
 	readonly favorite: boolean;
+	/** This model's reasoning effort. '' = it runs at its own default, and the row says nothing. */
+	readonly effort: string;
+	/** Whether the model publishes levels at all: without them "Edit" would open an empty list. */
+	readonly editable: boolean;
 }
 
 export type ModelPickerRow = IModelSectionRow | IModelEntryRow;
@@ -111,7 +116,9 @@ interface IModelRowTemplate {
 	readonly container: HTMLElement;
 	readonly iconSlot: HTMLElement;
 	readonly name: HTMLElement;
+	readonly effort: HTMLElement;
 	readonly size: HTMLElement;
+	readonly edit: HTMLButtonElement;
 	readonly star: HTMLElement;
 	readonly store: DisposableStore;
 	current?: IModelEntryRow;
@@ -128,7 +135,10 @@ export class ModelRowRenderer implements IListRenderer<IModelEntryRow, IModelRow
 
 	readonly templateId = MODEL_ROW_TEMPLATE;
 
-	constructor(private readonly onToggleFavorite: (row: IModelEntryRow) => void) { }
+	constructor(
+		private readonly onToggleFavorite: (row: IModelEntryRow) => void,
+		private readonly onEdit: (row: IModelEntryRow, anchor: HTMLElement) => void = () => { },
+	) { }
 
 	renderTemplate(container: HTMLElement): IModelRowTemplate {
 		const store = new DisposableStore();
@@ -139,13 +149,22 @@ export class ModelRowRenderer implements IListRenderer<IModelEntryRow, IModelRow
 		iconSlot.className = 'openide-menu-row-icon';
 		const name = append(row, document.createElement('span'));
 		name.className = 'openide-mp-name';
+		// Between the name and the context window, which is the order Cursor reads in: what the
+		// model IS, how hard it thinks, how much it holds.
+		const effort = append(row, document.createElement('span'));
+		effort.className = 'openide-mp-effort';
 		const size = append(row, document.createElement('span'));
 		size.className = 'openide-mp-size';
+		// Only on the hovered row (CSS), so a list of twenty models is not a list of twenty buttons.
+		const edit = append(row, document.createElement('button')) as HTMLButtonElement;
+		edit.type = 'button';
+		edit.className = 'openide-mp-edit';
+		edit.textContent = t('chat.model.edit');
 		const star = append(row, document.createElement('span'));
 		star.className = 'openide-mp-star';
 		star.setAttribute('role', 'button');
 		container.appendChild(row);
-		const template: IModelRowTemplate = { container: row, iconSlot, name, size, star, store };
+		const template: IModelRowTemplate = { container: row, iconSlot, name, effort, size, edit, star, store };
 		// Stopped here and not on the list: the star is an action ON the row, and letting the click
 		// through would also select the model the user was only bookmarking.
 		store.add(addDisposableListener(star, 'click', event => {
@@ -154,6 +173,14 @@ export class ModelRowRenderer implements IListRenderer<IModelEntryRow, IModelRow
 			if (template.current) { this.onToggleFavorite(template.current); }
 		}));
 		store.add(addDisposableListener(star, 'mousedown', event => event.stopPropagation()));
+		// Same reason as the star, and one more: editing a model's effort is not choosing it, so a
+		// click here must not close the popover the flyout is about to be placed against.
+		store.add(addDisposableListener(edit, 'click', event => {
+			event.preventDefault();
+			event.stopPropagation();
+			if (template.current) { this.onEdit(template.current, edit); }
+		}));
+		store.add(addDisposableListener(edit, 'mousedown', event => event.stopPropagation()));
 		return template;
 	}
 
@@ -163,7 +190,13 @@ export class ModelRowRenderer implements IListRenderer<IModelEntryRow, IModelRow
 		clearNode(templateData.iconSlot);
 		templateData.iconSlot.appendChild(createProviderIcon(document, element.group.id, element.group.label));
 		templateData.name.textContent = element.model.name;
+		// Nothing when the model runs at its own default: naming a level the user never chose, and
+		// that the provider is free to change, would be a number pulled out of the air.
+		templateData.effort.textContent = element.effort ? reasoningEffortLabel(element.effort) : '';
+		templateData.effort.hidden = !element.effort;
 		templateData.size.textContent = element.model.context;
+		templateData.edit.hidden = !element.editable;
+		templateData.edit.title = t('chat.model.editEffort', element.model.name);
 		// The active model wears the persistent tint of `.openide-menu-active`; the list's own
 		// hover/focus paint is lighter and always wins visually over it.
 		templateData.container.classList.toggle('openide-menu-active', element.active);

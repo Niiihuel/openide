@@ -38,7 +38,7 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { IMarkerService } from '../../../../platform/markers/common/markers.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
-import { asText, IRequestService } from '../../../../platform/request/common/request.js';
+import { asText } from '../../../../platform/request/common/request.js';
 import { ISecretStorageService } from '../../../../platform/secrets/common/secrets.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
@@ -89,12 +89,15 @@ import { IPlanTarget, resolvePlanTarget } from '../common/openidePlanTarget.js';
 import { planSlug, readPlanDraft } from '../common/openidePlanDraft.js';
 import { breakdownTotal, computeContextBreakdown, estimateConversationTokens, estimateTextTokens, estimateToolsTokens } from '../common/openideTokens.js';
 import { compactAgentToolResult, resolveRetrievedContextBudget, shouldCompressMcpTools } from '../common/openideAgentEfficiency.js';
-import { modelIdsFromProviderResponse } from '../common/openideProviderCapabilities.js';
+import { modelIdsFromProviderResponse, modelModalitiesFromProviderResponse } from '../common/openideProviderCapabilities.js';
 import { classifyProviderError, humanizeProviderError, IClassifiedProviderError } from '../common/openideErrorClassifier.js';
 import { buildCompactionTranscript, buildDeterministicFallbackSummary, buildStructuredSummaryMessage, compactionSavingsRatio, normalizeCompactionOptions, planContextCompaction, shouldCompactContext } from '../common/openideContextCompaction.js';
 import { OpenideToolCallGuard, repairToolArgumentsJson, validateToolArguments } from '../common/openideToolGuardrails.js';
 import { resolveStreamStaleTimeoutSeconds } from '../common/openideReasoningTimeouts.js';
 import { fallbackStepKey, parseFallbackChain, parseProviderModelTarget } from '../common/openideFallback.js';
+import { IVoiceModelSelection, parseVoiceSetting, selectVoiceModels } from '../common/openideVoiceModels.js';
+import { parseVoiceTranscription, voiceTranscriptionRequest } from '../common/openideVoiceRequest.js';
+import { hasVoiceTransport, resolveVoiceTransport } from '../common/openideVoiceTransport.js';
 import { describeCooldown, IModelTarget, isModelCoolingDown, isModelHealthSignal, planModelRun } from '../common/openideModelHealth.js';
 import { t } from '../common/openideStrings.js';
 import { normalizeModelForProvider } from '../common/openideModelNormalize.js';
@@ -255,9 +258,20 @@ export interface IOpenideAgentService {
 	setActiveProvider(providerId: string): Promise<void>;
 	getModel(): string;
 	setModel(model: string): Promise<void>;
-	/** Esfuerzo de razonamiento global ('' default · none · minimal…xhigh). */
-	getReasoningEffort(): string;
-	setReasoningEffort(effort: string): Promise<void>;
+	/**
+	 * Reasoning effort OF ONE MODEL ('' = the model's own default · none · minimal…xhigh).
+	 *
+	 * Per model and not per session: the level that makes one model useful makes another slow or
+	 * expensive, and the picker now edits it right on the model's row. Called with no arguments it
+	 * answers for whatever is active, which is what every caller that just wants "the current one"
+	 * means; the agent loop passes the model it is actually about to call, because a failover can
+	 * be running somewhere else entirely.
+	 */
+	getReasoningEffort(providerId?: string, model?: string): string;
+	setReasoningEffort(effort: string, providerId?: string, model?: string): Promise<void>;
+	/** Every stored level at once, keyed `<providerId>/<modelId>`. For the picker, which paints a
+	 *  row per connected model and cannot afford a lookup each. */
+	getReasoningEfforts(): Readonly<Record<string, string>>;
 	/** Reasoning levels the given model publishes, so a picker offers only what it accepts.
 	 *  `undefined` = unknown (the registry is cold or silent) — offer the full list. */
 	getModelReasoning(providerId?: string, model?: string): IModelReasoning | undefined;
@@ -331,7 +345,7 @@ export interface IOpenideAgentService {
 	/** Provider models: live discovery when the endpoint publishes them, otherwise models.dev. */
 	resolveProviderModels(entry: IProviderEntry): Promise<string[]>;
 	/** Shared source for the model pickers (chat, plans and future surfaces). */
-	getConnectedModelGroups(selectedProviderId?: string, selectedModel?: string): Promise<IOpenidePickerGroup[]>;
+	getConnectedModelGroups(selectedProviderId?: string, selectedModel?: string, includeEmpty?: boolean): Promise<IOpenidePickerGroup[]>;
 	/** Everything the picker shows for one model: name, context, capabilities, cost, efforts. */
 	describeModel(providerId: string, modelId: string): IOpenidePickerModel;
 	/** Picker state. Keys are `providerId/modelId`; section keys are `favorites`, `recent` or
@@ -364,8 +378,13 @@ export interface IOpenideAgentService {
 	reportPickedElement(result: IBrowserPickResult): void;
 	/** Effective dictation capability. In automatic mode it depends solely on the active provider. */
 	getVoiceCapability(): Promise<IVoiceCapability>;
+	/**
+	 * Every connected model that can be dictated to, and every connected provider that cannot,
+	 * with its reason. What the Settings selector offers instead of a text box.
+	 */
+	listVoiceModels(): Promise<IVoiceModelSelection<IOpenidePickerModel>>;
 	/** Voice dictation: transcribes a WAV with the target pinned when recording started. */
-	transcribeAudio(wavBase64: string, providerId?: string, model?: string): Promise<string>;
+	transcribeAudio(wavBase64: string, providerId?: string, model?: string, token?: CancellationToken): Promise<string>;
 	/**
 	 * ONE short call to a model, no tools, no session, no transcript: the primitive behind the
 	 * autocomplete and the quick edit. Same engine the agent runs on (`streamWithRetry`: stale
@@ -400,7 +419,7 @@ export interface IOpenideAgentService {
 	/** Reveals the agent terminal in the IDE panel/dock (the "Send to panel" menu item). */
 	revealAgentTerminalToPanel(): Promise<boolean>;
 	/** Follows a semantic agent location without stealing focus from the chat. */
-	followAgentLocation(location: IAgentLocation): Promise<void>;
+	followAgentLocation(location: IAgentLocation, token?: CancellationToken): Promise<void>;
 	/** Follows a background terminal once its stable id already exists. */
 	followBackgroundTerminal(id: string): Promise<void>;
 	/** Opens the inline (integrated) REVIEW of a file edited by the agent: the file in the normal
@@ -707,13 +726,13 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	private readonly auth: OpenideAuthManager;
 	private readonly oauth: OpenideOAuthManager;
 	private readonly accounts: OpenideProviderAccountsService;
-	private readonly netRequests: IRequestService;
+	private readonly netRequests: OpenideRequestChannelClient;
 	private readonly browserAutomation: OpenideBrowserAutomation;
 	/** Short cache of the ping to local providers (avoids hammering the server on every refresh). */
 	private readonly localProbeCache = new Map<string, { at: number; ok: boolean }>();
 	/** Cache of GET /models for providers with dynamicModels (TTL 5 min). */
 	/** Live `GET /models` per provider, for the life of the window. See `resolveProviderModels`. */
-	private readonly dynamicModelsCache = new Map<string, { models: string[] }>();
+	private readonly dynamicModelsCache = new Map<string, { models: string[]; fetchedAt: number; modalities?: ReturnType<typeof modelModalitiesFromProviderResponse> }>();
 	private readonly tools: OpenideToolRegistry;
 	private readonly mcp: OpenideMcpManager;
 	private readonly hooks: OpenideAgentHooks;
@@ -868,7 +887,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		// ALL agent traffic (providers, OAuth, catalog) goes through the MAIN channel
 		// (Electron net, no CORS and with streaming) — the renderer's fetch crashes against
 		// CORS en endpoints como chatgpt.com/backend-api ("Failed to fetch").
-		const netRequests: IRequestService = new OpenideRequestChannelClient(mainProcessService.getChannel(OPENIDE_REQUEST_CHANNEL));
+		const netRequests = new OpenideRequestChannelClient(mainProcessService.getChannel(OPENIDE_REQUEST_CHANNEL));
 		this.netRequests = netRequests;
 		this.protocols.set('anthropic', new AnthropicProvider(netRequests));
 		this.protocols.set('openai', new OpenAICompatibleProvider(netRequests));
@@ -963,7 +982,16 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			}
 		}));
 
+		// Credentials can change in another window; refresh connected catalogs there as well.
+		this._register(this.secretStorage.onDidChangeSecret(key => {
+			const prefix = [SECRET_APIKEY_PREFIX, SECRET_OAUTH_PREFIX].find(prefix => key.startsWith(prefix));
+			if (!prefix) { return; }
+			this.dynamicModelsCache.delete(key.slice(prefix.length));
+			this._onDidChange.fire();
+		}));
+
 		this.migrateProviderSettings();
+		this.migrateReasoningEffort();
 	}
 
 	private customProviders(): any[] | undefined {
@@ -1058,17 +1086,102 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		this._onDidChange.fire();
 	}
 
+	/** @deprecated The session-wide effort. Read once, by the migration, and then removed. */
 	private static readonly STORAGE_EFFORT = 'openide.agent.reasoningEffort';
+	private static readonly STORAGE_EFFORT_BY_MODEL = 'openide.agent.reasoningEffortByModel';
 	private static readonly STORAGE_PERMISSION = 'openide.agent.permissionMode';
 
-	/** '' = the model's default · 'none' off · minimal/low/medium/high/xhigh (with limits independent of the model). */
-	getReasoningEffort(): string {
-		return this.storageService.get(OpenideAgentService.STORAGE_EFFORT, StorageScope.APPLICATION) || '';
+	/** Parsed once per distinct stored value. The picker reads this for every row it builds, on
+	 *  every keystroke in its search box, and a `JSON.parse` per model is a parse per model. */
+	private _efforts: { raw: string | undefined; value: Record<string, string> } | undefined;
+
+	private effortsByModel(): Record<string, string> {
+		const raw = this.storageService.get(OpenideAgentService.STORAGE_EFFORT_BY_MODEL, StorageScope.APPLICATION);
+		const cached = this._efforts;
+		// `cached &&` and not `cached?.raw === raw`: with nothing stored, `raw` is `undefined` too,
+		// and the optional form is true on the very first call — when there is no cache to return.
+		if (cached && cached.raw === raw) {
+			return cached.value;
+		}
+		let value: Record<string, string> = {};
+		try {
+			const parsed = raw ? JSON.parse(raw) : {};
+			if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) { value = parsed as Record<string, string>; }
+		} catch {
+			value = {};
+		}
+		// Keyed on the RAW string, so a write from this window or from another one invalidates it
+		// without anyone having to remember to.
+		this._efforts = { raw, value };
+		return value;
 	}
 
-	async setReasoningEffort(effort: string): Promise<void> {
-		this.storageService.store(OpenideAgentService.STORAGE_EFFORT, effort, StorageScope.APPLICATION, StorageTarget.MACHINE);
+	getReasoningEfforts(): Readonly<Record<string, string>> {
+		return this.effortsByModel();
+	}
+
+	/** `<providerId>/<modelId>`, the same key the model picker builds its rows around. */
+	private effortKey(providerId: string, model: string): string {
+		return `${providerId}/${model}`;
+	}
+
+	/**
+	 * Which model an effort call is about. Empty arguments mean the active one, and an active
+	 * provider with no explicit model means that provider's default — the same resolution
+	 * `getModelReasoning` does, so the level and the levels on offer always describe one model.
+	 */
+	private effortTarget(providerId?: string, model?: string): string {
+		const provider = providerId ?? this.getActiveProviderId();
+		if (!provider) {
+			return '';
+		}
+		const target = model || (providerId ? this.modelForProvider(providerId) : this.getModel()) || this.findProvider(provider)?.defaultModel || '';
+		return target ? this.effortKey(provider, target) : '';
+	}
+
+	/** '' = the model's default · 'none' off · minimal/low/medium/high/xhigh (with limits independent of the model). */
+	getReasoningEffort(providerId?: string, model?: string): string {
+		const key = this.effortTarget(providerId, model);
+		return key ? this.effortsByModel()[key] || '' : '';
+	}
+
+	async setReasoningEffort(effort: string, providerId?: string, model?: string): Promise<void> {
+		const key = this.effortTarget(providerId, model);
+		if (!key) {
+			return;
+		}
+		// Copied: `effortsByModel` hands back the cached object, and mutating that in place would
+		// leave the cache agreeing with a `raw` string it no longer matches.
+		const efforts = { ...this.effortsByModel() };
+		// '' is the model's own default, which is the absence of a choice, not a choice of nothing:
+		// stored as an entry it would pin the map at one row per model the user ever looked at.
+		if (effort) { efforts[key] = effort; } else { delete efforts[key]; }
+		this.storageService.store(OpenideAgentService.STORAGE_EFFORT_BY_MODEL, JSON.stringify(efforts), StorageScope.APPLICATION, StorageTarget.MACHINE);
 		this._onDidChange.fire();
+	}
+
+	/**
+	 * The effort used to be ONE value for the whole session. It becomes the entry of the model that
+	 * was active when this build first ran, and the legacy key goes: carrying it as a fallback for
+	 * every OTHER model would silently apply a level chosen for one model to models that never had
+	 * it, which is the confusion the per-model store exists to end.
+	 */
+	private migrateReasoningEffort(): void {
+		const legacy = this.storageService.get(OpenideAgentService.STORAGE_EFFORT, StorageScope.APPLICATION);
+		if (legacy === undefined) {
+			return;
+		}
+		this.storageService.remove(OpenideAgentService.STORAGE_EFFORT, StorageScope.APPLICATION);
+		const key = legacy ? this.effortTarget() : '';
+		if (!key) {
+			return;
+		}
+		const efforts = { ...this.effortsByModel() };
+		if (efforts[key] !== undefined) {
+			return;
+		}
+		efforts[key] = legacy;
+		this.storageService.store(OpenideAgentService.STORAGE_EFFORT_BY_MODEL, JSON.stringify(efforts), StorageScope.APPLICATION, StorageTarget.MACHINE);
 	}
 
 	getModelReasoning(providerId = this.getActiveProviderId(), model?: string): IModelReasoning | undefined {
@@ -1118,15 +1231,14 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	}
 
 	async refreshModelCatalog(): Promise<IModelCatalogStatus> {
-		await this.catalog.refreshNow();
-		// The registry is only half of where a model comes from: the other half is the provider's
-		// own GET /models, cached for five minutes. Someone pressing "refresh" because a model
-		// they just read about is missing means BOTH — otherwise the registry updates and the
-		// picker still shows the list it asked for four minutes ago.
-		this.dynamicModelsCache.clear();
-		// Same reasoning for a key exported since the window opened.
-		this.auth.forgetExternalCredentials();
-		this._onDidChange.fire();
+		try {
+			await this.catalog.refreshNow();
+		} finally {
+			// Provider discovery must refresh even when the public registry is unavailable.
+			this.dynamicModelsCache.clear();
+			this.auth.forgetExternalCredentials();
+			this._onDidChange.fire();
+		}
 		return this.catalog.status();
 	}
 
@@ -1384,6 +1496,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		await this.accounts.remove(providerId, baseKey, accountId);
 		if (wasActive) {
 			this.resetProviderRuntime(providerId);
+			this.subagentRouting.clearHealth(providerId);
 		}
 		this._onDidChange.fire();
 	}
@@ -1681,7 +1794,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	async resolveProviderModels(entry: IProviderEntry): Promise<string[]> {
 		// Warms the registry for the surfaces that call this without going through the picker
 		// (settings pages, subagent config). getConnectedModelGroups awaits it before painting.
-		void this.catalog.ensureFresh();
+		await this.catalog.ensureFresh();
 		const fallback = (): string[] => {
 			const known = this.catalog.modelsFor(entry.id);
 			if (known.length) {
@@ -1698,17 +1811,10 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		if (!adapter?.listModels && !genericDiscovery) {
 			return fallback();
 		}
-		// Cached for the SESSION, not for five minutes.
-		//
-		// A provider adds a model every few weeks; asking every connected endpoint again every
-		// five minutes of use was polling for something that almost never changes, and with the
-		// registry providers now connectable that is N requests each time the picker opens. The
-		// list is refreshed when something actually happened instead: the window restarted (this
-		// map dies with the process), the provider's credential changed (`setApiKey`/`signOut`
-		// delete their entry), or the user asked for it ("Refresh now" clears the map). A failed
-		// discovery is never cached, so a provider that was down retries on the next look.
+		// Refresh on demand after 30 minutes: long-lived IDE sessions must discover releases
+		// without a restart. No background polling; explicit refresh and account changes invalidate.
 		const cached = this.dynamicModelsCache.get(entry.id);
-		if (cached) {
+		if (cached && Date.now() - cached.fetchedAt < 30 * 60 * 1000) {
 			return cached.models;
 		}
 		try {
@@ -1718,7 +1824,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 					.filter(id => typeof id === 'string' && id.length > 0)
 					.sort((a, b) => a.localeCompare(b));
 				if (ids.length) {
-					this.dynamicModelsCache.set(entry.id, { models: ids });
+					this.dynamicModelsCache.set(entry.id, { models: ids, fetchedAt: Date.now() });
 					return ids;
 				}
 			}
@@ -1740,9 +1846,10 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			if (!text) {
 				throw new Error('empty body');
 			}
-			const ids = modelIdsFromProviderResponse(JSON.parse(text));
+			const discovery: unknown = JSON.parse(text);
+			const ids = modelIdsFromProviderResponse(discovery);
 			if (ids.length) {
-				this.dynamicModelsCache.set(entry.id, { models: ids });
+				this.dynamicModelsCache.set(entry.id, { models: ids, fetchedAt: Date.now(), modalities: modelModalitiesFromProviderResponse(discovery) });
 				return ids;
 			}
 		} catch { /* sin red o API caída: fallback estático */ }
@@ -1753,6 +1860,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	 *  formatting is testable and the registry never has to cross the postMessage boundary. */
 	describeModel(providerId: string, modelId: string): IOpenidePickerModel {
 		const meta = this.catalog.metadataFor(modelId, providerId);
+		const liveModalities = this.dynamicModelsCache.get(providerId)?.modalities?.get(modelId);
 		const reasoning = this.catalog.reasoningFor(modelId, providerId);
 		const locale = language || 'en';
 		return {
@@ -1761,8 +1869,8 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			context: formatContextTokens(meta?.limit?.context ?? meta?.limit?.input, locale),
 			toolCall: meta?.tool_call === true,
 			reasoning: meta?.reasoning === true,
-			input: [...(meta?.modalities?.input ?? [])],
-			output: [...(meta?.modalities?.output ?? [])],
+			input: [...(liveModalities?.input ?? meta?.modalities?.input ?? [])],
+			output: [...(liveModalities?.output ?? meta?.modalities?.output ?? [])],
 			costIn: formatCostPerMillion(meta?.cost?.input, locale),
 			costOut: formatCostPerMillion(meta?.cost?.output, locale),
 			// No cost published (subscriptions, local runtimes) must not render as "— / —".
@@ -1772,7 +1880,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		};
 	}
 
-	async getConnectedModelGroups(selectedProviderId = this.getActiveProviderId(), selectedModel = this.getModel()): Promise<IOpenidePickerGroup[]> {
+	async getConnectedModelGroups(selectedProviderId = this.getActiveProviderId(), selectedModel = this.getModel(), includeEmpty = false): Promise<IOpenidePickerGroup[]> {
 		await this.catalog.ensureFresh();
 		const providers = this.listProviders();
 		const groups: IOpenidePickerGroup[] = [];
@@ -1783,7 +1891,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				// Same as the historical composer: the persisted/manual value stays visible even when
 				// discovery changes. Build revalidates it before running and gives an actionable error if stale.
 				if (provider.id === selectedProviderId && selectedModel && !ids.includes(selectedModel)) { ids.push(selectedModel); }
-				if (ids.length) {
+				if (ids.length || includeEmpty) {
 					groups.push({
 						id: provider.id,
 						label: provider.label,
@@ -1997,15 +2105,16 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		return this.tools.revealAgentTerminalToPanel();
 	}
 
-	async followAgentLocation(location: IAgentLocation): Promise<void> {
+	async followAgentLocation(location: IAgentLocation, token: CancellationToken = CancellationToken.None): Promise<void> {
+		if (!this.planFollowEnabled || token.isCancellationRequested) { return; }
 		if (location.kind === 'terminal') {
 			if (!location.background) {
-				await this.tools.followAgentTerminal();
+				await this.tools.followAgentTerminal(undefined, token);
 			}
 			return;
 		}
 		if (location.kind === 'browser') {
-			await this.commandService.executeCommand('openide.browser.open');
+			await this.commandService.executeCommand('openide.browser.open', undefined, { preserveFocus: true });
 			return;
 		}
 		const path = location.path.trim();
@@ -2017,7 +2126,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		// raw-text review must never win over the plan's visual editor.
 		const isPlan = /(?:^|[\\/])\.openide[\\/]plans[\\/][^\\/]+\.md$/i.test(path);
 		if (location.review && !isPlan) {
-			await this.editReview.openReview(path, true, { startLine: location.line, endLine: location.endLine });
+			await this.editReview.openReview(path, true, { startLine: location.line, endLine: location.endLine, token });
 			return;
 		}
 		await this.editorService.openEditor({
@@ -3009,7 +3118,9 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	}
 
 	setPlanFollowEnabled(enabled: boolean): void {
+		if (this.planFollowEnabled === enabled) { return; }
 		this.planFollowEnabled = enabled;
+		if (!enabled) { this.editReview.stopFollowing(); }
 		this._onDidChangePlanFollow.fire(enabled);
 	}
 
@@ -3271,7 +3382,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				if (!url) {
 					return 'Error: URL not allowed — the preview is only for local apps (localhost, 127.0.0.1, *.localhost or the user allowlist).';
 				}
-				await this.commandService.executeCommand('openide.browser.open', url);
+				await this.commandService.executeCommand('openide.browser.open', url, { preserveFocus: true });
 				return `OK: ${url} opened in the IDE preview.`;
 			},
 		};
@@ -3310,17 +3421,16 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	// ---- Dictado por voz ----
 
 	private async resolveVoiceTarget(providerId?: string, model?: string): Promise<{ capability: IVoiceCapability; entry?: IProviderEntry }> {
-		const configured = String(this.configurationService.getValue('openide.agent.voiceModel') ?? '').trim();
+		const configured = parseVoiceSetting(String(this.configurationService.getValue('openide.agent.voiceModel') ?? ''));
 		let targetProvider = providerId?.trim() ?? '';
 		let targetModel = model?.trim() ?? '';
 		let overridden = false;
-		if (!targetProvider && !targetModel && configured) {
-			const slash = configured.indexOf('/');
-			if (slash <= 0 || slash === configured.length - 1) {
+		if (!targetProvider && !targetModel && configured.kind !== 'auto') {
+			if (configured.kind === 'invalid') {
 				return { capability: { available: false, reason: t('agentSurface.voice.settingFormat') } };
 			}
-			targetProvider = configured.slice(0, slash);
-			targetModel = configured.slice(slash + 1);
+			targetProvider = configured.providerId;
+			targetModel = configured.model;
 			overridden = true;
 		}
 		if (!targetProvider) {
@@ -3336,11 +3446,14 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		if (!targetModel) {
 			return { capability: { available: false, providerId: entry.id, providerLabel: entry.label, reason: t('agentSurface.voice.noTranscriptionModel', entry.label) }, entry };
 		}
-		if (!entry.baseUrl || (entry.protocol !== 'openai' && entry.protocol !== 'openai-responses')) {
+		if (!hasVoiceTransport(entry)) {
 			return { capability: { available: false, providerId: entry.id, providerLabel: entry.label, model: targetModel, reason: t('agentSurface.voice.noAudioProtocol', entry.label) }, entry };
 		}
 		if (!(await this.isConnected(entry.id))) {
 			return { capability: { available: false, providerId: entry.id, providerLabel: entry.label, model: targetModel, reason: t('agentSurface.voice.connectProvider', entry.label) }, entry };
+		}
+		if (!resolveVoiceTransport(entry, this.describeModel(entry.id, targetModel))) {
+			return { capability: { available: false, providerId: entry.id, providerLabel: entry.label, model: targetModel, reason: t('agentSurface.voice.modelUnsupported', targetModel, entry.label) }, entry };
 		}
 		return { capability: { available: true, providerId: entry.id, providerLabel: entry.label, model: targetModel, overridden }, entry };
 	}
@@ -3349,7 +3462,35 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		return (await this.resolveVoiceTarget()).capability;
 	}
 
-	async transcribeAudio(wavBase64: string, providerId?: string, model?: string): Promise<string> {
+	/**
+	 * The connected models that can hear, grouped as the picker groups them.
+	 *
+	 * Built on `getConnectedModelGroups` rather than on a query of its own: dictation must offer
+	 * what the chat offers, minus what cannot carry audio. A second enumeration would drift from
+	 * the first the day discovery changes, and the user would be looking at two different ideas of
+	 * "the models you have".
+	 */
+	async listVoiceModels(): Promise<IVoiceModelSelection<IOpenidePickerModel>> {
+		const groups = await this.getConnectedModelGroups(undefined, undefined, true);
+		// STT-only services need not appear in a provider's chat-model catalog.
+		const candidates = groups.map(group => {
+			const entry = this.findProvider(group.id);
+			const models = [...group.models];
+			for (const id of [entry?.voiceModel, ...Object.keys(entry?.voiceModelTransports ?? {})]) {
+				if (id && !models.some(model => model.id === id)) { models.push(this.describeModel(group.id, id)); }
+			}
+			return { ...group, models };
+		});
+		return selectVoiceModels(candidates, providerId => {
+			const entry = this.findProvider(providerId);
+			return entry && hasVoiceTransport(entry) ? entry.protocol : undefined;
+		}, (providerId, model) => {
+			const entry = this.findProvider(providerId);
+			return !!entry && !!resolveVoiceTransport(entry, model);
+		});
+	}
+
+	async transcribeAudio(wavBase64: string, providerId?: string, model?: string, token: CancellationToken = CancellationToken.None): Promise<string> {
 		const resolved = await this.resolveVoiceTarget(providerId, model);
 		const pick = resolved.capability;
 		if (!pick.available || !resolved.entry || !pick.model) {
@@ -3357,30 +3498,25 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		}
 		const credential = await this.auth.resolveCredential(resolved.entry);
 		const base = (resolved.entry.baseUrl || '').replace(/\/+$/, '');
-		const body = {
-			model: pick.model,
-			temperature: 0,
-			messages: [{
-				role: 'user',
-				content: [
-					{ type: 'text', text: 'Transcribe the audio EXACTLY as spoken, in the same language. Return ONLY the transcription, with no quotes and no comments.' },
-					{ type: 'input_audio', input_audio: { data: wavBase64, format: 'wav' } },
-				],
-			}],
-		};
-		const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+		const request = voiceTranscriptionRequest(resolved.entry, this.describeModel(resolved.entry.id, pick.model), wavBase64);
+		const headers: Record<string, string> = { ...resolved.entry.extraHeaders, 'Content-Type': request.contentType };
 		const authToken = credential.kind === 'apiKey' ? credential.value : credential.token;
 		if (authToken) {
 			headers['Authorization'] = `Bearer ${authToken}`;
 		}
-		Object.assign(headers, resolved.entry.extraHeaders ?? {});
+		if (request.transport === 'gemini-inline' && credential.kind === 'apiKey') {
+			delete headers.Authorization;
+			headers['x-goog-api-key'] = credential.value;
+		}
 		const ctx = await this.netRequests.request({
 			type: 'POST',
-			url: `${base}/chat/completions`,
-			data: JSON.stringify(body),
+			url: `${base}${request.path}`,
+			data: request.data,
+			dataBase64: request.dataBase64,
+			timeout: 60_000,
 			headers,
 			callSite: 'openideAgentVoice',
-		}, CancellationToken.None);
+		}, token);
 		const text = (await asText(ctx)) ?? '';
 		const status = ctx.res.statusCode ?? 0;
 		if (status < 200 || status >= 300) {
@@ -3391,12 +3527,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			} catch { /* no exponemos el body crudo del provider */ }
 			throw new Error(t('agentSurface.voice.transcriptionFailed', status, detail));
 		}
-		const out = JSON.parse(text)?.choices?.[0]?.message?.content;
-		const result = typeof out === 'string' ? out.trim() : '';
-		if (!result) {
-			throw new Error(t('agentSurface.voice.emptyTranscription'));
-		}
-		return result;
+		return parseVoiceTranscription(text, request.response);
 	}
 
 	// ---- context limits / active model ----
@@ -4108,7 +4239,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				try {
 					result = await this.streamWithRetry(
 						adapter,
-						{ credential, providerId: entry.id, baseUrl, model, system, messages: wireMessages, tools: toolDefs, maxTokens, extraHeaders: entry.extraHeaders, cloudCodeMetadata: entry.cloudCodeMetadata, effort: this.getReasoningEffort() || undefined },
+						{ credential, providerId: entry.id, baseUrl, model, system, messages: wireMessages, tools: toolDefs, maxTokens, extraHeaders: entry.extraHeaders, cloudCodeMetadata: entry.cloudCodeMetadata, effort: this.getReasoningEffort(entry.id, model) || undefined },
 						ev => {
 							if (ev.type === 'text') {
 								iterationEmitted = true;
@@ -4510,7 +4641,12 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 						// the capture is SHOWN in the chat (inline image card) as well as sent to the model
 						onEvent({ type: 'screenshot', id: call.id, mimeType: shot.mimeType, data: shot.data });
 						messages.push({ role: 'tool', toolCallId: call.id, content: `${shot.note} The image comes in the next message.` });
-						messages.push({ role: 'user', content: `[image: result of ${call.name}]`, images: [{ mimeType: shot.mimeType, data: shot.data }] });
+						// Hidden, like the recording's carrier below: the `screenshot` event already put
+						// the capture in the transcript as its own card, so this is the model's copy and
+						// nothing else. Unhidden it was rebuilt on restore as a USER REQUEST — a bubble
+						// saying "[image: result of browser_screenshot]" that nobody typed, which also
+						// cut the assistant's turn in two and got held at the top by the pinned request.
+						messages.push({ role: 'user', hidden: true, content: `[image: result of ${call.name}]`, images: [{ mimeType: shot.mimeType, data: shot.data }] });
 						continue;
 					}
 					// A recorded flow: the card in the chat plays the file from disk, the transcript
@@ -4802,7 +4938,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			}
 			const result = await this.streamWithRetry(
 				ctx.adapter,
-				{ credential: ctx.credential, providerId: ctx.entry.id, baseUrl: ctx.baseUrl, model: ctx.model, system, messages, tools: toolDefs, maxTokens: Math.min(ctx.maxTokens ?? budget.maxOutputTokens, budget.maxOutputTokens), extraHeaders: ctx.entry.extraHeaders, cloudCodeMetadata: ctx.entry.cloudCodeMetadata, effort: this.getReasoningEffort() || undefined },
+				{ credential: ctx.credential, providerId: ctx.entry.id, baseUrl: ctx.baseUrl, model: ctx.model, system, messages, tools: toolDefs, maxTokens: Math.min(ctx.maxTokens ?? budget.maxOutputTokens, budget.maxOutputTokens), extraHeaders: ctx.entry.extraHeaders, cloudCodeMetadata: ctx.entry.cloudCodeMetadata, effort: this.getReasoningEffort(ctx.entry.id, ctx.model) || undefined },
 				ev => {
 					if (ev.type === 'text') { wrap({ type: 'text', delta: ev.delta }); }
 					if (ev.type === 'info') { wrap(ev); }

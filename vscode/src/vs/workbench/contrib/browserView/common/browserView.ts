@@ -279,7 +279,7 @@ export interface IBrowserViewWorkbenchService {
 	getKnownBrowserViews(): Map<string, BrowserEditorInput>;
 
 	/** Open or navigate the workspace's single local-app preview. */
-	openPreview(url?: string, initialState?: IBrowserEditorViewState): Promise<BrowserEditorInput>;
+	openPreview(url?: string, initialState?: IBrowserEditorViewState, options?: { readonly preserveFocus?: boolean }): Promise<BrowserEditorInput>;
 
 	/** Get the workspace preview when it has already been created. */
 	getPreview(): BrowserEditorInput | undefined;

@@ -15,6 +15,7 @@ import { IConfigurationService } from '../../../../../platform/configuration/com
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
+import { IAccessibilitySignalService } from '../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
 import { IStorageService } from '../../../../../platform/storage/common/storage.js';
 import { COMPACT_COMMAND, IOpenideChatSuggestSources } from '../../common/chat/openideChatSlashCommands.js';
 import { AgentMode, IChatCapabilityMention, IChatImage } from '../../common/openideAgentTypes.js';
@@ -112,6 +113,8 @@ export class OpenideChatComposer extends Disposable {
 	/** Where trays that stack under the input card mount. Inside the composer on purpose — see
 	 *  the note where it is created. */
 	get trayHost(): HTMLElement { return this._trayHost; }
+	/** Notices stay above the composer block and participate in the dock's measured height. */
+	readonly noticeHost: HTMLElement;
 	/** Slot for the ask_user questions card, INSIDE the block above the trays: one silhouette with
 	 *  the prompt, outlined and beam-swept by the block itself. */
 	get questionsHost(): HTMLElement { return this._questionsHost; }
@@ -171,6 +174,7 @@ export class OpenideChatComposer extends Disposable {
 		@IStorageService storageService: IStorageService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IHoverService hoverService: IHoverService,
+		@IAccessibilitySignalService accessibilitySignalService: IAccessibilitySignalService,
 		@IFileService fileService: IFileService,
 	) {
 		super();
@@ -178,6 +182,7 @@ export class OpenideChatComposer extends Disposable {
 
 		this._dock = append(parent, $('.openide-chat-dock'));
 		const composer = append(this._dock, $('.openide-chat-composer'));
+		this.noticeHost = append(composer, $('.openide-chat-notice-host'));
 		// Host for the trays that stack UNDER the card (changed files today). It lives inside the
 		// composer, like the webview's #filesStack, and not as a sibling
 		// of the dock: the dock is z-index 100 and paints its fade gradient over anything below it,
@@ -265,6 +270,7 @@ export class OpenideChatComposer extends Disposable {
 		));
 		this._voice = this._register(new OpenideChatComposerVoice(
 			agentService,
+			accessibilitySignalService,
 			getWindow(parent),
 			state => this._controls.applyVoiceState(state),
 			text => this._appendTranscription(text),

@@ -15,17 +15,44 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
-import { IRequestService } from '../../../../../platform/request/common/request.js';
-import { AgentStreamEvent, IChatMessage, ILLMProvider, IProviderRequest, IProviderResult, IToolCall } from '../openideAgentTypes.js';
+import { asText, IRequestService } from '../../../../../platform/request/common/request.js';
+import { AgentStreamEvent, IChatMessage, ILLMProvider, IProviderModelsRequest, IProviderRequest, IProviderResult, IToolCall } from '../openideAgentTypes.js';
 import { chatGptAccountIdFromJwt } from '../openideJwt.js';
 import { stablePromptCacheKey } from '../openideAgentEfficiency.js';
 import { sseDataOf, ssePost } from '../openideSse.js';
+
+/** Codex wire compatibility, independent of OpenIDE's product version. */
+const CODEX_COMPATIBILITY_VERSION = '0.153.4';
 
 export class CodexProvider implements ILLMProvider {
 
 	readonly id = 'codex';
 
 	constructor(private readonly requestService: IRequestService) { }
+
+	/** The subscription catalog is account-scoped; the public API catalog is not equivalent.
+	 * Wire version verified against openai/codex rust-v0.153.4 (endpoint/models.rs). */
+	async listModels(req: IProviderModelsRequest, token: CancellationToken): Promise<readonly string[]> {
+		if (req.credential.kind !== 'oauth') { return []; }
+		const base = req.baseUrl?.replace(/\/+$/, '') || 'https://chatgpt.com/backend-api/codex';
+		const headers: Record<string, string> = {
+			Authorization: `Bearer ${req.credential.token}`,
+			originator: 'codex_cli_rs',
+			'User-Agent': `codex_cli_rs/${CODEX_COMPATIBILITY_VERSION} (OpenIDE)`,
+			...req.extraHeaders,
+		};
+		const accountId = chatGptAccountIdFromJwt(req.credential.token);
+		if (accountId) { headers['ChatGPT-Account-ID'] = accountId; }
+		const response = await this.requestService.request({
+			type: 'GET', url: `${base}/models?client_version=${CODEX_COMPATIBILITY_VERSION}`, headers,
+			timeout: 15_000, callSite: 'openideCodexModels',
+		}, token);
+		const status = response.res.statusCode ?? 0;
+		if (status < 200 || status >= 300) { throw new Error(`Model discovery HTTP ${status}`); }
+		const data: { models?: { slug?: string; visibility?: string }[] } = JSON.parse(await asText(response) || '{}');
+		if (!Array.isArray(data.models)) { throw new Error('Invalid Codex model catalog'); }
+		return [...new Set(data.models.filter(model => model && typeof model.slug === 'string' && model.slug.trim() && model.visibility !== 'hide' && model.visibility !== 'hidden').map(model => model.slug!))];
+	}
 
 	async streamChat(req: IProviderRequest, onEvent: (e: AgentStreamEvent) => void, token: CancellationToken): Promise<IProviderResult> {
 		const base = (req.baseUrl?.replace(/\/+$/, '')) || 'https://chatgpt.com/backend-api/codex';
@@ -65,8 +92,9 @@ export class CodexProvider implements ILLMProvider {
 		const instructions = req.system || 'You are a helpful coding assistant.';
 		// The Codex wire REQUIRES reasoning. GPT-5.6 supports Extra High; earlier families
 		// keep the clamp to high so sessions on a legacy model do not break.
-		const supportsExtraHigh = req.model.toLowerCase().startsWith('gpt-5.6');
-		const effortMap: Record<string, string> = { none: 'low', minimal: 'low', low: 'low', medium: 'medium', high: 'high', xhigh: supportsExtraHigh ? 'xhigh' : 'high', max: supportsExtraHigh ? 'xhigh' : 'high' };
+		const supportsMax = /^gpt-6-astra(?:-|$)/i.test(req.model);
+		const supportsExtraHigh = supportsMax || req.model.toLowerCase().startsWith('gpt-5.6');
+		const effortMap: Record<string, string> = { none: 'low', minimal: 'low', low: 'low', medium: 'medium', high: 'high', xhigh: supportsExtraHigh ? 'xhigh' : 'high', max: supportsMax ? 'max' : supportsExtraHigh ? 'xhigh' : 'high' };
 		const codexEffort = effortMap[(req.effort ?? '').toLowerCase()] ?? 'medium';
 		const body: Record<string, unknown> = {
 			model: req.model,
@@ -87,7 +115,7 @@ export class CodexProvider implements ILLMProvider {
 		const headers: Record<string, string> = {
 			'Content-Type': 'application/json',
 			'Authorization': `Bearer ${bearer}`,
-			'User-Agent': 'codex_cli_rs/0.0.0 (OpenIDE)',
+			'User-Agent': `codex_cli_rs/${CODEX_COMPATIBILITY_VERSION} (OpenIDE)`,
 			'originator': 'codex_cli_rs',
 		};
 		const accountId = bearer ? chatGptAccountIdFromJwt(bearer) : undefined;

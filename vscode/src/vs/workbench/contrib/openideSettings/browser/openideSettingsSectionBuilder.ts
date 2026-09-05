@@ -74,6 +74,7 @@ export interface ISectionCardRow extends ISectionGroupRow {
 
 export interface ISectionFilterSpec {
 	readonly placeholder: string;
+	readonly value?: string;
 	readonly ariaLabel?: string;
 	readonly clearLabel?: string;
 	/** Fires on every keystroke with the query, trimmed and lowercased. Empty means "show all". */
@@ -375,11 +376,13 @@ export class OpenideSectionRenderer {
 			tooltip: '',
 		}));
 		append(wrap, $('span.codicon.codicon-search.openide-settings-search-icon'));
+		box.value = spec.value ?? '';
 		const clear = append(wrap, $('button.openide-settings-search-clear.hidden', {
 			type: 'button',
 			title: spec.clearLabel ?? t('settings.filter.clear'),
 		})) as HTMLButtonElement;
 		append(clear, $('span.codicon.codicon-close'));
+		clear.classList.toggle('hidden', !box.value);
 		const count = append(wrap, $('span.openide-settings-filter-count.hidden'));
 
 		const apply = () => {

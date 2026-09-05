@@ -107,6 +107,8 @@ export class OpenideChatWidget extends Disposable {
 	private readonly _instantiationService: IInstantiationService;
 	/** No conversation on screen: the Sessions panel is the body (upstream's stacked control). */
 	private _listMode = false;
+	/** What a conversation with nothing in it shows. An overlay on the list host. */
+	private readonly _empty: HTMLElement;
 	private _capabilityCounts: IOpenideChatCapabilityCounts = OPENIDE_CHAT_EMPTY_CAPABILITIES;
 	private readonly _controller: OpenideChatController;
 
@@ -179,15 +181,13 @@ export class OpenideChatWidget extends Disposable {
 		// The live terminal of an external agent session takes the transcript's place (and the
 		// composer's: the TUI has its own prompt) while such a session is the active tab.
 		this._terminalPane = this._register(instantiationService.createInstance(OpenideChatAgentTerminalPane, this._root));
-		// Over the transcript, under the pinned message: an answer to something the user just did
-		// up there (a click on the pinned turn, a rejected attachment) shows where they are
-		// looking, not down by the composer. It is an overlay, so it takes no room from the list.
-		this._notice = append(this._listHost, $('.openide-chat-notice.hidden'));
+		this._empty = this._buildEmptyState();
 		// Between the transcript and the composer, which is where the webview's dock puts it: the
 		// pending changes are the thing you decide on BEFORE writing the next message.
 		// Composer first: the tray mounts inside it, so its host has to exist already. Mounting the
 		// tray on the root instead left it outside the dock, whose fade gradient then painted over it.
 		this._composer = this._register(instantiationService.createInstance(OpenideChatComposer, this._root, this._suggestSources()));
+		this._notice = append(this._composer.noticeHost, $('.openide-chat-notice.hidden', { role: 'status', 'aria-live': 'polite' }));
 		// Docked ON the composer, not in the transcript: the run is parked on the answer, so the
 		// card belongs where the user is already looking. The transcript keeps a shimmer line.
 		this._questionsCard = this._register(instantiationService.createInstance(OpenideChatQuestionsCard, this._composer.questionsHost));
@@ -208,6 +208,7 @@ export class OpenideChatWidget extends Disposable {
 			this._list.setItems(this._controller.items);
 			this._syncQuestionsCard();
 			this._syncPinnedRequest();
+			this._syncEmptyState();
 		}));
 		this._register(this._questionsCard.onDidChangeHeight(() => this._composer.remeasure()));
 		// Both trays live INSIDE the composer's dock, so their height is the composer's height: they
@@ -495,7 +496,10 @@ export class OpenideChatWidget extends Disposable {
 
 	private _wireSessions(): void {
 		this._register(this._header.onDidRequestToggleSessions(() => {
-			if (this._listMode) { return; } // the list IS the body; nothing to toggle
+			// In list mode the panel IS the body, so "toggle" can only mean "back to the chat".
+			// It used to mean nothing at all, which left the overview as a room with no door: with
+			// no conversation to open, the button that got you there could not get you back.
+			if (this._listMode) { this._leaveListMode(); return; }
 			this._sessionsPane.toggle();
 		}));
 		this._register(this._header.onDidChooseNewKind(choice => this._newSessionOfKind(choice)));
@@ -539,10 +543,15 @@ export class OpenideChatWidget extends Disposable {
 			this.agentService.releaseConversationResources(id);
 			this._reconcileTerminals();
 		}));
-		// Nothing to show yet: open on the sessions overview, as VS Code does.
-		if (!this.sessions.activeSessionId()) {
+		// No active conversation but saved ones to choose from: the overview, as VS Code does.
+		// NOTHING saved at all: the composer. The overview used to be the first screen either way,
+		// which asked a brand-new user to pick a conversation from a list that said "No sessions" —
+		// a dead end where the one thing they could do was find the + button. The list is a click
+		// away in the header, and the empty state below points at it once there is something in it.
+		if (!this.sessions.activeSessionId() && this.sessions.listAll().length > 0) {
 			this._enterListMode();
 		}
+		this._syncEmptyState();
 		// A deleted conversation leaves the Changes view too: the service indexes sessions by id
 		// and nothing else ever told it a session was gone, so a deleted CLI chat kept its
 		// section — and a new chat with the same title showed as a second one.
@@ -606,6 +615,7 @@ export class OpenideChatWidget extends Disposable {
 		this._root.classList.add('openide-chat-list-mode');
 		this._sessionsPane.setFull(true);
 		this._sessionsPane.render();
+		this._syncEmptyState();
 		this._layoutList();
 	}
 
@@ -618,6 +628,7 @@ export class OpenideChatWidget extends Disposable {
 		if (this._sessionsPane.mode === 'stacked') {
 			this._sessionsPane.setOpen(false);
 		}
+		this._syncEmptyState();
 		this._layoutList();
 	}
 
@@ -664,7 +675,48 @@ export class OpenideChatWidget extends Disposable {
 		} else {
 			this._terminalPane.hide();
 		}
+		this._syncEmptyState();
 		this._layoutList();
+	}
+
+	/**
+	 * What an empty transcript says, built once and shown by `_syncEmptyState`.
+	 *
+	 * The same three parts as the workbench's own empty editor — the product mark, one line, and
+	 * the keys worth knowing — because a new chat is the same kind of moment: a surface with
+	 * nothing in it yet, which should say what to do rather than sit blank. The mark is the very
+	 * file the watermark uses, so the two are one picture and not two drawings of a logo.
+	 */
+	private _buildEmptyState(): HTMLElement {
+		const root = append(this._listHost, $('.openide-chat-empty.hidden'));
+		append(root, $('.openide-chat-empty-mark'));
+		append(root, $('.openide-chat-empty-title', undefined, t('chat.empty.title')));
+		append(root, $('.openide-chat-empty-text', undefined, t('chat.empty.text')));
+		const hints = append(root, $('.openide-chat-empty-hints'));
+		for (const [key, hint] of [['/', 'chat.empty.hintSlash'], ['@', 'chat.empty.hintAt']] as const) {
+			const row = append(hints, $('.openide-chat-empty-hint'));
+			append(row, $('kbd.openide-chat-empty-key', undefined, key));
+			append(row, $('span', undefined, t(hint)));
+		}
+		// Only once there is something to go back to. It is the other half of the header's toggle:
+		// from the overview that button returns here, and from here this one goes there.
+		const sessions = append(root, $('button.openide-chat-empty-sessions', { type: 'button' })) as HTMLButtonElement;
+		sessions.textContent = t('chat.empty.sessions');
+		this._register(addDisposableListener(sessions, 'click', () => this._enterListMode()));
+		return root;
+	}
+
+	/**
+	 * Shown only when there is genuinely nothing else: an empty transcript, in a native session,
+	 * with neither the overview nor a CLI's terminal standing in for the body.
+	 */
+	private _syncEmptyState(): void {
+		const empty = !this._listMode && !this._cliActive && this._controller.items.length === 0;
+		this._empty.classList.toggle('hidden', !empty);
+		const sessions = this._empty.querySelector('.openide-chat-empty-sessions') as HTMLElement | null;
+		if (sessions) {
+			sessions.hidden = this.sessions.listAll().length === 0;
+		}
 	}
 
 	/**
@@ -815,13 +867,11 @@ export class OpenideChatWidget extends Disposable {
 		append(close, $('span.codicon.codicon-close'));
 		this._noticeStore.value = addDisposableListener(close, 'click', () => this._hideNotice());
 		reset(this._notice, $(`span.codicon.codicon-${icon}`), $('span.openide-chat-notice-text', undefined, notice.message), close);
-		// Just under the pinned message when there is one, else at the top of the transcript.
-		this._notice.style.top = `${(this._pinned.domNode.classList.contains('visible') ? this._pinned.domNode.offsetHeight : 0) + 6}px`;
 		this._notice.classList.remove('hidden');
 		this._notice.classList.toggle('openide-chat-notice-error', notice.severity === 'error');
 		this._notice.classList.toggle('openide-chat-notice-warning', notice.severity === 'warning');
 		// A notice sits between the transcript and the composer, so it changes the list's height.
-		this._layoutList();
+		this._composer.remeasure();
 	}
 
 	private _hideNotice(): void {
@@ -830,7 +880,7 @@ export class OpenideChatWidget extends Disposable {
 		}
 		this._noticeStore.clear();
 		this._notice.classList.add('hidden');
-		this._layoutList();
+		this._composer.remeasure();
 	}
 
 	/**

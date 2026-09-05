@@ -146,14 +146,13 @@
 .openide-chat-notice-action .codicon { font-size: 13px; }
 .openide-chat-notice-action.hidden { display: none; }
 
-/* The widget's own notice, over the transcript under the pinned message: the transcript's
-   notice card (same paddings, glyph and hairline), plus a close button. An overlay above the
-   pinned band's fade, so the fade never runs over it. Hidden when there is nothing to say. */
-.openide-chat-notice {
-	position: absolute;
-	left: 10px;
-	right: 18px;
-	z-index: 6;
+/* Inline feedback above the composer, inside its measured dock. */
+.openide-chat-notice-host {
+	width: min(100%, 760px);
+}
+.openide-chat-notice-host > .openide-chat-notice {
+	position: relative;
+	margin: 0 0 8px;
 	display: flex;
 	align-items: flex-start;
 	gap: 9px;

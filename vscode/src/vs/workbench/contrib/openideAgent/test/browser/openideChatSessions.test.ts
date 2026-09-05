@@ -118,6 +118,32 @@ suite('OpenIDE ChatSessions — VS Code session semantics', () => {
 		storage.dispose();
 	});
 
+	test('conversation titles retain descriptive text beyond the old 48-character cap', () => {
+		const { storage, sessions } = make();
+		const id = sessions.create();
+		const title = 'Implementar la conexión de micrófono y seleccionar proveedores de transcripción';
+		sessions.save(id, [user(title)], false);
+		assert.strictEqual(new OpenideChatSessions(storage).metaOf(id)?.title, title);
+		storage.dispose();
+	});
+
+	test('compacting history preserves the conversation title across later messages', () => {
+		const { storage, sessions } = make();
+		const id = sessions.create();
+		sessions.save(id, [user('Corregir micrófono')], false);
+		sessions.save(id, [{ role: 'assistant', content: 'summary', compaction: { beforeTokens: 100, afterTokens: 10, savingsPercent: 90, origin: 'automatic' } }, user('Continuar')], false);
+		assert.strictEqual(new OpenideChatSessions(storage).metaOf(id)?.title, 'Corregir micrófono');
+		storage.dispose();
+	});
+
+	test('skips empty opening messages and uses the visible command instead of expanded instructions', () => {
+		const { storage, sessions } = make();
+		const id = sessions.create();
+		sessions.save(id, [user(''), { ...user('expanded private instructions'), displayText: '/revisar mi proyecto' }], false);
+		assert.strictEqual(sessions.metaOf(id)?.title, '/revisar mi proyecto');
+		storage.dispose();
+	});
+
 	test('a renamed empty session is no longer empty, so it survives', () => {
 		const { storage, sessions } = make();
 		const id = sessions.create();

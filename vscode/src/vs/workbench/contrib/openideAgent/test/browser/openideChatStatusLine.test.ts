@@ -138,7 +138,7 @@ suite('OpenIDE chat status line', () => {
 
 	test('the shipped holds are the ones the user asked for', () => {
 		// The suite runs on injected timings; these are what actually ships.
-		assert.strictEqual(OPENIDE_CHAT_STEP_MIN_MS >= 1000, true);
+		assert.strictEqual(OPENIDE_CHAT_STEP_MIN_MS <= 200, true);
 		assert.strictEqual(OPENIDE_CHAT_IDLE_GRACE_MS > OPENIDE_CHAT_STEP_MIN_MS, true);
 	});
 
@@ -151,5 +151,25 @@ suite('OpenIDE chat status line', () => {
 		step('Pensando');
 		// No exit to wait for: a step nobody saw leave is not a step.
 		assert.strictEqual(label().textContent, 'Pensando');
+	});
+
+	test('completed swaps release their animation effects', async () => {
+		const { label, step } = create();
+		step('Reading');
+		step('Editing');
+		await until(() => label().textContent ?? '', 'Editing');
+		await timeout(200);
+		assert.strictEqual(label().getAnimations().filter(animation => animation.playState === 'finished').length, 0);
+	});
+
+	test('hiding during an exit cannot overwrite the next live status', async () => {
+		const { line, label, step } = create();
+		step('Old step');
+		await timeout(120);
+		step('Stale next step');
+		line.hide();
+		step('Current step');
+		await timeout(300);
+		assert.deepStrictEqual({ text: label().textContent, opacity: getComputedStyle(label()).opacity }, { text: 'Current step', opacity: '1' });
 	});
 });

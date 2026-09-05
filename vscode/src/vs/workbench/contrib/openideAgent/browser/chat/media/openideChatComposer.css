@@ -237,6 +237,10 @@
 	box-shadow: none;
 	background: transparent;
 }
+/* Match the questions divider, including when a hidden tray sits between visible sections. */
+.openide-chat-block .openide-chat-tray-host > :not(.hidden) ~ :not(.hidden) {
+	border-top: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
+}
 .openide-chat-block .openide-chat-tray-host > :not(.hidden):first-child,
 .openide-chat-block .openide-chat-tray-host > .hidden + :not(.hidden),
 .openide-chat-block .openide-chat-tray-host > .hidden + .hidden + :not(.hidden) {
@@ -393,12 +397,36 @@
 /* ---- Control row ------------------------------------------------------------------------ */
 
 /* Fixed height: the trailing slot swaps microphone, send and stop, and the row must not move. */
-.openide-chat-input-row { display: flex; align-items: center; gap: 4px; min-width: 0; height: 24px; }
+/* `overflow: hidden` is the guarantee, not the layout: the chips below already give way in order,
+   so nothing should ever reach this edge — but a dock dragged narrow enough used to push the
+   microphone and the send button OUT of the card and over the panel beside it, and an icon painting
+   outside the surface it belongs to is the one outcome that must be impossible. */
+/* ONE line, always. The row gives way by cutting text, never by moving icons: wrapping was tried
+   and it is worse — the controls jump to a second line and the whole composer grows a row taller
+   the moment the dock is dragged past a threshold nobody can see. `overflow: hidden` is the last
+   resort behind that, so nothing can paint outside the card whatever happens. */
+.openide-chat-input-row { display: flex; align-items: center; gap: 4px; min-width: 0; height: 24px; overflow: hidden; }
 .openide-chat-input-row .openide-composer-spacer { flex: 1; }
 
-.openide-composer-anchor { position: relative; display: flex; flex-shrink: 0; }
+/* Every labelled chip shrinks; the icons never do. The order the row gives way in is therefore
+   fixed: the model's name ellipsises, then the mode's, and both keep their glyph and chevron
+   because that is the button's intrinsic width. The alternative — chips at their natural size and
+   the icons pushed off the end — loses the controls the user cannot do without (send, attach) to
+   protect two words they can read from the popover anyway. */
+/* The order the row gives way in, from the outside in.
+   1. The mode chip never shrinks: it is one short word ("Agent", "Plan"), and cutting it to "A…"
+      to save eight pixels is the one thing that looked broken rather than tight.
+   2. The model chip absorbs everything, down to nothing if it comes to that. No floor: a floor on
+      each chip adds up to more than a narrow row has, and what gets pushed off the end then is an
+      ICON — which is the outcome this whole rule exists to prevent. */
+.openide-composer-anchor { position: relative; display: flex; flex-shrink: 1; min-width: 0; }
 .openide-composer-anchor[hidden] { display: none; }
-.openide-composer-anchor-shrink { flex-shrink: 1; min-width: 0; }
+/* A thousand to one, not "never": flexbox shares the deficit by factor × width, so at that ratio
+   the model chip absorbs effectively all of it and the mode chip is untouched — until the model
+   reaches zero and cannot absorb any more, at which point the mode gives way rather than let the
+   row overflow onto the icons. `flex-shrink: 0` on the mode chip made that last case impossible
+   and the microphone was clipped instead. */
+.openide-composer-anchor-shrink { flex-shrink: 1000; }
 
 .openide-composer-trigger {
 	display: inline-flex;
@@ -421,11 +449,21 @@
 
 .openide-composer-trigger-label {
 	font-weight: 500;
-	min-width: 0;
+	/* Inside the model chip the NAME is what gives way, not the level beside it: the name is long,
+	   repeated in full by the popover, and recognisable from its first few characters. The level is
+	   two short words that mean nothing truncated. */
+	flex: 1 100 auto;
+	/* A floor of a few characters: squeezed to nothing the chip became an icon and a level with no
+	   model in it, which reads as if no model were chosen at all. Ellipsised it still identifies
+	   one. */
+	min-width: 44px;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+/* Only inside the model chip: the mode's label is one short word, and a floor on it would make the
+   chip refuse to give way at the width where the model's has nothing left to give. */
+.openide-composer-mode .openide-composer-trigger-label { min-width: 0; }
 
 .openide-composer-model.unset .openide-composer-trigger-label {
 	color: var(--vscode-descriptionForeground);
@@ -447,12 +485,25 @@
 
 .monaco-workbench .openide-chat-native .openide-chat-input-card .openide-composer-mode > .codicon[class*="codicon-"]:first-child { font-size: 13px; color: var(--oi-text-muted); }
 
-/* Inline SVG glyph: matches the optical weight of the codicons beside it and follows the same
-   colour, so it does not read as a foreign asset dropped into the row. */
-.openide-composer-effort .oi-glyph { flex: 0 0 auto; width: 14px; height: 14px; color: var(--oi-text-muted); }
-.openide-composer-effort:hover .oi-glyph,
-.openide-composer-effort:not(.unset) .oi-glyph { color: var(--oi-text); }
-.openide-composer-effort.unset .openide-composer-trigger-label { color: var(--oi-text-muted); }
+/* The reasoning level, worn by the model chip rather than by a control of its own: the effort is a
+   property OF the model now (`getReasoningEffort(providerId, model)`), edited on that model's row
+   in the picker. Muted and after the name, so the chip reads "which model, how hard". */
+.openide-composer-model-effort {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	/* Shrinks a hundred times more reluctantly than the name beside it: it only starts to give
+	   once the name has nothing left to give. */
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	color: var(--oi-text-muted);
+	font-weight: 400;
+	white-space: nowrap;
+}
+.openide-composer-model-effort[hidden] { display: none; }
+.openide-composer-model-effort > .oi-glyph { flex: 0 0 auto; width: 12px; height: 12px; }
+.openide-composer-model-effort > span { overflow: hidden; text-overflow: ellipsis; }
 
 /* The workbench's own `.openide-provider-icon` is 16px with a borderless monogram; the composer
    and the picker use the webview's 15px/14px marks, so both are pinned here. */
@@ -526,6 +577,16 @@
 .openide-composer-mic.rec { color: var(--vscode-errorForeground); animation: openide-mic-pulse 1.2s ease-in-out infinite; }
 .openide-composer-mic.busy { pointer-events: none; }
 .openide-composer-mic.unavailable { color: var(--vscode-descriptionForeground); }
+.openide-composer-voice-status {
+	padding: 6px 10px;
+	font-size: var(--oi-text-xs);
+	color: var(--vscode-descriptionForeground);
+}
+.openide-composer-voice-status.recording { color: var(--vscode-errorForeground); }
+.openide-composer-voice-status[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+	.openide-composer-mic.rec { animation: none; }
+}
 .monaco-workbench .openide-chat-native .openide-chat-input-card .openide-composer-mic .codicon[class*="codicon-"] { font-size: 14px; }
 
 @keyframes openide-mic-pulse {

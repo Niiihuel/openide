@@ -80,6 +80,20 @@ suite('OpenIDE ChatMarkdownPart', () => {
 		assert.strictEqual(await clipboard.readText(), 'line one\nline two');
 	});
 
+	test('the fence carries the source text, character for character', () => {
+		// The tokenizer builds NODES rather than an HTML string: nothing is escaped on the way in
+		// and nothing is parsed on the way out, so the markup-looking characters have to come back
+		// exactly as typed. Going through a string is what used to throw under the workbench's
+		// Trusted Types policy and leave the whole turn rendering as an empty row.
+		// Spaces and not a tab for the indent: marked expands tabs inside a fence, and that is its
+		// business, not the tokenizer's.
+		const { part } = create('```plaintext\n<div class="x"> & </div>\n  second\n```\n');
+		const source = part.domNode.querySelector('.monaco-tokenized-source');
+		assert.ok(source);
+		assert.strictEqual(source.querySelectorAll('br').length, 1, 'one break between the two lines');
+		assert.strictEqual(source.textContent, '<div class="x"> & </div>  second');
+	});
+
 	test('a fence above the caret survives the deltas below it', () => {
 		const { part, element } = create('```plaintext\nstable\n```\n\nTail');
 		const fence = part.domNode.children[0];

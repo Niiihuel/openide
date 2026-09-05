@@ -389,7 +389,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-sections > .openide-settings-section,
 .openide-settings-list > .openide-settings-section { padding: var(--vscode-spacing-size240, 24px) 0 var(--vscode-spacing-size280, 28px); }
 .openide-settings-list > .openide-settings-section:first-child,
-.openide-settings-list > :first-child > .openide-settings-section:first-child { padding-top: 0; }
+.openide-settings-list > :first-child > .openide-settings-section:first-child:not(.openide-settings-voice-test) { padding-top: 0; }
 .openide-settings-section-title { font-size: 15px; font-weight: 600; line-height: 20px; letter-spacing: -0.005em; }
 .openide-settings-section-desc { max-width: 62ch; color: var(--oi-text-muted); font-size: 12.5px; line-height: 19px; }
 /* The policy and globs editors are native InputBoxes in multiline mode, so the class sits on the
@@ -660,6 +660,34 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-row.danger .openide-settings-setting-title,
 .monaco-workbench .openide-settings .openide-settings-row.danger .openide-settings-row-glyph.codicon[class*="codicon-"] { color: var(--oi-danger); }
 .openide-settings-row.armed { background: color-mix(in srgb, var(--oi-danger) 14%, transparent); }
+/* The row that holds the current value of a choice (the voice model, today). The trailing check is
+   the mark -- the same one the settings dropdown puts on its selected option -- and the tint only
+   has to make the row findable when scrolling a card of twenty. Deliberately quieter than `armed`:
+   this is a state, not a warning. */
+.openide-settings-row.selected { background: color-mix(in srgb, var(--oi-accent) 8%, transparent); }
+.openide-settings-voice { display: flex; flex-direction: column; gap: 24px; }
+.openide-settings-voice .openide-settings-provider-logo { width: 20px; height: 20px; }
+.openide-settings-voice-test {
+	padding: 16px;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-md);
+	background: var(--oi-raised);
+}
+.openide-settings-voice-level { width: 100%; height: 12px; margin: 8px 0; }
+.openide-settings-voice-level::-webkit-meter-bar { background: var(--oi-border); border: none; }
+.openide-settings-voice-level::-webkit-meter-optimum-value { background: var(--oi-accent); }
+.openide-settings-voice-test > .openide-settings-section-desc:empty { display: none; }
+.openide-settings-voice-test .openide-settings-section-actions { flex-wrap: wrap; }
+.openide-settings-voice-transcript {
+	margin: 10px 0;
+	padding: 10px 12px;
+	border-inline-start: 2px solid var(--oi-accent);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	user-select: text;
+}
+.openide-settings .openide-settings-voice-test [hidden] { display: none !important; }
+.monaco-workbench .openide-settings .openide-settings-row.selected .openide-settings-row-glyph.codicon[class*="codicon-"] { color: var(--oi-accent); }
 /* The trailing glyph of a row IS a control affordance: 16px, muted, like every action glyph. */
 .monaco-workbench .openide-settings .openide-settings-row-glyph.codicon[class*="codicon-"] { font-size: 16px; color: var(--oi-text-muted); }
 .openide-settings-row .oi-pill { font-size: var(--oi-text-xs); }
@@ -960,3 +988,27 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 /* ---- Import page: one row per editor or CLI found on the machine ---- */
 .openide-settings-setting-title > .openide-settings-import-mark { display: inline-flex; vertical-align: -3px; width: 16px; height: 16px; margin-right: 6px; font-size: 9px; }
 .openide-settings-import-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 2px; }
+
+.openide-settings-voice-provider {
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-md);
+	background: var(--oi-raised);
+	overflow: hidden;
+}
+.openide-settings-voice-provider-summary {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 16px;
+	list-style: none;
+	cursor: pointer;
+}
+.openide-settings-voice-provider-summary::-webkit-details-marker { display: none; }
+.openide-settings-voice-provider-summary:hover { background: var(--oi-hover); }
+.openide-settings-voice-provider-summary:focus-visible { outline: 1px solid var(--oi-focus); outline-offset: -2px; }
+.openide-settings-voice-provider-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.openide-settings-voice-provider-count { color: var(--oi-text-muted); font-size: var(--oi-text-xs); }
+.openide-settings-voice-provider[open] > summary > .codicon-chevron-right { transform: rotate(90deg); }
+.openide-settings-voice-provider > .openide-settings-cardsection { padding: 0; }
+.openide-settings-voice-provider .openide-settings-group { padding-bottom: 0; }
+.openide-settings-voice-provider .openide-settings-card { border: 0; border-top: 1px solid var(--oi-border); border-radius: 0; }

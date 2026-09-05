@@ -57,6 +57,6 @@ export interface IOpenideSettingsSection extends IDisposable {
 	 */
 	readonly navigationChildren?: readonly IOpenideSettingsNavigationEntry[];
 	readonly onDidChangeNavigation?: Event<void>;
-	/** Repaints inside `container`. Called on every editor render: must be idempotent. */
-	render(container: HTMLElement, context: IOpenideSettingsSectionContext): void;
+	/** Repaints inside `container`. The optional disposable releases resources when the page is hidden or replaced. */
+	render(container: HTMLElement, context: IOpenideSettingsSectionContext): void | IDisposable;
 }

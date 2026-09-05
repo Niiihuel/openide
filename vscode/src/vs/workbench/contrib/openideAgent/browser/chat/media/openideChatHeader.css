@@ -173,18 +173,21 @@
 	max-width: none;
 }
 
-/* A title that does not fit fades out instead of ending in `…`: the ellipsis eats three
-   characters of a 160px tab to say what the strip's own edge fade already says, and the fade
-   reads as "there is more" without pretending the word ended there. Clip, not ellipsis, so the
-   last glyph runs under the mask. 14px is the strip's edge fade (`.openide-chat-tabs.can-scroll-*`). */
+/* Keep complete titles readable; only overflowing text needs an ellipsis. */
+.openide-chat-tab .openide-chat-conversation-icon {
+	width: var(--vscode-spacing-size160);
+	height: var(--vscode-spacing-size160);
+	flex: 0 0 var(--vscode-spacing-size160);
+	background-color: currentColor;
+	mask: url('./chat-conversation.svg') center / contain no-repeat;
+}
+
 .openide-chat-tab-title {
 	flex: 1;
 	min-width: 0;
 	white-space: nowrap;
 	overflow: hidden;
-	text-overflow: clip;
-	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent 100%);
-	mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent 100%);
+	text-overflow: ellipsis;
 }
 
 .openide-chat-tab-close {

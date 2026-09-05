@@ -316,6 +316,59 @@
 	font-size: 12px;
 }
 
+/* The model's reasoning level, beside its name. Absent — not blank — when the model runs at its
+   own default: the row says what was chosen, never what the provider happens to do. */
+.openide-mp-effort {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+}
+.openide-mp-effort[hidden] { display: none; }
+
+/* "Edit": the level is edited ON the model, so the affordance lives on the model's row. Revealed
+   by hover or keyboard focus only — twenty models would otherwise be twenty buttons — and it takes
+   no space when it is invisible, so the context window never shifts as the pointer sweeps down. */
+.openide-mp-edit {
+	order: 100;
+	flex: 0 0 auto;
+	display: none;
+	align-items: center;
+	height: 18px;
+	margin-left: 8px;
+	padding: 0 6px;
+	border: none;
+	border-radius: var(--oi-radius-sm);
+	background: var(--oi-tint-2, var(--vscode-toolbar-hoverBackground));
+	color: var(--vscode-foreground);
+	font-family: inherit;
+	font-size: 11px;
+	cursor: pointer;
+}
+.openide-mp-edit[hidden] { display: none !important; }
+.openide-mp-list .monaco-list-row:hover .openide-mp-edit,
+.openide-mp-list .monaco-list-row.focused .openide-mp-edit { display: inline-flex; }
+.openide-mp-edit:hover { background: var(--vscode-toolbar-hoverBackground); }
+
+/* The levels of ONE model, beside the row that opened them. Same card as the detail panel — same
+   ground, same shadow, same z-index band — because they are the same kind of thing: a surface the
+   popover cannot contain (`.openide-menu` is `overflow: hidden`) hung off one of its rows. */
+.openide-mp-effort-flyout {
+	position: fixed;
+	z-index: 2601;
+	min-width: 148px;
+	padding: 4px;
+	display: flex;
+	flex-direction: column;
+	border-radius: var(--oi-radius-lg);
+	border: 1px solid var(--oi-border);
+	background-color: var(--oi-overlay);
+	box-shadow: var(--oi-shadow);
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	color: var(--vscode-menu-foreground, var(--vscode-foreground));
+}
+.openide-mp-effort-flyout[hidden] { display: none; }
+
 /* `margin-left: auto` opens the whole slack HERE, so the star pins to a fixed column. Hanging off
    the name instead, every row put its star at a different x and the column read as a sawtooth. */
 .openide-mp-star {

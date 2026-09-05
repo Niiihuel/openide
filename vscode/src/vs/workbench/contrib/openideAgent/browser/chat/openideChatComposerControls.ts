@@ -11,7 +11,7 @@ import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { AgentMode } from '../../common/openideAgentTypes.js';
 import { IOpenideAgentService } from '../openideAgentService.js';
 import { applyProviderIcon } from '../openideProviderIcons.js';
-import { createThinkingGlyph, OpenideChatEffortPicker, reasoningControlVisible, reasoningEffortLabel } from './openideChatEffortPicker.js';
+import { createThinkingGlyph, reasoningControlVisible, reasoningEffortChipLabel } from './openideChatReasoning.js';
 import { OpenideChatModePicker, agentModeEntry } from './openideChatModePicker.js';
 import { OpenideChatModelPicker } from './openideChatModelPicker.js';
 import { IOpenideChatModelRoute } from './openideChatController.js';
@@ -68,7 +68,6 @@ export class OpenideChatComposerControls extends Disposable {
 	private readonly _modelPicker: OpenideChatModelPicker;
 	/** Set while a turn of the VISIBLE conversation runs somewhere other than the chosen model. */
 	private _modelRoute: IOpenideChatModelRoute | undefined;
-	private readonly _effortPicker: OpenideChatEffortPicker;
 	/** See `_warmModelCatalog`. */
 	private _catalogWarmed = false;
 
@@ -78,18 +77,18 @@ export class OpenideChatComposerControls extends Disposable {
 	private readonly _modelButton: HTMLButtonElement;
 	private readonly _modelIcon: HTMLElement;
 	private readonly _modelLabel: HTMLElement;
-	private readonly _effortAnchor: HTMLElement;
-	private readonly _effortButton: HTMLButtonElement;
-	private readonly _effortLabel: HTMLElement;
+	/** The active model's reasoning level, worn by the model chip. Hidden when it has none. */
+	private readonly _modelEffort: HTMLElement;
+	private readonly _modelEffortLabel: HTMLElement;
 	private readonly _followButton: HTMLButtonElement;
 	private readonly _micButton: HTMLButtonElement;
+	private readonly _voiceStatus: HTMLElement;
 	private readonly _sendButton: HTMLButtonElement;
 	/**
 	 * The tips whose text depends on state, kept so a repaint can re-read them. The hover itself
 	 * always resolves late; these only exist to keep the accessible name on the same string.
 	 */
 	private readonly _modeTooltip: IOpenideChatTooltip;
-	private readonly _effortTooltip: IOpenideChatTooltip;
 	private readonly _followTooltip: IOpenideChatTooltip;
 	private readonly _micTooltip: IOpenideChatTooltip;
 	private readonly _sendTooltip: IOpenideChatTooltip;
@@ -108,7 +107,7 @@ export class OpenideChatComposerControls extends Disposable {
 		row: HTMLElement,
 		private readonly agentService: IOpenideAgentService,
 		contextViewService: IContextViewService,
-		commandService: ICommandService,
+		private readonly commandService: ICommandService,
 		hoverService: IHoverService,
 		private readonly voice: OpenideChatComposerVoice,
 		private readonly actions: IComposerActions,
@@ -118,7 +117,6 @@ export class OpenideChatComposerControls extends Disposable {
 
 		this._modePicker = this._register(new OpenideChatModePicker(agentService, contextViewService, () => this._paintMode()));
 		this._modelPicker = this._register(new OpenideChatModelPicker(agentService, contextViewService, commandService, () => this.refresh()));
-		this._effortPicker = this._register(new OpenideChatEffortPicker(agentService, contextViewService, () => this.refresh()));
 
 		const mode = createTrigger(row, 'openide-composer-mode');
 		this._modeButton = mode.button;
@@ -137,17 +135,17 @@ export class OpenideChatComposerControls extends Disposable {
 		this._modelIcon.hidden = true;
 		this._modelLabel = append(model.button, model.label);
 		this._modelLabel.textContent = t('chatSurface.model.unset');
+		// The level rides on the model chip instead of on a control of its own. The effort belongs
+		// to a model now (`getReasoningEffort(providerId, model)`) and is edited on that model's row
+		// in the picker, so a second trigger here would have been a second way into one setting —
+		// and one more thing for a narrow dock to push off its own edge.
+		this._modelEffort = append(model.button, document.createElement('span'));
+		this._modelEffort.className = 'openide-composer-model-effort';
+		this._modelEffort.hidden = true;
+		this._modelEffort.appendChild(createThinkingGlyph(document));
+		this._modelEffortLabel = append(this._modelEffort, document.createElement('span'));
 		model.button.appendChild(createCodicon(document, 'chevron-down', 'openide-composer-chevron'));
 		this._register(addDisposableListener(model.button, 'click', () => this._modelPicker.toggle(model.button)));
-
-		const effort = createTrigger(row, 'openide-composer-effort');
-		this._effortAnchor = effort.anchor;
-		this._effortAnchor.hidden = true;
-		this._effortButton = effort.button;
-		this._effortButton.appendChild(createThinkingGlyph(document));
-		this._effortLabel = append(effort.button, effort.label);
-		this._effortTooltip = this._register(setupChatTooltip(hoverService, this._effortButton, () => t('chat.tip.effort', this._effortPicker.options.length)));
-		this._register(addDisposableListener(effort.button, 'click', () => this._effortPicker.toggle(effort.button)));
 
 		const spacer = append(row, document.createElement('span'));
 		spacer.className = 'openide-composer-spacer';
@@ -173,13 +171,25 @@ export class OpenideChatComposerControls extends Disposable {
 		const mic = createUtilButton(hoverService, row, 'openide-composer-mic', 'mic-filled', () => this._voiceLabel());
 		this._micButton = mic.button;
 		this._micTooltip = this._register(mic.tooltip);
+		this._voiceStatus = document.createElement('div');
+		this._voiceStatus.className = 'openide-composer-voice-status';
+		this._voiceStatus.setAttribute('role', 'status');
+		this._voiceStatus.setAttribute('aria-live', 'polite');
+		this._voiceStatus.hidden = true;
+		row.before(this._voiceStatus);
 		// Toggle vs hold-to-talk (the removed chat webview): the click only counts in toggle mode,
 		// and the pointer pair only in hold mode, so a setting change mid-session never double-fires.
-		this._register(addDisposableListener(this._micButton, 'click', () => {
-			if (this._voiceMode === 'toggle') { this.voice.toggle(); }
+		this._register(addDisposableListener(this._micButton, 'click', (event: MouseEvent) => {
+			// Dictation off: `toggle()` returns in silence, which is how this button spent its life
+			// looking broken. The reason is already in the tooltip; the click is the way to fix it.
+			if (!this.voice.capability.available) {
+				void this.commandService.executeCommand('openide.agent.openVoiceSettings');
+				return;
+			}
+			if (this._voiceMode === 'toggle' || event.detail === 0) { this.voice.toggle(); }
 		}));
 		this._register(addDisposableListener(this._micButton, 'pointerdown', (event: PointerEvent) => {
-			if (this._voiceMode !== 'holdToTalk') { return; }
+			if (event.button !== 0 || this._voiceMode !== 'holdToTalk' || !this.voice.capability.available) { return; }
 			event.preventDefault();
 			this._holding = this.voice.beginHold();
 		}));
@@ -191,6 +201,17 @@ export class OpenideChatComposerControls extends Disposable {
 		this._register(addDisposableListener(this._micButton, 'pointerup', release));
 		this._register(addDisposableListener(this._micButton, 'pointerleave', release));
 		this._register(addDisposableListener(this._micButton, 'pointercancel', release));
+		this._register(addDisposableListener(this._micButton, 'blur', release));
+		this._register(addDisposableListener(this._micButton, 'keydown', (event: KeyboardEvent) => {
+			if (this._voiceMode !== 'holdToTalk' || !this.voice.capability.available || (event.key !== ' ' && event.key !== 'Enter')) { return; }
+			event.preventDefault();
+			if (!event.repeat) { this._holding = this.voice.beginHold(); }
+		}));
+		this._register(addDisposableListener(this._micButton, 'keyup', (event: KeyboardEvent) => {
+			if (this._voiceMode !== 'holdToTalk' || (event.key !== ' ' && event.key !== 'Enter')) { return; }
+			event.preventDefault();
+			release();
+		}));
 
 		this._sendButton = append(row, document.createElement('button'));
 		this._sendButton.type = 'button';
@@ -244,7 +265,6 @@ export class OpenideChatComposerControls extends Disposable {
 	closeMenus(): void {
 		this._modePicker.close();
 		this._modelPicker.close();
-		this._effortPicker.close();
 	}
 
 	/** Repaints the mic from the recorder's own state machine. */
@@ -252,17 +272,41 @@ export class OpenideChatComposerControls extends Disposable {
 		this._voiceState = state;
 		this._micButton.classList.toggle('rec', state === 'recording');
 		this._micButton.classList.toggle('busy', state === 'busy' || state === 'starting');
+		this._micButton.disabled = state === 'busy';
+		this._micButton.setAttribute('aria-busy', String(state === 'busy' || state === 'starting'));
+		this._micButton.setAttribute('aria-pressed', String(state === 'recording'));
+		this._micButton.replaceChildren(createCodicon(this._micButton.ownerDocument,
+			state === 'recording' ? 'primitive-square' : state === 'busy' || state === 'starting' ? 'loading' : 'mic-filled'));
+		this._micButton.firstElementChild?.classList.toggle('codicon-modifier-spin', state === 'busy' || state === 'starting');
+		this._voiceStatus.hidden = state === 'idle';
+		this._voiceStatus.classList.toggle('recording', state === 'recording');
+		this._voiceStatus.textContent = state === 'recording' ? t('chatSurface.voice.listening') : this._voiceLabel();
 		this._micTooltip.update();
 		this._updateSlot();
 	}
 
 	/** What the microphone is doing right now, in the language the IDE is in right now. */
+	/**
+	 * What the microphone says about itself.
+	 *
+	 * While it is doing something the state is the whole answer. At rest it also names the model
+	 * that will hear -- the dictation model is chosen in Settings and can differ from the model
+	 * answering in the chat, so a tooltip that only said "Dictate" left the user with no way to
+	 * know which of the two was about to be billed. When dictation is off it says WHY, and the
+	 * click (see the handler above) goes to the page that fixes it.
+	 */
 	private _voiceLabel(): string {
-		return this._voiceState === 'recording' ? (this._voiceMode === 'holdToTalk' ? t('chat.voice.release') : t('chat.voice.stop'))
-			: this._voiceState === 'busy' ? t('chat.voice.transcribing')
-				: this._voiceState === 'starting' ? t('chat.voice.preparing')
-					: this._voiceMode === 'holdToTalk' ? t('chat.voice.hold')
-						: t('chat.voice.dictate');
+		if (this._voiceState === 'recording') { return this._voiceMode === 'holdToTalk' ? t('chat.voice.release') : t('chat.voice.stop'); }
+		if (this._voiceState === 'busy') { return t('chat.voice.transcribing'); }
+		if (this._voiceState === 'starting') { return t('chat.voice.preparing'); }
+		const base = this._voiceMode === 'holdToTalk' ? t('chat.voice.hold') : t('chat.voice.dictate');
+		const capability = this.voice.capability;
+		if (!capability.available) {
+			return `${capability.reason ?? t('chatSurface.voice.unsupported')} — ${t('chatSurface.voice.configure')}`;
+		}
+		return capability.providerLabel && capability.model
+			? t('chatSurface.voice.usingModel', base, capability.providerLabel, capability.model)
+			: base;
 	}
 
 	/**
@@ -339,15 +383,16 @@ export class OpenideChatComposerControls extends Disposable {
 		applyProviderIcon(this._modelIcon, providerId, entry?.label ?? '');
 		this._modelIcon.classList.add('openide-composer-provider-icon');
 
+		// Spelled out whenever the model reasons at all, its own default included: this is the only
+		// place the level is VISIBLE without opening a menu, and "nothing shown" was indistinguishable
+		// from "this model does not think". The picker's rows are the opposite case — twenty rows
+		// each saying "Model default" is noise — so they stay silent until a level is chosen.
 		const reasoning = this.agentService.getModelReasoning(providerId, model);
-		this._effortPicker.setPublishedReasoning(reasoning);
-		this._effortAnchor.hidden = !reasoningControlVisible(connected, reasoning);
-		if (!this._effortAnchor.hidden) {
-			const effort = this.agentService.getReasoningEffort() || '';
-			this._effortLabel.textContent = reasoningEffortLabel(effort);
-			this._effortButton.classList.toggle('unset', !effort);
-			this._effortTooltip.update();
-		}
+		const hasEffort = reasoningControlVisible(connected, reasoning);
+		this._modelEffort.hidden = !hasEffort;
+		this._modelEffortLabel.textContent = hasEffort ? reasoningEffortChipLabel(this.agentService.getReasoningEffort(providerId, model)) : '';
+		// The mic tooltip names the dictation model, which `refreshCapability` may have just changed.
+		this._micTooltip.update();
 		this._updateSlot();
 	}
 
@@ -392,11 +437,7 @@ export class OpenideChatComposerControls extends Disposable {
 		this._sendTooltip.update();
 	}
 
-	/**
-	 * ONE slot on the right: an empty composer offers dictation, a composer with something to say
-	 * offers send, and a live run offers stop. While the microphone is busy it keeps the slot, or
-	 * the control the user is talking into would vanish mid-sentence.
-	 */
+	/** Share one action slot: microphone when empty, Send for a draft, Stop during a run. */
 	private _updateSlot(): void {
 		const voiceState = this.voice.state;
 		let showSend = this._busy || this._hasContent;
@@ -405,8 +446,6 @@ export class OpenideChatComposerControls extends Disposable {
 		}
 		this._sendButton.hidden = !showSend;
 		this._sendButton.disabled = !this._busy && !this._hasContent;
-		// The microphone keeps its place whether or not dictation is available (Cursor shows it
-		// always); without a voice provider it is dimmed and its tooltip says what is missing.
 		this._micButton.hidden = showSend;
 		this._micButton.classList.toggle('unavailable', !this.voice.capability.available && voiceState === 'idle');
 	}

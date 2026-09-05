@@ -75,6 +75,11 @@ const OPENIDE_NAV_LABELS = {
 
 export class OpenideSettingsModel {
 	private model: Settings2EditorModel | undefined;
+	private cachedItems: IOpenideSettingItem[] | undefined;
+	private cachedNavigation: readonly IOpenideSettingsNavigationEntry[] | undefined;
+	private cachedMatches: IOpenideSettingItem[] | undefined;
+	private readonly patterns = new Map<string, RegExp>();
+	private searchText = new WeakMap<IOpenideSettingItem, string>();
 	private state: IOpenideSettingsViewState;
 	/** Categories whose content is not config keys (skills, hooks, MCP…): without this the filter
 	 *  dropped them from the tree, judging each category only by its schema settings. */
@@ -86,12 +91,30 @@ export class OpenideSettingsModel {
 		this.state = { target: ConfigurationTarget.USER_LOCAL, query: '', category: 'home' };
 	}
 
-	setModel(model: Settings2EditorModel): void { this.model = model; }
+	setModel(model: Settings2EditorModel | undefined): void { this.model = model; this.invalidate(); }
+
+	/** Configuration, schema, profile and display-language changes invalidate the snapshot. */
+	invalidate(): void {
+		this.cachedItems = undefined;
+		this.cachedNavigation = undefined;
+		this.cachedMatches = undefined;
+		this.searchText = new WeakMap();
+		this.patterns.clear();
+	}
 	setSurfaceSearch(entries: ReadonlyMap<string, readonly IOpenideSettingsSearchEntry[]>): void { this.surfaceSearch = entries; }
-	setState(state: Partial<IOpenideSettingsViewState>): void { this.state = { ...this.state, ...state }; }
+	setState(state: Partial<IOpenideSettingsViewState>): void {
+		const next = { ...this.state, ...state };
+		if (next.target !== this.state.target || next.folderUri?.toString() !== this.state.folderUri?.toString() || next.language !== this.state.language) {
+			this.invalidate();
+		} else if (next.query !== this.state.query) {
+			this.cachedMatches = undefined;
+		}
+		this.state = next;
+	}
 	get viewState(): Readonly<IOpenideSettingsViewState> { return this.state; }
 
 	get navigation(): readonly IOpenideSettingsNavigationEntry[] {
+		if (this.cachedNavigation) { return this.cachedNavigation; }
 		if (!this.model) { return []; }
 		const convert = (entry: ITOCEntry<string>): IOpenideSettingsNavigationEntry | undefined => {
 			if (entry.hide) { return undefined; }
@@ -105,7 +128,7 @@ export class OpenideSettingsModel {
 		const common = getCommonlyUsedData(this.model.settingsGroups).settings?.map(setting => setting.key) ?? [];
 		const core = tocData.children?.map(convert).filter((entry): entry is IOpenideSettingsNavigationEntry => !!entry) ?? [];
 		const extensions = buildOpenideExtensionsNavigation(this.allItems(), t('settings.nav.extensions'));
-		return [
+		return this.cachedNavigation = [
 			{ id: 'home', label: t('settings.nav.all') },
 			{ id: 'commonlyUsed', label: t('settings.nav.commonlyUsed'), settings: common },
 			...core,
@@ -184,8 +207,8 @@ export class OpenideSettingsModel {
 	 * home page, a search hit outside the TOC — falls back to the first segment of its key
 	 * ("files.autoSave" → "Files"), which is how upstream names a section it has no label for.
 	 *
-	 * Resolved once per call, not per row: `navigation` rebuilds the TOC (and inspects every
-	 * setting for the extensions node) each time it is read.
+	 * The catalog and navigation snapshot are shared with search until configuration or schema
+	 * changes invalidate them.
 	 */
 	groupItems(items: readonly IOpenideSettingItem[]): { readonly label: string; readonly items: IOpenideSettingItem[] }[] {
 		const category = this.state.category;
@@ -253,16 +276,16 @@ export class OpenideSettingsModel {
 		const tagMatch = query.match(/@tag:([^\s]+)/)?.[1];
 		const plain = query.replace(/@(modified|haspolicy)\b|@(id|ext|feature|lang|tag):[^\s]+/g, '').trim();
 		const activeEntry = ignoreCategory || this.state.category === 'home' ? undefined : this.findNavigationEntry(this.state.category);
-		return this.allItems().filter(item => {
-			if (activeEntry && !this.entryMatchesItem(activeEntry, item, true)) { return false; }
+		const matches = this.cachedMatches ??= this.allItems().filter(item => {
 			if (modifiedOnly && !item.value.configured) { return false; }
 			if (query.includes('@haspolicy') && item.value.policyValue === undefined) { return false; }
 			if (idMatch && !item.key.toLowerCase().includes(idMatch)) { return false; }
 			if (extensionMatch && !item.extensionId?.toLowerCase().includes(extensionMatch)) { return false; }
 			if (tagMatch && !item.tags.some(tag => tag.toLowerCase().includes(tagMatch))) { return false; }
 			if (!plain) { return true; }
-			return `${item.key} ${item.label} ${item.description} ${item.category}`.toLowerCase().includes(plain);
+			return this.searchText.get(item)!.includes(plain);
 		});
+		return activeEntry ? matches.filter(item => this.entryMatchesItem(activeEntry, item, true)) : matches;
 	}
 
 	private entryMatchesItem(entry: IOpenideSettingsNavigationEntry, item: IOpenideSettingItem, includeDescendants: boolean): boolean {
@@ -273,18 +296,25 @@ export class OpenideSettingsModel {
 	}
 
 	private settingMatchesPattern(key: string, pattern: string): boolean {
-		const expression = pattern.replace(/[\\^$+?.()|[\]{}]/g, '\\$&').replace(/\*/g, '.*');
-		return new RegExp(`^${expression}$`, 'i').test(key);
+		let compiled = this.patterns.get(pattern);
+		if (!compiled) {
+			const expression = pattern.replace(/[\\^$+?.()|[\]{}]/g, '\\$&').replace(/\*/g, '.*');
+			compiled = new RegExp(`^${expression}$`, 'i');
+			this.patterns.set(pattern, compiled);
+		}
+		return compiled.test(key);
 	}
 
 	async update(item: IOpenideSettingItem, value: unknown): Promise<void> {
 		const overrides = { resource: this.state.folderUri, overrideIdentifier: this.state.language };
 		await this.configurationService.updateValue(item.key, value, overrides, this.state.target);
+		this.invalidate();
 	}
 
 	reset(item: IOpenideSettingItem): Promise<void> { return this.update(item, undefined); }
 
 	private allItems(): IOpenideSettingItem[] {
+		if (this.cachedItems) { return this.cachedItems; }
 		if (!this.model) { return []; }
 		const out: IOpenideSettingItem[] = [];
 		const seen = new Set<string>();
@@ -295,9 +325,10 @@ export class OpenideSettingsModel {
 					seen.add(setting.key);
 					// Per-language default overrides from extensions are not settings the user edits here.
 					if (!isOpenideNavigableSetting({ key: setting.key, groupId: group.id })) { continue; }
-					const inspected = this.configurationService.inspect<unknown>(setting.key, { resource: this.state.folderUri, overrideIdentifier: this.state.language });
-					const targetValue = getConfigValueInTarget(inspected, this.state.target);
-					out.push({
+					const configurationService = this.configurationService;
+					const { folderUri: resource, language: overrideIdentifier, target } = this.state;
+					let value: IOpenideSettingItem['value'] | undefined;
+					const item: IOpenideSettingItem = {
 						key: setting.key,
 						label: labelFor(setting),
 						category: categoryFor(group, setting),
@@ -312,18 +343,26 @@ export class OpenideSettingsModel {
 						tags: setting.tags || [],
 						restricted: !!setting.restricted,
 						deprecated: !!setting.deprecationMessage,
-						value: {
-							effective: inspected.value,
-							defaultValue: inspected.defaultValue,
-							targetValue,
-							configured: targetValue !== undefined,
-							policyValue: inspected.policyValue,
-							overrideIdentifiers: inspected.overrideIdentifiers || [],
+						// Navigation and text search need metadata, not thousands of inspected values.
+						get value() {
+							if (value) { return value; }
+							const inspected = configurationService.inspect<unknown>(setting.key, { resource, overrideIdentifier });
+							const targetValue = getConfigValueInTarget(inspected, target);
+							return value = {
+								effective: inspected.value,
+								defaultValue: inspected.defaultValue,
+								targetValue,
+								configured: targetValue !== undefined,
+								policyValue: inspected.policyValue,
+								overrideIdentifiers: inspected.overrideIdentifiers || [],
+							};
 						},
-					});
+					};
+					this.searchText.set(item, `${item.key} ${item.label} ${item.description} ${item.category}`.toLowerCase());
+					out.push(item);
 				}
 			}
 		}
-		return out;
+		return this.cachedItems = out;
 	}
 }

@@ -11,6 +11,7 @@ import { ICommandService } from '../../../../platform/commands/common/commands.j
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { OpenideChatModelPicker } from './chat/openideChatModelPicker.js';
+import { createThinkingGlyph, reasoningControlVisible, reasoningEffortChipLabel } from './chat/openideChatReasoning.js';
 import { appendKbd, PRIMARY_ENTER_HINT } from './chat/openideChatKbd.js';
 import { createMenuContent, createMenuRow, OpenideComposerPopover } from './chat/openideComposerMenu.js';
 import { t } from '../common/openideStrings.js';
@@ -93,6 +94,9 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 	private _modelButton: HTMLButtonElement | undefined;
 	private _modelIcon: HTMLElement | undefined;
 	private _modelLabel: HTMLElement | undefined;
+	/** The execution model's reasoning level, the same chip the composer wears. */
+	private _modelEffort: HTMLElement | undefined;
+	private _modelEffortLabel: HTMLElement | undefined;
 	private _run: HTMLElement | undefined;
 
 	private _render(): void {
@@ -100,6 +104,7 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 		clearNode(this.domNode);
 		this._picker.value = undefined;
 		this._modelButton = this._modelIcon = this._modelLabel = this._run = undefined;
+		this._modelEffort = this._modelEffortLabel = undefined;
 		if (this._agentFile && this._agentFileResource) {
 			this._renderAgentFile(this._agentFile, this._agentFileResource);
 			return;
@@ -122,8 +127,17 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 		const icon = append(button, document.createElement('span'));
 		icon.className = 'openide-composer-provider-icon';
 		const label = append(button, $('span.openide-composer-trigger-label'));
+		// The level belongs to the model, so wherever a model is chosen the level goes with it: the
+		// same span, the same class and the same source as the composer's chip, and one
+		// `onDidChange` repaints both — an effort edited from the chat's picker shows here without
+		// this surface knowing anything happened.
+		const effort = append(button, $('span.openide-composer-model-effort'));
+		effort.hidden = true;
+		effort.appendChild(createThinkingGlyph(document));
+		const effortLabel = append(effort, document.createElement('span'));
 		append(button, $('span.codicon.codicon-chevron-down.openide-composer-chevron'));
 		this._modelButton = button; this._modelIcon = icon; this._modelLabel = label;
+		this._modelEffort = effort; this._modelEffortLabel = effortLabel;
 
 		const picker = new OpenideChatModelPicker(this._agentService, this._contextViewService, this._commandService, () => this._paintModel(), {
 			anchorPosition: AnchorPosition.BELOW,
@@ -153,7 +167,8 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 	private _paintModel(): void {
 		const resource = this._resource;
 		const icon = this._modelIcon, label = this._modelLabel, button = this._modelButton;
-		if (!resource || !icon || !label || !button) {
+		const effort = this._modelEffort, effortLabel = this._modelEffortLabel;
+		if (!resource || !icon || !label || !button || !effort || !effortLabel) {
 			return;
 		}
 		void this._agentService.getPlanExecutionTarget(resource).then(target => {
@@ -166,6 +181,10 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 			applyProviderIcon(icon, providerId, entry?.label ?? '');
 			icon.classList.add('openide-composer-provider-icon');
 			icon.hidden = !providerId;
+			const reasoning = target.model ? this._agentService.getModelReasoning(providerId, target.model) : undefined;
+			const graded = reasoningControlVisible(!!providerId, reasoning);
+			effort.hidden = !graded;
+			effortLabel.textContent = graded ? reasoningEffortChipLabel(this._agentService.getReasoningEffort(providerId, target.model)) : '';
 		}, () => { /* the picker reports the error; the label keeps its last good value */ });
 	}
 

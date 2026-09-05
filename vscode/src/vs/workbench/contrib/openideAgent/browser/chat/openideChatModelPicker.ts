@@ -16,6 +16,7 @@ import { defaultListStyles } from '../../../../../platform/theme/browser/default
 import { IOpenideAgentService, IOpenidePickerGroup, IOpenidePickerModel } from '../openideAgentService.js';
 import { createCodicon, createMenuCheck, createMenuContent, createMenuEmpty, createMenuRow, OpenideComposerPopover } from './openideComposerMenu.js';
 import { OpenideChatModelDetail } from './openideChatModelDetail.js';
+import { OpenideChatModelEffort } from './openideChatModelEffort.js';
 import { t } from '../../common/openideStrings.js';
 import {
 	IModelEntryRow, IModelSectionRow, MODEL_ROW_TEMPLATE, MODEL_SECTION_HEIGHT, MODEL_SECTION_TEMPLATE,
@@ -127,6 +128,7 @@ export class OpenideChatModelPicker extends Disposable {
 
 	private readonly _popover: OpenideComposerPopover;
 	private readonly _detail = this._register(new OpenideChatModelDetail());
+	private readonly _effort: OpenideChatModelEffort;
 
 	private _groups: readonly IOpenidePickerGroup[] = [];
 	/** Until the first load resolves an empty list means "not asked yet", not "nothing connected". */
@@ -147,6 +149,12 @@ export class OpenideChatModelPicker extends Disposable {
 	) {
 		super();
 		this._popover = this._register(new OpenideComposerPopover(contextViewService));
+		this._effort = this._register(new OpenideChatModelEffort(agentService, () => {
+			// The row has to repaint with its new level, and the composer's model chip carries the
+			// same level beside the name.
+			this._paint();
+			this.onDidChangeSelection();
+		}));
 	}
 
 	private _activeOverride: { providerId: string; modelId: string } | undefined;
@@ -164,11 +172,13 @@ export class OpenideChatModelPicker extends Disposable {
 				this._listHost = undefined;
 				this._emptyHost = undefined;
 				this._detail.disarm();
+				this._effort.hide();
 			},
 		});
 	}
 
 	close(): void {
+		this._effort.hide();
 		this._popover.close();
 	}
 
@@ -201,13 +211,16 @@ export class OpenideChatModelPicker extends Disposable {
 
 		this._list = store.add(new List<ModelPickerRow>('OpenideChatModelPicker', this._listHost, new PickerDelegate(), [
 			new ModelSectionRenderer(row => this._toggleSection(row)),
-			new CheckedModelRowRenderer(row => this._toggleFavorite(row)),
+			new CheckedModelRowRenderer(row => this._toggleFavorite(row), (row, anchor) => this._editEffort(row, anchor)),
 		], { horizontalScrolling: false, mouseSupport: true }));
 		this._list.style(PICKER_LIST_STYLES);
 		store.add(this._list.onMouseClick(event => {
 			if (event.element?.kind === 'model') { this._choose(event.element); }
 		}));
 		store.add(this._list.onMouseOver(event => {
+			// While a level is being picked the card describing another model is noise, and both
+			// want the same strip of screen beside the popover.
+			if (this._effort.isOpen) { return; }
 			if (event.element?.kind === 'model' && typeof event.index === 'number') {
 				this._detail.arm();
 				this._list?.setFocus([event.index]);
@@ -260,6 +273,8 @@ export class OpenideChatModelPicker extends Disposable {
 		const favorites = this.agentService.getPickerFavorites();
 		const activeProvider = this._activeOverride?.providerId ?? this.agentService.getActiveProviderId();
 		const activeModel = this._activeOverride ? this._activeOverride.modelId : this.agentService.getModel();
+		// One read for the whole list, for the same reason.
+		const efforts = this.agentService.getReasoningEfforts();
 		const byKey = new Map<string, { group: IOpenidePickerGroup; model: IOpenidePickerModel }>();
 		for (const group of this._groups) {
 			for (const model of group.models) { byKey.set(pickerKey(group.id, model.id), { group, model }); }
@@ -268,6 +283,11 @@ export class OpenideChatModelPicker extends Disposable {
 			kind: 'model', key: pickerKey(group.id, model.id), group, model,
 			active: group.id === activeProvider && (activeModel ? model.id === activeModel : model.id === group.defaultModel),
 			favorite: favorites.includes(pickerKey(group.id, model.id)),
+			effort: efforts[pickerKey(group.id, model.id)] ?? '',
+			// Read off the group the picker already loaded, not asked of the service per row: this
+			// runs once for every model the user has connected — hundreds, on every keystroke in the
+			// search box — and `findProvider` rebuilds the provider list on each call.
+			editable: model.efforts.length > 0 || model.toggle,
 		});
 		const rows: ModelPickerRow[] = [];
 		const pinned = (key: string, label: string, codicon: string, keys: readonly string[]): void => {
@@ -412,7 +432,15 @@ export class OpenideChatModelPicker extends Disposable {
 		this._paint();
 	}
 
+	private _editEffort(row: IModelEntryRow, anchor: HTMLElement): void {
+		const host = this._popover.container;
+		if (!host) { return; }
+		this._detail.disarm();
+		this._effort.open(host, anchor, row.group, row.model);
+	}
+
 	private _choose(row: IModelEntryRow): void {
+		this._effort.hide();
 		this._popover.close();
 		void (async () => {
 			if (this.options.choose) {

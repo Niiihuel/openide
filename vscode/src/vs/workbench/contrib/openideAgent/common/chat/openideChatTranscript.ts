@@ -42,6 +42,24 @@ export interface IOpenideChatTranscriptOptions {
 	readonly runs?: ReadonlyMap<string, ISubagentRun>;
 }
 
+/**
+ * The `user` message a tool's picture travels in, from a build that forgot to mark it `hidden`.
+ *
+ * A screenshot cannot ride on a `tool` message — not every provider carries images there — so the
+ * agent attaches it to a synthetic `user` message. That one is the model's copy; the transcript
+ * already shows the capture as its own card. Written without the flag, it came back on restore as
+ * a request the user never made, which ALSO split the assistant's turn at that point and gave the
+ * pinned-request overlay something to hold at the top of the conversation.
+ *
+ * Matched here and not migrated on write: the conversations already saved carry it, and they have
+ * to render correctly the next time they are opened, not the next time someone sends a message.
+ */
+const TOOL_IMAGE_CARRIER = /^\[image: result of \S+\]$/;
+
+export function isOpenideChatToolImageCarrier(message: IChatMessage): boolean {
+	return message.role === 'user' && !!message.images?.length && TOOL_IMAGE_CARRIER.test(message.content ?? '');
+}
+
 /** Compaction rewrote history before the snapshot carried metadata; the summary must not look like
  *  a user's request. Same literal the webview matches on. */
 const LEGACY_COMPACTION_PREFIX = '[Resumen histórico compacto]';
@@ -64,7 +82,7 @@ export function buildOpenideChatTranscript(
 	let state = createOpenideChatReducerState();
 
 	for (const message of messages) {
-		if (message.hidden || message.role === 'tool' || message.role === 'system') {
+		if (message.hidden || isOpenideChatToolImageCarrier(message) || message.role === 'tool' || message.role === 'system') {
 			continue;
 		}
 		const compaction = compactionContentFor(message);

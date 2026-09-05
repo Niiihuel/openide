@@ -152,15 +152,23 @@ export class OpenideProviderAccountsService {
 		return true;
 	}
 
-	/** Deletes a saved account. If it was the active one, it also closes the live session (no
-	 *  "orphaned" active credential is left without an account backing it). */
+	/** Removing the active account selects a remaining saved credential before disconnecting.
+	 * Missing account secrets are skipped; deleting the last usable account signs out. */
 	async remove(providerId: string, baseKey: string, accountId: string): Promise<void> {
-		await this.secretStorage.delete(this.accountSecretKey(baseKey, accountId));
 		const accounts = (await this.list(providerId)).filter(account => account.id !== accountId);
-		await this.saveIndex(providerId, accounts);
 		if ((await this.getActiveId(providerId)) === accountId) {
-			await this.setActiveId(providerId, undefined);
-			await this.secretStorage.delete(baseKey);
+			let replacement: IProviderAccountMeta | undefined;
+			for (const account of accounts) {
+				const credential = await this.secretStorage.get(this.accountSecretKey(baseKey, account.id));
+				if (!credential) { continue; }
+				await this.secretStorage.set(baseKey, credential);
+				replacement = account;
+				break;
+			}
+			await this.setActiveId(providerId, replacement?.id);
+			if (!replacement) { await this.secretStorage.delete(baseKey); }
 		}
+		await this.secretStorage.delete(this.accountSecretKey(baseKey, accountId));
+		await this.saveIndex(providerId, accounts);
 	}
 }

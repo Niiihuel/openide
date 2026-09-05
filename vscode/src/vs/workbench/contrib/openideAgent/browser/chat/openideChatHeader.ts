@@ -115,6 +115,7 @@ export class OpenideChatHeader extends Disposable {
 	private readonly _optionsWrap: HTMLElement;
 	private readonly _collapseToggle: HTMLButtonElement;
 	private _optionsCollapsed: boolean;
+	private _optionsPreference: boolean | undefined;
 	private _animationTimer: number | undefined;
 
 	/** Cleared and refilled on every repaint: the view tabs are rebuilt, never patched. */
@@ -201,9 +202,10 @@ export class OpenideChatHeader extends Disposable {
 		// strip ~90px, which clips a SINGLE conversation's title mid-word and pushes its close box
 		// off the row — the strip that is supposed to answer "which conversation" cannot. Folding
 		// the cluster is what upstream does with a toolbar that outgrows its bar (the `⋯` overflow
-		// of an action bar), except here the user decides when, because the trade is theirs: one
-		// click for a control against a readable strip all day.
-		this._optionsCollapsed = this.storageService.getBoolean(OPTIONS_COLLAPSED_KEY, StorageScope.PROFILE, false);
+		// of an action bar), with an automatic initial fold in narrow docks. An explicit user choice
+		// takes precedence over that responsive default.
+		this._optionsPreference = this.storageService.getBoolean(OPTIONS_COLLAPSED_KEY, StorageScope.PROFILE);
+		this._optionsCollapsed = this._optionsPreference ?? false;
 		this._collapseToggle = this.createHeadButton(actions, COLLAPSE_ICON, () => t(this._optionsCollapsed ? 'chat.header.showOptions' : 'chat.header.hideOptions'), () => {
 			this.setOptionsCollapsed(!this._optionsCollapsed);
 		});
@@ -284,6 +286,19 @@ export class OpenideChatHeader extends Disposable {
 	 * folded, where the strip has the row, and unfolded, where it has the ~75px the cluster leaves.
 	 */
 	private layoutStrip(): void {
+		// Until the user chooses a toolbar state, reserve enough room to identify a
+		// conversation in the default narrow dock. Resizing never overwrites that choice.
+		const width = this._element.clientWidth;
+		if (this._optionsPreference === undefined && width > 0) {
+			const collapsed = width < 440;
+			if (collapsed !== this._optionsCollapsed) {
+				this._optionsCollapsed = collapsed;
+				this._kebabMenu.close();
+				this._kindPicker.close();
+				this.applyOptionsCollapsed();
+				return;
+			}
+		}
 		this.revealActiveTab();
 		this.updateOverflowAffordance();
 	}
@@ -391,7 +406,7 @@ export class OpenideChatHeader extends Disposable {
 		const cli = getOpenideCli(session.cliId);
 		return cli
 			? createProviderIcon(document, cli.icon, cli.name, 'openide-chat-tab-icon')
-			: $('span.openide-chat-tab-icon.codicon.codicon-comment-discussion');
+			: $('span.openide-chat-tab-icon.openide-chat-conversation-icon', { 'aria-hidden': 'true' });
 	}
 
 	private createTab(session: IChatSessionMeta, active: boolean): HTMLElement {
@@ -404,7 +419,8 @@ export class OpenideChatHeader extends Disposable {
 		// pressed once per open conversation just to get past the header.
 		tab.tabIndex = active ? 0 : -1;
 		tab.draggable = true;
-		const title = session.title || t('chat.header.newTitle');
+		const title = session.kind !== 'cli' && session.empty ? t('chat.header.newTitle') : session.title || t('chat.header.newTitle');
+		tab.setAttribute('aria-label', title);
 		// The strip ellipsises, so the whole "agent · conversation" is what the hover is FOR. It goes
 		// in `_tabStore` and not `_register`: the tabs are rebuilt on every repaint, and a hover per
 		// repaint parked on the header's own store would never be released.
@@ -605,6 +621,7 @@ export class OpenideChatHeader extends Disposable {
 	 */
 	private setOptionsCollapsed(collapsed: boolean): void {
 		if (this._optionsCollapsed === collapsed) { return; }
+		this._optionsPreference = collapsed;
 		this._optionsCollapsed = collapsed;
 		this._kebabMenu.close();
 		this._kindPicker.close();

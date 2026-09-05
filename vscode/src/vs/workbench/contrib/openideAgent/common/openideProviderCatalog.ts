@@ -14,6 +14,8 @@
  *  product decision rather than a fact about the provider.
  *--------------------------------------------------------------------------------------------*/
 
+import { isVoiceTransport, VoiceTransportId } from './openideVoiceTransport.js';
+
 /** 'codex' = Responses API of the ChatGPT Codex backend (subscription).
  * 'openai-responses' = Responses API oficial de OpenAI (requerida por GPT-5.6 preview). */
 export type ProtocolId = 'openai' | 'openai-responses' | 'anthropic' | 'codex' | 'gemini-cloudcode';
@@ -82,9 +84,10 @@ export interface IProviderEntry {
 	readonly cloudCodeMetadata?: Record<string, string>;
 	/** Si true, la lista de modelos se obtiene de GET {baseUrl}/models (ej: NVIDIA NIM). */
 	readonly dynamicModels?: boolean;
-	/** Verified model that accepts `input_audio` in chat/completions for dictation.
-	 *  Absent means OpenIDE must not advertise automatic voice for this provider. */
+	/** Default dictation model; the voice registry resolves its actual wire contract. */
 	readonly voiceModel?: string;
+	readonly voiceTransport?: VoiceTransportId;
+	readonly voiceModelTransports?: Readonly<Record<string, VoiceTransportId>>;
 	readonly custom?: boolean;
 }
 
@@ -109,7 +112,13 @@ export const OPENIDE_BUILTIN_PROVIDERS: ReadonlyArray<IProviderEntry> = [
 			flow: 'loopback',
 			authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
 			tokenUrl: 'https://oauth2.googleapis.com/token',
-			// Antigravity IDE OAuth client (public by design — same as opencode-antigravity-auth)
+			// Antigravity IDE's OAuth client, published and already used by opencode-antigravity-auth.
+			// The same installed-app shape as the Copilot entry below, whose `Editor-Version` and
+			// `Copilot-Integration-Id` do the same job: these gateways identify the CLIENT, not the
+			// user, so a provider that speaks to one is the client it speaks as. The secret is
+			// shipped in the client and held by no server of ours — there is nothing here to rotate,
+			// and nothing an OpenIDE-registered client could replace, because the gateway would not
+			// know it. Kept deliberately; the secret-scanning alert is resolved, not hidden.
 			clientId: '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com',
 			clientSecret: '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',
 			redirectUri: 'http://localhost:51121/oauth-callback',
@@ -218,6 +227,7 @@ export const OPENIDE_BUILTIN_PROVIDERS: ReadonlyArray<IProviderEntry> = [
 	},
 	{
 		id: 'groq', label: 'Groq', company: 'Groq', protocol: 'openai', baseUrl: 'https://api.groq.com/openai/v1', auth: 'apiKey',
+		voiceModel: 'whisper-large-v3-turbo',
 		apiKeysUrl: 'https://console.groq.com/keys',
 		blurb: 'Very fast inference (LPU) for open-source models.',
 		defaultModel: 'openai/gpt-oss-120b',
@@ -230,12 +240,14 @@ export const OPENIDE_BUILTIN_PROVIDERS: ReadonlyArray<IProviderEntry> = [
 	},
 	{
 		id: 'mistral', label: 'Mistral', company: 'Mistral AI', protocol: 'openai', baseUrl: 'https://api.mistral.ai/v1', auth: 'apiKey',
+		voiceModel: 'voxtral-mini-latest',
 		apiKeysUrl: 'https://console.mistral.ai/api-keys',
 		blurb: 'Mistral Large, Medium and Codestral models.',
 		defaultModel: 'mistral-medium-latest',
 	},
 	{
 		id: 'xai', label: 'Grok', company: 'xAI', protocol: 'openai', baseUrl: 'https://api.x.ai/v1', auth: 'apiKey',
+		voiceModel: 'stt',
 		apiKeysUrl: 'https://console.x.ai',
 		blurb: 'xAI Grok models.',
 		defaultModel: 'grok-4.3',
@@ -249,6 +261,7 @@ export const OPENIDE_BUILTIN_PROVIDERS: ReadonlyArray<IProviderEntry> = [
 	},
 	{
 		id: 'together', label: 'Together', company: 'Together AI', protocol: 'openai', baseUrl: 'https://api.together.xyz/v1', auth: 'apiKey',
+		voiceModel: 'openai/whisper-large-v3',
 		apiKeysUrl: 'https://api.together.xyz/settings/api-keys',
 		blurb: 'Hosted open-source models (Llama, Qwen, …).',
 		defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
@@ -376,6 +389,9 @@ function normalizeCustom(raw: any): IProviderEntry | undefined {
 		blurb: typeof raw.blurb === 'string' ? raw.blurb : (typeof raw.baseUrl === 'string' ? raw.baseUrl : undefined),
 		defaultModel: typeof raw.defaultModel === 'string' ? raw.defaultModel : undefined,
 		voiceModel: typeof raw.voiceModel === 'string' && raw.voiceModel.trim() ? raw.voiceModel.trim() : undefined,
+		voiceTransport: isVoiceTransport(raw.voiceTransport) ? raw.voiceTransport : undefined,
+		voiceModelTransports: raw.voiceModelTransports && typeof raw.voiceModelTransports === 'object' && !Array.isArray(raw.voiceModelTransports)
+			? Object.fromEntries(Object.entries(raw.voiceModelTransports).filter((entry): entry is [string, VoiceTransportId] => isVoiceTransport(entry[1]))) : undefined,
 		custom: true,
 	};
 }

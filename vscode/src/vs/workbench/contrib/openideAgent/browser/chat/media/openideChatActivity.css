@@ -84,8 +84,7 @@
    the removed chat webview. Flat and integrated: no card, no border, no background. */
 
 .openide-chat-reasoning {
-	display: flex;
-	flex-direction: column;
+	display: block;
 }
 
 .openide-chat-reasoning-summary {
@@ -133,17 +132,9 @@
 	overflow-y: auto;
 }
 
-/* Collapsed it keeps a faded two-line peek instead of disappearing: the card then reads as folded
-   rather than as gone, which is what stops users from re-opening it to check it is still there.
-   (Reasoning only. The explore group below used to do the same and no longer does — see there.) */
+/* Closed details must not paint outside their measured summary height in the virtual list. */
 .openide-chat-reasoning:not([open]) .openide-chat-think {
-	display: block;
-	max-height: 66px;
-	overflow: hidden;
-	opacity: 0.5;
-	pointer-events: none;
-	-webkit-mask-image: linear-gradient(#000 25%, transparent);
-	mask-image: linear-gradient(#000 25%, transparent);
+	display: none;
 }
 
 /* ====================== "Exploring" group =================================

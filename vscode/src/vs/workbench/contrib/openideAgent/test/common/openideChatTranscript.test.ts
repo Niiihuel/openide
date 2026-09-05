@@ -82,6 +82,30 @@ suite('OpenIDE chat transcript restore', () => {
 		assert.strictEqual(requestAt(items, 0).text, 'visible');
 	});
 
+	test("a tool's picture is not a request the user made", () => {
+		// The screenshot rides on a synthetic `user` message because not every provider carries
+		// images on a `tool` one. Restored as a bubble it read as something the user sent, and it
+		// cut the assistant's turn in two at that point.
+		const items = build([
+			{ role: 'user', content: 'sacá una captura', messageId: 'm1' },
+			{ role: 'assistant', content: 'antes' },
+			{ role: 'user', content: '[image: result of browser_screenshot]', images: [{ mimeType: 'image/png', data: 'AAA' }] },
+			{ role: 'assistant', content: 'después' },
+		]);
+		assert.deepStrictEqual(items.map(item => item.kind), ['request', 'response']);
+		assert.strictEqual(requestAt(items, 0).text, 'sacá una captura');
+	});
+
+	test('a message that only looks like a carrier is still the user talking', () => {
+		// The guard is narrow on purpose: the shape AND attached images. Prose that merely
+		// mentions the marker, or the marker with nothing attached, stays in the transcript.
+		const items = build([
+			{ role: 'user', content: '[image: result of browser_screenshot]', messageId: 'm1' },
+			{ role: 'user', content: 'mirá esto: [image: result of browser_screenshot] no anda', messageId: 'm2', images: [{ mimeType: 'image/png', data: 'AAA' }] },
+		]);
+		assert.deepStrictEqual(items.map(item => item.kind), ['request', 'request']);
+	});
+
 	test('the user row keeps what was typed AND what the model received', () => {
 		const items = build([{
 			role: 'user', content: 'cuerpo expandido del comando', displayText: '/review src', messageId: 'm1',

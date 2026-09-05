@@ -16,6 +16,7 @@ import { Registry } from '../../../../platform/registry/common/platform.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import { OPENIDE_CLI_CATALOG } from '../common/openideAgentCliCatalog.js';
+import { VOICE_TRANSPORTS } from '../common/openideVoiceTransport.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
@@ -576,7 +577,7 @@ registerAction2(class extends Action2 {
 		});
 	}
 
-	async run(accessor: ServicesAccessor, urlArg?: string): Promise<void> {
+	async run(accessor: ServicesAccessor, urlArg?: string, options?: { readonly preserveFocus?: boolean }): Promise<void> {
 		// the accessor is only valid synchronously: resolve EVERYTHING before the first await
 		const browserViewService = accessor.get(IBrowserViewWorkbenchService);
 		const extraHosts = accessor.get(IConfigurationService).getValue<string[]>('openide.agent.browserAllowedHosts');
@@ -584,7 +585,7 @@ registerAction2(class extends Action2 {
 		// Without a URL, it focuses the workspace's single preview. If it does not exist yet, it opens
 		// its native empty state: navigation will arrive from the frontend port the agent started.
 		// It never suggests localhost:3000 again, nor replaces an already-navigated preview.
-		await browserViewService.openPreview(url);
+		await browserViewService.openPreview(url, undefined, options);
 	}
 });
 
@@ -676,6 +677,28 @@ registerAction2(class extends Action2 {
 		const pane = await preferencesService.openSettings({ jsonEditor: false, query: '' });
 		if (pane instanceof OpenideSettingsEditor) {
 			await pane.showSettingsCategory('openideAgent/providers');
+		}
+	}
+});
+
+// Where the microphone sends someone it cannot serve. The dictation model is chosen in Settings,
+// and a dead button with a tooltip explaining why is only half an answer: the other half is the
+// way to fix it, one click away.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'openide.agent.openVoiceSettings',
+			title: { value: t('contrib.cmd.agent.openVoiceSettings'), original: 'AI Agent: Voice dictation settings' },
+			category: Categories.Preferences,
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const preferencesService = accessor.get(IPreferencesService);
+		const pane = await preferencesService.openSettings({ jsonEditor: false, query: '' });
+		if (pane instanceof OpenideSettingsEditor) {
+			await pane.showSettingsCategory('openideAgent/voice');
 		}
 	}
 });
@@ -1272,6 +1295,8 @@ configurationRegistry.registerConfiguration({
 					baseUrl: { type: 'string', description: 'Base URL del endpoint (ej: http://localhost:11434/v1)' },
 					defaultModel: { type: 'string' },
 					voiceModel: { type: 'string', description: 'Modelo de dictado compatible con input_audio (opcional)' },
+					voiceTransport: { type: 'string', enum: [...VOICE_TRANSPORTS], description: t('settings.voice.transportDesc') },
+					voiceModelTransports: { type: 'object', additionalProperties: { type: 'string', enum: [...VOICE_TRANSPORTS] }, description: t('settings.voice.modelTransportsDesc') },
 				},
 				required: ['id'],
 			},

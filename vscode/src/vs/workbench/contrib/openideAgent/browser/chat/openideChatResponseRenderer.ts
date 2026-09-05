@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append, reset } from '../../../../../base/browser/dom.js';
+import { $, append, DisposableResizeObserver, getWindow, reset } from '../../../../../base/browser/dom.js';
 import { ITreeNode, ITreeRenderer } from '../../../../../base/browser/ui/tree/tree.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { FuzzyScore } from '../../../../../base/common/filters.js';
@@ -86,12 +86,6 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 	private readonly _markdownRenderer: OpenideChatMarkdownRenderer;
 
 	/**
-	 * Set while `renderElement` runs. Reporting a height from inside the tree's own render pass
-	 * makes the list re-enter the row it is painting, which is the layout loop.
-	 */
-	private _elementBeingRendered: IOpenideChatItem | undefined;
-
-	/**
 	 * Rows whose height changed DURING the render pass, to be reported once it is over.
 	 *
 	 * Deferring instead of dropping is the whole point. A part that grows from `tryUpdate` — the
@@ -103,6 +97,7 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 	 * toggle fires from a click, outside any pass, so its report was never dropped.
 	 */
 	private readonly _deferredHeights = new Map<IOpenideChatResponseTemplate, IOpenideChatResponseItem>();
+	private _heightReportQueued = false;
 
 	constructor(
 		private readonly _currentWidth: IObservable<number>,
@@ -125,7 +120,12 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		// the renderer decides per paint which step it is speaking for.
 		const status = templateDisposables.add(new OpenideChatStatusLine(row));
 		const footer = append(row, $('.openide-chat-response-footer'));
-		return { row, partsHost, status, footer, templateDisposables, parts: [], currentElement: undefined, renderedId: undefined };
+		const template: IOpenideChatResponseTemplate = { row, partsHost, status, footer, templateDisposables, parts: [], currentElement: undefined, renderedId: undefined };
+		const observer = templateDisposables.add(new DisposableResizeObserver('OpenideChatResponseRenderer.height', () => {
+			this._fireItemHeightChange(template);
+		}, getWindow(row)));
+		templateDisposables.add(observer.observe(row));
+		return template;
 	}
 
 	renderElement(node: ITreeNode<IOpenideChatItem, FuzzyScore>, index: number, template: IOpenideChatResponseTemplate): void {
@@ -145,16 +145,13 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		}
 		template.currentElement = element;
 
-		this._elementBeingRendered = element;
-		try {
-			this._renderContent(element, index, template);
-		} finally {
-			this._elementBeingRendered = undefined;
-		}
+		this._renderContent(element, index, template);
 
 		template.row.classList.toggle('openide-chat-row-streaming', !element.isComplete);
 		this._renderStatus(element, template);
 		this._renderFooter(element, template);
+		// Include inserted parts, collapsed reasoning, and status/footer changes in one measurement.
+		this._deferHeightReport(template, element);
 	}
 
 	/**
@@ -395,54 +392,35 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		if (!element || !template.row.isConnected) {
 			return;
 		}
-		if (element === this._elementBeingRendered) {
-			this._deferHeightReport(template, element);
-			return;
-		}
-		this._reportHeight(template, element, false);
+		this._deferHeightReport(template, element);
 	}
 
-	/**
-	 * Queues one report per row for after the render pass. A microtask is enough: it runs once the
-	 * tree's synchronous pass has unwound, so the list is re-entrant again, and it still lands
-	 * before the frame is painted — the row is resized without a visible flash of the clipped card.
-	 */
+	/** Read all dirty rows before notifying the list: each notification can itself write layout. */
 	private _deferHeightReport(template: IOpenideChatResponseTemplate, element: IOpenideChatResponseItem): void {
-		if (this._deferredHeights.has(template)) {
-			this._deferredHeights.set(template, element);
+		this._deferredHeights.set(template, element);
+		if (this._heightReportQueued) {
 			return;
 		}
-		this._deferredHeights.set(template, element);
+		this._heightReportQueued = true;
 		queueMicrotask(() => {
-			const queued = this._deferredHeights.get(template);
-			this._deferredHeights.delete(template);
-			// The template is recycled by the list: by now it may be painting another turn, and
-			// resizing THAT row to this one's height is worse than not reporting at all.
-			if (queued && !this._store.isDisposed && template.currentElement === queued) {
-				this._reportHeight(template, queued, true);
+			this._heightReportQueued = false;
+			const changes: IOpenideChatItemHeightChange[] = [];
+			for (const [row, queued] of this._deferredHeights) {
+				// A virtual list may have recycled or detached this template since it was queued.
+				if (this._store.isDisposed || row.currentElement !== queued || !row.row.isConnected) {
+					continue;
+				}
+				const height = Math.ceil(row.row.getBoundingClientRect().height);
+				if (height && height !== queued.currentRenderedHeight) {
+					queued.currentRenderedHeight = height;
+					changes.push({ element: queued, height });
+				}
+			}
+			this._deferredHeights.clear();
+			for (const change of changes) {
+				this._onDidChangeItemHeight.fire(change);
 			}
 		});
-	}
-
-	/**
-	 * `announceFirst` is what separates the two callers. A height that arrives outside a render
-	 * pass and is the row's first measurement needs no announcement, because the list produced it.
-	 * A DEFERRED one is the opposite case by construction: the row grew after the list measured it,
-	 * so that measurement is precisely what is stale.
-	 */
-	private _reportHeight(template: IOpenideChatResponseTemplate, element: IOpenideChatResponseItem, announceFirst: boolean): void {
-		if (!template.row.isConnected) {
-			return;
-		}
-		const height = Math.ceil(template.row.getBoundingClientRect().height);
-		if (!height || height === element.currentRenderedHeight) {
-			return;
-		}
-		const previousHeight = element.currentRenderedHeight;
-		element.currentRenderedHeight = height;
-		if (announceFirst || typeof previousHeight === 'number') {
-			this._onDidChangeItemHeight.fire({ element, height });
-		}
 	}
 
 	disposeElement(_node: ITreeNode<IOpenideChatItem, FuzzyScore>, _index: number, template: IOpenideChatResponseTemplate): void {
@@ -450,6 +428,8 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 	}
 
 	disposeTemplate(template: IOpenideChatResponseTemplate): void {
+		template.currentElement = undefined;
+		this._deferredHeights.delete(template);
 		this._clearParts(template);
 		template.renderedId = undefined;
 		template.templateDisposables.dispose();

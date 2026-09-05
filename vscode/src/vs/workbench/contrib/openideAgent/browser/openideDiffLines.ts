@@ -31,13 +31,14 @@ import { OpenideDiffLine } from '../common/openideDiffPreview.js';
  */
 export function appendOpenideDiffLines(parent: HTMLElement, path: string, lines: readonly OpenideDiffLine[], created: boolean, languageService: ILanguageService, token: CancellationToken, onDidPaint?: () => void): HTMLElement {
 	const root = append(parent, $('div.openide-diff'));
+	const canvas = append(root, $('div.openide-diff-lines'));
 	const codes: { readonly node: HTMLElement; readonly text: string; readonly line: OpenideDiffLine }[] = [];
 	for (const line of lines) {
 		// A created file diffs against one empty line; showing that "− " as a removal is a lie.
 		if (created && line.t === 'del' && !line.x.trim()) {
 			continue;
 		}
-		const row = append(root, $(`div.openide-diff-line.openide-diff-${line.t}`));
+		const row = append(canvas, $(`div.openide-diff-line.openide-diff-${line.t}`));
 		const sign = append(row, $('span.openide-diff-sign'));
 		// U+2212 for the same reason as the stats column: it is as wide as the plus sign.
 		sign.textContent = line.t === 'add' ? '+' : line.t === 'del' ? '−' : ' ';
@@ -50,7 +51,7 @@ export function appendOpenideDiffLines(parent: HTMLElement, path: string, lines:
 	if (codes.length) {
 		void resolveLanguageId(path, languageService, token)
 			.then(languageId => languageId ? paintWhenReady(languageId, codes, languageService, token) : undefined)
-			.then(() => onDidPaint?.());
+			.then(() => { if (!token.isCancellationRequested) { onDidPaint?.(); } });
 	}
 	return root;
 }
@@ -61,6 +62,9 @@ export function appendOpenideDiffLines(parent: HTMLElement, path: string, lines:
  * then is what turns a restored transcript's diffs from plain text into highlighted code.
  */
 function resolveLanguageId(path: string, languageService: ILanguageService, token: CancellationToken): Promise<string | undefined> {
+	if (token.isCancellationRequested) {
+		return Promise.resolve(undefined);
+	}
 	const uri = URI.file(`/${path}`);
 	const guess = (): string | undefined => {
 		const id = languageService.guessLanguageIdByFilepathOrFirstLine(uri);

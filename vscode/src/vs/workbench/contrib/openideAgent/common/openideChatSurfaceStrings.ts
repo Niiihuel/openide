@@ -35,7 +35,13 @@ export const OPENIDE_CHAT_SURFACE_STRINGS = {
 
 	// ---- voice dictation
 	'chatSurface.voice.unsupported': { es: 'El proveedor activo no permite dictado por voz.', en: 'The active provider does not support voice dictation.' },
+	'chatSurface.voice.usingModel': { es: '{0} · {1} · {2}', en: '{0} · {1} · {2}' },
+	'chatSurface.voice.configure': { es: 'Configurar el dictado', en: 'Set up dictation' },
 	'chatSurface.voice.startFailed': { es: 'No se pudo iniciar el dictado', en: 'Could not start dictation' },
+	'chatSurface.voice.listening': { es: 'Micrófono activo · Escuchando…', en: 'Microphone on · Listening…' },
+	'chatSurface.voice.permissionDenied': { es: 'Permití el acceso al micrófono en los ajustes de privacidad del sistema y volvé a intentar.', en: 'Allow microphone access in system privacy settings and try again.' },
+	'chatSurface.voice.noMicrophone': { es: 'No se encontró un micrófono. Conectá uno y volvé a intentar.', en: 'No microphone found. Connect one and try again.' },
+	'chatSurface.voice.deviceBusy': { es: 'No se pudo acceder al micrófono. Revisá el dispositivo o si otra aplicación lo está usando.', en: 'Could not access the microphone. Check the device or whether another app is using it.' },
 	'chatSurface.voice.label': { es: 'Dictado', en: 'Dictation' },
 
 	// ---- reasoning effort: the menu's heading and the two levels that are not proper names.

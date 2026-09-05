@@ -71,3 +71,24 @@ export function modelIdsFromProviderResponse(value: unknown): string[] {
 	const selectable = ids.filter(isSelectableModelId);
 	return [...new Set(selectable.length ? selectable : ids)].sort((a, b) => a.localeCompare(b));
 }
+
+/** Live endpoint modalities override registry guesses, including an explicitly text-only model.
+ * OpenRouter publishes architecture; compatible catalogs can publish modalities directly. */
+export function modelModalitiesFromProviderResponse(value: unknown): ReadonlyMap<string, { input?: string[]; output?: string[] }> {
+	const result = new Map<string, { input?: string[]; output?: string[] }>();
+	if (!value || typeof value !== 'object') { return result; }
+	const data = (value as Record<string, unknown>).data;
+	if (!Array.isArray(data)) { return result; }
+	const strings = (value: unknown): string[] | undefined => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : undefined;
+	for (const entry of data) {
+		if (!entry || typeof entry !== 'object') { continue; }
+		const model = entry as Record<string, unknown>;
+		if (typeof model.id !== 'string') { continue; }
+		const architecture = model.architecture && typeof model.architecture === 'object' ? model.architecture as Record<string, unknown> : {};
+		const modalities = model.modalities && typeof model.modalities === 'object' ? model.modalities as Record<string, unknown> : {};
+		const input = strings(architecture.input_modalities) ?? strings(modalities.input);
+		const output = strings(architecture.output_modalities) ?? strings(modalities.output);
+		if (input || output) { result.set(model.id, { input, output }); }
+	}
+	return result;
+}

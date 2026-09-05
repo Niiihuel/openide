@@ -15,7 +15,7 @@ export const SVG_NAMESPACE = SVG_NS;
  *. That route is closed in the workbench: the Trusted Types policy
  * rejects `innerHTML` and `DOMParser.parseFromString`, and taking it once already took the whole
  * chat view down ("Fail to render view workbench.view.openideChat.view" — see the note in
- * openideChatEffortPicker.ts). So the geometry is ported number for number and only the last mile,
+ * openideChatReasoning.ts). So the geometry is ported number for number and only the last mile,
  * turning it into nodes, is different.
  *
  * Escaping disappears with it: every label lands through `textContent`, which is why this module

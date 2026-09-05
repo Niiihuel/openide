@@ -190,6 +190,7 @@ export class OpenidePlanEditor extends EditorPane {
 	private readonly renderer: OpenideChatMarkdownRenderer;
 	/** Rendered markdown results and their link hovers; cleared before every repaint. */
 	private readonly rendered = this._register(new DisposableStore());
+	private readonly followRendered = this._register(new DisposableStore());
 	private readonly rowListeners = this._register(new DisposableStore());
 	private readonly watcher = this._register(new MutableDisposable());
 	private readonly inputDisposables = this._register(new DisposableStore());
@@ -293,7 +294,11 @@ export class OpenidePlanEditor extends EditorPane {
 				void this.refresh(uri, this.inputGeneration);
 			}
 		}));
-		this.inputDisposables.add(this.agentService.onDidChangePlanFollow(() => void this.refresh(uri, this.inputGeneration)));
+		this.inputDisposables.add(this.agentService.onDidChangePlanFollow(enabled => {
+			this.state = { ...this.state, followAgent: enabled };
+			this.renderFollow();
+			this.scrollable.scanDomNode();
+		}));
 		// The plan is being written RIGHT NOW: every model delta repaints the document. The file
 		// does not exist on disk yet, so the watcher above sees nothing.
 		this.inputDisposables.add(this.agentService.onDidChangePlanDraft(draft => {
@@ -509,6 +514,7 @@ export class OpenidePlanEditor extends EditorPane {
 	}
 
 	private renderFollow(): void {
+		this.followRendered.clear();
 		clearNode(this.followHost);
 		if (!this.state.followAgent) {
 			return;
@@ -529,7 +535,7 @@ export class OpenidePlanEditor extends EditorPane {
 		}
 		const toggle = append(bar, $('button.openide-plan-follow-toggle', { type: 'button' })) as HTMLButtonElement;
 		toggle.textContent = t('plan.follow.stop');
-		this.rendered.add(addDisposableListener(toggle, 'click', () => {
+		this.followRendered.add(addDisposableListener(toggle, 'click', () => {
 			this.state = { ...this.state, followAgent: false };
 			this.agentService.setPlanFollowEnabled(false);
 			this.renderFollow();

@@ -50,7 +50,19 @@ export interface IOpenideCliUsageSource {
 }
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
-/** Gemini CLI's OAuth client (public by design — shipped in google-gemini/gemini-cli's source). */
+/**
+ * Gemini CLI's OAuth client, published by Google in `google-gemini/gemini-cli`.
+ *
+ * It has to be THIS client and not one of OpenIDE's, which is the part worth writing down: the
+ * refresh token below is not ours — it is the one the user's own Gemini CLI obtained and left on
+ * disk, and a refresh token can only be redeemed by the client it was issued to. Swapping in an
+ * OpenIDE client id here does not improve anything, it makes every refresh return
+ * `invalid_client` and the usage row silently disappear.
+ *
+ * The "secret" is not one: an installed application cannot keep a secret (RFC 8252), which is why
+ * Google ships it in the CLI's source. GitHub's secret scanner flags it anyway; the alert is
+ * resolved with this reasoning rather than by hiding the constant.
+ */
 const GEMINI_CLI_CLIENT_ID = '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
 const GEMINI_CLI_CLIENT_SECRET = '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';
 

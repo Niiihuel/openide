@@ -5,7 +5,7 @@
 
 import { $, addDisposableListener, append, getWindow, scheduleAtNextAnimationFrame } from '../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
-import { Disposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { t } from '../common/openideStrings.js';
 import { IOpenideChatTooltip, setupChatTooltip } from './chat/openideChatHover.js';
@@ -43,6 +43,7 @@ export class OpenideFold extends Disposable {
 	private readonly fade: HTMLElement;
 	private readonly expand: HTMLButtonElement;
 	private readonly tooltip: IOpenideChatTooltip;
+	private readonly measurement = this._register(new MutableDisposable<IDisposable>());
 
 	constructor(
 		private readonly host: HTMLElement,
@@ -88,7 +89,11 @@ export class OpenideFold extends Disposable {
 	 * laid out.
 	 */
 	measure(): void {
-		scheduleAtNextAnimationFrame(getWindow(this.host), () => {
+		if (this.measurement.value) {
+			return;
+		}
+		this.measurement.value = scheduleAtNextAnimationFrame(getWindow(this.host), () => {
+			this.measurement.clear();
 			if (!this.host.isConnected) {
 				return;
 			}

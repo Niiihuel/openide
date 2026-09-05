@@ -15,6 +15,8 @@
  *  - No blocks left ⇒ the file is resolved (clearBaseline + callback to the chat).
  *--------------------------------------------------------------------------------------------*/
 
+import { getWindow } from '../../../../base/browser/dom.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { RunOnceScheduler, timeout } from '../../../../base/common/async.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -26,7 +28,7 @@ import { linesDiffComputers } from '../../../../editor/common/diff/linesDiffComp
 import { DetailedLineRangeMapping } from '../../../../editor/common/diff/rangeMapping.js';
 import { LineRange } from '../../../../editor/common/core/ranges/lineRange.js';
 import { EditorOption } from '../../../../editor/common/config/editorOptions.js';
-import { IModelDeltaDecoration, ITextModel, OverviewRulerLane } from '../../../../editor/common/model.js';
+import { ITextModel, OverviewRulerLane } from '../../../../editor/common/model.js';
 import { IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { DEFAULT_EDITOR_ASSOCIATION } from '../../../common/editor.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
@@ -69,11 +71,8 @@ class ReviewSession extends Disposable {
 	/** Ephemeral visual cursor for "follow the agent" mode. Kept apart from the persistent diff so
 	 *  it alters neither Undo/Keep nor the overview ruler map. */
 	private readonly followDecorations: IEditorDecorationsCollection;
-	/** Typewriter-style visual reveal. It never mutates the model: the code is already complete and
-	 *  saved; it only hides/reveals ephemeral ranges so cancelling never leaves partial files. */
-	private readonly typingDecorations: IEditorDecorationsCollection;
 	private zoneIds: string[] = [];
-	private deletionZones: { change: DetailedLineRangeMapping; dom: HTMLElement; lines: HTMLElement[] }[] = [];
+	private deletionZones: { change: DetailedLineRangeMapping; dom: HTMLElement }[] = [];
 	private changes: readonly DetailedLineRangeMapping[] = [];
 	private readonly headerWidget: ReviewHeaderWidget;
 	private readonly blockWidget: ReviewBlockWidget;
@@ -82,14 +81,13 @@ class ReviewSession extends Disposable {
 	/** Baseline content the diff is computed against (the live session's if there was one, else git
 	 *  HEAD). Per-block keep overwrites it locally with the kept block folded in. */
 	private baseline: string;
+	private lastRender: { model: ITextModel; version: number; baseline: string } | undefined;
 	/** Becomes true on seeing the first diff. It prevents auto-resolving the file when the review
 	 *  attaches BEFORE the model reloads from disk (diff still empty). */
 	private hadChanges = false;
 	/** Index of the active block (the editor bar's stepper). */
 	private currentBlock = -1;
 	private followEpoch = 0;
-	private followAnimating = false;
-	private renderAfterFollow = false;
 	private hoverBlock = -1;
 	private readonly hoverScheduler: RunOnceScheduler;
 
@@ -109,7 +107,6 @@ class ReviewSession extends Disposable {
 		super();
 		this.decorations = this.editor.createDecorationsCollection();
 		this.followDecorations = this.editor.createDecorationsCollection();
-		this.typingDecorations = this.editor.createDecorationsCollection();
 		this.baseline = baseline;
 		// The agent review uses the overview ruler to locate changes. The minimap duplicates that
 		// information, steals width and displaces the action pill; it is disabled only for the
@@ -131,7 +128,7 @@ class ReviewSession extends Disposable {
 			undoBlock: () => this.runAction('undoBlock'),
 			keepBlock: () => this.runAction('keepBlock'),
 		}));
-		this.recompute = this._register(new RunOnceScheduler(() => this.render(), 250));
+		this.recompute = this._register(new RunOnceScheduler(() => this.render(), 50));
 		// The hunk pill also activates on hover intent: a second resting over a block is enough and
 		// avoids forcing the user to move the cursor or click the code.
 		this.hoverScheduler = this._register(new RunOnceScheduler(() => {
@@ -144,7 +141,8 @@ class ReviewSession extends Disposable {
 		}, 1000));
 		this._register(this.editor.onDidChangeModelContent(() => {
 			if (!this.applying) {
-				this.recompute.schedule();
+				this.stopFollowing();
+				if (!this.recompute.isScheduled()) { this.recompute.schedule(); }
 			}
 		}));
 		this._register(this.editor.onDidScrollChange(() => this.blockWidget.layout()));
@@ -196,12 +194,12 @@ class ReviewSession extends Disposable {
 	// ---- render ----
 
 	private render(revealActive = false): void {
-		if (this.followAnimating) {
-			this.renderAfterFollow = true;
-			return;
-		}
 		const model = this.model();
 		if (!model) {
+			return;
+		}
+		if (this.lastRender?.model === model && this.lastRender.version === model.getVersionId() && this.lastRender.baseline === this.baseline) {
+			this.updateChrome(revealActive);
 			return;
 		}
 		const original = this.baselineLines();
@@ -282,7 +280,6 @@ class ReviewSession extends Disposable {
 				dom.style.fontFamily = fontInfo.fontFamily;
 				dom.style.fontSize = `${fontInfo.fontSize}px`;
 				dom.style.lineHeight = `${fontInfo.lineHeight}px`;
-				const lineNodes: HTMLElement[] = [];
 				for (const text of lines) {
 					const ln = document.createElement('div');
 					ln.className = 'openide-review-deleted-line';
@@ -294,9 +291,8 @@ class ReviewSession extends Disposable {
 					code.textContent = text || ' ';
 					ln.append(sign, code);
 					dom.appendChild(ln);
-					lineNodes.push(ln);
 				}
-				this.deletionZones.push({ change: c, dom, lines: lineNodes });
+				this.deletionZones.push({ change: c, dom });
 				this.zoneIds.push(accessor.addZone({
 					afterLineNumber: c.modified.isEmpty ? c.modified.startLineNumber - 1 : c.modified.startLineNumber - 1,
 					heightInLines: lines.length,
@@ -318,6 +314,7 @@ class ReviewSession extends Disposable {
 			removed += change.original.length;
 		}
 		const pendingChanged = this.snapshot.markPending(this.path, this.changes.length > 0, added, removed);
+		this.lastRender = { model, version: model.getVersionId(), baseline: this.baseline };
 		this.updateChrome(revealActive);
 		if (pendingChanged) {
 			this.onPendingChanged();
@@ -498,208 +495,50 @@ class ReviewSession extends Disposable {
 		this.render();
 	}
 
-	/** Walks the last edit's range as a progressive write. The content is already applied and
-	 *  saved: this layer hides everything not yet written, reveals the active prefix and centers
-	 *  Monaco. That way it never leaves a half-written file if the run is cancelled. */
-	async followRange(startLine?: number, endLine?: number): Promise<void> {
-		const epoch = ++this.followEpoch;
-		// A new edit may arrive while the previous one is still animating. We cancel its projection
-		// WITHOUT repainting the persistent decorations (that caused the green/red flash of the WHOLE
-		// block when there were previous changes). We only clear the typewriter overlay.
-		const wasAnimating = this.followAnimating;
-		if (wasAnimating) {
-			this.followAnimating = false;
-			this.typingDecorations.clear();
-			this.followDecorations.clear();
-			for (const zone of this.deletionZones) {
-				zone.dom.classList.remove('openide-agent-delete-pending');
-				for (const line of zone.lines) { line.classList.remove('openide-agent-delete-revealed'); }
-			}
-		}
+	/** Highlights the completed edit without hiding code or replaying a simulated typing queue. */
+	async followRange(startLine?: number, endLine?: number, token: CancellationToken = CancellationToken.None): Promise<void> {
+		this.stopFollowing();
+		if (token.isCancellationRequested) { return; }
+		this.recompute.cancel();
+		this.render();
 		const model = this.model();
-		if (!model || !this.changes.length) {
-			if (wasAnimating) { this.render(); }
-			return;
-		}
-		const from = Math.max(1, startLine ?? 1);
-		const to = Math.max(from, endLine ?? model.getLineCount());
-		// Animate only the blocks INSIDE the new edit's range. Previous changes (outside this range)
-		// are not painted during the animation: the file looks clean and only the green/red of what
-		// is being written right now appears.
+		if (!model) { return; }
+		const from = Math.max(1, Math.min(model.getLineCount(), startLine ?? 1));
+		const to = Math.max(from, Math.min(model.getLineCount(), endLine ?? model.getLineCount()));
+		this.editor.revealLineInCenterIfOutsideViewport(from);
+		const domNode = this.editor.getDomNode();
+		if (!domNode || getWindow(domNode).matchMedia('(prefers-reduced-motion: reduce)').matches) { return; }
+		const epoch = this.followEpoch;
 		const blocks = this.changes.filter(change => {
-			const start = change.modified.isEmpty ? Math.max(1, change.modified.startLineNumber - 1) : change.modified.startLineNumber;
-			const end = change.modified.isEmpty ? start : Math.max(start, change.modified.endLineNumberExclusive - 1);
-			return end >= from && start <= to;
+			const start = Math.max(1, change.modified.startLineNumber - (change.modified.isEmpty ? 1 : 0));
+			return start <= to && Math.max(start, change.modified.endLineNumberExclusive - 1) >= from;
 		});
-		const followed = blocks.length ? blocks : [];
-		const ranges = followed.filter(block => !block.modified.isEmpty).map(block => {
-			const start = block.modified.startLineNumber;
-			const end = Math.max(start, block.modified.endLineNumberExclusive - 1);
-			return { block, start: Math.max(start, from), end: Math.min(end, to) };
-		}).filter(range => range.start <= range.end);
-		const deletionZones = followed.flatMap(block => this.deletionZones.filter(zone => zone.change === block));
-		if (!ranges.length && !deletionZones.length) {
-			if (wasAnimating) { this.render(); }
-			return;
+		this.followDecorations.set(blocks.filter(block => !block.modified.isEmpty).map(block => ({
+			range: new Range(Math.max(from, block.modified.startLineNumber), 1,
+				Math.min(to, block.modified.endLineNumberExclusive - 1), model.getLineMaxColumn(Math.min(to, block.modified.endLineNumberExclusive - 1))),
+			options: { description: 'openide-agent-edit-flash', isWholeLine: true, className: 'openide-agent-edit-flash' },
+		})));
+		for (const zone of this.deletionZones) {
+			if (blocks.includes(zone.change)) { zone.dom.classList.add('openide-agent-delete-flash'); }
 		}
-		// Only here do we confirm there is something to animate: we clear the persistent diff so the
-		// animation starts over a clean file (no whole-block flash).
-		this.decorations.clear();
-		if (!ranges.length && !deletionZones.length) {
-			return;
+		const cancellation = token.onCancellationRequested(() => {
+			if (epoch === this.followEpoch) { this.stopFollowing(); }
+		});
+		try {
+			await timeout(180, token);
+		} catch (error) {
+			if (!token.isCancellationRequested) { throw error; }
+		} finally {
+			cancellation.dispose();
+			if (epoch === this.followEpoch) { this.stopFollowing(); }
 		}
-		this.followAnimating = true;
-		this.renderAfterFollow = false;
-		const finish = (restorePersistent: boolean): void => {
-			if (epoch !== this.followEpoch) { return; }
-			this.typingDecorations.clear();
-			this.followDecorations.clear();
-			this.followAnimating = false;
-			for (const zone of this.deletionZones) {
-				zone.dom.classList.remove('openide-agent-delete-pending');
-			}
-			if (restorePersistent || this.renderAfterFollow) {
-				// When it ends we paint the PERSISTENT diff. But to avoid the flash of the WHOLE block, we do
-				// it with a normal re-render (no violent clear+set).
-				this.render();
-			}
-		};
+	}
 
-		const totalCharacters = ranges.reduce((sum, range) => {
-			for (let line = range.start; line <= range.end; line++) { sum += model.getLineLength(line) + 1; }
-			return sum;
-		}, 0);
-		// The model is never modified: we hide what has not been "written" yet and advance a visual
-		// cursor. For large files we raise the chunk size without lengthening the animation.
-		const totalLines = ranges.reduce((sum, range) => sum + range.end - range.start + 1, 0);
-		const targetSteps = Math.max(24, Math.min(520, Math.ceil(totalCharacters / 3)));
-		const baseChunk = Math.max(1, Math.ceil(totalCharacters / targetSteps));
-		let first = true;
-		const linePause = totalLines <= 40 ? 55 : totalLines <= 120 ? 24 : 8;
-		const updateTypingDecorations = (activeRangeIndex: number, activeLine: number, column: number, completeActive = false): void => {
-			const pending: IModelDeltaDecoration[] = [];
-			const activeRange = ranges[activeRangeIndex];
-			const activeMaxColumn = model.getLineMaxColumn(activeLine);
-			const completedLine = (line: number): void => {
-				pending.push({
-					range: new Range(line, 1, line, model.getLineMaxColumn(line)),
-					options: { description: 'openide-agent-typewriter-complete-line', isWholeLine: true, className: 'openide-agent-typewriter-complete-line' },
-				});
-			};
-			for (let rangeIndex = 0; rangeIndex <= activeRangeIndex; rangeIndex++) {
-				const range = ranges[rangeIndex];
-				const completedEnd = rangeIndex < activeRangeIndex ? range.end : activeLine - 1;
-				for (let line = range.start; line <= completedEnd; line++) { completedLine(line); }
-			}
-			if (completeActive) {
-				completedLine(activeLine);
-			} else {
-				// The active line is shown without colour. Green appears only when the line break is
-				// confirmed; the not-yet-written suffix stays completely hidden.
-				pending.push({
-					range: new Range(activeLine, 1, activeLine, activeMaxColumn),
-					options: { description: 'openide-agent-typewriter-pending-line', isWholeLine: true, className: 'openide-agent-typewriter-pending-line' },
-				});
-				if (column < activeMaxColumn) {
-				pending.push({
-					range: new Range(activeLine, column, activeLine, activeMaxColumn),
-					options: { description: 'openide-agent-typewriter-hidden', inlineClassName: 'openide-agent-typewriter-hidden' },
-				});
-				}
-			}
-
-			const hideLines = (start: number, end: number): void => {
-				if (start > end) { return; }
-				pending.push({
-					range: new Range(start, 1, end, model.getLineMaxColumn(end)),
-					options: {
-						description: 'openide-agent-typewriter-pending-lines',
-						isWholeLine: true,
-						className: 'openide-agent-typewriter-pending-line',
-						inlineClassName: 'openide-agent-typewriter-hidden',
-					},
-				});
-			};
-			hideLines(activeLine + 1, activeRange.end);
-			for (let futureIndex = activeRangeIndex + 1; futureIndex < ranges.length; futureIndex++) {
-				hideLines(ranges[futureIndex].start, ranges[futureIndex].end);
-			}
-			this.typingDecorations.set(pending);
-		};
-
-		// We remove the persistent diff BEFORE the first frame: the file starts visually clean.
-		// We then hide the full replacement. If the hunk is an edit, the baseline zone stays visible
-		// in its neutral colour and is confirmed line by line in red before we start writing the new
-		// code in green.
-		for (const zone of deletionZones) {
-			zone.dom.classList.add('openide-agent-delete-pending');
-			for (const line of zone.lines) { line.classList.remove('openide-agent-delete-revealed'); }
-		}
-		this.decorations.clear();
-		if (ranges.length) {
-			updateTypingDecorations(0, ranges[0].start, 1);
-		}
-		if (deletionZones.length) {
-			await timeout(110);
-			const deletedLineCount = deletionZones.reduce((sum, zone) => sum + zone.lines.length, 0);
-			const deletePause = deletedLineCount <= 30 ? 58 : deletedLineCount <= 100 ? 26 : 10;
-			for (const zone of deletionZones) {
-				const blockIndex = this.changes.indexOf(zone.change);
-				if (blockIndex >= 0) { this.currentBlock = blockIndex; this.updateChrome(); }
-				const revealLine = zone.change.modified.isEmpty ? Math.max(1, zone.change.modified.startLineNumber - 1) : zone.change.modified.startLineNumber;
-				if (first) { this.editor.revealLineInCenter(revealLine); first = false; }
-				else { this.editor.revealLineInCenterIfOutsideViewport(revealLine); }
-				for (const line of zone.lines) {
-					if (epoch !== this.followEpoch || !this.model()) {
-						finish(false);
-						return;
-					}
-					line.classList.add('openide-agent-delete-revealed');
-					await timeout(deletePause);
-				}
-				zone.dom.classList.remove('openide-agent-delete-pending');
-				await timeout(Math.min(80, deletePause * 2));
-			}
-		}
-		if (!ranges.length) {
-			finish(true);
-			return;
-		}
-		for (let rangeIndex = 0; rangeIndex < ranges.length; rangeIndex++) {
-			const range = ranges[rangeIndex];
-			const blockIndex = this.changes.indexOf(range.block);
-			if (blockIndex >= 0) { this.currentBlock = blockIndex; this.updateChrome(); }
-			for (let line = range.start; line <= range.end; line++) {
-				if (epoch !== this.followEpoch || !this.model()) { finish(false); return; }
-				const safeLine = Math.max(1, Math.min(model.getLineCount(), line));
-				const maxColumn = model.getLineMaxColumn(safeLine);
-				const lineText = model.getLineContent(safeLine);
-				let column = 1;
-				if (first) { this.editor.revealLineInCenter(safeLine); first = false; }
-				else { this.editor.revealLineInCenterIfOutsideViewport(safeLine); }
-				while (column < maxColumn) {
-					if (epoch !== this.followEpoch || !this.model()) { finish(false); return; }
-					const burst = Math.random() < 0.24 ? Math.floor(Math.random() * 5) + 2 : 1;
-					column = Math.min(maxColumn, column + Math.max(baseChunk, burst));
-					updateTypingDecorations(rangeIndex, safeLine, column);
-					this.followDecorations.set([{
-						range: new Range(safeLine, Math.max(1, column - 1), safeLine, column),
-						options: { description: 'openide-agent-typewriter-cursor', inlineClassName: 'openide-agent-typewriter-cursor' },
-					}]);
-					const last = lineText.charAt(Math.max(0, column - 2));
-					let delay = 10 + Math.floor(Math.random() * 15);
-					if (/[;{}]/.test(last)) { delay += 35; }
-					else if (/[,.:()[\]]/.test(last)) { delay += 15; }
-					await timeout(delay);
-				}
-				// Makes the finished line's green background visible, while keeping every later line
-				// hidden until its own animation starts.
-				updateTypingDecorations(rangeIndex, safeLine, maxColumn, true);
-				await timeout(linePause);
-			}
-		}
-		await timeout(180);
-		finish(true);
+	/** Stops only transient effects; pending changes and their Keep/Undo controls remain visible. */
+	stopFollowing(): void {
+		++this.followEpoch;
+		this.followDecorations.clear();
+		for (const zone of this.deletionZones) { zone.dom.classList.remove('openide-agent-delete-flash'); }
 	}
 
 	/** API for the keybindings (Ctrl+N / Ctrl+Y / Ctrl+Enter, gated by openideReviewActive). */
@@ -744,9 +583,8 @@ class ReviewSession extends Disposable {
 	}
 
 	override dispose(): void {
-		this.followEpoch++;
+		this.stopFollowing();
 		this.decorations.clear();
-		this.followDecorations.clear();
 		this.editor.changeViewZones(accessor => {
 			for (const id of this.zoneIds) {
 				accessor.removeZone(id);
@@ -1090,7 +928,7 @@ export class OpenideEditReview extends Disposable {
 			this.updateContext();
 		}));
 		// Restored editors may exist before this service is constructed.
-		timeout(0).then(() => this.attachActive());
+		queueMicrotask(() => { if (!this._store.isDisposed) { this.attachActive(); } });
 	}
 
 	/** Session of the focused/active editor (the keybindings operate on it). */
@@ -1123,7 +961,8 @@ export class OpenideEditReview extends Disposable {
 	/** Opens the file in the normal editor and attaches the review (replacing vscode.diff). It
 	 *  attaches the explicit path DIRECTLY (it does not depend on the `pendingPaths()` gate, which
 	 *  is empty after a restart): the baseline resolves against git HEAD then → the diff survives reloads. */
-	async openReview(path: string, preserveFocus = false, follow?: { startLine?: number; endLine?: number }): Promise<void> {
+	async openReview(path: string, preserveFocus = false, follow?: { startLine?: number; endLine?: number; token?: CancellationToken }): Promise<void> {
+		if (follow?.token?.isCancellationRequested) { return; }
 		const uri = this.host.resolveUri(path);
 		if (!uri) {
 			throw new Error(`No se pudo resolver el archivo para revisar: ${path}`);
@@ -1139,10 +978,13 @@ export class OpenideEditReview extends Disposable {
 		// Tools write with IFileService (disk), not through textFileService: if the file was already
 		// open, Monaco may keep showing the baseline. We reload the clean model before attaching the
 		// decorations; we never clobber a user's dirty buffer.
+		if (follow?.token?.isCancellationRequested) { return; }
 		await this.reloadFromDisk(path);
+		if (follow?.token?.isCancellationRequested) { return; }
 		// openEditor can resolve BEFORE Monaco has the model: wait for the editor whose model.uri
 		// matches; otherwise the file opened without the green/red decorations.
 		const editor = await this.waitForEditorWithModel(uri);
+		if (follow?.token?.isCancellationRequested) { return; }
 		if (!editor) {
 			throw new Error(`No se pudo abrir el editor de texto para revisar: ${path}`);
 		}
@@ -1150,9 +992,14 @@ export class OpenideEditReview extends Disposable {
 		if (!attached) {
 			throw new Error(`No se pudo activar el review del agente para: ${path}`);
 		}
-		if (follow) {
-			await this.sessions.get(path)?.session.followRange(follow.startLine, follow.endLine);
+		if (follow && !follow.token?.isCancellationRequested) {
+			await this.sessions.get(path)?.session.followRange(follow.startLine, follow.endLine, follow.token);
 		}
+	}
+
+	/** Cancels visual follow in every open review when Zen is turned off. */
+	stopFollowing(): void {
+		for (const { session } of this.sessions.values()) { session.stopFollowing(); }
 	}
 
 	/** Editor (focused/active o cualquiera listado) cuyo modelo actual es exactamente `uri`. */
@@ -1361,7 +1208,7 @@ export class OpenideEditReview extends Disposable {
 				}
 				if (!next) {
 					// transient clear during reload: re-check on the next tick
-					timeout(0).then(() => {
+					queueMicrotask(() => {
 						if (!this.sessions.has(path)) {
 							return;
 						}

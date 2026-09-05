@@ -20,10 +20,9 @@
 .openide-diff {
 	--oi-edit-surface: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-foreground));
 	background: var(--oi-edit-surface);
-	/* inline-block + min-width: the block grows to its widest line so every row's tint runs the
-	   full scrollable width, not just behind its own text. */
-	display: inline-block;
-	min-width: 100%;
+	/* Keep the viewport constrained; the inner canvas owns the shared width of every row. */
+	display: block;
+	width: 100%;
 	font-family: var(--vscode-editor-font-family, monospace);
 	font-size: 11.5px;
 	line-height: 1.55;
@@ -37,6 +36,14 @@
 	overflow: auto;
 }
 
+/* Override the transcript's generic min/max-width constraints on descendants. */
+.openide-chat-row .openide-diff-lines,
+.openide-diff-lines {
+	width: max-content;
+	min-width: 100%;
+	max-width: none;
+}
+
 /* Beats `.openide-chat-row * { white-space: normal }` (openideChatNative.css): a diff keeps its
    indentation and never wraps — it scrolls, like the editor it previews. The selector names the
    transcript row because that is where the wrapping rule lives; in the sidebar the plain rule
@@ -47,6 +54,7 @@
 }
 .openide-diff-line {
 	display: flex;
+	box-sizing: border-box;
 	white-space: pre;
 	padding-right: 10px;
 	color: var(--vscode-editor-foreground, var(--vscode-foreground));

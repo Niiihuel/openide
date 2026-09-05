@@ -34,6 +34,8 @@ suite('OpenIDE ChatController — send path', () => {
 		const hooks: string[] = [];
 		const references: string[][] = [];
 		const agentService = {
+			onDidChangePlanFollow: store.add(new Emitter<boolean>()).event,
+			isPlanFollowEnabled: () => false,
 			onDidCreatePlan: store.add(new Emitter()).event,
 			onDidChangePlanDraft: store.add(new Emitter()).event,
 			onDidChangeCanvas: store.add(new Emitter()).event,

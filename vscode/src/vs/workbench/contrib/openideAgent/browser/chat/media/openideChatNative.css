@@ -232,6 +232,82 @@
    engine cannot answer that". Rather than invent a look for it, it borrows the webview's own
    `.flatrow` family the removed chat webview — muted for info, the amber card for a warning,
    the red card for an error — so nothing new enters the visual language. */
+/* ---- The empty transcript of a new chat -----------------------------------------------------
+   The workbench's own empty editor, at the dock's scale: the same watermark file, one line, and
+   the two keys the composer answers to. It is an OVERLAY on the list host rather than a row in the
+   list, so an arriving first turn simply covers it — the list never has to hold a fake item and
+   the tail lock never has to scroll past one. */
+.openide-chat-empty {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	padding: 24px 20px;
+	text-align: center;
+	pointer-events: none;
+	user-select: none;
+}
+/* Only the button takes clicks: the rest of the card must not eat a drag over the transcript. */
+.openide-chat-empty > * { pointer-events: none; }
+.openide-chat-empty .openide-chat-empty-sessions { pointer-events: auto; }
+.openide-chat-empty.hidden { display: none; }
+
+.openide-chat-empty-mark {
+	width: 40px;
+	height: 40px;
+	opacity: 0.55;
+	background-image: url('../../../../../browser/parts/editor/media/openide-watermark-black.png');
+	background-size: contain;
+	background-position: center;
+	background-repeat: no-repeat;
+}
+.monaco-workbench.vs-dark .openide-chat-empty-mark,
+.monaco-workbench.hc-black .openide-chat-empty-mark {
+	background-image: url('../../../../../browser/parts/editor/media/openide-watermark-white.png');
+}
+
+.openide-chat-empty-title { font-size: 14px; font-weight: 600; color: var(--vscode-foreground); }
+.openide-chat-empty-text { font-size: 12.5px; color: var(--vscode-descriptionForeground); }
+
+.openide-chat-empty-hints { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.openide-chat-empty-hint {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}
+.openide-chat-empty-key {
+	flex: 0 0 auto;
+	min-width: 18px;
+	padding: 1px 5px;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-sm);
+	background: var(--oi-tint-2, var(--vscode-toolbar-hoverBackground));
+	color: var(--vscode-foreground);
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11px;
+	line-height: 15px;
+}
+
+.openide-chat-empty-sessions {
+	margin-top: 6px;
+	padding: 4px 10px;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-md);
+	background: transparent;
+	color: var(--vscode-foreground);
+	font-family: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+.openide-chat-empty-sessions:hover { background: var(--vscode-toolbar-hoverBackground); }
+.openide-chat-empty-sessions[hidden] { display: none; }
+
 .openide-chat-notice {
 	flex: 0 0 auto;
 	margin: 6px 10px;

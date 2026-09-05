@@ -3,15 +3,19 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { addDisposableListener } from '../../../../../base/browser/dom.js';
-import { Disposable } from '../../../../../base/common/lifecycle.js';
-import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { OPENIDE_GLYPH_THINKING } from '../../common/openideGlyphs.js';
 import { OPENIDE_REASONING_EFFORTS } from '../../common/openideReasoning.js';
-import { IOpenideAgentService } from '../openideAgentService.js';
 import { IModelReasoning } from '../openideModelCatalog.js';
-import { createMenuContent, createMenuRow, createMenuSection, OpenideComposerPopover } from './openideComposerMenu.js';
 import { OpenideStringKey, t } from '../../common/openideStrings.js';
+
+/**
+ * What a reasoning level IS, shared by everything that shows one.
+ *
+ * The popover that used to live here is gone: the effort is per model now, so it is edited on the
+ * model's own row in the picker (`openideChatModelEffort.ts`) and there is no session-wide control
+ * left to open. What remains is the vocabulary — the glyph, the label, and which levels a given
+ * model will actually honour.
+ */
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -52,6 +56,18 @@ export function reasoningEffortLabel(value: string): string {
 }
 
 /**
+ * The level as the composer's model chip wears it.
+ *
+ * Same word as the menu for every graded level — they are the API's own, and short. The exception
+ * is the model's own default, whose menu label is a sentence ("Model default") that ate the model's
+ * NAME out of the chip beside it at any ordinary dock width. On the chip it is "Auto": the chip has
+ * room for one word, and the menu is where the full phrase belongs.
+ */
+export function reasoningEffortChipLabel(value: string): string {
+	return value ? reasoningEffortLabel(value) : t('chat.effort.auto');
+}
+
+/**
  * Levels the ACTIVE model publishes. `undefined` means the registry is cold or silent, and then
  * everything is offered: hiding a level the model does support is worse than showing one it
  * silently clamps.
@@ -70,56 +86,4 @@ export function availableReasoningEfforts(published: IModelReasoning | undefined
 /** True when the control is worth showing at all — an effort the model ignores is worse than none. */
 export function reasoningControlVisible(connected: boolean, published: IModelReasoning | undefined): boolean {
 	return connected && !!published && (published.efforts.length > 0 || published.toggle);
-}
-
-/** Effort popover: one flat list, no submenu. The effort is session-wide, not per model. */
-export class OpenideChatEffortPicker extends Disposable {
-
-	private readonly _popover: OpenideComposerPopover;
-	private _published: IModelReasoning | undefined;
-
-	constructor(
-		private readonly agentService: IOpenideAgentService,
-		contextViewService: IContextViewService,
-		private readonly onDidChangeEffort: () => void,
-	) {
-		super();
-		this._popover = this._register(new OpenideComposerPopover(contextViewService));
-	}
-
-	setPublishedReasoning(published: IModelReasoning | undefined): void {
-		this._published = published;
-	}
-
-	get options(): readonly (readonly [string, OpenideStringKey])[] {
-		return availableReasoningEfforts(this._published);
-	}
-
-	toggle(anchor: HTMLElement): void {
-		this._popover.toggle(anchor, {
-			className: 'openide-menu-effort',
-			render: (container, store) => {
-				const document = container.ownerDocument;
-				const content = createMenuContent(document);
-				container.appendChild(content);
-				content.appendChild(createMenuSection(document, t('chatSurface.effort.section')));
-				const current = this.agentService.getReasoningEffort() || '';
-				for (const [value, labelKey] of this.options) {
-					// No glyphs at all: the persistent tint on the active row is the only mark,
-					// and the hover reads above it.
-					const row = createMenuRow(document, { label: t(labelKey), active: value === current });
-					store.add(addDisposableListener(row, 'click', () => {
-						this._popover.close();
-						void this.agentService.setReasoningEffort(value);
-						this.onDidChangeEffort();
-					}));
-					content.appendChild(row);
-				}
-			},
-		});
-	}
-
-	close(): void {
-		this._popover.close();
-	}
 }
