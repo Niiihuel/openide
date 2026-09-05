@@ -17,10 +17,9 @@ jobs:
     steps:
       - name: Validate tag input
         run: '[[ "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
-      # Check out the release's scripts, trusted key and metadata. Credentials are needed for
-      # the final push of the verified stable feed; this job never uploads the working tree.
+      # Check out the release's scripts, trusted key and metadata without storing credentials.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with: { ref: '${{ inputs.tag }}' }
+        with: { ref: '${{ inputs.tag }}', persist-credentials: false }
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with: { node-version-file: .nvmrc, package-manager-cache: false }
       - name: Download successful build and release assets
@@ -41,4 +40,6 @@ jobs:
           for manifest in update-feed/stable/*/*/*/latest.json; do
             curl --fail --silent --show-error --location --head --retry 5 --retry-all-errors "$(jq -er '.artifact.url' "$manifest")" >/dev/null
           done
+          # The helper reads GH_TOKEN from the environment; no token is stored in .git/config.
+          gh auth setup-git --hostname github.com
           ./dev/publish-update-feed.sh update-feed updates
