@@ -68,6 +68,7 @@ let
     pkg-config
     git
     jq
+    util-linux # flock coordinates updater and launcher, including after crashes
     unzip
     zip
     fakeroot

@@ -9,9 +9,11 @@
 
 import * as assert from 'assert';
 import { createHash } from 'crypto';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { chmod, copyFile, mkdtemp, readFile, rename, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { acquireOpenideUpdateLock } from '../../node/openideUpdateLock.js';
 import { getOpenideAppImageLauncher, getOpenideAppImagePaths, markOpenideAppImageHealthy, readOpenideAppImageMarker, recoverOpenideAppImage, stageOpenideAppImage } from '../../electron-main/openideAppImageUpdater.js';
 
 suite('OpenIDE AppImage updater', () => {
@@ -55,5 +57,55 @@ suite('OpenIDE AppImage updater', () => {
 			assert.strictEqual(getOpenideAppImageLauncher(current, 'openide', './untrusted-relative'), wrapper);
 		} finally { await rm(dir, { recursive: true, force: true }); }
 	});
+	for (const scenario of ['second install', 'copy mutation', 'replace failure', 'recovery interruption', 'stale lock', 'active lock'] as const) {
+		test(`preserves the last healthy executable: ${scenario}`, async () => {
+			const dir = await mkdtemp(join(tmpdir(), 'openide-rollback-'));
+			const paths = getOpenideAppImagePaths(join(dir, 'OpenIDE.AppImage'));
+			const download = join(dir, 'download');
+			const sha = createHash('sha256').update('new').digest('hex');
+			try {
+				await writeFile(paths.current, 'healthy');
+				await writeFile(download, 'new');
+				if (scenario === 'copy mutation') {
+					await assert.rejects(stageOpenideAppImage(download, paths, '1.2.0', 3, sha, CancellationToken.None, {
+						rename,
+						copyFile: async (source, target) => { await writeFile(source, 'bad'); await copyFile(source, target); }
+					}));
+					assert.strictEqual(await readFile(paths.current, 'utf8'), 'healthy');
+					await assert.rejects(readFile(paths.pending), { code: 'ENOENT' });
+					return;
+				}
+				if (scenario === 'replace failure') {
+					await assert.rejects(stageOpenideAppImage(download, paths, '1.2.0', 3, sha, CancellationToken.None, {
+						copyFile, rename: async () => { throw new Error('interrupted replacement'); }
+					}));
+					assert.strictEqual(await readFile(paths.current, 'utf8'), 'healthy');
+					await recoverOpenideAppImage(paths);
+					assert.strictEqual(await readFile(paths.current, 'utf8'), 'healthy');
+					return;
+				}
+				if (scenario === 'active lock') {
+					const release = await acquireOpenideUpdateLock(paths.lock);
+					try {
+						await assert.rejects(stageOpenideAppImage(download, paths, '1.2.0', 3, sha));
+						await assert.rejects(recoverOpenideAppImage(paths));
+						assert.strictEqual(await readFile(paths.current, 'utf8'), 'healthy');
+					} finally { await release(); }
+				}
+				if (scenario === 'stale lock') { await writeFile(paths.lock, ''); }
+				await stageOpenideAppImage(download, paths, '1.2.0', 3, sha);
+				if (scenario === 'second install') {
+					await assert.rejects(stageOpenideAppImage(download, paths, '1.3.0', 3, sha), /Restart OpenIDE/);
+					assert.strictEqual((await readOpenideAppImageMarker(paths))?.version, '1.2.0');
+				}
+				if (scenario === 'recovery interruption') {
+					await assert.rejects(recoverOpenideAppImage(paths, { copyFile, rename: async () => { throw new Error('interrupted recovery'); } }));
+					assert.deepStrictEqual([await readFile(paths.current, 'utf8'), await readFile(paths.previous, 'utf8')], ['new', 'healthy']);
+				}
+				await recoverOpenideAppImage(paths);
+				assert.strictEqual(await readFile(paths.current, 'utf8'), 'healthy');
+			} finally { await rm(dir, { recursive: true, force: true }); }
+		});
+	}
 	test('refuses immutable nix store paths', () => assert.throws(() => getOpenideAppImagePaths('/nix/store/hash-openide/bin/openide'), /no puede/));
 });

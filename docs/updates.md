@@ -19,17 +19,79 @@ are currently published **unsigned**, because an Authenticode certificate has to
 be bought from a CA. Auto-update works either way, but SmartScreen warns anyone
 downloading the installer by hand.
 
+## What updates itself
+
+| Installation | In the feed | Behaviour |
+|---|---|---|
+| Linux x64 AppImage at `~/.local/bin/OpenIDE.AppImage` | Yes | Downloaded, verified and swapped in place; see below. |
+| Linux x64 `.deb`, `.rpm`, `.tar.gz` | — | The Linux updater only replaces an AppImage. Install the next release with the package manager. |
+| Linux arm64 (any format) | No | No AppImage is built for arm64 (`build/linux/prepare_assets.sh`), so nothing is advertised: an update that cannot install is worse than none. |
+| Windows x64 and arm64 user installer | Yes | Downloaded, verified and installed by the user-setup updater. |
+| Windows system installer, zip, MSI | — | Updated by running the next installer. |
+| Development build (`scripts/code.sh`) | — | Updates are disabled on purpose. |
+| Nix store derivation | — | Never modified automatically; rebuild the derivation. |
+
 ## AppImage and NixOS
 
 The supported mutable installation lives at `~/.local/bin/OpenIDE.AppImage`.
-Replacement goes through `.pending`, keeps `.previous`, and writes a health
-marker. If the first launch fails, the wrapper restores the previous version
-exactly once. A derivation under `/nix/store` is never modified automatically.
+Replacement goes through `.pending`. The updater verifies the size and SHA-256 of
+that final copy before replacing the executable, keeps `.previous`, and records a
+pending startup in `.update.json`. A second install is refused until the new
+workbench confirms its running version and installed hash, then removes the
+journal and rollback copy.
+
+The updater and generated launcher coordinate with Linux `flock` (util-linux).
+The `.update.lock` file deliberately stays on disk; the kernel releases ownership
+when the holder exits, including after SIGKILL. Do not delete a live lock file.
+The NixOS installer resolves `flock` and exports its path to the IDE. Regenerate
+the launcher with `bash dev/install-appimage.sh` when upgrading from older builds.
+
+If the first launch fails, the wrapper restores the previous version on the next
+launch. Recovery prepares a separate hard link (or copy) and atomically renames it
+over the current executable; an interrupted recovery leaves a launchable current
+path and a recoverable previous copy. Concurrent CLI invocations do not count as
+another failed startup. Restart after an update goes through the installed
+launcher or AppImage, never the extracted executable of the old version.
+
+### Manual upgrade from the published 1.1.0 / 1.2.0 AppImages
+
+Those published Linux builds pass a VSBuffer wrapper to `Buffer.from` and fail
+when downloading an update. The source fix uses `chunk.buffer`; it cannot repair
+an already installed binary through the broken download path. These users need
+one manual upgrade **after a release containing the fix has been published**.
+
+1. Download that release's AppImage and matching signed manifest/signature. Verify
+   them against the trusted release key with
+   `bash dev/verify-update-manifest.sh <manifest.json> <trusted-public-key.pem> <AppImage>`.
+2. Close all OpenIDE instances. In a checkout matching the downloaded release,
+   put the verified AppImage in `assets/` and make it executable.
+3. Run `bash dev/install-appimage.sh`. It atomically replaces the installation,
+   clears obsolete update markers, and regenerates the launcher with the shared
+   lock and recovery protocol. Start OpenIDE normally.
+
+### Regression checks
+
+After transpiling the sources, run the existing manifest/signature tests and
+`dev/test-updater-main.mjs` with Electron. The main-process suite includes real
+filesystem tests of corrupted Windows caches, replacement failures, pending
+installs, and altered copy bytes. `node dev/test-appimage-recovery.mjs` exercises
+SIGKILL and the generated launcher. `xvfb-run -a node dev/test-updater-restart.mjs`
+uses an ephemeral signing key, a local HTTP fixture transport, and a synthetic
+executable to exercise the production Linux update service through a real
+Electron relaunch and a new ready window's health acknowledgement. It does not
+publish a release or replace a user's installation. Native Windows installer
+execution and the final release artifact still need their platform smoke tests.
 
 ## Channels
 
 - `stable`: `X.Y.Z` versions, promoted by hand once every artifact is verified.
-- `insider`: `X.Y.Z-insider.YYYYMMDD.N` versions, published to a separate feed.
+  This is the only channel currently published.
+- `insider`: `X.Y.Z-insider.YYYYMMDD.N` versions on a separate feed. The
+  version format, the manifest parser and `version.sh` already accept it, but
+  the pipeline is not wired: `release-openide-insider.yml` has no schedule and
+  cannot run against `master`, whose `openide-version.json` declares `stable`.
+  Turning it on needs an insider version line, a `quality` input in the release
+  workflow and a matching arm in promotion; the workflow's header lists them.
 
 ## Release secrets
 
@@ -95,9 +157,15 @@ publishes the release, confirms unauthenticated access to the installer URLs,
 and finally advances the stable feed. If the final push fails, rerun promotion;
 it accepts an already public stable release and repeats verification.
 
-Installed builds check automatically after about 30 seconds when `update.mode`
-is `default` or `start`. The title-bar popover announces a detected version once
-per window session without taking keyboard focus; an inactive window defers it
-until focus returns. `update.titleBar: false` disables that indicator. Development
+Installed builds check automatically 30 seconds after startup when `update.mode`
+is `default` or `start`, and hourly after that in `default`. The title-bar
+popover announces a detected version once per window session without taking
+keyboard focus; an inactive window defers it until focus returns.
+`update.titleBar: false` disables that indicator; the *OpenIDE: Check for
+updates / Download / Install / Restart* commands remain available. Development
 builds intentionally disable application updates, so use the installed AppImage
 or Windows user installer when testing an upgrade from the previous version.
+
+After the first start of a new version, OpenIDE fetches the version's note from
+`docs/updates/` and shows it once as a card; a version without a note shows
+nothing. The format is described in [updates/README.md](./updates/README.md).

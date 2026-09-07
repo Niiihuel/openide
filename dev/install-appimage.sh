@@ -8,8 +8,8 @@
 #   1) copies the AppImage to ~/.local/bin/OpenIDE.AppImage (a version-agnostic name)
 #   2) creates the wrapper ~/.local/bin/openide  (through appimage-run; absolute paths
 #      because the .desktop does not inherit the shell's PATH)
-#   3) copia los iconos hicolor del AppDir del build
-#   4) escribe ~/.local/share/applications/openide.desktop
+#   3) copies the hicolor icons from the build AppDir
+#   4) writes ~/.local/share/applications/openide.desktop
 #
 # Requires: appimage-run  (nixpkgs.appimage-run) in the user profile.
 
@@ -63,6 +63,12 @@ if [[ -z "${APPIMAGE_RUN}" ]]; then
 	exit 1
 fi
 
+FLOCK="$(command -v flock || true)"
+if [[ -z "${FLOCK}" ]]; then
+	echo "Falta 'flock' (util-linux), necesario para coordinar las actualizaciones." >&2
+	exit 1
+fi
+
 # `@vscodium/native-keymap` ships a `.node` that links against libxkbfile.so.1, and appimage-run's
 # FHS environment carries libX11 and libstdc++ but not that one. So the binding fails to load, the
 # module falls back to a Debug build that release AppImages do not contain, and the error you see
@@ -100,7 +106,21 @@ SOURCE_ICON="${ROOT_DIR}/VSCode-linux-x64/resources/app/resources/linux/code.png
 mkdir -p "${BIN_DIR}" "${APPS_DIR}"
 
 # 1) the AppImage under a version-agnostic name (it survives rebuilds)
-install -m 0755 "${APPIMAGE}" "${BIN_DIR}/OpenIDE.AppImage"
+(
+	exec 9>"${BIN_DIR}/OpenIDE.AppImage.update.lock"
+	"${FLOCK}" -w 30 -x 9
+	MANUAL_PENDING="${BIN_DIR}/OpenIDE.AppImage.manual-pending"
+	trap 'rm -f "${MANUAL_PENDING}"' EXIT
+	install -m 0755 "${APPIMAGE}" "${MANUAL_PENDING}"
+	cmp "${APPIMAGE}" "${MANUAL_PENDING}"
+	sync -f "${MANUAL_PENDING}"
+	mv -f "${MANUAL_PENDING}" "${BIN_DIR}/OpenIDE.AppImage"
+	sync -f "${BIN_DIR}/OpenIDE.AppImage"
+	# A verified manual replacement supersedes any interrupted automatic update.
+	rm -f "${BIN_DIR}/OpenIDE.AppImage.update.json"
+	sync -f "${BIN_DIR}"
+	rm -f "${BIN_DIR}/OpenIDE.AppImage.previous" "${BIN_DIR}/OpenIDE.AppImage.pending"
+)
 
 # 2) wrapper CLI + entrypoint (paths absolutos: el .desktop no tiene tu PATH)
 cat > "${BIN_DIR}/openide" <<EOF
@@ -111,18 +131,37 @@ APPIMAGE="${BIN_DIR}/OpenIDE.AppImage"
 MARKER="\${APPIMAGE}.update.json"
 PREVIOUS="\${APPIMAGE}.previous"
 HEALTHY="\${APPIMAGE}.healthy"
-# If the new binary never recorded a healthy start, roll back exactly once.
-if [ -f "\${MARKER}" ] && [ -f "\${PREVIOUS}" ] && [ ! -f "\${HEALTHY}" ]; then
-  ATTEMPTS=\$(sed -n 's/.*"attempts":\([0-9][0-9]*\).*/\1/p' "\${MARKER}" | head -1)
-  if [ "\${ATTEMPTS:-0}" -ge 1 ]; then
-    mv -f "\${APPIMAGE}" "\${APPIMAGE}.failed" || true
-    mv -f "\${PREVIOUS}" "\${APPIMAGE}"
-    rm -f "\${MARKER}"
-  else
-    sed -i 's/"attempts":0/"attempts":1/' "\${MARKER}" || true
+# A second CLI invocation must not count as a failed startup of the same process.
+# Keep fd 8 across exec; hold fd 9 only while modifying the update journal.
+exec 8>"\${APPIMAGE}.startup.lock"
+if ${FLOCK} -n -x 8; then
+  exec 9>"\${APPIMAGE}.update.lock"
+  ${FLOCK} -w 30 -x 9
+  if [ -f "\${MARKER}" ] && [ -f "\${PREVIOUS}" ]; then
+    ATTEMPTS=\$(sed -n 's/.*"attempts":\([0-9][0-9]*\).*/\1/p' "\${MARKER}" | head -1)
+    if [ "\${ATTEMPTS:-0}" -ge 1 ]; then
+      RESTORE="\${APPIMAGE}.restore"
+      rm -f "\${RESTORE}"
+      ln "\${PREVIOUS}" "\${RESTORE}" || cp -p "\${PREVIOUS}" "\${RESTORE}"
+      sync -f "\${RESTORE}"
+      mv -f "\${RESTORE}" "\${APPIMAGE}"
+      sync -f "\${APPIMAGE}"
+      rm -f "\${MARKER}"
+      sync -f "\$(dirname "\${APPIMAGE}")"
+      rm -f "\${PREVIOUS}" "\${APPIMAGE}.pending"
+    else
+      sed 's/"attempts":0/"attempts":1/' "\${MARKER}" > "\${MARKER}.pending"
+      sync -f "\${MARKER}.pending"
+      mv -f "\${MARKER}.pending" "\${MARKER}"
+      sync -f "\${MARKER}"
+    fi
   fi
+  exec 9>&-
+else
+  exec 8>&-
 fi
 rm -f "\${HEALTHY}"
+export OPENIDE_FLOCK="${FLOCK}"
 export OPENIDE_APPIMAGE_PATH="\${APPIMAGE}"
 export OPENIDE_APPIMAGE_LAUNCHER="${BIN_DIR}/openide"
 # See dev/install-appimage.sh: appimage-run's FHS environment has no libxkbfile.so.1, which
@@ -172,5 +211,5 @@ command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -f "${
 echo "✔ AppImage:   ${BIN_DIR}/OpenIDE.AppImage"
 echo "✔ Wrapper:    ${BIN_DIR}/openide"
 echo "✔ Desktop:    ${APPS_DIR}/openide.desktop"
-echo "Abrí tu launcher (rofi/fuzzel/app grid) y buscá 'OpenIDE'."
+echo "Open your launcher (rofi/fuzzel/app grid) and search for 'OpenIDE'."
 echo "(CLI 'openide' en terminal requiere ~/.local/bin en PATH.)"

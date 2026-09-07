@@ -145,7 +145,7 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 		const updatingVersionPath = path.join(exeDir, 'updating_version');
 		if (await pfs.Promises.exists(updatingVersionPath)) {
 			try {
-				const updateType = getUpdateType();
+				const updateType = this.getUpdateType();
 				const updatingVersion = (await readFile(updatingVersionPath, 'utf8')).trim();
 				this.logService.info(`update#doCheckForUpdates - application was updating to version ${updatingVersion}`);
 				const updatePackagePath = await this.getUpdatePackagePath(updatingVersion, updateType);
@@ -159,7 +159,7 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 				// updatingVersionPath will be deleted by inno setup.
 			}
 		} else {
-			const fastUpdatesEnabled = getUpdateType() === UpdateType.Setup && this.configurationService.getValue('update.enableWindowsBackgroundUpdates');
+			const fastUpdatesEnabled = this.getUpdateType() === UpdateType.Setup && this.configurationService.getValue('update.enableWindowsBackgroundUpdates');
 			// GC for background updates in system setup happens via inno_setup since it requires
 			// elevated permissions.
 			if (fastUpdatesEnabled && this.productService.target === 'user' && this.productService.commit) {
@@ -181,7 +181,7 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 	protected buildUpdateFeedUrl(quality: string, _commit: string, _options?: IUpdateURLOptions): string {
 		let target: Target;
 
-		switch (getUpdateType()) {
+		switch (this.getUpdateType()) {
 			case UpdateType.Archive:
 				target = "archive"
 				break;
@@ -218,7 +218,7 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 
 		this._isLatestVersion(url, explicit)
 			.then((result) => {
-				const updateType = getUpdateType();
+				const updateType = this.getUpdateType();
 
 				if(!result) {
 					// If we were checking for an overwrite update and found nothing newer,
@@ -257,10 +257,16 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 
 				return this.cleanup(update.version).then(() => {
 					return this.getUpdatePackagePath(update.version, updateType).then(updatePackagePath => {
-						return pfs.Promises.exists(updatePackagePath).then(exists => {
+						return pfs.Promises.exists(updatePackagePath).then(async exists => {
 							if (exists) {
 								if (this.productService.applicationName === 'openide' && (!update.sha256hash || !update.size)) { throw new Error('Manifest firmado incompleto.'); }
-								return (update.sha256hash ? checksum(updatePackagePath, update.sha256hash) : Promise.resolve()).then(() => updatePackagePath, async () => { await pfs.Promises.rm(updatePackagePath); return undefined; }).then(valid => valid ?? this.getUpdatePackagePath(update.version, updateType));
+								try {
+									if (update.sha256hash) { await checksum(updatePackagePath, update.sha256hash); }
+									return updatePackagePath;
+								} catch {
+									await pfs.Promises.rm(updatePackagePath);
+									// Continue through the download and verification path below.
+								}
 							}
 
 							const downloadPath = `${updatePackagePath}.tmp`;
@@ -299,9 +305,9 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 								.then(() => pfs.Promises.rename(downloadPath, updatePackagePath, false /* no retry */))
 								.then(() => updatePackagePath);
 						});
-					}).then(packagePath => {
+					}).then(async packagePath => {
 						this.availableUpdate = { packagePath };
-						this.saveUpdateMetadata(update);
+						await this.saveUpdateMetadata(update);
 						this.setState(State.Downloaded(update, explicit, this._overwrite));
 
 						const fastUpdatesEnabled = this.configurationService.getValue('update.enableWindowsBackgroundUpdates');
@@ -325,7 +331,7 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 					this._overwrite = false;
 					this.setState(State.Ready(this.state.update, this.state.explicit, false));
 				} else {
-					this.setState(State.Idle(getUpdateType(), message));
+					this.setState(State.Idle(this.getUpdateType(), message));
 				}
 			});
 	}
@@ -334,7 +340,7 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 		if (state.update.url) {
 			this.nativeHostMainService.openExternal(undefined, state.update.url);
 		}
-		this.setState(State.Idle(getUpdateType()));
+		this.setState(State.Idle(this.getUpdateType()));
 	}
 
 	private async getUpdatePackagePath(version: string, type: UpdateType): Promise<string> {
@@ -382,7 +388,7 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 
 		let child: ChildProcess
 
-		const type = getUpdateType();
+		const type = this.getUpdateType();
 		if (type == UpdateType.WindowsInstaller) {
 			this.logService.info(`update#doApplyUpdate - msiexec.exe /i ${this.availableUpdate.packagePath}`);
 
@@ -418,7 +424,7 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 
 		child.once('exit', () => {
 			this.availableUpdate = undefined;
-			this.setState(State.Idle(getUpdateType()));
+			this.setState(State.Idle(this.getUpdateType()));
 		});
 
 		const readyMutexName = `${this.productService.win32MutexName}-ready`;
@@ -457,7 +463,7 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 
 		const cancelTimeout = new ProcessTimeRunOnceScheduler(() => {
 			this.logService.warn('update#doApplyUpdate: polling timed out waiting for update to be ready');
-			this.setState(State.Idle(getUpdateType(), 'Update did not complete within expected time'));
+			this.setState(State.Idle(this.getUpdateType(), 'Update did not complete within expected time'));
 		}, 60 * 60 * 1000);
 
 		// Poll for progress and ready mutex for 1 hour.
@@ -529,7 +535,7 @@ export class Win32UpdateService extends AbstractUpdateService implements IRelaun
 				// ignore
 			}
 		} else {
-			const type = getUpdateType();
+			const type = this.getUpdateType();
 			if (type == UpdateType.WindowsInstaller) {
 				this.logService.info(`update#doQuitAndInstall - msiexec.exe /i ${this.availableUpdate.packagePath}`);
 

@@ -10,7 +10,7 @@ const Mocha = require('mocha');
 app.whenReady().then(async () => {
 	try {
 		const mocha = new Mocha({ ui: 'tdd', timeout: 10000 });
-		for (const name of ['abstractUpdateService', 'openideLinuxUpdateService', 'openideAppImageUpdater', 'updateRelaunchArguments', 'win32UpdateType']) {
+		for (const name of ['abstractUpdateService', 'openideLinuxUpdateService', 'openideAppImageUpdater', 'updateRelaunchArguments', 'win32UpdateType', 'openideWindowsUpdateService']) {
 			mocha.addFile(path.join(root, `vscode/out/vs/platform/update/test/electron-main/${name}.test.js`));
 		}
 		await mocha.loadFilesAsync();
