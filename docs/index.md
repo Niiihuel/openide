@@ -35,6 +35,7 @@
 
 ## Releases
 
+- [OpenIDE 1.3.0 release notes](./releases/1.3.0.md)
 - [Release notes](./releases/1.2.0.md) and the [release review](./reviews/1.2.0.md) for 1.2.0
 - [Code OSS 1.136.1 integration](./codeoss-1.136.1.md) — the last upstream migration and what it validated
 

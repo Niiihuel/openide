@@ -60,7 +60,7 @@ OpenIDE carries two version numbers, declared together in `openide-version.json`
 
 | | Where it lives | What it is for |
 | --- | --- | --- |
-| **Product version** | `product.json.openideVersion` | What OpenIDE calls itself: installer names, update feed, About dialog. Currently `1.2.0`. |
+| **Product version** | `product.json.openideVersion` | What OpenIDE calls itself: installer names, update feed, About dialog. Currently `1.3.0`. |
 | **VS Code API version** | `vscode/package.json.version` | The extension API this build implements. Every `engines.vscode` range is validated against it, so it tracks Code OSS. Currently `1.136.1`. |
 
 Neither is edited by hand in those files — `build.sh` derives both from

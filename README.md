@@ -281,7 +281,7 @@ per release; it is not a guarantee that every third-party extension works.
 
 | Field | Value |
 |---|---|
-| OpenIDE version | `1.2.0` |
+| OpenIDE version | `1.3.0` |
 | VS Code API version | `1.136.1` |
 | Code OSS base | `1.136.1` |
 | Channel | `stable` |
