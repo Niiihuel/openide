@@ -1,10 +1,11 @@
 # Code OSS 1.136.1 integration
 
 Validated on September 4, 2026, on Linux x64 (NixOS, FHS development environment).
+The integration was done on the 1.1.0 line and shipped as OpenIDE 1.2.0.
 
 | Component | Version |
 | --- | --- |
-| OpenIDE product | 1.1.0 |
+| OpenIDE product | 1.1.0 at validation time; released as 1.2.0 |
 | Code OSS / extension API | 1.136.1 |
 | Upstream commit | a44adf7f53e00964ab890f9f8758a334f1fc15bc |
 | Development Node | 24.18.0 |

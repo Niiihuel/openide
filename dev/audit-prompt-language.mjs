@@ -48,14 +48,13 @@ const root = process.cwd();
 const MODEL_FACING = [
 	'vscode/src/vs/workbench/contrib/openideAgent/browser/openideTools.ts',
 	'vscode/src/vs/workbench/contrib/openideAgent/browser/openideBrowserTools.ts',
+	'vscode/src/vs/workbench/contrib/openideAgent/common/openideSystemPrompt.ts',
 ];
 
 /** Regions inside mixed files: [file, startMarker, endMarker]. */
 const MODEL_FACING_REGIONS = [
-	['vscode/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts',
-		'const OUTPUT_CONTINUATION_PROMPT', 'const MODE_PROMPTS'],
-	['vscode/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts',
-		'const MODE_PROMPTS', '\n};'],
+	['vscode/src/vs/workbench/contrib/openideAgent/common/openideTurnRuntime.ts',
+		'const OUTPUT_CONTINUATION_PROMPT', '\ntype Usage'],
 	['vscode/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts',
 		'const MESSAGE_REFUSALS', '\n};'],
 	// Tool schemas declared outside the tool files. Missing these is how the first version of this
@@ -72,6 +71,7 @@ const MODEL_FACING_REGIONS = [
  * Covered on a budget rather than at zero, because they were not translated in one pass.
  */
 const RATCHET_FILES = [
+	'openideProviderService.ts', 'openideVoiceService.ts', 'openideCodebaseTools.ts', 'openideRestoreEngine.ts',
 	'openideAgentService.ts', 'openideAgentSkills.ts', 'openideGitFlow.ts', 'openideCanvasRuntime.ts',
 	'openideMessageChangeSetService.ts', 'openideOAuth.ts', 'openideUsageService.ts',
 	'openideAgentHooks.ts', 'openideWebResearch.ts', 'openideAgentMcp.ts', 'openideAgentMemory.ts',
@@ -87,9 +87,9 @@ const allowlistPath = 'dev/prompt-language-allowlist.json';
  * `requestsMutation` is not a message at all: it is a regex of verb stems matched against the
  * USER's own prose to detect an edit request, and it carries Spanish and English stems side by
  * side (`modific|edit|actualiz|…|write|update|change`). Translating it would delete half its
- * coverage.
+ * coverage. `explicitMemory` likewise matches English and Spanish user requests.
  */
-const ALLOWED = new Set(['approvalInfo:', 'const requestsMutation']);
+const ALLOWED = new Set(['approvalInfo:', 'const requestsMutation', 'const explicitMemory']);
 
 const problems = [];
 

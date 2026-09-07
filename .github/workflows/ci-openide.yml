@@ -38,7 +38,7 @@ jobs:
           cache-dependency-path: vscode/package-lock.json
 
       - name: Install native dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y libkrb5-dev libx11-dev libxkbfile-dev libsecret-1-dev
+        run: sudo apt-get update -y && sudo apt-get install -y libkrb5-dev libx11-dev libxkbfile-dev libsecret-1-dev bubblewrap
 
       - name: Install JavaScript dependencies
         working-directory: vscode
@@ -53,7 +53,7 @@ jobs:
         run: node --test dev/verify-release-feed.test.mjs
 
       - name: Test upstream synchronization
-        run: node --test dev/codeoss-sync.test.mjs
+        run: node --test dev/codeoss-sync.test.mjs dev/audit-fork-delta.test.mjs
 
       - name: Audit version consistency
         run: node dev/audit-version-consistency.mjs
@@ -81,6 +81,10 @@ jobs:
       - name: Audit script permissions
         run: node dev/audit-script-permissions.mjs
 
+      - name: Validate source layers
+        working-directory: vscode
+        run: npm run valid-layers-check
+
       - name: Typecheck canonical source
         working-directory: vscode
         run: npm run typecheck-client
@@ -104,6 +108,19 @@ jobs:
       - name: Test binary request transport
         working-directory: vscode
         run: node test/unit/node/index.js --runGlob 'vs/platform/request/test/node/*.test.js'
+
+      - name: Require Linux process confinement
+        working-directory: vscode
+        run: >-
+          node --input-type=module -e "import { OpenideProcessIsolation } from './out/vs/platform/openideAgentHost/node/openideProcessIsolation.js';
+          const status = await new OpenideProcessIsolation().status(); if (!status.available) { throw new Error(status.reason); }"
+
+      - name: Test connection ownership and restore coordination
+        working-directory: vscode
+        run: >-
+          ./node_modules/.bin/mocha --ui tdd --timeout 10000 --exit
+          out/vs/base/parts/ipc/test/common/ipc.test.js
+          out/vs/platform/openideAgentHost/test/node/*.test.js
 
       - name: Test OpenIDE agent common
         working-directory: vscode
@@ -147,6 +164,10 @@ jobs:
 
       - name: Test updater main process lifecycle
         run: xvfb-run -a vscode/.build/electron/openide dev/test-updater-main.mjs --no-sandbox --ozone-platform=x11
+      - name: Test AppImage launcher recovery after process death
+        run: node dev/test-appimage-recovery.mjs
+      - name: Test signed update and Electron restart
+        run: xvfb-run -a node dev/test-updater-restart.mjs
 
       - name: Test update popover
         working-directory: vscode
@@ -159,3 +180,56 @@ jobs:
         env:
           XDG_SESSION_TYPE: x11
         run: xvfb-run -a node dev/smoke-upgrade.mjs
+
+      - name: Test IDE bridge with real Electron windows
+        run: |
+          ulimit -c 0
+          xvfb-run -a vscode/.build/electron/openide dev/test-ide-bridge.mjs --no-sandbox --ozone-platform=x11
+
+      - name: Test hosted CLI in the running IDE
+        run: xvfb-run -a node dev/test-hosted-cli.mjs
+
+      - name: Test native harness in the running IDE
+        run: xvfb-run -a node dev/test-harness-runtime.mjs
+
+      - name: Publish fork integration evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fork-integration-${{ github.run_id }}
+          path: .build/fork-hardening/
+          if-no-files-found: warn
+          retention-days: 14
+
+  restore-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - name: Install JavaScript dependencies
+        working-directory: vscode
+        run: npm ci
+      - name: Transpile canonical source
+        working-directory: vscode
+        run: npm run transpile-client
+      - name: Test restore on native Windows filesystem
+        working-directory: vscode
+        run: >-
+          node node_modules/mocha/bin/mocha.js --ui tdd --timeout 30000 --exit
+          --reporter json --reporter-option output=../.build/fork-hardening/windows-restore/results.json
+          out/vs/workbench/contrib/openideAgent/test/node/openideCliRestore.test.js
+          out/vs/platform/openideAgentHost/test/node/openideRestoreLocks.test.js
+
+      - name: Publish Windows restore evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-restore-${{ github.run_id }}
+          path: .build/fork-hardening/windows-restore/
+          if-no-files-found: warn
+          retention-days: 14

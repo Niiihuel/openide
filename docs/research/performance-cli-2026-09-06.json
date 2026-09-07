@@ -1,0 +1,1094 @@
+{
+  "date": "2026-09-06",
+  "gitHead": "72c2545ea9750d0f9630813a140157842410ecaa",
+  "dirtyWorkingTree": true,
+  "sourceAndCompiledSha256": {
+    "vscode/src/vs/platform/openideAgentHost/node/openideMemoryOwner.ts": "445f4a422b7503e9722b9d809eb7de25afcd3a0244e03fd4e18e285831442e7c",
+    "vscode/out/vs/platform/openideAgentHost/node/openideMemoryOwner.js": "5f438cbb9da89f8b312db077ae7dd68931da2543d7a42d32d0948eb3ce4fc27e",
+    "vscode/src/vs/platform/openideCodebase/common/openideMemoryRecord.ts": "661b66c3ea2aa4cbd526b48249dc5c3aff9e865e9ead3bbcf3a759eb3ea47128",
+    "vscode/out/vs/platform/openideCodebase/common/openideMemoryRecord.js": "42fa10a38ca33db4daa1fc8f6fc85908145df1a507282805a53fc2fe5c51a323",
+    "vscode/src/vs/workbench/contrib/openideAgent/common/openideMemoryRecall.ts": "7097f6c07fc5fddf25199161ebd6a094e930b078df774fa3a96e84738414c608",
+    "vscode/out/vs/workbench/contrib/openideAgent/common/openideMemoryRecall.js": "285b073b20c6f59e5b4995f2011521a55aadc6a32d3befebeefbc8781b97135f",
+    "vscode/src/vs/code/electron-utility/sharedProcess/contrib/openideCodebaseMemoryStorage.ts": "38de77df24b56b73576b914e2540bf69ad75dc828d44c798ae245d57c8b646f1",
+    "vscode/out/vs/code/electron-utility/sharedProcess/contrib/openideCodebaseMemoryStorage.js": "a576b6de4696680bb3af6674d2f7aee859b0d56297b1a208f926622e33cf1c54",
+    "vscode/src/vs/code/electron-utility/sharedProcess/contrib/openideCodebaseMemoryChannel.ts": "b6162394b02db134730df0650a8e279adc701c43225dc182652c895f3525217b",
+    "vscode/out/vs/code/electron-utility/sharedProcess/contrib/openideCodebaseMemoryChannel.js": "87baa92397604ae9c2b317d2b44442abd169671aa7880dca1bd3a98368051b34",
+    "vscode/src/vs/workbench/contrib/openideAgent/browser/openideCodebaseQueryService.ts": "1dd100a8af802f4685ca03ca80b4e60a0d4112bb148a31940220921216004d69",
+    "vscode/out/vs/workbench/contrib/openideAgent/browser/openideCodebaseQueryService.js": "6b4346abfea98f8f97195bfd6fa496d139ab1f35a7b10c6302c6f7e28c066927",
+    "vscode/src/vs/workbench/contrib/openideAgent/browser/openideCodebaseMemoryWatcher.ts": "9cea8161526f1ddf01dd64302e5bddbd60944e33a3b7c0818fd700ffcde885d7",
+    "vscode/out/vs/workbench/contrib/openideAgent/browser/openideCodebaseMemoryWatcher.js": "49cdb7938d2f5101f0b0d71d3beb91950d0b006aed529e9fabf86e16f8946e76",
+    "vscode/src/vs/workbench/contrib/openideAgent/browser/openideAgentService.ts": "19bd977160cb8a1960c6fd85b844c3e8a5f0b735bf5ed5959875083688ddf75a",
+    "vscode/out/vs/workbench/contrib/openideAgent/browser/openideAgentService.js": "9433cbdf97e3374d9e0d5beabd5435111def978ae72c6effe8a80e0fd47b71c4",
+    "vscode/src/vs/workbench/contrib/openideAgent/browser/openideMemoryCheckpoint.ts": "b5620f1821a9c7ce103c45a90fc415b644a20fb49654e0e695a1a1beef037f93",
+    "vscode/out/vs/workbench/contrib/openideAgent/browser/openideMemoryCheckpoint.js": "9167cec578fe3376c19ea27d6f9007ffb98e9b9145053b4fcc2b98bb6f1e475c",
+    "vscode/src/vs/workbench/contrib/openideAgent/common/openideAgentCliCatalog.ts": "021af91b0175550b6ec9b5f690866c8bd7f8a95be9e79c9632e0b904c15e2a9d",
+    "vscode/out/vs/workbench/contrib/openideAgent/common/openideAgentCliCatalog.js": "0c25be60cfb29d666b301f39b208f0a77013b8327ecd6df5e0cdc0ce8397da2f",
+    "vscode/src/vs/workbench/contrib/openideAgent/common/openideIdeExposure.ts": "23466eec4e1097fc514279dbedaba9cceac71c3552294417f290b888e3f614b7",
+    "vscode/out/vs/workbench/contrib/openideAgent/common/openideIdeExposure.js": "b38db1f6f6952fb8431f13f13802508fd57fed613d6245b3ec3ddfbb6d80892a"
+  },
+  "installedCliVersions": {
+    "claude": "2.1.263",
+    "codex": "0.153.4",
+    "opencode": "1.17.12",
+    "grok": "1.0.13 (5e9a58528b76)",
+    "gemini": null,
+    "amp": null,
+    "droid": null,
+    "copilot": null
+  },
+  "benchmarks": {
+    "date": "2026-09-06T23:09:31.546Z",
+    "node": "v22.23.1",
+    "cpu": "AMD Ryzen 9 270 w/ Radeon 780M Graphics",
+    "platform": "linux",
+    "methodology": "Warm OS cache. Nine timed samples after one warmup for reads. Production classes from vscode/out. Synthetic notes ~2KB each; no provider, IPC, graph projection or GUI in memory timings. Storage insertion uses persistence off to isolate manifest CPU; three independent fresh stores per size. Fixture creation excluded.",
+    "memory": [
+      {
+        "notes": 0,
+        "sessions": 0,
+        "bytes": 0,
+        "list": {
+          "p50": 0.5378770000000088,
+          "p95": 0.6735809999999987,
+          "samples": [
+            0.6735809999999987,
+            0.49969600000000014,
+            0.5539770000000033,
+            0.5893530000000027,
+            0.28188699999999756,
+            0.5378770000000088,
+            0.5551999999999992,
+            0.4627959999999973,
+            0.43993399999999383
+          ]
+        },
+        "rank": {
+          "p50": 0.006711999999993168,
+          "p95": 0.07050200000000473,
+          "samples": [
+            0.009167000000005032,
+            0.005851000000006934,
+            0.003887000000005969,
+            0.006711999999993168,
+            0.003706999999991467,
+            0.0018730000000033442,
+            0.012152000000000385,
+            0.07050200000000473,
+            0.012313000000006014
+          ]
+        },
+        "twoScans": {
+          "p50": 0.5847849999999966,
+          "p95": 0.8391210000000058,
+          "samples": [
+            0.6052729999999968,
+            0.4447020000000066,
+            0.4558930000000032,
+            0.5847849999999966,
+            0.8346930000000015,
+            0.8391210000000058,
+            0.5027210000000082,
+            0.46177399999999125,
+            0.656328000000002
+          ]
+        },
+        "fourConcurrentListsMs": 1.3324240000000032
+      },
+      {
+        "notes": 50,
+        "sessions": 0,
+        "bytes": 104080,
+        "list": {
+          "p50": 14.375200000000007,
+          "p95": 17.500398999999987,
+          "samples": [
+            17.13151900000001,
+            16.669723999999974,
+            14.207324999999997,
+            14.375200000000007,
+            16.124944999999997,
+            12.960821999999979,
+            11.006002999999993,
+            17.500398999999987,
+            13.661082000000022
+          ]
+        },
+        "get": {
+          "p50": 13.814919999999972,
+          "p95": 15.197598999999968,
+          "samples": [
+            15.197598999999968,
+            14.983989000000008,
+            13.814919999999972,
+            14.191295000000025,
+            13.06644,
+            13.532722000000035,
+            13.080205000000035,
+            14.098942000000022,
+            10.432188999999994
+          ]
+        },
+        "rank": {
+          "p50": 0.8096950000000334,
+          "p95": 2.0046919999999773,
+          "samples": [
+            1.5299039999999877,
+            2.0046919999999773,
+            0.5130800000000022,
+            0.6359509999999773,
+            0.6980369999999994,
+            0.700761,
+            1.3942589999999768,
+            1.4607950000000187,
+            0.8096950000000334
+          ]
+        },
+        "twoScans": {
+          "p50": 25.028412000000003,
+          "p95": 29.011347,
+          "samples": [
+            24.360291000000018,
+            29.011347,
+            26.881821000000002,
+            22.50560799999994,
+            26.563415000000077,
+            24.329952999999932,
+            25.805766999999946,
+            22.706434999999942,
+            25.028412000000003
+          ]
+        },
+        "fourConcurrentListsMs": 48.51741000000004
+      },
+      {
+        "notes": 200,
+        "sessions": 0,
+        "bytes": 416580,
+        "list": {
+          "p50": 45.35380900000018,
+          "p95": 51.00067999999999,
+          "samples": [
+            51.00067999999999,
+            45.955776000000014,
+            49.70937200000003,
+            43.693731999999954,
+            44.40399100000013,
+            40.2058619999998,
+            45.35380900000018,
+            49.51049899999998,
+            41.00751300000002
+          ]
+        },
+        "get": {
+          "p50": 45.35201599999982,
+          "p95": 58.253635999999915,
+          "samples": [
+            45.96494399999983,
+            42.76741700000002,
+            46.021688999999924,
+            45.35201599999982,
+            48.052660999999944,
+            45.096066000000064,
+            58.253635999999915,
+            41.30733400000008,
+            42.25827400000003
+          ]
+        },
+        "rank": {
+          "p50": 1.5260670000000118,
+          "p95": 5.960687999999891,
+          "samples": [
+            1.7556159999999181,
+            2.422354000000041,
+            5.960687999999891,
+            1.5260670000000118,
+            0.776873999999907,
+            0.6990990000001602,
+            0.6053039999999328,
+            1.5147259999998823,
+            2.27891499999987
+          ]
+        },
+        "twoScans": {
+          "p50": 87.69799300000022,
+          "p95": 91.78587500000003,
+          "samples": [
+            86.09279900000001,
+            84.46036300000014,
+            88.25570799999991,
+            87.49569499999961,
+            82.00226299999986,
+            87.69799300000022,
+            88.66556500000024,
+            91.36216299999978,
+            91.78587500000003
+          ]
+        },
+        "fourConcurrentListsMs": 169.454205
+      },
+      {
+        "notes": 500,
+        "sessions": 0,
+        "bytes": 1041780,
+        "list": {
+          "p50": 109.16852599999993,
+          "p95": 112.26917999999978,
+          "samples": [
+            110.79042200000004,
+            106.85630700000002,
+            108.91722500000014,
+            112.26917999999978,
+            112.19932900000003,
+            106.7177670000001,
+            104.57121000000006,
+            109.25147000000015,
+            109.16852599999993
+          ]
+        },
+        "get": {
+          "p50": 104.27971399999933,
+          "p95": 112.18313799999942,
+          "samples": [
+            103.80415400000038,
+            112.18313799999942,
+            105.74807299999975,
+            104.87634999999955,
+            103.43244800000048,
+            109.77481999999964,
+            102.80779799999982,
+            104.27971399999933,
+            103.07237299999997
+          ]
+        },
+        "rank": {
+          "p50": 1.0994689999997718,
+          "p95": 3.931489000000056,
+          "samples": [
+            2.6353330000001733,
+            1.427150999999867,
+            0.9458810000000994,
+            1.0994689999997718,
+            3.931489000000056,
+            1.0396859999996195,
+            0.9213850000001003,
+            0.8142640000000938,
+            1.1091659999997319
+          ]
+        },
+        "twoScans": {
+          "p50": 220.78075400000034,
+          "p95": 227.4462620000004,
+          "samples": [
+            220.44564700000046,
+            199.2778330000001,
+            213.45811700000013,
+            222.27503100000013,
+            217.50460199999998,
+            221.74737300000015,
+            227.22711199999958,
+            220.78075400000034,
+            227.4462620000004
+          ]
+        },
+        "fourConcurrentListsMs": 422.1261259999992
+      },
+      {
+        "notes": 500,
+        "sessions": 200,
+        "bytes": 1458380,
+        "list": {
+          "p50": 162.93101399999978,
+          "p95": 204.94544099999985,
+          "samples": [
+            167.86718399999972,
+            152.45328099999915,
+            156.35473300000012,
+            159.63241799999923,
+            162.93101399999978,
+            159.11013100000127,
+            168.1620269999985,
+            204.94544099999985,
+            186.5770680000005
+          ]
+        },
+        "get": {
+          "p50": 191.44463899999937,
+          "p95": 359.2311410000002,
+          "samples": [
+            359.2311410000002,
+            219.9156949999997,
+            219.06332900000052,
+            185.11919800000032,
+            178.17029999999977,
+            192.91565199999968,
+            167.85418899999968,
+            191.44463899999937,
+            165.2851499999997
+          ]
+        },
+        "rank": {
+          "p50": 2.6260760000004666,
+          "p95": 4.44772600000033,
+          "samples": [
+            2.631115000000136,
+            4.44772600000033,
+            2.6260760000004666,
+            3.5723069999985455,
+            2.980688999999984,
+            1.582712999999785,
+            1.9203839999991033,
+            1.176832999999533,
+            0.9342990000004647
+          ]
+        },
+        "twoScans": {
+          "p50": 337.47619699999996,
+          "p95": 367.0324839999994,
+          "samples": [
+            353.0394100000012,
+            327.88477299999977,
+            351.8360680000005,
+            337.47619699999996,
+            367.0324839999994,
+            356.42626999999993,
+            325.73003900000003,
+            320.96469799999977,
+            306.0108360000013
+          ]
+        },
+        "fourConcurrentListsMs": 634.1034569999993
+      }
+    ],
+    "storage": [
+      {
+        "files": 500,
+        "insertTotalMs": {
+          "p50": 25.356184,
+          "p95": 30.27867900000001,
+          "samples": [
+            22.137739000000003,
+            30.27867900000001,
+            25.356184
+          ]
+        }
+      },
+      {
+        "files": 2000,
+        "insertTotalMs": {
+          "p50": 717.8492979999999,
+          "p95": 751.707578,
+          "samples": [
+            751.707578,
+            717.8492979999999,
+            676.0758020000001
+          ]
+        }
+      },
+      {
+        "files": 5000,
+        "insertTotalMs": {
+          "p50": 6109.0056700000005,
+          "p95": 6131.1521600000015,
+          "samples": [
+            6109.0056700000005,
+            6131.1521600000015,
+            6071.603967999999
+          ]
+        }
+      }
+    ]
+  },
+  "reproductions": {
+    "methodology": "Production compiled watcher and query classes with mock service boundaries; no filesystem writes to workspace. Tests deliberately exercise rejected bursts and snapshot invalidation while a read is pending.",
+    "watcher": [
+      {
+        "count": 500,
+        "reads": 500,
+        "maxConcurrentReads": 500,
+        "batchLength": 500,
+        "pendingAfter": 0
+      },
+      {
+        "count": 501,
+        "reads": 501,
+        "maxConcurrentReads": 501,
+        "batchLength": 501,
+        "pendingAfter": 0,
+        "error": "Demasiados cambios en un lote IPC."
+      }
+    ],
+    "query": [
+      {
+        "nodes": 5000,
+        "p50Ms": 5.5493179999999995,
+        "p95Ms": 12.003387000000004,
+        "samples": [
+          12.003387000000004,
+          5.832517000000024,
+          4.392782000000011,
+          4.9095299999999895,
+          5.555748999999992,
+          3.951486000000017,
+          5.5493179999999995,
+          4.80021499999998,
+          5.876620000000003
+        ]
+      },
+      {
+        "nodes": 25000,
+        "p50Ms": 24.77682699999997,
+        "p95Ms": 26.399985000000015,
+        "samples": [
+          23.336641000000014,
+          26.399985000000015,
+          24.29618700000003,
+          25.333278000000007,
+          24.77682699999997,
+          26.153622999999982,
+          24.768301000000008,
+          26.082339999999988,
+          22.060172000000023
+        ]
+      },
+      {
+        "nodes": 100000,
+        "p50Ms": 100.46895399999994,
+        "p95Ms": 108.72587900000008,
+        "samples": [
+          99.87266799999998,
+          97.75046600000007,
+          93.63785800000005,
+          100.46895399999994,
+          100.84618,
+          99.45780100000002,
+          106.43258700000001,
+          108.72587900000008,
+          106.53781299999991
+        ]
+      }
+    ],
+    "snapshotRace": {
+      "parallelQueries": 2,
+      "remoteSnapshotCalls": 2,
+      "changeVersionDuringLoad": 2,
+      "nextSearchVersion": 1,
+      "staleCachedAfterInvalidation": true
+    }
+  },
+  "runtime": {
+    "date": "2026-09-06T23:13:37.992Z",
+    "methodology": "Two sequential fresh profiles (initial failed placement run recorded separately), tiny workspace, extensions disabled, dev build, local immediate SSE fixture. Checkpoint response intentionally delayed 1500ms. No real provider or CLI model. Workspace 6 placement asserted; inherited placement token cleared; no initial focus.",
+    "runs": [
+      {
+        "mode": "automatic",
+        "checkpoints": 1,
+        "workbenchMs": 5105.091227999999,
+        "workspace": 6,
+        "chatReadyMs": 6100.0995139999995,
+        "idle3sTaskMs": 1054.1550000000002,
+        "rendererHeapMiB": 148.55975341796875,
+        "providerArrivedMs": 100.143865,
+        "nativeSchemaBytes": 37993,
+        "checkpointStartedMs": 126.90417399999933,
+        "textVisibleMs": 821.7007450000001,
+        "turnSettledMs": 1679.1444109999993,
+        "processMemory": [
+          {
+            "type": "Browser",
+            "workingSetKiB": 318200
+          },
+          {
+            "type": "GPU",
+            "workingSetKiB": 212428
+          },
+          {
+            "type": "Utility",
+            "workingSetKiB": 82192
+          },
+          {
+            "type": "Tab",
+            "workingSetKiB": 681216
+          },
+          {
+            "type": "Utility",
+            "workingSetKiB": 175704
+          },
+          {
+            "type": "Utility",
+            "workingSetKiB": 116552
+          },
+          {
+            "type": "Utility",
+            "workingSetKiB": 229296
+          }
+        ]
+      },
+      {
+        "mode": "manual",
+        "checkpoints": 0,
+        "workbenchMs": 5211.934057,
+        "workspace": 6,
+        "chatReadyMs": 6235.8089899999995,
+        "idle3sTaskMs": 1364.082,
+        "rendererHeapMiB": 143.21377563476562,
+        "providerArrivedMs": 113.99484999999913,
+        "nativeSchemaBytes": 37993,
+        "textVisibleMs": 1078.1852360000012,
+        "turnSettledMs": 1081.144916000001,
+        "processMemory": [
+          {
+            "type": "Browser",
+            "workingSetKiB": 321024
+          },
+          {
+            "type": "GPU",
+            "workingSetKiB": 212412
+          },
+          {
+            "type": "Utility",
+            "workingSetKiB": 82080
+          },
+          {
+            "type": "Tab",
+            "workingSetKiB": 677820
+          },
+          {
+            "type": "Utility",
+            "workingSetKiB": 173520
+          },
+          {
+            "type": "Utility",
+            "workingSetKiB": 118196
+          },
+          {
+            "type": "Utility",
+            "workingSetKiB": 222592
+          }
+        ]
+      }
+    ]
+  },
+  "catalog": {
+    "methodology": "Derived from actual native fixture request using production external allowlist/description transforms. Compat schemas added separately; openide_memory_read noted separately. This is not a captured external tools/list.",
+    "nativeCount": 69,
+    "nativeBytes": 37993,
+    "externalCount": 24,
+    "externalBytes": 25754,
+    "repeatedContextBytes": 13214,
+    "compatCount": 11,
+    "compatBytes": 2984,
+    "additionalTools": [
+      "openide_memory_read"
+    ],
+    "descriptionsOver2KiB": [
+      {
+        "name": "openide_browser_record_start",
+        "bytes": 2093
+      }
+    ],
+    "tools": [
+      {
+        "name": "openide_memory",
+        "description": "Shared memory for THIS repository (.openide/MEMORY.md), read by every session, by the other CLIs and by the user's own harness. Maintain it: when you learn something durable — a convention, an architectural decision, a gotcha that cost you — write it here instead of leaving the next session to rediscover it. Discover notes with openide_memory_search; expand one with openide_memory_get; write a durable topic with openide_memory_save. Markdown notes connect to Project Map. Use openide_memory_session_summary for a handoff. Read the current revision and hash before updating. The compatibility overview is available through openide_memory_read. Saves from this CLI are attributed to external calls; OpenIDE cannot guarantee checkpoints inside an external model loop. Do NOT store passing state or single-turn detail.\n\nPersistent memory across sessions. Store DURABLE facts: target \"project\" (conventions, decisions and gotchas of THIS repo → .openide/MEMORY.md) or \"user\" (stable user preferences, global). Use it when the user states a preference or corrects the way you work. Do NOT store transient state, already-fixed errors or single-turn details.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "add",
+                "replace",
+                "remove"
+              ],
+              "description": "add appends an entry; replace/remove act on the entry containing old_text"
+            },
+            "target": {
+              "type": "string",
+              "enum": [
+                "project",
+                "user"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "description": "Text of the entry (add/replace)"
+            },
+            "old_text": {
+              "type": "string",
+              "description": "Unique fragment of the existing entry (replace/remove)"
+            }
+          },
+          "required": [
+            "action",
+            "target"
+          ]
+        }
+      },
+      {
+        "name": "openide_memory_search",
+        "description": "Shared memory for THIS repository (.openide/MEMORY.md), read by every session, by the other CLIs and by the user's own harness. Maintain it: when you learn something durable — a convention, an architectural decision, a gotcha that cost you — write it here instead of leaving the next session to rediscover it. Discover notes with openide_memory_search; expand one with openide_memory_get; write a durable topic with openide_memory_save. Markdown notes connect to Project Map. Use openide_memory_session_summary for a handoff. Read the current revision and hash before updating. The compatibility overview is available through openide_memory_read. Saves from this CLI are attributed to external calls; OpenIDE cannot guarantee checkpoints inside an external model loop. Do NOT store passing state or single-turn detail.\n\nSearch full project memory text and topics. Returns bounded excerpts with IDs, provenance and revision hashes; memory_get expands a record. Available without the graph or embeddings.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "max_tokens": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 3000
+            },
+            "include_sessions": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "openide_memory_get",
+        "description": "Shared memory for THIS repository (.openide/MEMORY.md), read by every session, by the other CLIs and by the user's own harness. Maintain it: when you learn something durable — a convention, an architectural decision, a gotcha that cost you — write it here instead of leaving the next session to rediscover it. Discover notes with openide_memory_search; expand one with openide_memory_get; write a durable topic with openide_memory_save. Markdown notes connect to Project Map. Use openide_memory_session_summary for a handoff. Read the current revision and hash before updating. The compatibility overview is available through openide_memory_read. Saves from this CLI are attributed to external calls; OpenIDE cannot guarantee checkpoints inside an external model loop. Do NOT store passing state or single-turn detail.\n\nRead the complete canonical Markdown memory and current revision hash before updating or forgetting it.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        }
+      },
+      {
+        "name": "openide_memory_save",
+        "description": "Shared memory for THIS repository (.openide/MEMORY.md), read by every session, by the other CLIs and by the user's own harness. Maintain it: when you learn something durable — a convention, an architectural decision, a gotcha that cost you — write it here instead of leaving the next session to rediscover it. Discover notes with openide_memory_search; expand one with openide_memory_get; write a durable topic with openide_memory_save. Markdown notes connect to Project Map. Use openide_memory_session_summary for a handoff. Read the current revision and hash before updating. The compatibility overview is available through openide_memory_read. Saves from this CLI are attributed to external calls; OpenIDE cannot guarantee checkpoints inside an external model loop. Do NOT store passing state or single-turn detail.\n\nSave a concise durable Markdown note: what, why, where, evidence and limits. Search the topic first. To update, memory_get then supply id, expected_revision and expected_hash. Use supersedes when a decision changes. Never store secrets or copy profile preferences into project memory.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "expected_hash": {
+              "type": "string"
+            },
+            "topic_key": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "idempotency_key": {
+              "type": "string",
+              "description": "Unique operation key; reuse exactly for a retry of the same write."
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "decision",
+                "convention",
+                "discovery",
+                "bugfix",
+                "preference"
+              ]
+            },
+            "related": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Workspace-relative paths or path#symbol references."
+            },
+            "supersedes": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "topic_key",
+            "body",
+            "idempotency_key"
+          ]
+        }
+      },
+      {
+        "name": "openide_memory_session_summary",
+        "description": "Shared memory for THIS repository (.openide/MEMORY.md), read by every session, by the other CLIs and by the user's own harness. Maintain it: when you learn something durable — a convention, an architectural decision, a gotcha that cost you — write it here instead of leaving the next session to rediscover it. Discover notes with openide_memory_search; expand one with openide_memory_get; write a durable topic with openide_memory_save. Markdown notes connect to Project Map. Use openide_memory_session_summary for a handoff. Read the current revision and hash before updating. The compatibility overview is available through openide_memory_read. Saves from this CLI are attributed to external calls; OpenIDE cannot guarantee checkpoints inside an external model loop. Do NOT store passing state or single-turn detail.\n\nPersist a session handoff: goal, progress, blockers and next steps. This is not proof of task completion.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "expected_hash": {
+              "type": "string"
+            },
+            "topic_key": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "idempotency_key": {
+              "type": "string",
+              "description": "Unique operation key; reuse exactly for a retry of the same write."
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "decision",
+                "convention",
+                "discovery",
+                "bugfix",
+                "preference"
+              ]
+            },
+            "related": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Workspace-relative paths or path#symbol references."
+            },
+            "supersedes": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "topic_key",
+            "body",
+            "idempotency_key"
+          ]
+        }
+      },
+      {
+        "name": "openide_memory_forget",
+        "description": "Shared memory for THIS repository (.openide/MEMORY.md), read by every session, by the other CLIs and by the user's own harness. Maintain it: when you learn something durable — a convention, an architectural decision, a gotcha that cost you — write it here instead of leaving the next session to rediscover it. Discover notes with openide_memory_search; expand one with openide_memory_get; write a durable topic with openide_memory_save. Markdown notes connect to Project Map. Use openide_memory_session_summary for a handoff. Read the current revision and hash before updating. The compatibility overview is available through openide_memory_read. Saves from this CLI are attributed to external calls; OpenIDE cannot guarantee checkpoints inside an external model loop. Do NOT store passing state or single-turn detail.\n\nForget a project memory after an explicit user request. Requires memory_get revision and hash. Removes canonical content and retained local revisions; Git history is outside this operation.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "expected_hash": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "expected_revision",
+            "expected_hash"
+          ]
+        }
+      },
+      {
+        "name": "openide_plan_save",
+        "description": "BLOCKING: saves the plan, opens it in OpenIDE's plan editor and does NOT answer until the user has reviewed it. The reply carries the plan as it stands AFTER their edits — run that one, not the one you sent. If they discard it, run nothing.\n\nSave the COMPLETE plan to .openide/plans/<slug>.md so the user can review and approve it. It is THE CLOSING of plan mode: call it ONCE, as the last step, with the full plan markdown (including the \"## Tareas\" section with checkboxes at the end). Do not use it outside plan mode.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Short plan title (it names the file)"
+            },
+            "markdown": {
+              "type": "string",
+              "description": "Full plan in Markdown: # title, sections, and \"## Tareas\" at the end"
+            }
+          },
+          "required": [
+            "title",
+            "markdown"
+          ]
+        }
+      },
+      {
+        "name": "openide_project_map_query",
+        "description": "Queries the codebase graph OpenIDE keeps incrementally up to date (modules, dependencies, the blast radius of a change). Answer from this before rebuilding it by hand with searches: it is one call here and many greps otherwise.\n\nQuery Project Map before searching or reading many files. Returns only relevant nearby entities and relations, with provenance, confidence, freshness and a strict budget. Use it to orient yourself; then open only the specific files you must verify or modify.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "Concrete question or task about the project"
+            },
+            "maxTokens": {
+              "type": "number",
+              "description": "Output budget between 500 and 4000 tokens; 2000 by default"
+            }
+          },
+          "required": [
+            "question"
+          ]
+        }
+      },
+      {
+        "name": "openide_browser_open",
+        "description": "Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.\n\nOpen a LOCAL URL (localhost/127.0.0.1/*.localhost) in the IDE's built-in preview, so the user SEES their app running. Local dev apps only — it does not browse the web. Useful after starting a dev server with run_command in background.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Local URL (e.g. http://localhost:5173) or just the port (e.g. 5173)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      },
+      {
+        "name": "openide_browser_navigate",
+        "description": "Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.\n\nOpens or navigates the single native OpenIDE preview to a LOCAL URL and waits for it to load. It is the same visible browser used by browser_screenshot, browser_snapshot and browser_playwright; it does not create another instance.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Local URL (e.g. http://localhost:5173) or just the port (e.g. 5173)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      },
+      {
+        "name": "openide_browser_snapshot",
+        "description": "Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.\n\nGets the Playwright accessibility snapshot of the native preview: structure, roles, names and stable references to interact with.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "openide_browser_screenshot",
+        "description": "Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.\n\nCaptures the whole visible native preview, or one element. The image arrives as the next message.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "selector": {
+              "type": "string",
+              "description": "Selector Playwright/CSS opcional"
+            }
+          }
+        }
+      },
+      {
+        "name": "openide_browser_read_dom",
+        "description": "Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.\n\nReads the rendered HTML of the native preview, or of one element. The maximum length is configurable (openide.agent.browserTools.maxDomReadChars).",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "selector": {
+              "type": "string",
+              "description": "Selector Playwright/CSS opcional"
+            }
+          }
+        }
+      },
+      {
+        "name": "openide_browser_console",
+        "description": "Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.\n\nReturns the console of that same native preview (errors, warnings and logs).",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "openide_browser_click",
+        "description": "Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.\n\nClicks in the native preview with Playwright, using a selector, text, role or coordinates.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "selector": {
+              "type": "string"
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      {
+        "name": "openide_browser_type",
+        "description": "Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.\n\nFills an input, textarea or contenteditable in the native preview with Playwright.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "selector": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "text"
+          ]
+        }
+      },
+      {
+        "name": "openide_browser_evaluate",
+        "description": "Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.\n\nEvaluates a JavaScript expression through Playwright in the native preview.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      },
+      {
+        "name": "openide_browser_set_style",
+        "description": "Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.\n\nApplies live inline CSS through Playwright to the native preview. It does not persist to the source.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "selector": {
+              "type": "string"
+            },
+            "css": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector",
+            "css"
+          ]
+        }
+      },
+      {
+        "name": "openide_browser_playwright",
+        "description": "Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.\n\nRuns a self-contained Playwright block against the current native preview. The page variable already exists. Do not open or close pages: always operate on that page. Use it for flows the specific tools do not cover.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "An async Playwright body, for example: await page.getByRole(\"button\", { name: \"Save\" }).click(); return await page.title();"
+            },
+            "deferredResultId": {
+              "type": "string",
+              "description": "ID of an earlier run that is still pending"
+            },
+            "timeoutMs": {
+              "type": "number",
+              "description": "Maximum wait before returning a deferredResultId; defaults to openide.agent.browserTools.actionTimeoutMs"
+            }
+          }
+        }
+      },
+      {
+        "name": "openide_browser_record_start",
+        "description": "Records the browser the user has open in OpenIDE, as VIDEO, while you drive it (browser_record_start → your actions → browser_record_stop). A screenshot shows a state; a recording shows the transition, and it is the only way to judge an animation, a hover, a modal sliding in, a list re-sorting, a loading sequence or any flow of two or more steps.\n\nIt does not just record: it MEASURES. The result carries a list of motion findings, each with the exact millisecond to look at — an animation that stalled mid-flight, a single frame that flashed and reverted, motion that never came to rest, a layout that shifted with no click to explain it, an action that changed nothing on screen. It also carries what the page said about itself at the end: clipped text, broken images, contrast below WCAG AA, overlapping or undersized controls. Read those two lists FIRST and use them to aim; they turn \"review this video\" into \"look at 00:04.2\". A finding is a place to look, not a verdict — the video says whether it is a bug.\n\nYou get flow.webm (hand the path to a model or CLI that accepts video), sheet.jpg (every step tiled in ONE image, attached as an image: look at it before concluding) and frames/ (one JPEG per step). Every browser_click/type/navigate becomes a step; browser_record_mark names a moment no tool produced. One flow per recording, short.\n\nStarts recording the native preview as video (screencast of the same visible page). Every browser_click / browser_type / browser_navigate / browser_playwright that follows is marked as a step; browser_record_stop encodes a WebM plus a contact sheet and one key frame per step, AND measures the tape: a stall inside an animation, a one-frame flash, motion that never settles, a layout that shifts with nothing to explain it, an action that changed nothing on screen. Use it whenever the question is about MOTION or about a multi-step flow — an animation that feels wrong, a transition that stutters, a button that seems dead — because none of that survives a screenshot. Keep recordings short and focused (one flow per recording).",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "What this flow is (\"login\", \"open settings modal\"). Names the files and the card."
+            },
+            "fps": {
+              "type": "number",
+              "description": "Frames per second, 2-30. Default from openide.agent.browserTools.recordFps (12)."
+            },
+            "maxSeconds": {
+              "type": "number",
+              "description": "Automatic stop, 5-300 s. Default from openide.agent.browserTools.recordMaxSeconds (90)."
+            }
+          }
+        }
+      },
+      {
+        "name": "openide_browser_check_visual",
+        "description": "Measures the page the user has open for the visual defects a screenshot contains but no reader can reliably judge: text cut by an overflow with no ellipsis, images that loaded no pixels, text below the WCAG AA contrast ratio against the colour actually behind it, controls under 24x24, controls overlapping each other, a document wider than its viewport. Every finding carries a selector, a rectangle and the number that failed. Use it ALONGSIDE browser_screenshot, never instead of it: this answers \"is that text clipped, is that contrast 2.9:1\", and the picture answers \"does this look right\".\n\nMeasures the CURRENT page for visual defects and returns them with a selector and a number each: text clipped by an overflow with no ellipsis, images that loaded no pixels, text below the WCAG AA contrast ratio against what is actually behind it, controls under 24x24, controls overlapping each other, and a document wider than its viewport. These are the defects a screenshot contains but a reader cannot reliably measure — use it together with browser_screenshot, not instead of it: this answers \"is the text cut off, is the contrast 2.9:1\", and the picture answers \"does this look right\". Safe and read-only; it changes nothing on the page.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "openide_browser_record_mark",
+        "description": "Records the browser the user has open in OpenIDE, as VIDEO, while you drive it (browser_record_start → your actions → browser_record_stop). A screenshot shows a state; a recording shows the transition, and it is the only way to judge an animation, a hover, a modal sliding in, a list re-sorting, a loading sequence or any flow of two or more steps.\n\nIt does not just record: it MEASURES. The result carries a list of motion findings, each with the exact millisecond to look at — an animation that stalled mid-flight, a single frame that flashed and reverted, motion that never came to rest, a layout that shifted with no click to explain it, an action that changed nothing on screen. It also carries what the page said about itself at the end: clipped text, broken images, contrast below WCAG AA, overlapping or undersized controls. Read those two lists FIRST and use them to aim; they turn \"review this video\" into \"look at 00:04.2\". A finding is a place to look, not a verdict — the video says whether it is a bug.\n\nYou get flow.webm (hand the path to a model or CLI that accepts video), sheet.jpg (every step tiled in ONE image, attached as an image: look at it before concluding) and frames/ (one JPEG per step). Every browser_click/type/navigate becomes a step; browser_record_mark names a moment no tool produced. One flow per recording, short.\n\nAdds a named step to the running recording, for moments no tool produced (an animation finished, a state to point at). The browser tools add their own marks automatically.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "label"
+          ]
+        }
+      },
+      {
+        "name": "openide_browser_record_stop",
+        "description": "Records the browser the user has open in OpenIDE, as VIDEO, while you drive it (browser_record_start → your actions → browser_record_stop). A screenshot shows a state; a recording shows the transition, and it is the only way to judge an animation, a hover, a modal sliding in, a list re-sorting, a loading sequence or any flow of two or more steps.\n\nIt does not just record: it MEASURES. The result carries a list of motion findings, each with the exact millisecond to look at — an animation that stalled mid-flight, a single frame that flashed and reverted, motion that never came to rest, a layout that shifted with no click to explain it, an action that changed nothing on screen. It also carries what the page said about itself at the end: clipped text, broken images, contrast below WCAG AA, overlapping or undersized controls. Read those two lists FIRST and use them to aim; they turn \"review this video\" into \"look at 00:04.2\". A finding is a place to look, not a verdict — the video says whether it is a bug.\n\nYou get flow.webm (hand the path to a model or CLI that accepts video), sheet.jpg (every step tiled in ONE image, attached as an image: look at it before concluding) and frames/ (one JPEG per step). Every browser_click/type/navigate becomes a step; browser_record_mark names a moment no tool produced. One flow per recording, short.\n\nStops the recording and produces: flow.webm (video), sheet.jpg (every step tiled in one image, attached as the next message), frames/ (one JPEG per step) and manifest.json, all under the user's OpenIDE data folder. The result also carries two lists of measurements — what the frame timings say about the motion, each with the millisecond to look at, and what the page said about itself at the end (clipped text, contrast, overlap). Read those first and use them to aim: they turn \"review this video\" into \"look at 00:04.2\". The result lists absolute paths, so a model or CLI that accepts video can be handed the .webm and one that only reads images gets the sheet and the frames.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "framesToModel": {
+              "type": "number",
+              "description": "How many key frames to attach as images besides the sheet, 0-12. Default from openide.agent.browserTools.recordFramesToModel (6)."
+            },
+            "discard": {
+              "type": "boolean",
+              "description": "Stop and throw the recording away without writing anything."
+            }
+          }
+        }
+      },
+      {
+        "name": "openide_browser_dialog",
+        "description": "Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.\n\nAnswers the dialog, prompt or file chooser that interrupted the last Playwright step in the native preview.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "accept": {
+              "type": "boolean"
+            },
+            "promptText": {
+              "type": "string"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Paths for a file chooser; an empty array cancels it"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

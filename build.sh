@@ -44,8 +44,8 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
   . ../node-heap.sh
   export VSCODE_PUBLISH_COUNTER=1
 
-  # OpenIDE mantiene un árbol fuente completo. En CI (o en un checkout nuevo)
-  # instalamos dependencias, pero nunca reseteamos ni reconstruimos el source.
+  # OpenIDE keeps a complete source tree. In CI (or on a fresh checkout) we install
+  # dependencies, but we never reset or regenerate the source.
   if [[ "${CI_BUILD}" != "no" || ! -d node_modules ]]; then
     export ELECTRON_SKIP_BINARY_DOWNLOAD=1
     export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1

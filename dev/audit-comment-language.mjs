@@ -42,7 +42,23 @@ const scanRoots = [
 	'.github',
 	'vscode/resources',
 ];
-const scanFiles = [];
+/**
+ * The root build scripts and the packaging tree. They are sourced by CI and read by anyone who
+ * builds a release, and until they were listed here `version.sh` failed in Spanish while
+ * CONTRIBUTING promised English.
+ */
+const scanFiles = [
+	'build',
+	'build.sh',
+	'build_cli.sh',
+	'build-targets.sh',
+	'get_repo.sh',
+	'node-heap.sh',
+	'prepare_assets.sh',
+	'prepare_checksums.sh',
+	'utils.sh',
+	'version.sh',
+];
 /** Vendored code and build output: neither is written here, and both are enormous. */
 const SKIP_DIRECTORIES = new Set(['node_modules', 'out', 'dist', '.git']);
 

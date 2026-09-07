@@ -6,7 +6,7 @@ if [[ $# -lt 4 || $# -gt 5 ]]; then
 fi
 PLATFORM=$1 ARCH=$2 ASSET=$3 OUTPUT=$4 TARGET=${5:-}
 . ./version.sh
-case "${PLATFORM}" in linux) TARGET=${TARGET:-appimage};; darwin) TARGET=${TARGET:-archive};; win32) TARGET=${TARGET:-archive};; *) echo "Plataforma inválida" >&2; exit 1;; esac
+case "${PLATFORM}" in linux) TARGET=${TARGET:-appimage};; darwin) TARGET=${TARGET:-archive};; win32) TARGET=${TARGET:-archive};; *) echo "Invalid platform" >&2; exit 1;; esac
 [[ -f "${ASSET}" ]] || { echo "Falta asset ${ASSET}" >&2; exit 1; }
 [[ -n "${OPENIDE_UPDATE_PRIVATE_KEY:-}" ]] || { echo "Falta OPENIDE_UPDATE_PRIVATE_KEY (PEM Ed25519)." >&2; exit 1; }
 KEY_ID=$(jq -er '.updater.keyId' openide-version.json)

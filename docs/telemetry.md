@@ -1,87 +1,81 @@
 <!-- order: 10 -->
 
-# Getting all telemetry out
+# Telemetry and online services
 
-This page explains how OpenIDE handles telemetry and how it enhances your privacy.
+OpenIDE sends no telemetry. This page lists what is off, what the remaining
+online settings actually talk to, and how to turn the rest off. The complete
+list of connections the product makes on its own is in [privacy](./privacy.md).
 
-## Table of contents
+- [What is disabled](#telemetry)
+- [What the online-service settings point at](#replacements)
+- [Turning off the remaining connections](#opt-out)
+- [Checking for yourself](#checking)
 
-- [Telemetry in OpenIDE](#telemetry)
-- [Replacements to Microsoft Online Services](#replacements)
-- [Checking for telemetry](#checking)
-- [OpenIDE announcements](#announcements)
-- [Malicious & deprecated extensions](#malicious-extensions)
+## <a id="telemetry"></a>What is disabled
 
-## <a id="telemetry"></a>Telemetry in OpenIDE
+The product ships **no telemetry key** (`product.json` has no `aiConfig`), so
+the telemetry pipeline has nowhere to send anything and is inert regardless of
+settings. On top of that, the defaults differ from upstream:
 
-Even though we do not pass the telemetry build flags and go out of our way to cripple the baked-in telemetry, Microsoft still can track usage by default depending on your settings.
+| Setting | OpenIDE default | Upstream default |
+|---|---|---|
+| `telemetry.telemetryLevel` | `off` | `all` |
+| `telemetry.enableCrashReporter` | `false` | `true` |
+| `telemetry.editStats.enabled` | `false` | `true` |
+| `workbench.enableExperiments` | `false` | `true` |
 
-We disable all the following telemetry-related settings by default to enhance your privacy:
+There is no experiment service, no crash reporter endpoint and no analytics
+service in the build.
 
-```
-telemetry.telemetryLevel
-telemetry.enableCrashReporter
-telemetry.enableTelemetry
-telemetry.editStats.enabled
-workbench.enableExperiments
-workbench.settings.enableNaturalLanguageSearch
-workbench.commandPalette.experimental.enableNaturalLanguageSearch
-```
+**Extensions are a separate matter.** They run with your privileges and follow
+their own policies; some Microsoft extensions send telemetry to Microsoft
+regardless of the editor's setting. Check each extension's own settings.
 
-It is also recommended that you review all the settings that "use online services" by following [these instructions](https://code.visualstudio.com/docs/getstarted/telemetry#_managing-online-services). You can use the search filter `@tag:usesOnlineServices` to show such settings and review what to change.
+## <a id="replacements"></a>What the online-service settings point at
 
-**Please note that some extensions send telemetry data to Microsoft as well. We have no control over this and can only recommend removing the extension.**  
-For example, the C# extension `ms-vscode.csharp` sends tracking data to Microsoft. Be sure to check each extension's settings page to disable their telemetry if applicable.
+Search the Settings UI for `@tag:usesOnlineServices` to see every setting
+upstream marks as contacting a service. Their descriptions still say
+"Microsoft online service" because the text is upstream's; in OpenIDE they
+resolve to:
 
-### Update services
+| Setting | Talks to |
+|---|---|
+| `update.mode` | OpenIDE's signed update feed in the `Niiihuel/openide` repository and GitHub Releases. See [updates](./updates.md). |
+| `extensions.autoCheckUpdates`, `extensions.autoUpdate` | [Open VSX](https://open-vsx.org), the gallery in `product.json`. |
+| `extensions.excludeUnsafes` | The Eclipse Foundation's list of malicious and deprecated extensions at `raw.githubusercontent.com/EclipseFdn/publish-extensions/…/extension-control/extensions.json`. |
+| `workbench.welcomePage.extraAnnouncements` | `announcements-extra.json` in this repository, shown on the welcome page. It is currently empty. |
+| `workbench.settings.enableNaturalLanguageSearch`, `workbench.commandPalette.experimental.enableNaturalLanguageSearch` | Nothing: the upstream backend is Microsoft-only and OpenIDE ships no endpoint for it. |
 
-By default, the app periodically fetches connections to check for the latest version available to download and install.  
-Extensions are also checked for updates automatically from time to time.
+## <a id="opt-out"></a>Turning off the remaining connections
 
-If you want to prevent such behaviors, modify the following preferences:
+For the editor:
 
-For the app itself:
+- `update.mode`: `manual` checks only when you ask, `none` never checks.
+- `update.titleBar: false` hides the title-bar indicator without changing the
+  check.
+- `extensions.autoCheckUpdates` and `extensions.autoUpdate`: `false`.
+- `extensions.excludeUnsafes: false` stops fetching the unsafe-extension list.
+  Not recommended: it is the only protection against a known-malicious
+  extension already installed.
+- `workbench.welcomePage.extraAnnouncements: false`.
 
-- `update.mode` -> `manual` (or `none`)
-- `update.enableWindowsBackgroundUpdates` -> `false` (only applicable for Microsoft Windows)
+For the agent, whose connections only start once you connect a provider or use
+a feature:
 
-For extensions:
+- `openide.agent.web.enabled: false` disables `web_search` and `web_fetch`.
+- `openide.agent.usage.enabled: false` stops polling connected providers for
+  quota and usage.
+- The models.dev catalog download has no switch; the built-in provider
+  entries work without it.
 
-- `extensions.autoUpdate` -> `false`
-- `extensions.autoCheckUpdates` -> `false`
+`telemetry.feedback.enabled` stays on: it only controls whether the *Report
+Issue* command is offered, and reporting an issue opens the GitHub issue form in
+your browser.
 
-_Note: on Linux, the app update service is disabled completely at build-time even if the `update.mode` preference is configured. This is because users will more likely use their package managers to update the app rather than updating via the app itself._
+## <a id="checking"></a>Checking for yourself
 
-### Feedback telemetry
-
-By default, we keep the preference `telemetry.feedback.enabled` enabled. It's used to allow the button `Report Issue...` to be used on the app depending on the context. It does not send any data by having it enabled (other options already cover it). If you want, you can disable this behavior by toggling the preference value.
-
-## <a id="replacements"></a>Replacements to Microsoft Online Services
-
-When searching the `@tag:usesOnlineServices` filter, note that while the "Update: Mode" setting description still says "The updates are fetched from a Microsoft online service", OpenIDE sets [`updateUrl`](https://github.com/Niiihuel/openide/blob/master/vscode/product.json) in `product.json` to its own release feed, so enabling that setting won't actually result in any calls to the Microsoft online service.
-
-Likewise, while the descriptions for "Extensions: Auto Check Updates" and "Extensions: Auto Update" include the same phrase, OpenIDE points [`extensionsGallery`](https://github.com/Niiihuel/openide/blob/master/vscode/product.json) at Open VSX instead of the Visual Studio Marketplace, so these settings won't call Microsoft either.
-
-## <a id="checking"></a>Checking for telemetry
-
-If you want to verify that no telemetry is being sent, you can use network monitoring tools like:
-
-- Wireshark
-- Little Snitch (macOS)
-- GlassWire (Windows)
-
-Look for connections to Microsoft domains and telemetry endpoints.
-
-## <a id="announcements"></a>OpenIDE announcements
-
-The welcome page in OpenIDE displays announcements that are fetched via the internet from the project's GitHub repository.
-
-If you prefer to disable this feature, you can disable the preference `workbench.welcomePage.extraAnnouncements`.
-
-## <a id="malicious-extensions"></a>Malicious & deprecated extensions
-
-The definitions for malicious and deprecated extensions are dynamically loaded from the following URL:
-https://raw.githubusercontent.com/EclipseFdn/publish-extensions/refs/heads/master/extension-control/extensions.json
-
-If you prefer to avoid any external connections, you can disable the preference `extensions.excludeUnsafes`.
-However, this is not recommended as it may reduce the safety of your environment.
+Run the editor with a network monitor (Wireshark, `nethogs`, GlassWire) and an
+empty workspace. The only hosts you should see are `raw.githubusercontent.com`
+and `github.com` for updates and announcements, `open-vsx.org` when the
+Extensions view is open, and `models.dev` the first time the chat opens.
+Anything else belongs to an extension or to a provider you connected.

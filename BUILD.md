@@ -8,7 +8,7 @@ OpenIDE carries two version numbers, declared together in `openide-version.json`
 
 | | Where it lives | What it is for |
 | --- | --- | --- |
-| **Product version** | `product.json.openideVersion` | What OpenIDE calls itself: installer names, update feed, About dialog. Currently `1.1.0`. |
+| **Product version** | `product.json.openideVersion` | What OpenIDE calls itself: installer names, update feed, About dialog. Currently `1.2.0`. |
 | **VS Code API version** | `vscode/package.json.version` | The extension API this build implements. Every `engines.vscode` range is validated against it, so it tracks Code OSS. Currently `1.136.1`. |
 
 Neither is edited by hand in those files — `build.sh` derives both from
@@ -38,7 +38,7 @@ Common to every platform:
 
 `gcc`, `g++`, `make`, `pkg-config`, `libx11-dev`, `libxkbfile-dev`,
 `libsecret-1-dev`, `libkrb5-dev`, `fakeroot`, `rpm`, `rpmbuild`, `dpkg`,
-`imagemagick` (for AppImage), `snapcraft` (for Snap).
+`imagemagick` (for AppImage). The Rust CLI additionally needs `libssl-dev`.
 
 ### macOS
 
@@ -109,8 +109,8 @@ VSCODE_SKIP_PRELAUNCH=1 ./scripts/code.sh
 Run `npm run watch` in a second terminal for incremental rebuilds.
 
 The development instance stores its profile in `~/.config/code-oss-dev`, so it
-will not disturb an installed copy of OpenIDE. Pass
-`--remote-debugging-port=9333` if you want to inspect it over CDP.
+will not disturb an installed copy of OpenIDE, and it never checks for
+updates. Pass `--remote-debugging-port=9333` if you want to inspect it over CDP.
 
 For the checks to run before opening a pull request, see
 [CONTRIBUTING.md](CONTRIBUTING.md#validating-your-change).
@@ -135,9 +135,18 @@ powershell -ExecutionPolicy ByPass -File .\dev\build.ps1
 
 `dev/build.sh` accepts:
 
-- `-i` — build the Insiders channel
+- `-i` — build the Insiders channel. `version.sh` refuses it while
+  `openide-version.json` declares `"channel": "stable"`, which is the case on
+  `master`; the flag is for an insider branch.
 - `-o` — skip the build step
-- `-p` — generate the packages, assets and installers
+- `-p` — generate the packages, assets and installers into `assets/`
+
+The script detects `OS_NAME` and `VSCODE_ARCH` from the host only when they are
+not already set, so cross-builds name the target explicitly:
+
+```sh
+VSCODE_ARCH=arm64 . dev/build.sh
+```
 
 If GitHub rate-limits extension downloads, pass a token:
 
@@ -147,7 +156,12 @@ GITHUB_TOKEN=$(gh auth token) . dev/build.sh
 
 `dev/build.sh` is meant for development. Releases are produced by
 [`.github/workflows/release-openide.yml`](.github/workflows/release-openide.yml),
-which is the reference for how a real build is assembled.
+which is the reference for how a real build is assembled: it runs on a
+`v<x>.<y>.<z>` tag, builds Linux x64 (AppImage), Linux arm64 (archive, deb,
+rpm), Windows x64 and Windows arm64 (user installers), signs the update
+manifests, and leaves a draft release for
+[promotion](docs/updates.md#stable-promotion-order). The macOS rows are
+commented out in the matrix until a Developer ID identity is provisioned.
 
 ## Building on NixOS
 
@@ -176,23 +190,36 @@ To run the built product:
 
 ## Packaging
 
-### Snap
-
-```sh
-cd ./stores/snapcraft/stable    # or ./stores/snapcraft/insider
-snapcraft --use-lxd
-review-tools.snap-review --allow-classic openide*.snap
-```
+`. dev/build.sh -p` runs `prepare_assets.sh`, which calls the per-platform
+script under `build/<os>/` and writes everything to `assets/` with a `.sha256`
+and `.sha1` next to each file. On Linux that is the tarball, `.deb`, `.rpm` and
+(x64 only) the AppImage; on Windows the user and system installers, the zip and,
+with WiX installed, the MSI. The remote host (`reh`), web host (`reh-web`) and
+CLI archives are produced on every platform unless `build-targets.sh` turns
+them off (it does for Windows on anything but x64).
 
 ### AppImage
 
-See [`dev/build-appimage.sh`](dev/build-appimage.sh) and
-[`dev/install-appimage.sh`](dev/install-appimage.sh).
+The AppImage is built by `build/linux/appimage/build.sh` through
+`pkg2appimage`, and only for x64. [`dev/build-appimage.sh`](dev/build-appimage.sh)
+wraps that for a local build; [`dev/install-appimage.sh`](dev/install-appimage.sh)
+installs the result as `~/.local/bin/OpenIDE.AppImage` with a desktop entry,
+which is the layout the updater expects.
 
 ### Icons
 
 `icons/build_icons.sh` needs `imagemagick`, `librsvg`, and `png2icns`
-(`npm install png2icns -g`).
+(`npm install png2icns -g`). It regenerates the platform icons under
+`icons/stable/` and `icons/insider/` from `icons/openide.svg`; see
+[icons/README.md](icons/README.md).
+
+### Snap and winget
+
+`stores/` still holds the Snapcraft recipe and the winget version check that
+OpenIDE inherited from VSCodium. Neither is maintained: the snap recipe still
+names the package `codium` and points at the wrong GitHub organisation, and
+nothing publishes to winget. Treat them as a starting point if you want to
+bring either up, not as a supported path.
 
 ## Maintenance rules
 
@@ -203,8 +230,9 @@ See [`dev/build-appimage.sh`](dev/build-appimage.sh) and
 - No patches are added to make a feature compile.
 - A change is validated with a typecheck/compile and, if it affects the UI, in a
   real product window.
-- Code OSS updates are integrated as reviewable source changes, never by wiping
-  the local tree during a build.
+- Code OSS updates are integrated as reviewable source changes through
+  `dev/sync-codeoss.sh`, never by wiping the local tree during a build. See
+  [docs/fork-architecture.md](docs/fork-architecture.md#updating-code-oss).
 - Packaging scripts decide installer names, icons and update feeds, so inherited
   branding there reaches users directly. `node dev/audit-branding.mjs` scans both
   the shipped product and the scripts that produce it; keep it green.

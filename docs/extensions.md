@@ -1,136 +1,128 @@
 <!-- order: 15 -->
 
-# Extensions + Marketplace
+# Extensions and the marketplace
 
-## Table of Contents
-
-- [Marketplace](#marketplace)
-- [How to use the OpenVSX Marketplace](#howto-openvsx-marketplace)
-- [How to use a different extension gallery](#howto-switch-marketplace)
-- [How to self host your own extension gallery](#howto-selfhost-marketplace)
-- [Visual Studio Marketplace](#visual-studio-marketplace)
-- [Proprietary Debugging Tools](#proprietary-debugging-tools)
-- [Proprietary Extensions](#proprietary-extensions)
-- [Using the "VSIX Manager" Extension](#vsix-manager)
+- [Where extensions come from](#marketplace)
+- [Getting an extension that is not on Open VSX](#missing)
+- [Using a different gallery](#howto-switch-marketplace)
+- [Self-hosting a gallery](#howto-selfhost-marketplace)
+- [The Visual Studio Marketplace](#visual-studio-marketplace)
+- [Proprietary extensions and API proposals](#proprietary-extensions)
 - [Extensions compatibility](./extensions-compatibility.md)
 
-## <a id="marketplace"></a>Marketplace
+## <a id="marketplace"></a>Where extensions come from
 
-Being a vscode based editor, OpenIDE gets additional features by installing Visual Studio Code extensions.
-Unfortunately, as Microsoft [prohibits usages of the Microsoft marketplace by any other products](https://github.com/microsoft/vscode/issues/31168) or redistribution of `.vsix` files from it, in order to use Visual Studio Code extensions in non-Microsoft products those need to be installed differently.
+OpenIDE runs Visual Studio Code extensions. Microsoft's own marketplace,
+however, [may only be used by Microsoft products](https://github.com/microsoft/vscode/issues/31168),
+so like every other Code OSS distribution OpenIDE points its Extensions view at
+[Open VSX](https://open-vsx.org), the vendor-neutral registry run by the
+Eclipse Foundation. `vscode/product.json` sets:
 
-By default, the `product.json` file is set up to use [open-vsx.org](https://open-vsx.org/) as extension gallery, which has an [adapter](https://github.com/eclipse/openvsx/wiki/Using-Open-VSX-in-VS-Code) to the Marketplace API used by Visual Studio Code. Since that is a rather new project, you will likely miss some extensions you know from the Visual Studio Marketplace. You have the following options to obtain such missing extensions:
+```json
+"extensionsGallery": {
+  "serviceUrl": "https://open-vsx.org/vscode/gallery",
+  "itemUrl": "https://open-vsx.org/vscode/item",
+  "latestUrlTemplate": "https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest",
+  "controlUrl": "https://raw.githubusercontent.com/EclipseFdn/publish-extensions/refs/heads/master/extension-control/extensions.json"
+}
+```
 
-* Ask the extension maintainers to publish to [open-vsx.org](https://open-vsx.org/) in addition to the Visual Studio Marketplace. The publishing process is documented in the [Open VSX Wiki](https://github.com/eclipse/openvsx/wiki/Publishing-Extensions).
-* Create a pull request to [this repository](https://github.com/open-vsx/publish-extensions) to have the [@open-vsx](https://github.com/open-vsx) service account publish the extensions for you.
-* Download and [install the vsix files](https://code.visualstudio.com/docs/editor/extension-gallery#_install-from-a-vsix), for example from the release page in their source repository.
+Searching, installing and updating go to Open VSX. The `controlUrl` is the
+Eclipse Foundation's list of malicious and deprecated extensions; see
+[telemetry](./telemetry.md#replacements).
 
-## <a id="howto-openvsx-marketplace"></a>How to use the Open VSX Registry
+## <a id="missing"></a>Getting an extension that is not on Open VSX
 
-As noted above, the [Open VSX Registry](https://open-vsx.org/) is the pre-set extension gallery in OpenIDE. Using the extension view in OpenIDE will therefore by default use it.
-See [this article](https://web.archive.org/web/20200423131829/https://www.gitpod.io/blog/open-vsx/) for more information on the motivation behind Open VSX.
+Most popular extensions are published to both registries, but not all. When
+one is missing:
 
-## <a id="howto-switch-marketplace"></a>How to use a different extension gallery
+- Ask the maintainers to publish to Open VSX; the process is documented in
+  the [Open VSX wiki](https://github.com/eclipse/openvsx/wiki/Publishing-Extensions).
+- Open a pull request against
+  [open-vsx/publish-extensions](https://github.com/open-vsx/publish-extensions)
+  so the Open VSX service account publishes it.
+- Download the `.vsix` from the extension's own release page and install it
+  with *Extensions: Install from VSIX…*. Extensions installed this way do not
+  receive updates until they appear on the gallery.
 
-You can switch from the pre-set Open VSX Registry by configuring the endpoints using the following solutions.
+An extension manager such as
+[VSIX Manager](https://open-vsx.org/extension/zokugun/vsix-manager) can
+install from several sources at once and keep a local `.vsix` collection; it
+is a third-party extension, not part of OpenIDE.
 
-You can either use the following environment variables:
-- `VSCODE_GALLERY_SERVICE_URL` ***(required)***
-- `VSCODE_GALLERY_ITEM_URL` ***(required)***
+## <a id="howto-switch-marketplace"></a>Using a different gallery
+
+Set these environment variables before launching OpenIDE:
+
+- `VSCODE_GALLERY_SERVICE_URL` (required)
+- `VSCODE_GALLERY_ITEM_URL` (required)
+- `VSCODE_GALLERY_EXTENSION_URL_TEMPLATE` (required)
 - `VSCODE_GALLERY_CACHE_URL`
 - `VSCODE_GALLERY_CONTROL_URL`
-- `VSCODE_GALLERY_EXTENSION_URL_TEMPLATE` ***(required)***
 - `VSCODE_GALLERY_RESOURCE_URL_TEMPLATE`
 
-Or by creating a custom `product.json` at the following location (replace `OpenIDE` by `OpenIDE - Insiders` if you use that):
-- Windows: `%APPDATA%\OpenIDE` or `%USERPROFILE%\AppData\Roaming\OpenIDE`
-- macOS: `~/Library/Application Support/OpenIDE`
-- Linux: `$XDG_CONFIG_HOME/OpenIDE` or `~/.config/OpenIDE`
+Or create a user-level `product.json` that overrides the gallery:
 
-with the content like:
+- Windows: `%APPDATA%\OpenIDE\product.json`
+- macOS: `~/Library/Application Support/OpenIDE/product.json`
+- Linux: `~/.config/OpenIDE/product.json`
 
 ```jsonc
 {
   "extensionsGallery": {
-    "serviceUrl": "", // required
-    "itemUrl": "", // required
+    "serviceUrl": "",            // required
+    "itemUrl": "",               // required
+    "extensionUrlTemplate": "",  // required
     "cacheUrl": "",
     "controlUrl": "",
-    "extensionUrlTemplate": "", // required
-    "resourceUrlTemplate": "",
+    "resourceUrlTemplate": ""
   }
 }
 ```
 
-## <a id="howto-selfhost-marketplace"></a>How to self-host your own extension gallery
+## <a id="howto-selfhost-marketplace"></a>Self-hosting a gallery
 
-Individual developers and enterprise companies in regulated or security-conscious industries can self-host their own extension gallery.
+Two servers are known to work with the gallery protocol OpenIDE speaks:
 
-There are likely other options, but the following were reported to work:
+- [Open VSX](https://github.com/eclipse/openvsx) itself, the same software
+  behind the public registry, with a web UI and a publishing CLI.
+- [code-marketplace](https://coder.com/blog/running-a-private-vs-code-extension-marketplace),
+  a single Go binary that serves `.vsix` files from storage with no frontend.
 
-* [Open VSX](https://github.com/eclipse/openvsx) eclipse open-source project
-  While the public instance which is run by the Eclipse Foundation is the pre-set endpoint in OpenIDE, you can host your own instance.
+Point OpenIDE at either with the settings above.
 
-    > Open VSX is a [vendor-neutral](https://projects.eclipse.org/projects/ecd.openvsx) open-source alternative to the [Visual Studio Marketplace](https://marketplace.visualstudio.com/vscode). It provides a server application that manages [Visual Studio Code extensions](https://code.visualstudio.com/api) in a database, a web application similar to the Visual Studio Marketplace, and a command-line tool for publishing extensions similar to [vsce](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#vsce).
+## <a id="visual-studio-marketplace"></a>The Visual Studio Marketplace
 
-* [code-marketplace](https://coder.com/blog/running-a-private-vs-code-extension-marketplace) open-source project
+Its [terms of use](https://aka.ms/vsmarketplace-ToU) restrict it to Visual
+Studio products:
 
-    > `code-marketplace` is a self-contained go binary that does not have a frontend or any mechanisms for extension authors to add or update extensions in the marketplace. It simply reads extensions from file storage and provides an API for VSCode compatible editors to consume.
+> Marketplace Offerings are intended for use only with Visual Studio Products
+> and Services and you may only install and use Marketplace Offerings with
+> Visual Studio Products and Services.
 
-## <a id="visual-studio-marketplace"></a>Visual Studio Marketplace
+OpenIDE does not configure it and cannot help with using it. Several
+extensions hosted there also carry licences that forbid running them in
+non-Microsoft products.
 
-As with any online service, ensure you've understood [its terms of use](https://aka.ms/vsmarketplace-ToU) which include:
-> Marketplace Offerings are intended for use only with Visual Studio Products and Services and you may only install and use Marketplace Offerings with Visual Studio Products and Services.
+## <a id="proprietary-extensions"></a>Proprietary extensions and API proposals
 
-So, we can't provide any help if you intend to infringe their terms of use.
+Some Microsoft extensions — the C# and C++ debuggers, Live Share, the Remote
+Development pack — check at runtime that they are running in the official
+build, or are licensed only for it. The list and the open replacements are in
+[extensions compatibility](./extensions-compatibility.md).
 
-Also note that this extension gallery hosts multiple extensions that are non-free and have license-agreements that explicitly forbid using them in non-Microsoft products, along with using telemetry.
-
-## <a id="proprietary-debugging-tools"></a>Proprietary Debugging Tools
-
-The debugger provided with Microsoft's [C# extension](https://github.com/OmniSharp/omnisharp-vscode) as well as the (Windows) debugger provided with their [C++ extension](https://github.com/Microsoft/vscode-cpptools) are very restrictively licensed to only work with the official Visual Studio Code build. See [this comment in the C# extension repo](https://github.com/OmniSharp/omnisharp-vscode/issues/2491#issuecomment-418811364) and [this comment in the C++ extension repo](https://github.com/Microsoft/vscode-cpptools/issues/21#issuecomment-248349017).
-
-A workaround exists to get debugging working in C# projects, by using Samsung's opensource [netcoredbg](https://github.com/Samsung/netcoredbg) package. See [this comment](https://github.com/Niiihuel/openide/issues/82#issue-409806641) for instructions on how to set that up.
-
-## <a id="proprietary-extensions"></a>Proprietary Extensions
-
-Like the debuggers mentioned above, some extensions you may find in the marketplace (like the [Remote Development Extensions](https://code.visualstudio.com/docs/remote/remote-overview)) only function with the official Visual Studio Code build. You can work around this by adding the extension's internal ID (found on the extension's page) to the `extensionAllowedProposedApi` property of the product.json in your OpenIDE installation. For example:
+Extensions that merely need a proposed API are a different case. Upstream
+gates those through `extensionEnabledApiProposals` in `product.json`, and
+OpenIDE ships upstream's list. To grant a proposal to another extension, add
+it to the user-level `product.json` described above:
 
 ```jsonc
-  "extensionAllowedProposedApi": [
-    // ...
-    "ms-vscode-remote.vscode-remote-extensionpack",
-    "ms-vscode-remote.remote-wsl",
-    // ...
-  ],
+{
+  "extensionEnabledApiProposals": {
+    "publisher.extension": ["proposalName"]
+  }
+}
 ```
 
-In some cases, the above change won't help because the extension is hard-coded to only work with the official Visual Studio Code product.
-
-## <a id="vsix-manager"></a>Using the "VSIX Manager" Extension
-
-The [**VSIX Manager**](https://github.com/zokugun/vscode-vsix-manager) extension provides a powerful and user-friendly interface for managing `.vsix` files directly within OpenIDE. Its author is the main maintainer of OpenIDE ;)
-
-It is particularly beneficial for:
-- **Support for Multiple Marketplaces**: Seamlessly install and manage extensions from several marketplaces at the same time, allowing access to a broader range of extensions.
-- **Local Files**: Manage a collection of `.vsix` files stored locally.
-- **GitHub/Forgejo Release**: Install the extension directly from its GitHub/Forgejo release pages.
-- **Fallback Options**
-
-### <a id="use-cases"></a>Use Cases
-
-- Developers working offline can easily manage `.vsix` files.
-- Teams can distribute specific versions of extensions across systems.
-- Enterprises with restricted environments can maintain control over installed extensions.
-- Users can connect to multiple marketplaces and access a wider range of extensions or switch seamlessly between them.
-
-### <a id="marketplace-support"></a>Marketplace Support
-
-The **VSIX Manager** extension supports managing extensions from several marketplaces simultaneously. This feature enables:
-- **Access to Diverse Extensions**: Install extensions from different sources like Open VSX or private repositories.
-- **Fallback Options**: Ensure extension availability even if one marketplace is temporarily inaccessible.
-- **Enterprise Flexibility**: Use private or self-hosted marketplaces alongside public ones to meet security and compliance requirements.
-- **Custom Configurations**: Prioritize specific marketplaces for particular needs while keeping access to others.
-
-## [Extensions compatibility](./extensions-compatibility.md)
-
+This does not help with an extension that refuses to start outside Visual
+Studio Code; that check is in the extension's own code.

@@ -2,153 +2,172 @@
 
 # Troubleshooting
 
-## Table of Contents
-
 - [Linux](#linux)
   - [Fonts showing up as rectangles](#linux-fonts-rectangle)
-  - [Text and/or the entire interface not appearing](#linux-rendering-glitches)
-  - [Global menu workaround for KDE](#linux-kde-global-menu)
-  - [Flatpak most common issues](#linux-flatpak-most-common-issues)
-  - [Remote SSH doesn't work](#linux-remote-ssh)
-  - [The window doesn't show up](#linux-no-window)
+  - [Text or the entire interface not appearing](#linux-rendering-glitches)
+  - [The window does not show up](#linux-no-window)
+  - [Global menu on KDE](#linux-kde-global-menu)
+  - [Remote SSH does not work](#linux-remote-ssh)
+  - [The AppImage does not start after an update](#linux-appimage-recovery)
 - [Windows](#windows)
-  - [Group Policy Objects (GPOs) are ignored](#windows-gpo)
-  - ["Open with OpenIDE" missing from context menu](#windows-context-menu)
-  - [Windows Defender flags the installer as malware](#windows-defender)
+  - [SmartScreen or Defender warns about the installer](#windows-defender)
+  - [Group Policy objects are ignored](#windows-gpo)
+  - ["Open with OpenIDE" missing from the context menu](#windows-context-menu)
+- [Agent](#agent)
+  - [Credentials are not remembered](#agent-credentials)
+  - [A model is listed but requests fail](#agent-model-availability)
+  - [A hosted CLI does not see the OpenIDE tools](#agent-cli-tools)
+  - [An update is available but nothing happens](#agent-update)
 
 ## <a id="linux"></a>Linux
 
-### <a id="linux-fonts-rectangle"></a>_Fonts showing up as rectangles_
+### <a id="linux-fonts-rectangle"></a>Fonts showing up as rectangles
 
-The following command should help:
+Clear the font cache and let fontconfig rebuild it:
 
 ```
 rm -rf ~/.cache/fontconfig
-rm -rf ~/snap/openide/common/.cache
 fc-cache -r
 ```
 
-### <a id="linux-rendering-glitches"></a>_Text and/or the entire interface not appearing_
+### <a id="linux-rendering-glitches"></a>Text or the entire interface not appearing
 
-You have likely encountered [a bug in Chromium and Electron](microsoft/vscode#190437) when compiling Mesa shaders, which has affected all Visual Studio Code and OpenIDE versions for Linux distributions since 1.82. The current workaround (see microsoft/vscode#190437) is to delete the GPU cache as follows:
+This is a Chromium/Electron bug when compiling Mesa shaders
+([microsoft/vscode#190437](https://github.com/microsoft/vscode/issues/190437))
+that affects every Electron-based editor. The workaround is to delete the GPU
+cache:
 
 ```bash
 rm -rf ~/.config/OpenIDE/GPUCache
 ```
 
-### <a id="linux-kde-global-menu"></a>_Global menu workaround for KDE_
+### <a id="linux-no-window"></a>The window does not show up
 
-Install these packages on Fedora:
+Under Wayland:
 
-- libdbusmenu-devel
-- dbus-glib-devel
-- libdbusmenu
+- run `openide --verbose`;
+- if the log contains `EGL Driver message (Error) eglCreateContext: Requested
+  version is not supported`, start with `openide --ozone-platform=x11`.
 
-On Ubuntu this package is called `libdbusmenu-glib4`.
+### <a id="linux-kde-global-menu"></a>Global menu on KDE
 
-Credits: [Gerson](https://gitlab.com/paulcarroty/openide-deb-rpm-repo/-/issues/91)
+The global menu needs the `libdbusmenu` libraries. On Fedora install
+`libdbusmenu`, `libdbusmenu-devel` and `dbus-glib-devel`; on Ubuntu the
+package is `libdbusmenu-glib4`.
 
-### <a id="linux-flatpak-most-common-issues"></a>_Flatpak most common issues_
+### <a id="linux-remote-ssh"></a>Remote SSH does not work
 
-- blurry screen with HiDPI on wayland run:
-  ```bash
-  flatpak override --user --nosocket=wayland com.openide.openide
-  ```
-- To execute commands on the host system, run inside the sandbox
-  ```bash
-  flatpak-spawn --host <COMMAND>
-  # or
-  host-spawn <COMMAND>
-  ```
-- Where is my X extension? AKA modify product.json
-  TL;DR: use https://open-vsx.org/extension/zokugun/vsix-manager
+Microsoft's Remote - SSH extension only runs in the official build. Use
+[Open Remote - SSH](https://open-vsx.org/extension/jeanp413/open-remote-ssh)
+instead, and set `AllowTcpForwarding yes` in the server's `sshd_config`. The
+remote host it installs is OpenIDE's `openide-reh-*` archive, which the
+extension downloads from the release; Alpine hosts need the musl build from
+`build/alpine/`.
 
-- SDKs
-  see [this](https://github.com/flathub/com.openide.openide?tab=readme-ov-file#sdks)
+### <a id="linux-appimage-recovery"></a>The AppImage does not start after an update
 
-- If you have any other problems with the flatpak package try to look on the [FAQ](https://github.com/flathub/com.openide.openide?tab=readme-ov-file#faq) maybe the solution is already there or open an [issue](https://github.com/flathub/com.openide.openide/issues).
-
-### <a id="linux-remote-ssh"></a>_Remote SSH doesn't work_
-
-Use the OpenIDE's compatible extension [Open Remote - SSH](https://open-vsx.org/extension/jeanp413/open-remote-ssh).
-
-On the server, in the `sshd` config, `AllowTcpForwarding` need to be set to `yes`.
-
-It might requires additional dependencies due to the OS/distro (alpine).
-
-### <a id="linux-no-window"></a>_The window doesn't show up_
-
-If you are under Wayland:
-
-- try the command `openide --verbose`
-- if you see an error like `:ERROR:ui/gl/egl_util.cc:92] EGL Driver message (Error) eglCreateContext: Requested version is not supported`
-- try `openide --ozone-platform=x11`
+The updater keeps the previous image as `OpenIDE.AppImage.previous` next to
+the installed one and writes a health marker on the first successful start. If
+the new binary fails to reach the workbench, the launcher restores the previous
+image exactly once. If you end up with neither working, download the current
+release again and put it at `~/.local/bin/OpenIDE.AppImage`; see
+[updates](./updates.md#appimage-and-nixos).
 
 ## <a id="windows"></a>Windows
 
-### <a id="windows-gpo"></a>_Group Policy Objects (GPOs) are ignored_
+### <a id="windows-defender"></a>SmartScreen or Defender warns about the installer
 
-OpenIDE uses its own policy-watcher library (`@openide/policy-watcher`) which reads GPO values from a **different registry path** than VS Code.
+Windows installers are published unsigned, so SmartScreen shows "Windows
+protected your PC" on a hand-downloaded installer and Defender may flag it.
+Before overriding the warning:
 
-**OpenIDE reads policies from:**
+- download only from the [releases page](https://github.com/Niiihuel/openide/releases);
+- compare the file's SHA-256 with the `.sha256` file published next to it
+  (`certutil -hashfile OpenIDEUserSetup-x64-<version>.exe SHA256`).
 
-```
-HKLM\SOFTWARE\Policies\OpenIDE\OpenIDE
-```
+The in-product updater does not go through SmartScreen: it verifies the signed
+manifest and the artifact hash itself. See [updates](./updates.md#integrity).
 
-**VS Code reads policies from:**
+### <a id="windows-gpo"></a>Group Policy objects are ignored
 
-```
-HKLM\SOFTWARE\Policies\Microsoft\VSCode
-```
-
-If you are deploying OpenIDE in an enterprise environment via Group Policy:
-
-1. Copy the `.admx` template file to `C:\Windows\PolicyDefinitions\`
-2. Copy the `.adml` language file to `C:\Windows\PolicyDefinitions\en-US\`
-3. Open `gpedit.msc` and configure policies under the OpenIDE group
-4. Verify the resulting registry key exists at `HKLM\SOFTWARE\Policies\OpenIDE\OpenIDE` (not `Microsoft\OpenIDE`)
-
-If you set policies manually via Registry Editor, make sure you create the key at the correct path:
+OpenIDE reads policies through the `@vscodium/policy-watcher` library, which
+looks under the vendor key that library was built with, not under Microsoft's:
 
 ```
-HKLM\SOFTWARE\Policies\OpenIDE\OpenIDE\<PolicyName>  (REG_SZ or REG_DWORD)
+HKLM\SOFTWARE\Policies\VSCodium\OpenIDE
+HKCU\SOFTWARE\Policies\VSCodium\OpenIDE      (machine policies take precedence)
 ```
 
-For example, to set `Update: Mode` to `none`:
+Values are the setting id as name, `REG_SZ` or `REG_DWORD` as type. For
+example, to force `update.mode` to `none`:
 
 ```
-Registry key: HKLM\SOFTWARE\Policies\OpenIDE\OpenIDE
-Value name:   update.mode
-Value type:   REG_SZ
-Value data:   none
+Key:        HKLM\SOFTWARE\Policies\VSCodium\OpenIDE
+Value name: update.mode
+Type:       REG_SZ
+Data:       none
 ```
 
-Per-user policies are also supported under `HKCU\SOFTWARE\Policies\OpenIDE\OpenIDE` (machine policies take precedence).
+The `.admx`/`.adml` templates generated by the build (`build/lib/policies` in
+`vscode/`) target the same key. Policies written under
+`HKLM\SOFTWARE\Policies\Microsoft\VSCode` are for Visual Studio Code and are
+not read.
 
-### <a id="windows-context-menu"></a>_"Open with OpenIDE" missing from context menu_
+### <a id="windows-context-menu"></a>"Open with OpenIDE" missing from the context menu
 
-If the **"Open with OpenIDE"** option does not appear after installation (even with the checkbox checked during setup):
-
-1. **Run the installer again** and ensure _"Add 'Open with OpenIDE' action to Windows Explorer file context menu"_ is checked.
-2. **Windows 11 note**: Windows 11 hides most context menu entries behind **Shift + Right-click** ("Show more options"). OpenIDE's entry may be present but hidden in the new condensed menu. Try Shift + Right-click to see the classic context menu.
-3. If the entry still does not appear, you can add it manually via Registry Editor:
+1. Run the installer again and make sure *Add "Open with OpenIDE" action to
+   Windows Explorer file context menu* is checked.
+2. On Windows 11 most entries are hidden behind **Shift + Right-click** ("Show
+   more options").
+3. To add it by hand, create these keys (adjust the path; the user installer
+   puts OpenIDE under `%LOCALAPPDATA%\Programs\OpenIDE`):
 
    ```
    Key:   HKEY_CLASSES_ROOT\*\shell\Open with OpenIDE
    Value: (Default) = "Open with OpenIDE"
 
    Key:   HKEY_CLASSES_ROOT\*\shell\Open with OpenIDE\command
-   Value: (Default) = "C:\Program Files\OpenIDE\OpenIDE.exe" "%1"
+   Value: (Default) = "C:\Users\<you>\AppData\Local\Programs\OpenIDE\OpenIDE.exe" "%1"
    ```
 
-   Adjust the install path to match your actual installation directory.
+## <a id="agent"></a>Agent
 
-### <a id="windows-defender"></a>_Windows Defender flags the installer as malware_
+### <a id="agent-credentials"></a>Credentials are not remembered
 
-Some users report Windows Defender detecting the OpenIDE installer as `Cinjo` or another threat. This is a **false positive** caused by the unsigned nature of certain build artifacts.
+Provider keys and OAuth tokens go to the operating system's secret store. On
+Linux that is the Secret Service (`gnome-keyring`, KWallet with the secrets
+bridge); without one OpenIDE keeps credentials in memory only, shows a notice
+in Settings → Providers, and asks again after a restart. Install a keyring or
+run the editor from a session where one is unlocked.
 
-- Download OpenIDE **only from the official [GitHub Releases page](https://github.com/Niiihuel/openide/releases)**.
-- Verify the SHA256/SHA512 checksum of the downloaded file against the `.sha256` or `.sha512` file published alongside each release.
-- If Defender blocks the installer, add an exclusion for the downloaded file, run the install, then remove the exclusion.
-- You can also report the false positive directly to Microsoft via the [Windows Defender Security Intelligence submission portal](https://www.microsoft.com/en-us/wdsi/filesubmission).
+### <a id="agent-model-availability"></a>A model is listed but requests fail
+
+The model list merges what the provider reports with the models.dev catalog,
+so a model can be listed that your account or endpoint cannot use. Use
+*Refresh* in Settings → Providers → Models to re-read the provider, check the
+account's plan on the provider's side, and for a custom server confirm that
+the base URL and protocol match what it actually serves. Voice models have
+their own check: *Test dictation* in Settings → Voice.
+
+### <a id="agent-cli-tools"></a>A hosted CLI does not see the OpenIDE tools
+
+Only Claude Code, Codex and OpenCode receive the OpenIDE MCP endpoint
+automatically when launched from the dock; Grok needs *OpenIDE: Register
+OpenIDE tools in a CLI* once. The bridge requires a workspace folder to be
+open and `openide.ideServer.enabled` (default on). Tools appear with the
+`openide_` prefix, possibly behind the CLI's own server-name prefix, and the
+CLI's own permission system decides whether the model may call them. The
+matrix is in the [harness guide](./harness.md#hosted-cli-integration).
+
+### <a id="agent-update"></a>An update is available but nothing happens
+
+- Development builds (`./scripts/code.sh`) never update.
+- On Linux only the AppImage updates itself, and only when it is installed as
+  `~/.local/bin/OpenIDE.AppImage`. A `.deb`, `.rpm`, tarball or Nix store
+  derivation is updated by installing the next release.
+- `update.mode` must be `default` or `start`; `manual` only checks when asked
+  and `none` disables the check.
+- The popover announces once per window session; the title-bar indicator stays
+  until you act on it. `update.titleBar: false` hides it.
+
+See [updates](./updates.md) for the full behaviour.

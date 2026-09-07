@@ -7,10 +7,14 @@
       "layer": "release",
       "maturity": "soak",
       "invariant": "OpenIDE sólo acepta manifests v2 firmados, vinculados a canal, plataforma, arquitectura y target, con anti-rollback por versión, build y hash.",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "commands": [
-        "cd vscode && npm run compile-check-ts-native",
-        "cd vscode && ./node_modules/.bin/mocha --ui tdd --timeout 10000 --exit out/vs/platform/update/test/common/openideUpdateManifest.test.js out/vs/platform/update/test/node/openideUpdateVerifier.test.js"
+        "cd vscode && npm run typecheck-client",
+        "cd vscode && node node_modules/mocha/bin/mocha.js --ui tdd --timeout 10000 --exit out/vs/platform/update/test/common/openideUpdateManifest.test.js out/vs/platform/update/test/node/openideUpdateVerifier.test.js"
       ],
       "tests": [
         "vscode/src/vs/platform/update/test/common/openideUpdateManifest.test.ts",
@@ -31,9 +35,11 @@
       "layer": "desktop-runtime",
       "maturity": "soak",
       "invariant": "El updater AppImage verifica los bytes descargados, conserva una versión recuperable y reemplaza el ejecutable sin dejar una ruta current ausente.",
-      "platforms": ["linux"],
+      "platforms": [
+        "linux"
+      ],
       "commands": [
-        "cd vscode && ./node_modules/.bin/mocha --ui tdd --timeout 10000 --exit out/vs/platform/update/test/electron-main/openideAppImageUpdater.test.js"
+        "cd vscode && node node_modules/mocha/bin/mocha.js --ui tdd --timeout 10000 --exit out/vs/platform/update/test/electron-main/openideAppImageUpdater.test.js"
       ],
       "tests": [
         "vscode/src/vs/platform/update/test/electron-main/openideAppImageUpdater.test.ts"
@@ -53,7 +59,11 @@
       "layer": "workbench",
       "maturity": "soak",
       "invariant": "Volver a un mensaje reemplaza transcript y composer una sola vez, preserva conflictos y no mezcla provider, modelo o modo de otros turnos.",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "commands": [
         "cd vscode && npm run test-browser-no-install -- --browser chromium --runGlob 'vs/workbench/contrib/openideAgent/test/browser/{openideChatRollback,openideMessageChangeSetService}.test.js'"
       ],
@@ -76,9 +86,13 @@
       "layer": "main-process",
       "maturity": "experimental",
       "invariant": "Los procesos MCP tienen timeout, keepalive, parking, limpieza de árbol y nunca conservan tools fantasma después de una caída.",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "commands": [
-        "cd vscode && ./node_modules/.bin/mocha --ui tdd --timeout 10000 --exit out/vs/platform/openideAgentHost/test/common/openideAgentHost.test.js"
+        "cd vscode && node node_modules/mocha/bin/mocha.js --ui tdd --timeout 10000 --exit out/vs/platform/openideAgentHost/test/common/openideAgentHost.test.js"
       ],
       "tests": [
         "vscode/src/vs/platform/openideAgentHost/test/common/openideAgentHost.test.ts"
@@ -98,7 +112,11 @@
       "layer": "packaging",
       "maturity": "soak",
       "invariant": "Las superficies distribuidas usan branding OpenIDE y toda referencia heredada visible requiere una excepción documentada.",
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "commands": [
         "node dev/audit-branding.mjs"
       ],
@@ -113,6 +131,197 @@
         "AppImage, DEB, RPM, macOS y Windows pasan auditoría post-packaging."
       ],
       "demotionRule": "Branding heredado visible no allowlisted bloquea el artefacto afectado."
+    },
+    {
+      "id": "ide-bridge-window-ownership",
+      "owner": "agent-runtime",
+      "layer": "main-process",
+      "maturity": "soak",
+      "invariant": "Cada conexión Electron posee su endpoint, credenciales y solicitudes IDE; cierre, crash y recarga revocan solamente esa conexión.",
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
+      "commands": [
+        "cd vscode && node node_modules/mocha/bin/mocha.js --ui tdd --timeout 10000 --exit out/vs/base/parts/ipc/test/common/ipc.test.js out/vs/platform/openideAgentHost/test/node/*.test.js",
+        "ulimit -c 0 && xvfb-run -a vscode/.build/electron/openide dev/test-ide-bridge.mjs --no-sandbox --ozone-platform=x11"
+      ],
+      "tests": [
+        "dev/test-ide-bridge.mjs",
+        "vscode/src/vs/platform/openideAgentHost/test/node/openideIdeServerMain.test.ts",
+        "vscode/src/vs/workbench/contrib/openideAgent/test/browser/openideIdePlanReview.test.ts"
+      ],
+      "knownGaps": [
+        "Electron multiproceso ejecutado localmente en Linux; falta evidencia nativa Windows/macOS y de compatibilidad con CLIs externos."
+      ],
+      "promotionCriteria": [
+        "Las pruebas de aislamiento pasan repetidamente en los runners nativos distribuidos."
+      ],
+      "demotionRule": "Entrega cruzada, credencial superviviente o llamada pendiente sin cancelación bloquean el cambio."
+    },
+    {
+      "id": "cli-snapshot-restore",
+      "owner": "agent-experience",
+      "layer": "workbench",
+      "maturity": "soak",
+      "invariant": "La restauración CLI requiere una captura verificable, contenido posterior compatible, buffers limpios, ausencia de agentes activos y coordinación entre ventanas.",
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
+      "commands": [
+        "cd vscode && node node_modules/mocha/bin/mocha.js --ui tdd --timeout 30000 --exit out/vs/workbench/contrib/openideAgent/test/node/openideCliRestore.test.js out/vs/platform/openideAgentHost/test/node/openideRestoreLocks.test.js"
+      ],
+      "tests": [
+        "vscode/src/vs/workbench/contrib/openideAgent/test/node/openideCliRestore.test.ts",
+        "vscode/src/vs/platform/openideAgentHost/test/node/openideRestoreLocks.test.ts"
+      ],
+      "knownGaps": [
+        "Git/disco reales verificados localmente en Linux; job Windows añadido, todavía no ejecutado; los casos de symlinks se omiten explícitamente en Windows. Sin garantía de CAS frente a escritores externos ni de durabilidad ante pérdida de energía."
+      ],
+      "promotionCriteria": [
+        "La matriz nativa Linux/Windows demuestra conflictos preservados; las limitaciones de snapshots siguen visibles."
+      ],
+      "demotionRule": "Sobrescritura de trabajo posterior o restauración parcial sin informar bloquea merge."
+    },
+    {
+      "id": "openide-source-layers",
+      "owner": "architecture",
+      "layer": "source",
+      "maturity": "soak",
+      "invariant": "Browser y common consumen contratos portables; IPC y acceso nativo se registran en adaptadores Electron.",
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32",
+        "web"
+      ],
+      "commands": [
+        "cd vscode && npm run valid-layers-check"
+      ],
+      "tests": [
+        "vscode/build/checker/layersChecker.ts",
+        "vscode/src/vs/workbench/contrib/openideAgent/test/common/openideNativeServices.test.ts"
+      ],
+      "knownGaps": [
+        "El checker valida imports y tipos; no demuestra paridad de funcionalidades de la versión web."
+      ],
+      "promotionCriteria": [
+        "CI conserva cero violaciones y los adaptadores unavailable siguen fallando explícitamente."
+      ],
+      "demotionRule": "Un import nativo desde browser/common bloquea el cambio."
+    },
+    {
+      "id": "agent-turn-runtime",
+      "owner": "agent-runtime",
+      "layer": "common",
+      "maturity": "soak",
+      "invariant": "Cada turno posee reintentos, cancelación, continuación y recuperación de contexto; eventos tardíos no contaminan otras conversaciones.",
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32",
+        "web"
+      ],
+      "commands": [
+        "cd vscode && node node_modules/mocha/bin/mocha.js --ui tdd --timeout 10000 --exit out/vs/workbench/contrib/openideAgent/test/common/openideTurnRuntime.test.js"
+      ],
+      "tests": [
+        "vscode/src/vs/workbench/contrib/openideAgent/test/common/openideTurnRuntime.test.ts"
+      ],
+      "knownGaps": [
+        "Proveedores programados verifican el runtime; selección/failover de cuentas y permisos UI siguen como adaptadores en AgentService."
+      ],
+      "promotionCriteria": [
+        "Los escenarios de cancelación y recuperación se mantienen estables con proveedores reales además de los fixtures."
+      ],
+      "demotionRule": "Replay de herramientas o modificación de historial después de cancelar bloquean merge."
+    },
+    {
+      "id": "fork-delta-and-sync",
+      "owner": "fork-maintenance",
+      "layer": "tooling",
+      "maturity": "soak",
+      "invariant": "El inventario distingue árboles comprometidos y worktree; sync preserva el delta downstream y valida antes de avanzar la base.",
+      "platforms": [
+        "linux"
+      ],
+      "commands": [
+        "node --test dev/audit-fork-delta.test.mjs dev/codeoss-sync.test.mjs"
+      ],
+      "tests": [
+        "dev/audit-fork-delta.test.mjs",
+        "dev/codeoss-sync.test.mjs"
+      ],
+      "knownGaps": [
+        "Fixtures de Git pasan; no se ejecutó una actualización upstream real sobre este worktree con cambios previos."
+      ],
+      "promotionCriteria": [
+        "Una sincronización real publica reportes y pasa las verificaciones del subsistema afectado y CI completo."
+      ],
+      "demotionRule": "Pérdida de cambios downstream o metadata adelantada sin validar bloquean sync."
+    },
+    {
+      "id": "hosted-cli-product",
+      "owner": "agent-experience",
+      "layer": "desktop-runtime",
+      "maturity": "soak",
+      "invariant": "El dock lanza y conserva un PTY real, transmite entrada y resize, conecta MCP y permite recuperarse de salida o fallo.",
+      "platforms": [
+        "linux"
+      ],
+      "commands": [
+        "xvfb-run -a node dev/test-hosted-cli.mjs"
+      ],
+      "tests": [
+        "dev/test-hosted-cli.mjs",
+        "dev/fixtures/hosted-cli.mjs"
+      ],
+      "knownGaps": [
+        "Fixture local con forma de Codex; faltan CLI externo real, flujo con hooks, smoke empaquetado y evidencia Windows/macOS."
+      ],
+      "promotionCriteria": [
+        "Smoke sobre artefacto distribuido y un CLI con hooks, sin depender de credenciales reales en CI."
+      ],
+      "demotionRule": "Pérdida de terminal, entrada cruzada o relanzamiento sin recuperación bloquean el cambio."
+    },
+    {
+      "id": "agent-execution-recovery",
+      "owner": "agent-runtime",
+      "layer": "workbench",
+      "maturity": "experimental",
+      "invariant": "Cada efecto del harness pasa por permisos y un checkpoint durable; recuperar una interrupción no repite herramientas. El workspace y los procesos de los subagentes conservan su dueño.",
+      "platforms": [
+        "linux"
+      ],
+      "commands": [
+        "cd vscode && node node_modules/mocha/bin/mocha.js --ui tdd --timeout 30000 --exit out/vs/platform/openideAgentHost/test/node/*.test.js out/vs/workbench/contrib/openideAgent/test/node/openideRunJournal.test.js out/vs/workbench/contrib/openideAgent/test/node/openideWorkspaceAccess.test.js out/vs/workbench/contrib/openideAgent/test/common/openideToolExecutor.test.js",
+        "cd vscode && npm run test-browser-no-install -- --browser chromium --runGlob 'vs/workbench/contrib/openideAgent/test/browser/*.test.js'",
+        "node dev/test-harness-runtime.mjs"
+      ],
+      "tests": [
+        "vscode/src/vs/platform/openideAgentHost/test/node/openideRunJournalStore.test.ts",
+        "vscode/src/vs/platform/openideAgentHost/test/node/openideAgentTerminalOwner.test.ts",
+        "vscode/src/vs/platform/openideAgentHost/test/node/openideProcessIsolation.test.ts",
+        "vscode/src/vs/platform/openideAgentHost/test/node/openideSubagentWorktrees.test.ts",
+        "vscode/src/vs/workbench/contrib/openideAgent/test/common/openideToolExecutor.test.ts",
+        "vscode/src/vs/workbench/contrib/openideAgent/test/node/openideWorkspaceAccess.test.ts",
+        "vscode/src/vs/workbench/contrib/openideAgent/test/browser/openideShellIsolation.test.ts",
+        "dev/test-harness-runtime.mjs"
+      ],
+      "knownGaps": [
+        "Confinamiento de procesos implementado solo para Linux con bubblewrap; off no garantiza aislamiento OS.",
+        "Pendiente matriz nativa Windows/macOS, reinicio y build empaquetado.",
+        "El journal relee el prefijo y tiene límites por sesión; faltan rotación, cuota global y explorador de historial completo.",
+        "Worktrees requieren base limpia y rechazan filtros Git externos; en tmp dependen de la limpieza del sistema."
+      ],
+      "promotionCriteria": [
+        "Soak repetido de crash/reload, permisos anidados y cancelación sin pérdida de cambios externos.",
+        "Pruebas de producto ejercitan modelo local, archivos, terminal real y recuperación."
+      ],
+      "demotionRule": "Un efecto sin permiso/checkpoint o una recuperación que repite un efecto bloquea la promoción del gate."
     }
   ]
 }

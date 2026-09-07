@@ -23,12 +23,41 @@ patches.
 
 ## Explore OpenIDE
 
-- [Get started](./docs/getting-started.md) · [Download releases](https://github.com/Niiihuel/openide/releases)
+- [Install](#install) · [Get started](./docs/getting-started.md) · [Releases](https://github.com/Niiihuel/openide/releases)
 - [Harness and complete tool reference](./docs/harness.md)
 - [Memory and Project Map](#memory-and-project-map)
 - [Coding CLIs inside the editor](#coding-clis-inside-the-editor)
 - [Voice and provider formats](./docs/voice-transports.md)
 - [Build from source](./BUILD.md) · [Documentation](./docs/index.md)
+
+## Install
+
+Every release on the [releases page](https://github.com/Niiihuel/openide/releases)
+ships the artifacts below. Each one has a `.sha256` and a `.sha1` file next to
+it; compare the hash before installing anything downloaded by hand.
+
+| Platform | Artifact | Automatic updates |
+|---|---|---|
+| Linux x64 | `OpenIDE-<version>-x86_64.AppImage` (CI builds carry the glibc they were linked against in the name, e.g. `OpenIDE-1.2.0.glibc2.34-x86_64.AppImage`), plus `.deb`, `.rpm` and `OpenIDE-linux-x64-<version>.tar.gz` | Yes, for the AppImage only |
+| Linux arm64 | `.deb`, `.rpm` and `OpenIDE-linux-arm64-<version>.tar.gz` | No: install the next release by hand |
+| Windows x64 and arm64 | `OpenIDEUserSetup-<arch>-<version>.exe`, the per-user installer | Yes |
+| Windows x64 and arm64 | `OpenIDESetup-<arch>-<version>.exe` (system), `OpenIDE-win32-<arch>-<version>.zip` and `.msi`, when the release produced them | No |
+| macOS | Not published. The code builds and runs there, but a notarized release needs an Apple Developer ID the project does not have. Build it yourself with [BUILD.md](./BUILD.md). | — |
+
+The AppImage is the supported mutable installation on Linux. Put it at
+`~/.local/bin/OpenIDE.AppImage` (on NixOS, `dev/install-appimage.sh` does this
+and registers the desktop entry); the updater replaces that file in place and
+keeps the previous image for one recovery launch. Windows installers are
+currently unsigned, so SmartScreen warns on the first run of a hand-downloaded
+installer; the updater verifies its own downloads against the signed manifest
+and is unaffected. Details, channels and recovery behaviour are in
+[docs/updates.md](./docs/updates.md).
+
+OpenIDE keeps its data next to, not inside, VS Code's: extensions in
+`~/.openide/extensions`, user settings in `~/.config/OpenIDE` on Linux and
+`%APPDATA%\OpenIDE` on Windows. The remote server and CLI archives
+(`openide-reh-*`, `openide-reh-web-*`, `openide-cli-*`) are described in
+[docs/others.md](./docs/others.md).
 
 ## An editor and a harness
 
@@ -65,8 +94,9 @@ flowchart LR
   chat cards, changed-file summaries, and keep/undo actions. Background terminals,
   queued messages, questions and file changes have distinct sections near the
   composer.
-- **Editor assistance** — selection-based quick edits and configurable inline
-  completion, alongside full agent tasks.
+- **Editor assistance** — `Ctrl+K` quick-edits the selection in place, `Ctrl+L`
+  sends it to the chat, and inline completion (`openide.autocomplete.*`) can use
+  a different model than the conversation.
 - **Zen and action feedback** — focused editing with visual feedback for agent
   activity, additions, edits and deletions. Streaming UI updates are coordinated
   with rendering so the interface can keep up with incoming work.
@@ -212,10 +242,17 @@ rather than claiming every line was written by the CLI.
 | MCP servers | Additional tools discovered from configured external servers | `.openide/mcp.json` |
 
 Settings provide management surfaces for these integrations, providers, voice,
-context limits, Project Map, notifications and editor behavior. Rules and hooks
-also support profile-wide configuration. Hooks, native tool approvals and the
-CLI's own MCP permissions are separate mechanisms; their boundaries are
-explained in the [harness guide](./docs/harness.md#extension-points-and-permissions).
+context limits, Project Map, notifications and editor behavior. The MCP section
+ships a catalog of ready-to-add servers (filesystem, GitHub, Playwright, memory,
+Context7, Sequential Thinking, PostgreSQL, DeepWiki and a remote GitHub server)
+that asks only for the values each one needs. Rules and hooks also support
+profile-wide configuration. Hooks, native tool approvals and the CLI's own MCP
+permissions are separate mechanisms; their boundaries are explained in the
+[harness guide](./docs/harness.md#extension-points-and-permissions).
+
+OpenIDE's own surfaces — chat, Settings, plans, Project Map — are available in
+English and Spanish. `openide.language` follows the editor's display language by
+default and can pin either one.
 
 ### Editor, distribution and updates
 
@@ -225,11 +262,14 @@ gallery; extension availability and proprietary service compatibility are
 covered in the [extension guide](./docs/extensions-compatibility.md).
 
 The build compiles the canonical source tree directly. Release automation
-produces Linux and Windows artifacts, verifies signed update manifests and
-artifact hashes, and promotes the stable feed after release assets are public.
-Installed builds can announce an available update in the title-bar popover
-without taking keyboard focus. The supported mutable Linux AppImage installation
-retains the previous image during replacement and uses a startup health marker.
+produces Linux x64 and arm64 and Windows x64 and arm64 artifacts, verifies
+signed update manifests and artifact hashes, and promotes the stable feed only
+after release assets are public. The feed serves the Linux x64 AppImage and the
+Windows user installers; Linux arm64 is downloadable but not auto-updated,
+because the Linux updater only replaces an AppImage and none is built for that
+architecture. Installed builds announce an available update in the title-bar
+popover without taking keyboard focus. The AppImage installation retains the
+previous image during replacement and uses a startup health marker.
 Development builds intentionally do not auto-update.
 
 See [updates](./docs/updates.md) for installation behavior, integrity checks,
@@ -258,15 +298,19 @@ checked against, so it keeps tracking upstream. Both are declared in
 
 | Path | Description |
 |---|---|
-| `vscode/` | The complete canonical OpenIDE source. |
-| `vscode/src/vs/workbench/contrib/openideAgent/` | Integrated agent, chat, tools, providers and custom editors. |
-| `dev/` | Tooling, helper scripts and the FHS environment for development and builds. |
-| `src/` | Distribution configuration (stable/insider) and release assets. |
-| `docs/` | Documentation (installation, extensions, troubleshooting). |
-| `build.sh`, `dev/build.sh` | Build orchestration from the canonical source. |
-| `product.json` | OpenIDE product identity and configuration. |
+| `vscode/` | The complete canonical OpenIDE source: Code OSS plus OpenIDE's own code. Its `README.md`, `CONTRIBUTING.md`, `SECURITY.md` and `AGENTS.md` are Microsoft's upstream files, kept verbatim so upstream syncs merge cleanly; the OpenIDE documents are the ones at this repository's root. |
+| `vscode/src/vs/workbench/contrib/openideAgent/` | Integrated agent, chat, tools, providers, subagents, MCP, skills, Project Map and custom editors. The full list of OpenIDE-owned paths is in [CONTRIBUTING.md](./CONTRIBUTING.md#how-the-repository-is-laid-out). |
 | `openide-version.json` | Single source of truth: product version, VS Code API version, channel, Code OSS commit and the update signing key. |
-| `BUILD.md` | How to build, run and maintain OpenIDE. |
+| `product.json` | OpenIDE product identity. `vscode/product.json` is the copy the build reads; the version audit checks that both agree. |
+| `build.sh`, `version.sh`, `build-targets.sh`, `build_cli.sh`, `prepare_assets.sh` | Build orchestration used by CI: derive versions, compile, build the Rust CLI, package. |
+| `build/` | Per-platform packaging: `linux/` (deb, rpm, AppImage, remote host), `windows/` (installers, MSI, AppX), `osx/`, `alpine/`. |
+| `dev/` | Development entry points (`build.sh`, `openide-fhs.nix`, `sync-codeoss.sh`), the `audit-*.mjs` invariants CI runs, release-feed tooling and the smoke test. |
+| `docs/` | User and contributor documentation; start at [docs/index.md](./docs/index.md). |
+| `src/` | Icon and resource overlays per channel (`stable/`, `insider/`) copied into the build. |
+| `icons/` | Source artwork and the script that generates every platform icon. |
+| `stores/` | Snapcraft and winget metadata inherited from VSCodium. Not maintained and not published; see [BUILD.md](./BUILD.md#packaging). |
+| `.openide/` | This repository's own agent artifacts: the `openide-canvas` skill. Indexes and plans written by the product are ignored. |
+| `BUILD.md`, `CONTRIBUTING.md`, `SECURITY.md` | How to build, how to contribute, how to report a vulnerability. |
 
 ## Development
 
@@ -275,13 +319,28 @@ The reference guide for compiling and running the product is **[BUILD.md](./BUIL
 > A build compiles the current state of `vscode/`. It does not run `git reset`,
 > does not clone another repository, and does not apply patches.
 
-Quick iteration on NixOS:
+The day-to-day loop, from `vscode/`:
+
+```sh
+npm ci                                                        # first checkout only
+npm run typecheck-client
+npm run gulp copy-codicons
+npm run transpile-client
+npm run gulp compile-extensions compile-extension-media
+npm run electron                                              # fetches Electron once
+VSCODE_SKIP_PRELAUNCH=1 ./scripts/code.sh
+```
+
+On NixOS, wrap each command in the FHS sandbox:
 
 ```sh
 nix-build dev/openide-fhs.nix -o result-fhs
-./result-fhs/bin/openide-build -c 'cd vscode && npm ci && npm run typecheck-client && npm run gulp copy-codicons && npm run transpile-client && npm run gulp compile-extensions compile-extension-media && npm run electron'
+./result-fhs/bin/openide-build -c 'cd vscode && npm run typecheck-client && npm run gulp copy-codicons && npm run transpile-client && npm run gulp compile-extensions compile-extension-media && npm run electron'
 ./result-fhs/bin/openide-build -c 'cd vscode && VSCODE_SKIP_PRELAUNCH=1 ./scripts/code.sh'
 ```
+
+The checks CI runs before merging are listed in
+[CONTRIBUTING.md](./CONTRIBUTING.md#validating-your-change).
 
 ## Contributing
 

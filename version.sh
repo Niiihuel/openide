@@ -5,12 +5,12 @@ set -e
 VERSION_FILE="${OPENIDE_VERSION_FILE:-./openide-version.json}"
 
 if [[ ! -f "${VERSION_FILE}" ]]; then
-  echo "Error: no existe ${VERSION_FILE}" >&2
+  echo "Error: ${VERSION_FILE} does not exist" >&2
   return 1 2>/dev/null || exit 1
 fi
 
 jq -e '(.schemaVersion | type == "number" and . == 3) and (.updater.schemaVersion | type == "number" and . == 2) and (.updater.minimumUpdaterVersion | type == "number" and . >= 1 and floor == .)' "${VERSION_FILE}" >/dev/null || {
-  echo "Error: tipos del schema de versión/updater inválidos." >&2
+  echo "Error: invalid types in the version/updater schema." >&2
   return 1 2>/dev/null || exit 1
 }
 OPENIDE_VERSION=$(jq -er '.version' "${VERSION_FILE}")
@@ -27,33 +27,33 @@ MS_TAG="${CODE_OSS_VERSION}"
 MS_COMMIT="${CODE_OSS_COMMIT}"
 
 if [[ ! "${CODE_OSS_COMMIT}" =~ ^[a-f0-9]{40}$ ]]; then
-  echo "Error: commit Code OSS inválido." >&2
+  echo "Error: invalid Code OSS commit." >&2
   return 1 2>/dev/null || exit 1
 fi
 
 if [[ "${OPENIDE_VERSION_SCHEMA}" != "3" || "${OPENIDE_UPDATER_SCHEMA}" != "2" || ! "${OPENIDE_MINIMUM_UPDATER_VERSION}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "Error: schema de versión/updater OpenIDE inválido." >&2
+  echo "Error: invalid OpenIDE version/updater schema." >&2
   return 1 2>/dev/null || exit 1
 fi
 if [[ "${OPENIDE_CHANNEL}" != "stable" && "${OPENIDE_CHANNEL}" != "insider" ]]; then
-  echo "Error: canal OpenIDE inválido: ${OPENIDE_CHANNEL}" >&2
+  echo "Error: invalid OpenIDE channel: ${OPENIDE_CHANNEL}" >&2
   return 1 2>/dev/null || exit 1
 fi
 if [[ ! "${RELEASE_VERSION}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-insider\.[0-9]{8}\.[1-9][0-9]*)?$ ]]; then
-  echo "Error: versión OpenIDE inválida: ${RELEASE_VERSION}" >&2
+  echo "Error: invalid OpenIDE version: ${RELEASE_VERSION}" >&2
   return 1 2>/dev/null || exit 1
 fi
 if [[ "${OPENIDE_CHANNEL}" == "stable" && ( "${OPENIDE_VERSION}" == *-* || "${RELEASE_VERSION}" == *-* ) ]] || [[ "${OPENIDE_CHANNEL}" == "insider" && ( "${OPENIDE_VERSION}" != *-insider.* || "${RELEASE_VERSION}" != *-insider.* ) ]]; then
-  echo "Error: versión ${RELEASE_VERSION} incompatible con canal ${OPENIDE_CHANNEL}." >&2
+  echo "Error: version ${RELEASE_VERSION} is incompatible with channel ${OPENIDE_CHANNEL}." >&2
   return 1 2>/dev/null || exit 1
 fi
 
 if [[ ! "${OPENIDE_VERSION}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-insider\.[0-9]{8}\.[1-9][0-9]*)?$ || ! "${CODE_OSS_VERSION}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-  echo "Error: versión declarada OpenIDE/Code OSS inválida." >&2
+  echo "Error: invalid declared OpenIDE/Code OSS version." >&2
   return 1 2>/dev/null || exit 1
 fi
 if [[ "${VSCODE_QUALITY}" != "${OPENIDE_CHANNEL}" ]]; then
-  echo "Error: VSCODE_QUALITY (${VSCODE_QUALITY}) debe coincidir con channel (${OPENIDE_CHANNEL})." >&2
+  echo "Error: VSCODE_QUALITY (${VSCODE_QUALITY}) must match channel (${OPENIDE_CHANNEL})." >&2
   return 1 2>/dev/null || exit 1
 fi
 # OpenIDE versions its product independently of the Code OSS release it is built on. The two
@@ -78,7 +78,7 @@ if [[ -z "${BUILD_SOURCEVERSION:-}" ]]; then
   fi
 fi
 if [[ ! "${BUILD_SOURCEVERSION}" =~ ^[a-f0-9]{40}$ ]]; then
-  echo "Error: BUILD_SOURCEVERSION inválido." >&2
+  echo "Error: invalid BUILD_SOURCEVERSION." >&2
   return 1 2>/dev/null || exit 1
 fi
 

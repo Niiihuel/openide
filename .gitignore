@@ -1,5 +1,5 @@
-# `vscode/` es el árbol fuente canónico de OpenIDE. Sus artefactos de build se
-# excluyen mediante vscode/.gitignore; no se ignora el código fuente.
+# `vscode/` is OpenIDE's canonical source tree. Its build artifacts are
+# excluded through vscode/.gitignore; the source itself is never ignored.
 /vscode/.git.upstream-backup/
 /vscode/*.bak
 /vscode/resources/server/*.bak
@@ -26,30 +26,30 @@ stores/snapcraft/stable/*.snap
 font-size/node_modules/
 font-size/generate-css.js
 
-# OpenIDE: symlinks de nix-build
+# OpenIDE: nix-build symlinks
 result
 result-*
 
 # ---------------------------------------------------------------------------
-# Artefactos de build y estado de ejecución.
+# Build artifacts and runtime state.
 #
-# Nada de esto es fuente: se regenera. Sin estas reglas el primer commit del
-# árbol se llevaba 1.3 GB de `.build/` (el AppDir del AppImage, con un
-# node_modules entero adentro) y 719 MB de índices de `.openide/`, que además
-# derivan del código del usuario y no tienen por qué viajar a un remoto.
+# None of this is source: it is regenerated. Without these rules the first
+# commit of the tree carried 1.3 GB of `.build/` (the AppImage's AppDir, with a
+# whole node_modules inside) and 719 MB of `.openide/` indexes, which are also
+# derived from the user's code and have no reason to travel to a remote.
 # ---------------------------------------------------------------------------
 /.build/
 /tmp/
 /vendor/
 
-# Estado del agente en el workspace: los índices son derivados y pesados; lo
-# escrito a mano (skills, planes, MEMORY.md) sí se versiona.
+# Agent state in the workspace: the indexes are derived and heavy; what is
+# written by hand (skills, plans, MEMORY.md) is versioned.
 #
-# `**/` a propósito, no `/`: el indexador escribe su `.openide/` junto a la
-# carpeta que abrió, y abrir una subcarpeta del repo dejaba 34 MB de índices
-# fuera de estas reglas (`vscode/src/vs/workbench/browser/.openide/`). Un
-# pattern con `/` en el medio ya queda anclado a la raíz por sí solo, así que
-# quitarle el ancla inicial no alcanza: hay que pedir cualquier profundidad.
+# `**/` on purpose, not `/`: the indexer writes its `.openide/` next to the
+# folder it opened, and opening a subfolder of the repository left 34 MB of
+# indexes outside these rules (`vscode/src/vs/workbench/browser/.openide/`). A
+# pattern with a `/` in the middle is anchored to the root by itself, so
+# dropping the leading anchor is not enough: any depth has to be requested.
 **/.openide/memory-indexes/
 **/.openide/codegraph/
 
@@ -72,10 +72,13 @@ dev/design-*.md
 dev/prompt-*.md
 docs/i18n-pendientes.md
 
-# Claves privadas. Una clave de firma commiteada no se "borra" con un commit
-# siguiente: queda en el historial y hay que rotarla. La regla es amplia a
-# propósito — es más barato ignorar de más que filtrar una vez.
+# Private keys. A committed signing key is not "deleted" by a following commit:
+# it stays in the history and has to be rotated. The rule is deliberately broad:
+# ignoring too much is cheaper than filtering once.
 *.pem
 *.p12
 *.pfx
 *.key
+
+# Agent handoffs are local; durable Markdown notes may be versioned.
+**/.openide/memory/sessions/

@@ -1,10 +1,128 @@
 {
-  "description": "Upstream surfaces intentionally replaced by OpenIDE; shared agent-host code remains vendored but upstream providers are not registered by the product entry points.",
-  "paths": [
-    "extensions/copilot",
-    "src/vs/workbench/contrib/welcomeOnboarding",
-    "src/vs/workbench/contrib/preferences/test/browser/settingsEditor2.test.ts",
-    "src/vs/workbench/contrib/preferences/test/browser/settingsEditorSettingIndicators.test.ts",
-    "src/vs/workbench/contrib/preferences/test/browser/settingsTree.test.ts"
+  "schemaVersion": 1,
+  "description": "Explicit fork exceptions. New deletions must receive an owner, rationale and validation before synchronization.",
+  "removals": [
+    {
+      "path": "extensions/copilot",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Replaced by the native OpenIDE harness; do not restore the bundled upstream provider.",
+      "validation": "Agent common, browser and repository contract tests"
+    },
+    {
+      "path": "src/vs/workbench/contrib/welcomeOnboarding",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Replaced by OpenIDE onboarding and welcome surfaces.",
+      "validation": "OpenIDE settings and repository contract tests"
+    },
+    {
+      "path": "extensions/vscode-colorize-tests/test/colorize-fixtures/test.env",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Explicit legacy omission in the imported fork baseline; preserve until this fixture or distribution resource is deliberately restored.",
+      "validation": "Packaging and extension fixture smoke review when this path changes upstream"
+    },
+    {
+      "path": "resources/linux/debian/templates.template",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Explicit legacy omission in the imported fork baseline; preserve until this fixture or distribution resource is deliberately restored.",
+      "validation": "Packaging and extension fixture smoke review when this path changes upstream"
+    },
+    {
+      "path": "src/vs/workbench/contrib/preferences/browser/media/settingsEditor2.css",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Legacy upstream settings editor replaced by OpenIDE settings.",
+      "validation": "OpenIDE settings search and repository contract tests; typecheck-client"
+    },
+    {
+      "path": "src/vs/workbench/contrib/preferences/browser/settingsEditor2.ts",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Legacy upstream settings editor replaced by OpenIDE settings.",
+      "validation": "OpenIDE settings search and repository contract tests; typecheck-client"
+    },
+    {
+      "path": "src/vs/workbench/contrib/preferences/browser/settingsEditorSettingIndicators.ts",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Legacy upstream settings editor replaced by OpenIDE settings.",
+      "validation": "OpenIDE settings search and repository contract tests; typecheck-client"
+    },
+    {
+      "path": "src/vs/workbench/contrib/preferences/browser/settingsSearchMenu.ts",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Legacy upstream settings editor replaced by OpenIDE settings.",
+      "validation": "OpenIDE settings search and repository contract tests; typecheck-client"
+    },
+    {
+      "path": "src/vs/workbench/contrib/preferences/browser/settingsTree.ts",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Legacy upstream settings editor replaced by OpenIDE settings.",
+      "validation": "OpenIDE settings search and repository contract tests; typecheck-client"
+    },
+    {
+      "path": "src/vs/workbench/contrib/preferences/browser/settingsWidgets.ts",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Legacy upstream settings editor replaced by OpenIDE settings.",
+      "validation": "OpenIDE settings search and repository contract tests; typecheck-client"
+    },
+    {
+      "path": "src/vs/workbench/contrib/preferences/browser/tocTree.ts",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Legacy upstream settings editor replaced by OpenIDE settings.",
+      "validation": "OpenIDE settings search and repository contract tests; typecheck-client"
+    },
+    {
+      "path": "src/vs/workbench/contrib/preferences/test/browser/settingsEditor2.test.ts",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Legacy upstream settings editor replaced by OpenIDE settings.",
+      "validation": "OpenIDE settings search and repository contract tests; typecheck-client"
+    },
+    {
+      "path": "src/vs/workbench/contrib/preferences/test/browser/settingsEditorSettingIndicators.test.ts",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Legacy upstream settings editor replaced by OpenIDE settings.",
+      "validation": "OpenIDE settings search and repository contract tests; typecheck-client"
+    },
+    {
+      "path": "src/vs/workbench/contrib/preferences/test/browser/settingsTree.test.ts",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Legacy upstream settings editor replaced by OpenIDE settings.",
+      "validation": "OpenIDE settings search and repository contract tests; typecheck-client"
+    },
+    {
+      "path": "test/monaco/dist/core.html",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Explicit legacy omission in the imported fork baseline; preserve until this fixture or distribution resource is deliberately restored.",
+      "validation": "Packaging and extension fixture smoke review when this path changes upstream"
+    }
+  ],
+  "upstreamEdits": [
+    {
+      "path": "src/vs/code/electron-main/app.ts",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Registers OpenIDE process services and bridge transport.",
+      "validation": "Host ownership and Electron lifecycle tests"
+    },
+    {
+      "path": "src/vs/workbench/workbench.desktop.main.ts",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Registers desktop OpenIDE services and contributions.",
+      "validation": "valid-layers-check and desktop startup smoke"
+    },
+    {
+      "path": "src/vs/workbench/workbench.common.main.ts",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Registers product contributions and replaces upstream surfaces.",
+      "validation": "valid-layers-check and repository contract tests"
+    },
+    {
+      "path": "product.json",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Defines distribution branding, service endpoints and product capabilities.",
+      "validation": "audit-version-consistency.mjs and audit-branding.mjs"
+    },
+    {
+      "path": "package.json",
+      "owner": "OpenIDE maintainers",
+      "rationale": "Keeps the extension API version and OpenIDE development tasks.",
+      "validation": "audit-version-consistency.mjs and tooling tests"
+    }
   ]
 }

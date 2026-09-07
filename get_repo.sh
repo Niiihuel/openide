@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Compatibilidad temporal para los workflows de release: resuelve la metadata
-# de versión, pero no descarga ni reconstruye el código fuente.
+# Compatibility entry point for the release workflows: resolves the version
+# metadata but neither downloads nor rebuilds the source tree.
 
 set -e
 
 if [[ ! -f vscode/package.json ]]; then
-  echo "Error: falta el árbol fuente canónico en ./vscode" >&2
+  echo "Error: the canonical source tree is missing at ./vscode" >&2
   exit 1
 fi
 

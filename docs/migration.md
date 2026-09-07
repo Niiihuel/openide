@@ -1,54 +1,57 @@
 <!-- order: 20 -->
 
-# Migration
+# Migrating from Visual Studio Code
 
-## Table of Contents
+OpenIDE stores its data in its own locations, so nothing from an existing
+Visual Studio Code installation is picked up automatically. Both editors can
+stay installed.
 
-- [Manual Migration from Visual Studio Code to OpenIDE](#manual-migration)
-- [Semi-Automatic Migration with "Sync Settings" Extension](#semi-automatic-migration)
+- [Settings and keybindings](#settings)
+- [Extensions](#extensions)
+- [Settings Sync extensions](#sync)
 
-## <a id="manual-migration"></a>Manual Migration from Visual Studio Code to OpenIDE
+## <a id="settings"></a>Settings and keybindings
 
-OpenIDE (and a freshly cloned copy of vscode built from source) stores its extension files in `~/.vscode-oss`. So if you currently have Visual Studio Code installed, your extensions won't automatically populate. You can copy the `extensions` from `~/.vscode/extensions` to `~/.vscode-oss/extensions`.
+Visual Studio Code keeps `settings.json`, `keybindings.json` and `snippets/`
+in:
 
-Visual Studio Code stores its `keybindings.json` and `settings.json` file in these locations:
+- Windows: `%APPDATA%\Code\User`
+- macOS: `~/Library/Application Support/Code/User`
+- Linux: `~/.config/Code/User`
 
-- __Windows__: `%APPDATA%\Code\User`
-- __macOS__: `$HOME/Library/Application Support/Code/User`
-- __Linux__: `$HOME/.config/Code/User`
+OpenIDE reads the same files from:
 
-You can copy these files to the OpenIDE user settings folder:
+- Windows: `%APPDATA%\OpenIDE\User`
+- macOS: `~/Library/Application Support/OpenIDE/User`
+- Linux: `~/.config/OpenIDE/User`
 
-- __Windows__: `%APPDATA%\OpenIDE\User`
-- __macOS__: `$HOME/Library/Application Support/OpenIDE/User`
-- __Linux__: `$HOME/.config/OpenIDE/User`
+Copy the files across, or open *Preferences: Open User Settings (JSON)* in
+both editors and paste. Settings that name Microsoft-only services (Settings
+Sync, Copilot, the Microsoft marketplace) have no effect in OpenIDE and can be
+left as they are.
 
-To copy your settings manually:
+## <a id="extensions"></a>Extensions
 
-- In Visual Studio Code, go to Settings (`Meta+,`)
-- Click the three dots `...` and choose 'Open settings.json'
-- Copy the contents of settings.json into the same place in OpenIDE
+Visual Studio Code installs extensions under `~/.vscode/extensions`; OpenIDE
+uses `~/.openide/extensions`. Copying the directory works for most extensions,
+but two things differ:
 
-## <a id="semi-automatic-migration"></a>Semi-Automatic Migration with "Sync Settings" Extension
+- OpenIDE's gallery is [Open VSX](https://open-vsx.org). An extension copied
+  from VS Code that is not published there will keep working but will not
+  receive updates; see [extensions](./extensions.md) for the options.
+- Some Microsoft extensions refuse to run outside the official build; see
+  [extensions compatibility](./extensions-compatibility.md) for the list and
+  their replacements.
 
-The [**Sync Settings**](https://github.com/zokugun/vscode-sync-settings) extension can simplify the migration process by enabling synchronization of settings, keybindings, extensions, and more between Visual Studio Code and OpenIDE. Its author is the main maintainer of OpenIDE ;)
+The cleaner route is to reinstall from the Extensions view and let OpenIDE
+resolve each one against Open VSX.
 
-The extension is available in the Visual Studio Marketplace, OpenVSX or directly in its GitHub repository.
+## <a id="sync"></a>Settings Sync extensions
 
-### Steps:
-
-1. Install the **Sync Settings** extension in both Visual Studio Code and OpenIDE.
-2. Configure the extension on both Visual Studio Code and OpenIDE:
-  - Open Command Palette (`Meta+Shift+P`).
-  - Search for `Sync Settings: Open the repository settings` and execute the command.
-  - Configure the repository
-3. Export your current settings from Visual Studio Code:
-  - Open Command Palette (`Meta+Shift+P`).
-  - Search for `Sync Settings: Upload (user -> repository)` and execute the command.
-4. Import the settings into OpenIDE:
-  - I recommend the setting `"syncSettings.openOutputOnActivity": true,`.
-  - Open Command Palette (`Meta+Shift+P`).
-  - Search for `Sync Settings: Download (repository -> user)` and execute the command.
-  - Wait for all the extensions to be downloaded and installed (follow logs in the `Output` panel) before restarting OpenIDE.
-
-This method ensures that all supported configurations are seamlessly transferred.
+Microsoft's built-in Settings Sync needs Microsoft's backend and is not
+available in OpenIDE. Third-party alternatives such as
+[Sync Settings](https://open-vsx.org/extension/zokugun/sync-settings) work in
+both editors and can carry settings, keybindings, snippets and the extension
+list through a Git repository or a folder: install it in both, upload from
+VS Code, download in OpenIDE, and restart once the extensions have finished
+installing. OpenIDE does not endorse or maintain any of these extensions.

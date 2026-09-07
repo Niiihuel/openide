@@ -1,0 +1,112 @@
+[
+  {
+    "topic": "payments/retry",
+    "body": "# Payment retries\nQuasarRecovery must reuse the original idempotency key when retrying a payment. A new key can create a duplicate charge. The duplicate-charge regression passed for the observed revision.",
+    "queries": [
+      "QuasarRecovery retry policy",
+      "Can payment retries create duplicate charges?",
+      "Why reuse the idempotency key?",
+      "Cómo evitar cobros duplicados al reintentar pagos",
+      "What prevents charging a customer twice?"
+    ]
+  },
+  {
+    "topic": "auth/refresh",
+    "body": "# Refresh token rotation\nRotate refresh tokens once per session renewal. Reusing an old refresh token revokes the token family. Do not log token contents.",
+    "queries": [
+      "refresh token rotation",
+      "What happens when an old refresh token is reused?",
+      "Can I log credentials while debugging authentication?",
+      "Renovar sesión sin exponer tokens",
+      "How should a stolen renewal credential be handled?"
+    ]
+  },
+  {
+    "topic": "database/migrations",
+    "body": "# Database migrations\nDatabase schema migrations run in a transaction. Add nullable columns first, backfill existing rows, then introduce NOT NULL. Never delete production data to repair a failed migration.",
+    "queries": [
+      "database schema migration",
+      "When can we introduce NOT NULL?",
+      "What is the backfill order?",
+      "Cómo agregar una columna obligatoria sin perder datos",
+      "Can a failed migration delete production data?"
+    ]
+  },
+  {
+    "topic": "time/storage",
+    "body": "# Time handling\nPersist event timestamps in UTC. Render local time using the user time zone. Cordoba and Buenos Aires use the America/Argentina time zone identifiers. Do not store formatted display strings as timestamps.",
+    "queries": [
+      "UTC event timestamps",
+      "How should local time be rendered?",
+      "Argentina Cordoba time zone",
+      "Dónde guardar fechas y cómo mostrarlas al usuario",
+      "Should a formatted display date be stored?"
+    ]
+  },
+  {
+    "topic": "cache/invalidation",
+    "body": "# Cache invalidation\nInvalidate the customer cache after a committed profile update. A failed transaction must leave the previous cached value usable. Cache keys include the tenant identifier.",
+    "queries": [
+      "customer cache invalidation",
+      "When does a profile update invalidate the cache?",
+      "tenant identifier cache keys",
+      "Una transacción fallida debe borrar la caché",
+      "Could customer data leak across organizations?"
+    ]
+  },
+  {
+    "topic": "journal/durability",
+    "body": "# Run journal\nPersist tool intent before dispatching a workspace write. Persist the tool result before continuing the agent loop. On interruption, unknown tool outcomes require inspecting state instead of blindly replaying side effects.",
+    "queries": [
+      "tool intent dispatch durability",
+      "What happens after an interrupted workspace write?",
+      "unknown tool outcomes",
+      "Cómo recuperar una tarea interrumpida sin repetir cambios",
+      "Why persist tool results before continuing?"
+    ]
+  },
+  {
+    "topic": "workspace/isolation",
+    "body": "# Workspace isolation\nA subagent worktree owns its own workspace root. Relative writes and memory notes resolve inside that assigned worktree. Never silently fall back to the parent checkout.",
+    "queries": [
+      "subagent worktree workspace root",
+      "Where do relative memory writes go?",
+      "parent checkout fallback",
+      "Aislar cambios y memoria entre ramas de trabajo",
+      "Can a child task modify the main checkout?"
+    ]
+  },
+  {
+    "topic": "ui/accessibility",
+    "body": "# Keyboard accessibility\nDialogs trap keyboard focus while open and restore focus to the invoking control when closed. Escape dismisses nonblocking dialogs. Icon-only controls require accessible labels.",
+    "queries": [
+      "dialog keyboard focus",
+      "What should Escape do in a dialog?",
+      "accessible labels icon controls",
+      "Restaurar foco al cerrar una ventana de diálogo",
+      "How can keyboard users navigate the interface?"
+    ]
+  },
+  {
+    "topic": "storage/conflicts",
+    "body": "# Revision conflicts\nMemory updates require the current revision and content hash. Unsaved editor buffers block background replacement. Two native clients serialize mutations through one owner to avoid losing a write.",
+    "queries": [
+      "memory revision content hash",
+      "Why did an unsaved editor buffer block a memory write?",
+      "two native clients serialize mutations",
+      "Evitar perder notas cuando escriben dos agentes",
+      "How do we protect concurrent updates?"
+    ]
+  },
+  {
+    "topic": "testing/fixtures",
+    "body": "# Test fixtures\nIntegration tests use a deterministic local HTTP provider and disposable workspaces. Tests must verify observable disk effects and restart recovery. A provider stub does not establish real-model memory quality.",
+    "queries": [
+      "deterministic local HTTP provider",
+      "Why use disposable workspaces in integration tests?",
+      "restart recovery disk effects",
+      "Qué prueban las fixtures y qué queda sin medir",
+      "Does a stub prove semantic retrieval quality?"
+    ]
+  }
+]

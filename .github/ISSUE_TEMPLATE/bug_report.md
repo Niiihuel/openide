@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Create a report to help us improve
+about: Something in OpenIDE does not work as documented
 title: ''
 labels: bug
 assignees: ''
@@ -11,30 +11,30 @@ assignees: ''
 A clear and concise description of what the bug is.
 
 **Please confirm that this problem is OpenIDE-specific**
-- [ ] This bug doesn't happen if I use Microsoft's Visual Studio Code. It only happens in OpenIDE.
+- [ ] This bug does not happen in Visual Studio Code or Code OSS, or it is in an OpenIDE feature (agent, chat, providers, Project Map, updater, settings).
 
-**Please confirm that the issue/resolution isn't already documented**
-- [ ] I checked [the Docs page](https://github.com/Niiihuel/openide/blob/master/docs/index.md) and [the Troubleshooting page](https://github.com/Niiihuel/openide/blob/master/docs/troubleshooting.md) and my issue is not mentioned there.
+**Please confirm that the issue is not already documented**
+- [ ] I checked [the docs](https://github.com/Niiihuel/openide/blob/master/docs/index.md) and [troubleshooting](https://github.com/Niiihuel/openide/blob/master/docs/troubleshooting.md) and my issue is not mentioned there.
 
-**To Reproduce**
+**To reproduce**
 Steps to reproduce the behavior:
 1. Go to '...'
 2. Click on '....'
-3. Scroll down to '....'
-4. See error
+3. See error
 
 **Expected behavior**
 A clear and concise description of what you expected to happen.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+**Screenshots or logs**
+If applicable, add screenshots. For agent problems, the *OpenIDE Agent* output channel is usually what is needed; for startup problems, the output of `openide --verbose`.
 
-**Desktop (please complete the following information):**
- - OS: [e.g. Mac OS, Ubuntu 20.04, etc]
- - Architecture [e.g. x64, ia32, arm64]
- - Version [e.g. 1.33.0]
- - App Manager [e.g. Winget, Homebrew, Snap, AUR, RPM, Nix, ...]
- - Sandboxed [e.g. no, Flatpak, Snap]
+**Environment**
+ - OpenIDE version (Help → About): [e.g. 1.2.0]
+ - OS: [e.g. Ubuntu 24.04, Fedora 40, NixOS, Windows 11]
+ - Architecture: [x64 / arm64]
+ - Installed from: [AppImage / .deb / .rpm / .tar.gz / Windows user installer / Windows system installer / built from source]
+ - Provider and model, if the bug involves the agent: [e.g. OpenRouter, gpt-5-mini]
+ - Hosted CLI, if the bug involves the dock: [e.g. Claude Code 2.x]
 
 **Additional context**
 Add any other context about the problem here.

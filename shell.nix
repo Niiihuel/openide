@@ -1,10 +1,10 @@
-# Atajo interactivo para el entorno de build de OpenIDE en NixOS.
+# Interactive shortcut for the OpenIDE build environment on NixOS.
 #
-#   nix-shell            # entra al sandbox FHS con todo el toolchain
-#   . dev/build.sh -o    # (adentro) prepara el codigo fuente, sin compilar
-#   . dev/build.sh       # (adentro) build completo
+#   nix-shell            # enter the FHS sandbox with the whole toolchain
+#   . dev/build.sh -o    # (inside) resolve versions and prepare, without compiling
+#   . dev/build.sh       # (inside) full build
 #
-# La definicion real del entorno vive en dev/openide-fhs.nix.
+# The actual environment definition lives in dev/openide-fhs.nix.
 { pkgs ? import <nixpkgs> { } }:
 
 (import ./dev/openide-fhs.nix { inherit pkgs; }).env
