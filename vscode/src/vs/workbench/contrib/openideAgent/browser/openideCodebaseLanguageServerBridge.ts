@@ -9,12 +9,13 @@
  *  extraction to the same canonical index. The regex backend remains the fallback.
  *--------------------------------------------------------------------------------------------*/
 
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { timeout } from '../../../../base/common/async.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { ICodebaseMemoryService } from './openideCodebaseMemoryService.js';
 import { IOpenideCodebaseGraph } from './openideCodebaseGraph.js';
-import { ICodebaseMemoryNode, makeEvidence, makeNodeId } from '../../../../code/common/openideCodebaseMemoryTypes.js';
-import { IProviderExtraction } from '../../../../code/common/openideCodebaseMemoryProviders.js';
+import { ICodebaseMemoryNode, makeEvidence, makeNodeId } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
+import { IProviderExtraction } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProviders.js';
 import { IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
 
 /** Files per batch before yielding the event loop. Without this, the sequential sweep saturated
@@ -33,9 +34,13 @@ export class OpenideCodebaseLanguageServerBridge extends Disposable {
 		@ICodebaseMemoryService private readonly memory: ICodebaseMemoryService,
 		@IOpenideCodebaseGraph private readonly graph: IOpenideCodebaseGraph,
 		@IWorkspaceTrustManagementService private readonly trust: IWorkspaceTrustManagementService,
+		@IConfigurationService private readonly configuration: IConfigurationService,
 	) {
 		super();
 		this._register(this.trust.onDidChangeTrust(trusted => { if (trusted) { void this.refresh(); } else { this.generation++; } }));
+		this._register(this.configuration.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration('openide.memory.incrementalIndexing')) { this.generation++; void this.refresh(); }
+		}));
 		if (this.trust.isWorkspaceTrusted()) { void this.refresh(); }
 		// On close (window or reload), stop the sweep in progress: otherwise it keeps pushing
 		// extractions to the shared process and drowns the new window's initialize.
@@ -43,15 +48,16 @@ export class OpenideCodebaseLanguageServerBridge extends Disposable {
 	}
 
 	private async refresh(): Promise<void> {
-		if (!this.trust.isWorkspaceTrusted()) { return; }
+		if (!this.trust.isWorkspaceTrusted() || this.configuration.getValue('openide.memory.incrementalIndexing') === false) { return; }
 		const generation = ++this.generation;
 		const snapshot = await this.memory.getSnapshot().catch(() => undefined);
 		if (!snapshot || generation !== this.generation) { return; }
-		const files = snapshot.nodes.filter(node => node.kind === 'file').slice(0, MAX_FILES);
+		const files = snapshot.nodes.filter(node => node.kind === 'file' && node.evidence.provider !== 'authored').slice(0, MAX_FILES);
 		for (let index = 0; index < files.length; index++) {
 			if (generation !== this.generation) { return; }
 			const file = files[index];
 			const outline = await this.graph.outline(file.uri).catch(() => undefined);
+			if (generation !== this.generation) { return; }
 			if (outline) {
 				const evidence = makeEvidence('documentSymbols');
 				const nodes: ICodebaseMemoryNode[] = outline.symbols.slice(0, 1000).map(symbol => {

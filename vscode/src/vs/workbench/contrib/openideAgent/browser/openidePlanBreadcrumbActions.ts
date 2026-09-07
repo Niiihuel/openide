@@ -8,6 +8,7 @@ import { AnchorAlignment, AnchorPosition } from '../../../../base/browser/ui/con
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { OpenideChatModelPicker } from './chat/openideChatModelPicker.js';
@@ -56,6 +57,7 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 		@IContextViewService private readonly _contextViewService: IContextViewService,
 		@ICommandService private readonly _commandService: ICommandService,
 		@INotificationService private readonly _notificationService: INotificationService,
+		@IDialogService private readonly _dialogService: IDialogService,
 		@IOpenideIdePlanReview private readonly _planReview: OpenideIdePlanReview,
 		@IOpenideCliChangesService private readonly _cliChanges: OpenideCliChangesService,
 	) {
@@ -307,38 +309,29 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 		this._renderStore.add(addDisposableListener(approve, 'click', () => void this._commandService.executeCommand(OPENIDE_IDE_PLAN_APPROVE, path)));
 	}
 
-	/**
-	 * The bar for a file a hosted CLI changed: what it did, and one way to undo it.
-	 *
-	 * The undo restores the SESSION baseline, not HEAD, so it puts back what was there before that
-	 * conversation started rather than throwing away work that predates it. When the baseline is
-	 * inexact — the file was already dirty when the session began, so the best "before" we have is
-	 * one write late — the button says so instead of pretending.
-	 */
+	/** Review observed changes and explicitly select a snapshot for guarded restoration. */
 	private _renderAgentFile(hit: { sessionId: string; path: string; baseline: IOpenideSessionBaseline }, resource: URI): void {
 		const host = append(this.domNode, $('span.openide-plan-run'));
 		const label = append(host, $('span.openide-agent-file-label'));
 		label.textContent = t('cliChanges.breadcrumb.changed');
 
-		// Undo is offered whenever there is real content to restore. It is WITHHELD when the
-		// baseline is empty for a file that already existed: restoring that deletes something the
-		// session never created, while looking like the undo worked.
-		if (hit.baseline.existed || hit.baseline.exact) {
+		if (hit.baseline.exact) {
 			const undo = append(host, $('button.openide-review-btn.openide-plan-stop-btn', { type: 'button' })) as HTMLButtonElement;
 			append(undo, $('span.codicon.codicon-discard'));
-			append(undo, $('span.oreview-btn-label')).textContent = hit.baseline.exact
-				? t('cliChanges.breadcrumb.undo')
-				: t('cliChanges.breadcrumb.undoInexact');
-			undo.title = hit.baseline.exact ? t('cliChanges.breadcrumb.undoTitle') : t('cliChanges.noBaseline');
-			if (!hit.baseline.exact) {
-				// Partial: it cannot undo the agent's first edit of this conversation, because the
-				// restore point was taken after it.
-				undo.classList.add('openide-agent-file-inexact');
-			}
+			append(undo, $('span.oreview-btn-label')).textContent = t('cliChanges.breadcrumb.undo');
+			undo.title = t('cliChanges.breadcrumb.undoTitle');
 			this._renderStore.add(addDisposableListener(undo, 'click', async () => {
 				undo.disabled = true;
-				const ok = await this._cliChanges.rollback(hit.sessionId, hit.path);
-				if (!ok) {
+				try {
+					await this._cliChanges.openDiff(hit.sessionId, { path: hit.path, status: hit.baseline.existed ? 'modified' : 'added' });
+					const choice = await this._dialogService.confirm({ message: t('cliChanges.breadcrumb.restoreConfirm', hit.path), detail: t('cliChanges.breadcrumb.restoreDetail'), primaryButton: t('cliChanges.breadcrumb.undo') });
+					if (!choice.confirmed) { undo.disabled = false; return; }
+					const result = await this._cliChanges.rollback(hit.sessionId, hit.path, true);
+					if (result.status !== 'restored') {
+						undo.disabled = false;
+						this._notificationService.warn(t('cliChanges.breadcrumb.restoreResult', hit.path, result.status, result.reason ?? ''));
+					}
+				} catch {
 					undo.disabled = false;
 					this._notificationService.warn(t('cliChanges.breadcrumb.undoFailed', hit.path));
 				}

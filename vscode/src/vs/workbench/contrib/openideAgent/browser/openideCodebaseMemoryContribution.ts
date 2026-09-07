@@ -32,18 +32,25 @@ class OpenideCodebaseMemoryWatcherContribution extends Disposable implements IWo
 		@IOpenideCodebaseGraph graph: IOpenideCodebaseGraph,
 	) {
 		super();
-		this.watcher = new OpenideCodebaseMemoryWatcher(fileService, contextService, configurationService, memory, workspaceTrust);
-		this.languageServerBridge = new OpenideCodebaseLanguageServerBridge(memory, graph, workspaceTrust);
+		this.watcher = this._register(new OpenideCodebaseMemoryWatcher(fileService, contextService, configurationService, memory, workspaceTrust));
+		this.languageServerBridge = this._register(new OpenideCodebaseLanguageServerBridge(memory, graph, workspaceTrust, configurationService));
 		void this.watcher;
 		void this.languageServerBridge;
-		const rebuildIfNeeded = () => { if (configurationService.getValue<boolean>('openide.memory.indexOnOpen') !== false) { void memory.getVersion().then(version => (!version || version.version === 0) ? memory.rebuildFull() : undefined).catch(() => undefined); } };
-		this._register(workspaceTrust.onDidChangeTrust(trusted => { if (trusted) { rebuildIfNeeded(); } else { void memory.getVersion().then(key => key && memory.clear()).catch(() => undefined); } }));
-		if (workspaceTrust.isWorkspaceTrusted() && configurationService.getValue<boolean>('openide.memory.indexOnOpen') !== false) {
+		let generation = 0;
+		const rebuildIfNeeded = () => {
+			const current = ++generation;
+			if (!workspaceTrust.isWorkspaceTrusted() || configurationService.getValue<boolean>('openide.memory.indexOnOpen') === false) { return; }
 			void memory.getVersion().then(version => {
-				if (!version || version.version === 0) { return memory.rebuildFull(); }
+				if (current !== generation || !workspaceTrust.isWorkspaceTrusted()) { return; }
+				if (!version || version.version === 0 || version.staleCount > 0) { return memory.rebuildFull(); }
 				return undefined;
 			}).catch(() => undefined);
-		}
+		};
+		this._register({ dispose: () => { generation++; } });
+		this._register(workspaceTrust.onDidChangeTrust(() => rebuildIfNeeded()));
+		this._register(contextService.onDidChangeWorkspaceFolders(() => rebuildIfNeeded()));
+		this._register(configurationService.onDidChangeConfiguration(e => { if (e.affectsConfiguration('openide.memory.indexOnOpen')) { rebuildIfNeeded(); } }));
+		rebuildIfNeeded();
 	}
 }
 

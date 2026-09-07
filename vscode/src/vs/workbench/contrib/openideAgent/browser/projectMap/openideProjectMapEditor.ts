@@ -26,8 +26,8 @@ import { URI } from '../../../../../base/common/uri.js';
 import { ILanguageService } from '../../../../../editor/common/languages/language.js';
 import { getIconClasses } from '../../../../../editor/common/services/getIconClasses.js';
 import { IModelService } from '../../../../../editor/common/services/model.js';
-import { ILayoutNode, layoutGraph } from '../../../../../code/common/openideCodebaseGraphLayout.js';
-import { ICodebaseMemoryEdge, ICodebaseMemoryNode } from '../../../../../code/common/openideCodebaseMemoryTypes.js';
+import { ILayoutNode, layoutGraph } from '../../../../../platform/openideCodebase/common/openideCodebaseGraphLayout.js';
+import { ICodebaseMemoryEdge, ICodebaseMemoryNode } from '../../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -522,6 +522,16 @@ export class OpenideProjectMapEditor extends EditorPane {
 			const groups = await this.graphService.getRelations([node.id], this.maxRelationDepth(), 100, 'both');
 			if (serial !== this.relationsSerial) { return; }
 			this.renderRelations(node, groups);
+			const authored = (await this.memoryService.getFileNodes(node.uri)).find(item => item.kind === 'note' && item.metadata?.['id']);
+			if (serial !== this.relationsSerial) { return; }
+			if (authored) {
+				const metadata = authored.metadata!;
+				append(this.inspRelations, $('.openide-pmap-insp-section', undefined, t('memory.provenance', String(metadata['source_kind']), String(metadata['revision']))));
+				append(this.inspRelations, $('div', undefined, `${metadata['source_session']} / ${metadata['source_message']}`));
+				append(this.inspRelations, $('div', undefined, authored.documentation ?? ''));
+				append(this.inspRelations, $('div', undefined, t('memory.references', (metadata['related'] as string[] ?? []).join(', '))));
+			}
+
 		} catch (error) {
 			if (serial !== this.relationsSerial) { return; }
 			clearNode(this.inspRelations);

@@ -9,7 +9,7 @@
  *  An account is not a config key: credentials live in the system secret store and the state
  *  (connected, quota, accounts) is live. The page is 100% section.
  *
- *  All the logic already lives in IOpenideAgentService — here we only draw and call. The page is
+ *  All the logic already lives in IOpenideProviderService — here we only draw and call. The page is
  *  drawn with the settings editor's own anatomy (`card()` / `cardRow()` in the renderer): the
  *  index is one card per group with a row per provider, and every block of the detail page is a
  *  captioned card. A grid of tiles and an inset list of its own used to live here; two designs
@@ -41,7 +41,8 @@ import type { IOpenideSettingsNavigationEntry } from '../../openideSettings/comm
 import { ISectionFilter, ISectionStatus, OpenideSectionRenderer } from '../../openideSettings/browser/openideSettingsSectionBuilder.js';
 import { filterProviderModels, orderProviderModels, PROVIDER_MODEL_SEARCH_THRESHOLD } from '../common/openideProviderModels.js';
 import { providerSupportsUsage } from '../common/openideUsage.js';
-import { IOpenideAgentService, IOpenidePickerModel } from './openideAgentService.js';
+import { IOpenideProviderService } from './openideProviderService.js';
+import { IOpenidePickerModel } from '../common/openidePickerModels.js';
 import { IOAuthInteraction } from './openideOAuth.js';
 import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { openideInputBoxStyles } from './openideControlStyles.js';
@@ -184,7 +185,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	private enablingStore = false;
 
 	constructor(
-		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
+		@IOpenideProviderService private readonly providerService: IOpenideProviderService,
 		@IContextViewService private readonly contextViewService: IContextViewService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@IClipboardService private readonly clipboardService: IClipboardService,
@@ -197,7 +198,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		// Credentials and config can change from outside (the palette wizard, another Settings).
 		// The caches go stale instead of being dropped: the page repaints with the data it has and
 		// the fresh load swaps it in when it lands — no skeleton flash on every credential event.
-		this._register(this.agentService.onDidChange(() => {
+		this._register(this.providerService.onDidChange(() => {
 			this.statusStale = true;
 			this.detailStale = true;
 			this.invalidation++;
@@ -239,8 +240,8 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		// detail page is open.
 		try {
 			const [persistence, canEnableStore] = await Promise.all([
-				this.agentService.getSecretsPersistence(),
-				this.agentService.canEnableBasicPasswordStore(),
+				this.providerService.getSecretsPersistence(),
+				this.providerService.canEnableBasicPasswordStore(),
 			]);
 			if (token !== this.generation || !root.isConnected) { return; }
 			if (persistence === 'in-memory') {
@@ -272,9 +273,9 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	// ---- index ----
 
 	private paintIndex(root: HTMLElement, token: number): void {
-		const entries = this.agentService.listProviders();
+		const entries = this.providerService.listProviders();
 		const statuses = this.statusCache;
-		const activeId = this.agentService.getActiveProviderId();
+		const activeId = this.providerService.getActiveProviderId();
 
 		// The h1 above ("AI Providers") is the editor's; the page opens on its one-line explanation.
 		append(root, $('.openide-settings-provider-intro', undefined, t('openide.providers.desc')));
@@ -393,7 +394,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	/** Writes the custom entry and lands on the provider's own page, where the key is pasted. */
 	private async connectRegistryProvider(provider: IRegistryProvider): Promise<void> {
 		try {
-			await this.agentService.addRegistryProvider(provider.id);
+			await this.providerService.addRegistryProvider(provider.id);
 			this.navigate?.(providerPageId(provider.id));
 		} catch (error) {
 			this.notificationService.error(error instanceof Error ? error.message : String(error));
@@ -403,7 +404,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	private async loadRegistry(token: number): Promise<void> {
 		this.registryLoading = true;
 		try {
-			this.registryCache = await this.agentService.listRegistryProviders();
+			this.registryCache = await this.providerService.listRegistryProviders();
 		} catch {
 			// No registry (offline, first run): the group simply does not appear.
 			this.registryCache = [];
@@ -422,7 +423,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	 * to force it.
 	 */
 	private paintCatalogFooter(root: HTMLElement): void {
-		const status = this.agentService.getModelCatalogStatus();
+		const status = this.providerService.getModelCatalogStatus();
 		const card = this.ui.card(root, {
 			caption: t('openide.providers.catalogTitle'),
 			footer: t('openide.providers.catalogDesc'),
@@ -442,7 +443,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			run: async () => {
 				button.enabled = false;
 				try {
-					await this.agentService.refreshModelCatalog();
+					await this.providerService.refreshModelCatalog();
 					// The registry changed under it: the list of "the rest" has to be built again.
 					this.registryCache = undefined;
 					this.paint();
@@ -588,15 +589,15 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		this.statusLoading = true;
 		const invalidation = this.invalidation;
 		try {
-			const entries = this.agentService.listProviders();
+			const entries = this.providerService.listProviders();
 			const next = new Map<string, ProviderStatus>();
 			await Promise.all(entries.map(async entry => {
-				const connected = await this.agentService.isConnected(entry.id).catch(() => false);
-				const hasKey = entry.auth === 'apiKey' ? await this.agentService.hasApiKey(entry.id).catch(() => false) : false;
+				const connected = await this.providerService.isConnected(entry.id).catch(() => false);
+				const hasKey = entry.auth === 'apiKey' ? await this.providerService.hasApiKey(entry.id).catch(() => false) : false;
 				// Where the key comes from, not just whether there is one: a provider can now be
 				// connected because of the environment or another tool, and a row that does not say
 				// so leaves "why is it using THAT key?" unanswerable.
-				const origin = hasKey ? await this.agentService.credentialOrigin(entry.id).catch(() => undefined) : undefined;
+				const origin = hasKey ? await this.providerService.credentialOrigin(entry.id).catch(() => undefined) : undefined;
 				next.set(entry.id, { connected, hasKey, origin });
 			}));
 			this.statusCache = next;
@@ -628,9 +629,9 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			keywords: ['fallback', 'respaldo', 'cadena', 'chain', 'failover', 'rate limit', 'cooldown'],
 		});
 		chain.forEach((step, index) => {
-			const entry = this.agentService.findProvider(step.providerId);
+			const entry = this.providerService.findProvider(step.providerId);
 			const model = step.model ?? entry?.defaultModel ?? '';
-			const name = model ? this.agentService.describeModel(step.providerId, model).name || model : '';
+			const name = model ? this.providerService.describeModel(step.providerId, model).name || model : '';
 			const health = model ? this.routing.healthFor({ providerId: step.providerId, model }) : undefined;
 			const cooling = isModelCoolingDown(health, Date.now());
 			const value = this.ui.cardRow(card, {
@@ -688,7 +689,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 
 	/** Picks the next step from the models the connected providers actually publish. */
 	private async addChainStep(): Promise<void> {
-		const groups = await this.agentService.getConnectedModelGroups();
+		const groups = await this.providerService.getConnectedModelGroups();
 		const chain = this.fallbackChain();
 		const taken = new Set(chain.map(step => `${step.providerId}/${step.model ?? ''}`));
 		type ChainPick = IQuickPickItem & { readonly step: IFallbackStep };
@@ -715,7 +716,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 
 	private paintDetailPage(root: HTMLElement, token: number): void {
 		const id = this.activeProviderId!;
-		const entry = this.agentService.listProviders().find(provider => provider.id === id);
+		const entry = this.providerService.listProviders().find(provider => provider.id === id);
 		if (!entry) {
 			this.ui.empty(root, {
 				title: t('openide.providers.gone'),
@@ -741,15 +742,15 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		this.detailLoading = true;
 		const invalidation = this.invalidation;
 		try {
-			const entry = this.agentService.listProviders().find(provider => provider.id === id);
+			const entry = this.providerService.listProviders().find(provider => provider.id === id);
 			if (!entry) { return; }
-			const connected = await this.agentService.isConnected(entry.id).catch(() => false);
+			const connected = await this.providerService.isConnected(entry.id).catch(() => false);
 			// Warms the models.dev registry (and the 5-min dynamic-models cache) BEFORE describing
 			// models: `describeModel` is sync against the registry, and on a cold start it would
 			// return bare ids without names, context or cost.
-			await this.agentService.getConnectedModelGroups().catch(() => undefined);
+			await this.providerService.getConnectedModelGroups().catch(() => undefined);
 			const resolvedModels = orderProviderModels(
-				await this.agentService.resolveProviderModels(entry).catch(() => entry.defaultModel ? [entry.defaultModel] : []),
+				await this.providerService.resolveProviderModels(entry).catch(() => entry.defaultModel ? [entry.defaultModel] : []),
 				entry.defaultModel ?? '',
 			);
 			const view: IProviderView = {
@@ -759,13 +760,13 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 				auth: entry.auth,
 				blurb: entry.blurb ?? '',
 				connected,
-				hasKey: entry.auth === 'apiKey' ? await this.agentService.hasApiKey(entry.id).catch(() => false) : false,
-				hasStoredKey: entry.auth === 'apiKey' ? await this.agentService.hasStoredApiKey(entry.id).catch(() => false) : false,
-				origin: entry.auth === 'apiKey' ? await this.agentService.credentialOrigin(entry.id).catch(() => undefined) : undefined,
+				hasKey: entry.auth === 'apiKey' ? await this.providerService.hasApiKey(entry.id).catch(() => false) : false,
+				hasStoredKey: entry.auth === 'apiKey' ? await this.providerService.hasStoredApiKey(entry.id).catch(() => false) : false,
+				origin: entry.auth === 'apiKey' ? await this.providerService.credentialOrigin(entry.id).catch(() => undefined) : undefined,
 				supportsUsage: connected && providerSupportsUsage(entry),
-				accounts: entry.auth !== 'none' ? await this.agentService.listAccounts(entry.id).catch(() => []) : [],
+				accounts: entry.auth !== 'none' ? await this.providerService.listAccounts(entry.id).catch(() => []) : [],
 				models: resolvedModels,
-				modelInfos: resolvedModels.map(modelId => this.agentService.describeModel(entry.id, modelId)),
+				modelInfos: resolvedModels.map(modelId => this.providerService.describeModel(entry.id, modelId)),
 				defaultModel: entry.defaultModel ?? '',
 				apiKeysUrl: entry.apiKeysUrl ?? '',
 				oauthHint: entry.oauthHint ?? '',
@@ -802,8 +803,8 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 
 	/** The detail page: a head strip, then one captioned card per block. */
 	private paintDetailSections(root: HTMLElement, view: IProviderView): void {
-		const activeId = this.agentService.getActiveProviderId();
-		const model = this.agentService.getModel();
+		const activeId = this.providerService.getActiveProviderId();
+		const model = this.providerService.getModel();
 		const isActive = view.id === activeId && view.connected;
 
 		this.paintDetailHead(root, view, activeId, isActive);
@@ -1008,24 +1009,24 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		this.busyKey = view.id;
 		redraw();
 		try {
-			await this.agentService.ensureAccountTracked(view.id);
-			if (mode === 'reauth' && accountId) { await this.agentService.switchAccount(view.id, accountId); }
-			await this.agentService.setApiKey(view.id, key);
-			const snapshotId = mode === 'new' ? undefined : (accountId ?? await this.agentService.getActiveAccountId(view.id));
-			await this.agentService.snapshotAccount(view.id, { id: snapshotId });
+			await this.providerService.ensureAccountTracked(view.id);
+			if (mode === 'reauth' && accountId) { await this.providerService.switchAccount(view.id, accountId); }
+			await this.providerService.setApiKey(view.id, key);
+			const snapshotId = mode === 'new' ? undefined : (accountId ?? await this.providerService.getActiveAccountId(view.id));
+			await this.providerService.snapshotAccount(view.id, { id: snapshotId });
 			this.keyDraft.delete(view.id);
 			// Saving the key IS connecting: probe right away and finish the job. If nothing else
 			// is usable yet, this provider becomes the active one with its default model — the
 			// opencode behavior; nobody saves a key to then go hunting for a second button.
-			const connected = await this.agentService.isConnected(view.id).catch(() => false);
+			const connected = await this.providerService.isConnected(view.id).catch(() => false);
 			if (connected) {
-				const activeId = this.agentService.getActiveProviderId();
+				const activeId = this.providerService.getActiveProviderId();
 				const activeConnected = activeId && activeId !== view.id
-					? await this.agentService.isConnected(activeId).catch(() => false)
+					? await this.providerService.isConnected(activeId).catch(() => false)
 					: activeId === view.id;
 				if (!activeConnected) {
-					await this.agentService.setActiveProvider(view.id);
-					await this.agentService.setModel(this.draftModel.get(view.id) ?? '');
+					await this.providerService.setActiveProvider(view.id);
+					await this.providerService.setModel(this.draftModel.get(view.id) ?? '');
 					this.draftModel.delete(view.id);
 				}
 				this.notificationService.notify({ severity: Severity.Info, message: t('openide.providers.keyConnected', view.label) });
@@ -1098,12 +1099,12 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 				};
 				if (!account.isActive) {
 					item({ icon: 'check', label: t('openide.providers.accountSetDefault') },
-						() => void this.agentService.switchAccount(view.id, account.id).then(() => this.paint()));
+						() => void this.providerService.switchAccount(view.id, account.id).then(() => this.paint()));
 				}
 				item({ icon: 'sync', label: t('openide.providers.accountReauth') },
 					() => void this.reauthAccount(view, account.id, account.label, redraw));
 				item({ icon: view.auth === 'oauth' ? 'sign-out' : 'trash', label: view.auth === 'oauth' ? t('openide.providers.signOut') : t('openide.providers.accountRemove') },
-					() => void this.agentService.removeAccount(view.id, account.id).then(() => this.paint()));
+					() => void this.providerService.removeAccount(view.id, account.id).then(() => this.paint()));
 			},
 		});
 	}
@@ -1141,7 +1142,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			this.ui.cardRow(card, {
 				label: t('openide.providers.signOut'), icon: 'sign-out', danger: true,
 				confirm: t('openide.providers.signOutConfirm'),
-				run: () => void this.agentService.signOut(view.id).then(() => { this.detailStale = true; this.paint(); }),
+				run: () => void this.providerService.signOut(view.id).then(() => { this.detailStale = true; this.paint(); }),
 			});
 		}
 		// `hasStoredKey`, NOT `hasKey`: since the credential chain landed, a provider can be
@@ -1152,7 +1153,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			this.ui.cardRow(card, {
 				label: t('openide.providers.clearKey'), icon: 'trash', danger: true,
 				confirm: t('openide.providers.clearKeyConfirm'),
-				run: () => void this.agentService.clearApiKey(view.id).then(() => { this.detailStale = true; this.paint(); }),
+				run: () => void this.providerService.clearApiKey(view.id).then(() => { this.detailStale = true; this.paint(); }),
 			});
 		} else if (view.auth === 'apiKey' && view.hasKey && view.origin && view.origin.kind !== 'store') {
 			this.ui.cardRow(card, {
@@ -1212,7 +1213,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			// A manually-typed model that the catalog does not publish still shows as a row, so the
 			// selection is never invisible.
 			if (effectiveSelected && !infos.some(info => info.id === effectiveSelected)) {
-				infos.push(this.agentService.describeModel(view.id, effectiveSelected));
+				infos.push(this.providerService.describeModel(view.id, effectiveSelected));
 			}
 			const visible = filterProviderModels(infos, query);
 			if (!visible.length) {
@@ -1220,7 +1221,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 				this.ui.cardRow(card, {
 					label: t('openide.providers.catalogRefresh'), icon: 'refresh',
 					run: async () => {
-						try { await this.agentService.refreshModelCatalog(); }
+						try { await this.providerService.refreshModelCatalog(); }
 						catch (error) { this.fail(error); }
 						finally { this.recheck(); }
 					},
@@ -1275,7 +1276,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		const value = modelId === view.defaultModel ? '' : modelId;
 		if (isActiveProvider) {
 			this.draftModel.delete(view.id);
-			await this.agentService.setModel(value);
+			await this.providerService.setModel(value);
 			this.paint();
 			return;
 		}
@@ -1293,10 +1294,10 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		});
 		if (value === undefined) { return; }
 		const trimmed = value.trim();
-		const isActiveProvider = view.connected && view.id === this.agentService.getActiveProviderId();
+		const isActiveProvider = view.connected && view.id === this.providerService.getActiveProviderId();
 		if (isActiveProvider) {
 			this.draftModel.delete(view.id);
-			await this.agentService.setModel(trimmed === view.defaultModel ? '' : trimmed);
+			await this.providerService.setModel(trimmed === view.defaultModel ? '' : trimmed);
 			this.paint();
 			return;
 		}
@@ -1322,7 +1323,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	private refreshNavigation(): void {
 		// `hidden`: the sub-pages must stay resolvable (breadcrumb "AI Providers › OpenAI", deep
 		// links) but the sidebar must not list fifteen providers — the index page is the directory.
-		const next = this.agentService.listProviders().map(provider => ({ id: providerPageId(provider.id), label: provider.label, hidden: true }));
+		const next = this.providerService.listProviders().map(provider => ({ id: providerPageId(provider.id), label: provider.label, hidden: true }));
 		const same = next.length === this._navigationChildren.length
 			&& next.every((entry, index) => entry.id === this._navigationChildren[index].id && entry.label === this._navigationChildren[index].label);
 		if (same) { return; }
@@ -1343,7 +1344,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 					icon: this.enablingStore ? 'loading~spin' : 'save',
 					primary: true,
 					enabled: !this.enablingStore,
-					run: () => { this.enablingStore = true; this.paint(); void this.agentService.enableBasicPasswordStore(); },
+					run: () => { this.enablingStore = true; this.paint(); void this.providerService.enableBasicPasswordStore(); },
 				}]
 				: undefined,
 		});
@@ -1417,7 +1418,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		this.usage.set(providerId, { loading: true, windows: previous?.windows ?? [], loaded: !!previous?.loaded });
 		this.paint();
 		try {
-			const usage = await this.agentService.getProviderUsage(providerId, force);
+			const usage = await this.providerService.getProviderUsage(providerId, force);
 			this.usage.set(providerId, {
 				loading: false,
 				loaded: true,
@@ -1538,14 +1539,14 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 
 		// Track the active account BEFORE overwriting it with the new login: that way "add account"
 		// and "re-authenticate" never lose an already-connected session.
-		this.agentService.ensureAccountTracked(providerId)
-			.then(() => options.mode === 'reauth' && options.accountId ? this.agentService.switchAccount(providerId, options.accountId) : undefined)
-			.then(() => this.agentService.signIn(providerId, interaction))
+		this.providerService.ensureAccountTracked(providerId)
+			.then(() => options.mode === 'reauth' && options.accountId ? this.providerService.switchAccount(providerId, options.accountId) : undefined)
+			.then(() => this.providerService.signIn(providerId, interaction))
 			.then(async ok => {
 				if (session.cancelled) { return; }
 				if (ok) {
-					const snapshotId = options.mode === 'new' ? undefined : (options.accountId ?? await this.agentService.getActiveAccountId(providerId));
-					await this.agentService.snapshotAccount(providerId, { id: snapshotId, label: options.label });
+					const snapshotId = options.mode === 'new' ? undefined : (options.accountId ?? await this.providerService.getActiveAccountId(providerId));
+					await this.providerService.snapshotAccount(providerId, { id: snapshotId, label: options.label });
 					this.oauth = undefined;
 					// `recheck` and not `paint`: a repaint alone redraws from the CACHED probes,
 					// which still say "not connected" — the login just changed the very thing they

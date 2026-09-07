@@ -448,7 +448,7 @@
 /* The hosted terminal replaces transcript + composer while a CLI session is the active tab. */
 .openide-chat-agent-terminal { position: relative; flex: 1; min-height: 0; background: var(--vscode-terminal-background, var(--vscode-editor-background)); }
 .openide-chat-agent-terminal.hidden { display: none; }
-.openide-chat-agent-terminal-host { position: absolute; inset: 0; padding: 4px 0 0 6px; }
+.openide-chat-agent-terminal-host { position: absolute; inset: 32px 0 0; padding: 4px 0 0 6px; }
 .openide-chat-agent-terminal-host .terminal-wrapper { height: 100%; }
 .openide-chat-cli-active .openide-chat-list-host,
 .openide-chat-cli-active .openide-chat-notice,
@@ -688,3 +688,8 @@
 .openide-chat-native.sessions-side > .openide-chat-dock {
 	margin-right: 300px;
 }
+
+.openide-cli-tools { position: relative; z-index: 2; color: var(--vscode-descriptionForeground); background: var(--vscode-editor-background); font-size: var(--vscode-font-size); }
+.openide-cli-tools summary { height: 32px; line-height: 32px; padding: 0 8px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-cli-tools summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.openide-cli-tools p { margin: 0; padding: 4px 8px 8px; }

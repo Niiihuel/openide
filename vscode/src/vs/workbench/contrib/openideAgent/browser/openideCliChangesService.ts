@@ -3,33 +3,19 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-/*---------------------------------------------------------------------------------------------
- *  OpenIDE — what each hosted CLI changed, session by session and turn by turn.
- *
- *  The dock knows when an agent starts and stops working: `reduceOpenideCliStatus` already
- *  derives that from Claude's hooks and, for CLIs without them, from the output heuristic. This
- *  turns those transitions into change sets — snapshot the working tree when a turn opens, diff
- *  when it closes — so a CLI that never told us anything still produces a reviewable list.
- *
- *  The alternative was exposing OpenIDE's write tools over MCP and reading the edits from there.
- *  That was rejected: a tool crossing that door skips OpenIDE's approval. git asks the CLI for
- *  nothing, works for every one of them equally, and cannot be wrong about what is on disk.
- *
- *  ── What a turn's list actually means ──────────────────────────────────────────────────────
- *  "What changed in the working tree while the agent was working" — the user's own edits during
- *  that window included. The model says so rather than hiding it, and `hooked` records whether
- *  the boundary came from the CLI's own hooks or from the heuristic, so a surface can present an
- *  exact list differently from an approximate one instead of overstating both.
- *--------------------------------------------------------------------------------------------*/
+/**
+ * Observes filesystem changes during hosted CLI turns. Watchers and hooks establish time
+ * windows, not authorship. Pre-execution snapshots support explicit selected restoration;
+ * late captures remain review-only. Restore validates the current state through the same
+ * engine used by native message change sets.
+ */
 
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
-import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
-import { FileChangesEvent, IFileService } from '../../../../platform/files/common/files.js';
+import { FileChangesEvent, FileOperationResult, IFileService, toFileOperationResult } from '../../../../platform/files/common/files.js';
 import { Schemas } from '../../../../base/common/network.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ILanguageService } from '../../../../editor/common/languages/language.js';
@@ -37,9 +23,16 @@ import { IModelService } from '../../../../editor/common/services/model.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { ITextModelService } from '../../../../editor/common/services/resolverService.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
-import { IOpenideAgentService } from './openideAgentService.js';
-import { IOpenideAgentHostService, OPENIDE_AGENT_HOST_CHANNEL } from '../../../../platform/openideAgentHost/common/openideAgentHost.js';
+import { IOpenideAgentHostService } from '../../../../platform/openideAgentHost/common/openideAgentHost.js';
 import { OpenideCliId, OpenideCliSessionStatus } from '../common/openideAgentCliCatalog.js';
+import { IOpenideNativeServices } from '../common/openideNativeServices.js';
+import { IOpenideAgentRunStateService } from '../common/openideAgentRunState.js';
+import { IWorkingCopyService } from '../../../services/workingCopy/common/workingCopyService.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { createOpenideRestoreSafety, OpenideRestoreEngine } from './openideRestoreEngine.js';
+import { createFileChange } from '../common/openideMessageChanges.js';
+import { resolvePathInsideWorkspace } from '../common/openideWorkspacePath.js';
+import { extUriBiasedIgnorePathCase, joinPath } from '../../../../base/common/resources.js';
 import { buildDiffPreview, countDiff, OpenideDiffLine } from '../common/openideDiffPreview.js';
 import {
 	IOpenideCliTurn,
@@ -58,7 +51,7 @@ export const IOpenideCliChangesService = createDecorator<OpenideCliChangesServic
 
 /** A changed file, plus whether the repo can say what it looked like before. */
 export interface IOpenideCliChangedFile extends IOpenideTurnFile {
-	/** There is a real "before" on record, so the diff is meaningful and rollback is safe. */
+	/** An exact earlier snapshot exists; restore still validates the after state and active writers. */
 	readonly exact: boolean;
 }
 
@@ -72,8 +65,7 @@ export interface IOpenideCliChangedFile extends IOpenideTurnFile {
  * own TUI, printing its diff as it works — so repeating it here only fragmented the one thing
  * the panel is for: what this conversation did to the repo, in one list.
  *
- * Turns remain the mechanism underneath: they are how a change gets attributed to the agent
- * rather than to the user typing between turns. They just stopped being the presentation.
+ * Turns remain the observation windows. Attribution to a particular writer is unknown.
  */
 export interface IOpenideCliChangesSession {
 	readonly sessionId: string;
@@ -86,7 +78,7 @@ export interface IOpenideCliChangesSession {
 	readonly activity: OpenideCliActivity;
 	/** A turn is running right now, so the list is not final. */
 	readonly working: boolean;
-	/** Boundaries came from the CLI's own hooks, so the list is exact rather than inferred. */
+	/** Boundary evidence came from hooks. This does not establish who wrote a file. */
 	readonly hooked: boolean;
 	/** Some turn touched more paths than we keep, so the list is a prefix. */
 	readonly truncated: boolean;
@@ -103,32 +95,20 @@ export interface IOpenideCliTurnFinished {
 	readonly failed: boolean;
 }
 
-/**
- * A file as it stood before this conversation touched it — what a diff compares against and what
- * a rollback restores.
- *
- * `exact` says whether the repo actually records that "before".
- *
- * It does whenever the file is in HEAD, and also when the session CREATED it — an empty baseline
- * is exactly right there. What the repo cannot answer for is a file that was already sitting in
- * the tree untracked when the conversation began: git has never seen it, so there is no earlier
- * version anywhere.
- *
- * For a file git has never seen, OpenIDE takes its OWN snapshot the first time the conversation
- * touches it. That is one write late — whatever the agent's FIRST edit changed is baked in and
- * will not appear — but every edit after it is exact, which is the difference between a useful
- * diff and a wall of green. It matters more than it sounds: in a repo that tracks almost nothing
- * (this fork commits ten files under `vscode/src`) HEAD is never available, and this is the only
- * baseline there is.
- *
- * `exact` says which of the two it is, and nothing pretends otherwise: an inexact baseline shows
- * a warning in the list and a different tooltip on undo.
- */
+/** Snapshot evidence is independent of turn-boundary confidence and writer attribution. */
 export interface IOpenideSessionBaseline {
 	readonly content: string;
-	/** The file existed at that point. False ⇒ the session created it, and rollback deletes it. */
 	readonly existed: boolean;
 	readonly exact: boolean;
+	readonly provenance?: 'pre-execution' | 'pinned-git' | 'observed-late' | 'turn-end';
+	readonly capturedAt?: number;
+	readonly etag?: string;
+	readonly mtime?: number;
+}
+
+export interface IOpenideCliRestoreResult {
+	readonly status: 'restored' | 'conflict' | 'unavailable' | 'failed';
+	readonly reason?: string;
 }
 
 /**
@@ -166,6 +146,14 @@ interface ITracked {
 	 * then deleted files the agent had merely edited.
 	 */
 	readonly dirtyAtStart: Promise<ReadonlySet<string> | undefined>;
+	readonly baseCommit: Promise<string | undefined>;
+	prepared: boolean;
+	gitBytePreserving: boolean;
+	existingAtStart?: ReadonlySet<string>;
+	preparing?: Promise<void>;
+	exited: boolean;
+	readonly after: Map<string, IOpenideSessionBaseline>;
+	readonly restored: Set<string>;
 	/** Baseline per path, resolved once, the first time the session touches it. */
 	readonly baselines: Map<string, IOpenideSessionBaseline>;
 	/** In-flight baseline captures, so two events for one path do not both read it. */
@@ -191,7 +179,7 @@ function statusArgs(paths: readonly string[]): string[] {
 }
 
 /**
- * Scheme for the left-hand side of a CLI change's diff: the file as HEAD has it.
+ * Scheme for the left-hand side of a CLI change's diff: its captured session baseline.
  *
  * Its own scheme and not the agent's `openide-diff`: that one holds the session baselines the
  * inline review keeps and marks pending on, and borrowing it would have this view quietly
@@ -226,17 +214,19 @@ export class OpenideCliChangesService extends Disposable {
 	readonly onDidFinishTurn: Event<IOpenideCliTurnFinished> = this._onDidFinishTurn.event;
 
 	constructor(
-		@IMainProcessService mainProcessService: IMainProcessService,
+		@IOpenideNativeServices nativeServices: IOpenideNativeServices,
 		@ILogService private readonly logService: ILogService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IModelService private readonly modelService: IModelService,
 		@ILanguageService private readonly languageService: ILanguageService,
 		@ITextModelService textModelService: ITextModelService,
 		@IFileService private readonly fileService: IFileService,
-		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
+		@IWorkingCopyService private readonly workingCopyService: IWorkingCopyService,
+		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
+		@IOpenideAgentRunStateService private readonly runState: IOpenideAgentRunStateService,
 	) {
 		super();
-		this.host = ProxyChannel.toService<IOpenideAgentHostService>(mainProcessService.getChannel(OPENIDE_AGENT_HOST_CHANNEL));
+		this.host = nativeServices.host;
 		this._register(textModelService.registerTextModelContentProvider(OPENIDE_CLI_CHANGES_SCHEME, this));
 		this._register(fileService.onDidFilesChange(event => this.onFilesChanged(event)));
 	}
@@ -252,7 +242,7 @@ export class OpenideCliChangesService extends Disposable {
 			cliId: entry.cliId,
 			title: entry.title,
 			cwd: entry.cwd,
-			files: entry.log.sessionFiles().map(file => ({ ...file, exact: entry.baselines.get(file.path)?.exact !== false })),
+			files: entry.log.sessionFiles().map(file => ({ ...file, exact: entry.baselines.get(file.path)?.exact === true })),
 			activity: cliActivityOf(entry.status, entry.typing),
 			working: entry.log.isOpen,
 			hooked: entry.hooked,
@@ -277,8 +267,7 @@ export class OpenideCliChangesService extends Disposable {
 	 * read the SAME transition, so they can never disagree about whether the agent is working.
 	 *
 	 * `hooked` is the session's, not the event's: once a CLI has reported through its own hooks,
-	 * every later boundary of that session is trustworthy even if this particular one came from
-	 * the heuristic.
+	 * this records boundary evidence only. Restoration still waits for the process to exit.
 	 */
 	noteStatus(session: { readonly id: string; readonly cliId: OpenideCliId; readonly cwd: string; readonly title: string }, status: OpenideCliSessionStatus, hooked: boolean): void {
 		if (!session.cwd) {
@@ -299,14 +288,21 @@ export class OpenideCliChangesService extends Disposable {
 				queue: Promise.resolve(),
 				baselines: new Map(),
 				capturing: new Map(),
+				baseCommit: this.host.runGit(session.cwd, ['rev-parse', '--verify', 'HEAD']).then(result => result.ok && /^[a-f0-9]{40,64}$/.test(result.stdout.trim()) ? result.stdout.trim() : undefined, () => undefined),
+				prepared: false,
+				gitBytePreserving: false,
+				exited: false,
+				after: new Map(),
+				restored: new Set(),
 				// Kicked off when the session appears, NOT at the first turn boundary. The agent
 				// can write before that boundary's queued git call returns, and a baseline
 				// captured while this was still undefined got misfiled as "the session created
 				// it" — which paints the whole file as new.
-				dirtyAtStart: this.gitStatus(session.cwd, []).then(records => records && new Set(records.map(record => record.path))),
+				dirtyAtStart: this.gitStatus(session.cwd, []).then(records => records && new Set(records.flatMap(record => [record.path, ...(record.from ? [record.from] : [])]))),
 			};
 			this.tracked.set(session.id, entry);
 		}
+		if (!entry.exited) { this.runState.activeCliSessions.add(session.id); }
 		entry.title = session.title;
 		entry.hooked ||= hooked;
 		const boundary = turnBoundaryOf(entry.status, status);
@@ -320,6 +316,75 @@ export class OpenideCliChangesService extends Disposable {
 		entry.queue = entry.queue.then(() => this.applyBoundary(session.id, boundary)).catch(error => {
 			this.logService.warn('[openide-changes] boundary failed', error);
 		});
+	}
+
+	/** Awaited before launching the PTY. A bounded budget keeps large dirty trees usable. */
+	async prepareSession(session: { readonly id: string; readonly cliId: OpenideCliId; readonly cwd: string; readonly title: string }): Promise<void> {
+		this.noteStatus(session, 'needs-input', false);
+		const entry = this.tracked.get(session.id);
+		if (!entry) { return; }
+		entry.exited = false;
+		this.runState.activeCliSessions.add(session.id);
+		entry.preparing ??= (async () => {
+			const dirty = await entry.dirtyAtStart;
+			await entry.baseCommit;
+			const conversions = await Promise.all([
+				this.host.runGit(entry.cwd, ['config', '--get', '--default', 'false', 'core.autocrlf']),
+				this.host.runGit(entry.cwd, ['config', '--get', '--default', 'native', 'core.eol']),
+				this.host.runGit(entry.cwd, ['config', '--get', '--default', '', 'core.attributesfile']),
+			]).catch(() => undefined);
+			entry.gitBytePreserving = !!conversions?.every(result => result.ok)
+				&& conversions[0].stdout.trim() === 'false' && conversions[1].stdout.trim() === 'native' && !conversions[2].stdout.trim()
+				&& !!dirty && ![...dirty].some(path => path === '.gitattributes' || path.endsWith('/.gitattributes'));
+			// Include ignored paths before inferring absence: status alone omits existing files.
+			const inventory = await Promise.all([
+				this.host.runGit(entry.cwd, ['ls-files', '--cached', '--others', '--exclude-standard', '-z']),
+				this.host.runGit(entry.cwd, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z']),
+			]).catch(() => undefined);
+			if (inventory?.every(result => result.ok)) { entry.existingAtStart = new Set(inventory.flatMap(result => result.stdout.split('\0').filter(Boolean))); }
+			let remaining = 8 * 1024 * 1024;
+			let count = 0;
+			if (dirty) {
+				for (const path of dirty) {
+					if (++count > 128 || remaining <= 0) { break; }
+					const snapshot = await this.readSnapshot(entry, path, 'pre-execution');
+					if (snapshot) { entry.baselines.set(path, snapshot); remaining -= VSBuffer.fromString(snapshot.content).byteLength; }
+				}
+			}
+			entry.prepared = true;
+		})();
+		await entry.preparing;
+	}
+
+	/** Process exit is stronger evidence of inactivity than output silence. */
+	noteExited(sessionId: string): void {
+		this.runState.activeCliSessions.delete(sessionId);
+		const entry = this.tracked.get(sessionId);
+		if (entry) { entry.exited = true; }
+	}
+
+	private resource(entry: ITracked, path: string): URI | undefined {
+		if (path.trim() !== path || path.includes('\0')) { return undefined; }
+		const cwd = URI.file(entry.cwd);
+		const resource = resolvePathInsideWorkspace(path, [cwd]);
+		return resource && resolvePathInsideWorkspace(resource.fsPath, this.contextService.getWorkspace().folders.map(folder => folder.uri)) ? resource : undefined;
+	}
+
+	private async readSnapshot(entry: ITracked, path: string, provenance: IOpenideSessionBaseline['provenance']): Promise<IOpenideSessionBaseline | undefined> {
+		const resource = this.resource(entry, path);
+		if (!resource || this.workingCopyService.isDirty(resource)) { return undefined; }
+		try {
+			const stat = await this.fileService.stat(resource);
+			if (!stat.isFile || stat.isSymbolicLink || stat.size > 256 * 1024) { return undefined; }
+			const file = await this.fileService.readFile(resource, { limits: { size: 256 * 1024 } });
+			const content = file.value.toString();
+			if (content.includes('\0') || !VSBuffer.fromString(content).equals(file.value)) { return undefined; }
+			return { content, existed: true, exact: provenance !== 'observed-late', provenance, capturedAt: Date.now(), etag: file.etag, mtime: file.mtime };
+		} catch (error) {
+			return toFileOperationResult(error as Error) === FileOperationResult.FILE_NOT_FOUND
+				? { content: '', existed: false, exact: provenance !== 'observed-late', provenance, capturedAt: Date.now() }
+				: undefined;
+		}
 	}
 
 	/** The user is typing into this session's TUI. */
@@ -343,10 +408,17 @@ export class OpenideCliChangesService extends Disposable {
 		const paths = boundary === 'end' ? entry.log.touchedPaths() : [];
 		const [records, ignored] = paths.length ? await Promise.all([this.gitStatus(entry.cwd, paths), this.gitIgnored(entry.cwd, paths)]) : [[], undefined];
 		if (boundary === 'begin') {
+			entry.after.clear();
+			entry.restored.clear();
 			entry.log.begin(Date.now(), entry.hooked);
 		} else {
 			const closed = entry.log.end(records, Date.now(), ignored);
 			if (closed) {
+				for (const path of paths) {
+					await entry.capturing.get(path);
+					const snapshot = await this.readSnapshot(entry, path, 'turn-end');
+					if (snapshot) { entry.after.set(path, snapshot); }
+				}
 				this._onDidFinishTurn.fire({
 					sessionId,
 					cliId: entry.cliId,
@@ -379,14 +451,8 @@ export class OpenideCliChangesService extends Disposable {
 			await this.editorService.openEditor({ resource: this.baselineUri(sessionId, file.path), options: { pinned: true } });
 			return;
 		}
-		// The harness's own inline review — the file in the NORMAL editor with the blocks painted
-		// and Undo/Keep — not the side-by-side diff editor: one way of reading a change, whether
-		// the local agent or a hosted CLI made it. The session's baseline is what it compares
-		// against; without one (the capture is still in flight, or never happened) the review
-		// falls back to HEAD on its own.
 		await entry.capturing.get(file.path);
-		const baseline = entry.baselines.get(file.path);
-		await this.agentService.reviewExternalChange(`${entry.cwd}/${file.path}`, baseline ? { content: baseline.content, existed: baseline.existed } : undefined);
+		await this.editorService.openEditor({ original: { resource: this.baselineUri(sessionId, file.path) }, modified: { resource: joinPath(URI.file(entry.cwd), file.path) }, options: { pinned: true } });
 	}
 
 	/** The URI our content provider answers with the session's baseline for that path. */
@@ -404,21 +470,8 @@ export class OpenideCliChangesService extends Disposable {
 		const path = resource.path.replace(/^\//, '');
 		const entry = this.tracked.get(sessionId);
 		const baseline = entry?.baselines.get(path);
-		let content = baseline?.content ?? '';
-		if (entry && baseline && !baseline.exact) {
-			// Our snapshot landed after the only write there was, so it is identical to the file and
-			// the diff would render completely empty — the user opens a file the agent just
-			// rewrote and is shown no change at all. Falling back to an empty left side says "all
-			// of this", which is at least true, instead of "nothing", which is not.
-			try {
-				const current = (await this.fileService.readFile(URI.file(`${entry.cwd}/${path}`))).value.toString();
-				if (current === content) {
-					content = '';
-				}
-			} catch {
-				// Unreadable right now: the stored baseline is the best there is.
-			}
-		}
+		const content = baseline?.content ?? '';
+
 		// Language guessed from the URI path, so the left pane highlights like the right one; a
 		// diff where one side is plain text reads as if half the file changed.
 		return this.modelService.createModel(content, this.languageService.createByFilepathOrFirstLine(URI.file(path)), resource);
@@ -458,7 +511,7 @@ export class OpenideCliChangesService extends Disposable {
 		// tick would otherwise diff against nothing and paint the whole file green.
 		await entry.capturing.get(file.path);
 		const baseline = entry.baselines.get(file.path);
-		let before = baseline?.content ?? '';
+		const before = baseline?.content ?? '';
 		let after = '';
 		if (file.status !== 'deleted') {
 			try {
@@ -467,11 +520,7 @@ export class OpenideCliChangesService extends Disposable {
 				return undefined;
 			}
 		}
-		if (baseline && !baseline.exact && before === after) {
-			// Same call as `provideTextContent`: our own snapshot landed after the only write there
-			// was, so "all of this" is at least true where "nothing changed" is not.
-			before = '';
-		}
+
 		const counts = countDiff(before, after);
 		// The sidebar has no 120-line cap to honour — that one keeps a persisted transcript small.
 		// Still bounded: a generated file of thousands of lines is scrolled in the editor, not here.
@@ -484,44 +533,49 @@ export class OpenideCliChangesService extends Disposable {
 		for (const [sessionId, entry] of this.tracked) {
 			const path = this.relativeTo(entry.cwd, resource);
 			const baseline = path ? entry.baselines.get(path) : undefined;
-			if (path && baseline) {
+			if (path && baseline && entry.log.sessionFiles().some(file => file.path === path)) {
 				hits.push({ sessionId, path, baseline });
 			}
 		}
 		return hits.reverse();
 	}
 
-	/**
-	 * Puts a file back the way it was before this conversation touched it.
-	 *
-	 * A baseline that did not exist means the session created the file, so restoring it means
-	 * DELETING it — writing an empty file instead would leave a lie on disk that looks like work.
-	 */
-	async rollback(sessionId: string, path: string): Promise<boolean> {
+	/** Restores an explicitly selected observed snapshot after validating exact evidence. */
+	async rollback(sessionId: string, path: string, selectedSnapshot = false): Promise<IOpenideCliRestoreResult> {
 		const entry = this.tracked.get(sessionId);
-		const baseline = entry?.baselines.get(path);
-		if (!entry || !baseline) {
-			return false;
-		}
-		// Never restore an EMPTY baseline over a file that existed: that deletes something the
-		// session did not create, and it would look like the undo worked. Refused at the source as
-		// well as in the UI, because a guard that only lives in a button is one keybinding away
-		// from being bypassed. An inexact baseline WITH content is allowed — it undoes all but the
-		// agent's first edit, and the button says so.
-		if (!baseline.existed && !baseline.exact) {
-			return false;
-		}
-		const resource = URI.file(`${entry.cwd}/${path}`);
+		if (!entry) { return { status: 'unavailable', reason: 'The session snapshot is no longer available.' }; }
+		await entry.queue;
+		const baseline = entry.baselines.get(path);
+		const after = entry.after.get(path);
+		if (!baseline?.exact || !after?.exact) { return { status: 'unavailable', reason: 'Exact before and after snapshots are required.' }; }
+		if (entry.restored.has(path)) { return { status: 'unavailable', reason: 'This snapshot has already been restored.' }; }
+		// A watcher cannot distinguish a CLI write from a user or another agent's write.
+		if (!selectedSnapshot) { return { status: 'conflict', reason: 'These are observed changes. Select snapshot restoration explicitly after reviewing the comparison.' }; }
+		const resource = this.resource(entry, path);
+		if (!resource) { return { status: 'conflict', reason: 'Path outside the workspace.' }; }
+		const active = () => this.runState.hasActiveRuns() || [...this.tracked.values()].some(other => this.relativeTo(other.cwd, resource) && !other.exited);
+		if (active()) { return { status: 'conflict', reason: 'An agent may still be writing. Stop the CLI process or wait for the native run to finish.' }; }
+		const safety = createOpenideRestoreSafety(this.fileService, this.workingCopyService, this.host);
+		const engine = new OpenideRestoreEngine(this.fileService, this.contextService, {
+			...safety,
+			validateResource: async uri => {
+				if (active()) { return 'An agent may still be writing. Stop the CLI process or wait for the native run to finish.'; }
+				const reason = await safety.validateResource?.(uri);
+				if (reason) { return reason; }
+				const current = await this.readSnapshot(entry, path, 'pre-execution');
+				return !current || current.existed !== after.existed || current.content !== after.content || (after.etag && current.etag !== after.etag) || (after.mtime && current.mtime !== after.mtime)
+					? 'The file changed after the snapshot. Review the current comparison.' : undefined;
+			},
+		});
 		try {
-			if (baseline.existed) {
-				await this.fileService.writeFile(resource, VSBuffer.fromString(baseline.content));
-			} else {
-				await this.fileService.del(resource);
-			}
-			return true;
+			const operation = !baseline.existed ? 'create' : !after.existed ? 'delete' : 'modify';
+			const change = createFileChange(resource.fsPath, operation, baseline.existed ? baseline.content : undefined, after.existed ? after.content : undefined);
+			const result = await engine.rollback({ messageId: sessionId, timestamp: Date.now(), state: 'finalized', files: [change] });
+			if (result.status === 'reverted') { entry.restored.add(path); this.fireChange(sessionId); return { status: 'restored' }; }
+			return { status: result.status === 'unavailable' ? 'unavailable' : 'conflict', reason: result.files.find(file => file.reason)?.reason };
 		} catch (error) {
-			this.logService.warn('[openide-changes] rollback failed', error);
-			return false;
+			this.logService.warn('[openide-changes] restore failed', error);
+			return { status: 'failed', reason: error instanceof Error ? error.message : String(error) };
 		}
 	}
 
@@ -533,40 +587,36 @@ export class OpenideCliChangesService extends Disposable {
 	 */
 	private captureBaseline(sessionId: string, path: string): void {
 		const entry = this.tracked.get(sessionId);
-		if (!entry || entry.baselines.has(path) || entry.capturing.has(path)) {
-			return;
-		}
-		// Already sitting in the tree, untracked, when the conversation began ⇒ nothing anywhere
-		// records what it looked like. Anything else HEAD can answer, or the session created it.
-		const resource = URI.file(`${entry.cwd}/${path}`);
-		// Read FIRST, before awaiting anything. This is the snapshot's whole value: every
-		// millisecond spent on a git round-trip first is another write the agent can land, and the
-		// snapshot was coming back equal to the file — which rendered an empty diff.
-		const snapshot = this.fileService.readFile(resource).then(file => file.value.toString(), () => undefined);
-		const head = this.host.runGit(entry.cwd, ['show', `HEAD:${path}`, '--']).catch(() => undefined);
+		if (!entry || entry.baselines.has(path) || entry.capturing.has(path)) { return; }
 		const work = (async () => {
-			// `--` separates the pathspec from anything git might read as a revision, so a file
-			// called `HEAD` cannot change what is being asked for.
-			const fromHead = await head;
-			if (fromHead?.ok) {
-				entry.baselines.set(path, { content: fromHead.stdout, existed: true, exact: true });
-				return;
+			const [base, dirty] = await Promise.all([entry.baseCommit, entry.dirtyAtStart]);
+			if (entry.prepared && entry.existingAtStart && !entry.existingAtStart.has(path)) {
+				entry.baselines.set(path, { content: '', existed: false, exact: true, provenance: 'pre-execution', capturedAt: Date.now() }); return;
 			}
-			const dirtyAtStart = await entry.dirtyAtStart;
-			if (dirtyAtStart && !dirtyAtStart.has(path)) {
-				// Not in HEAD and not in the tree when the conversation began: the session made it,
-				// so an empty baseline is exactly right.
-				entry.baselines.set(path, { content: '', existed: false, exact: true });
-				return;
+			if (entry.prepared && dirty && !dirty.has(path) && base) {
+				const mode = await this.host.runGit(entry.cwd, ['ls-tree', '-z', base, '--', path]).catch(() => undefined);
+				if (mode?.ok && /^(100644|100755) blob /.test(mode.stdout)) {
+					const head = await this.host.runGit(entry.cwd, ['show', `${base}:./${path}`, '--']).catch(() => undefined);
+					if (head?.ok && head.stdout.length <= 256 * 1024 && !/[\0\ufffd]/.test(head.stdout)) {
+						const attributes = await Promise.all([
+							this.host.runGit(entry.cwd, ['check-attr', '-z', '--all', '--', path]),
+							this.host.runGit(entry.cwd, ['check-attr', `--source=${base}`, '-z', '--all', '--', path]),
+						]).catch(() => undefined);
+						const conversionAttributes = new Set(['text', 'eol', 'filter', 'working-tree-encoding', 'ident']);
+						const unconverted = attributes?.every(result => {
+							if (!result.ok) { return false; }
+							const fields = result.stdout.split('\0');
+							for (let index = 0; index + 2 < fields.length; index += 3) {
+								if (conversionAttributes.has(fields[index + 1]) && !['unset', 'unspecified', 'false'].includes(fields[index + 2])) { return false; }
+							}
+							return true;
+						});
+						entry.baselines.set(path, { content: head.stdout, existed: true, exact: entry.gitBytePreserving && !!unconverted, provenance: 'pinned-git', capturedAt: Date.now() }); return;
+					}
+				}
 			}
-			// Either git has no record of it, or git could not say what the tree looked like when
-			// the conversation began. In both cases our own snapshot is the only "before" there
-			// is, and it is marked inexact: the undo restores it instead of deleting the file,
-			// because "the session created this" is not something we can claim.
-			const content = await snapshot;
-			entry.baselines.set(path, content !== undefined
-				? { content, existed: true, exact: false }
-				: { content: '', existed: false, exact: false });
+			const snapshot = await this.readSnapshot(entry, path, 'observed-late');
+			entry.baselines.set(path, snapshot ?? { content: '', existed: false, exact: false, provenance: 'observed-late' });
 		})().finally(() => entry.capturing.delete(path));
 		entry.capturing.set(path, work);
 	}
@@ -623,17 +673,15 @@ export class OpenideCliChangesService extends Disposable {
 	 * timing alone would be a guess presented as a fact.
 	 */
 	noteFileChange(path: string, kind: OpenideTouchKind): void {
-		for (const entry of this.tracked.values()) {
+		for (const [sessionId, entry] of this.tracked) {
 			entry.log.touch(path, kind);
+			if (entry.log.isOpen) { this.captureBaseline(sessionId, path); }
 		}
 	}
 
 	private onFilesChanged(event: FileChangesEvent): void {
 		// Nothing is open ⇒ this is the user's own work between turns, and the whole point is not
 		// to claim it for an agent.
-		if (![...this.tracked.values()].some(entry => entry.log.isOpen)) {
-			return;
-		}
 		const batches: readonly [readonly URI[], OpenideTouchKind][] = [
 			[event.rawAdded, 'added'],
 			[event.rawUpdated, 'updated'],
@@ -645,6 +693,8 @@ export class OpenideCliChangesService extends Disposable {
 					continue;
 				}
 				for (const [sessionId, entry] of this.tracked) {
+					const changedPath = this.relativeTo(entry.cwd, resource);
+					if (changedPath) { this.previews.delete(`${sessionId}\0${changedPath}`); }
 					// Only a session with an OPEN turn is working: a baseline captured for an idle one
 					// would credit it with a file it never touched, and the undo control would then
 					// name the wrong conversation.
@@ -671,12 +721,9 @@ export class OpenideCliChangesService extends Disposable {
 	 * worse — silently answers about a path that happens to match inside this one.
 	 */
 	private relativeTo(cwd: string, resource: URI): string | undefined {
-		const base = cwd.endsWith('/') ? cwd : `${cwd}/`;
-		const path = resource.fsPath;
-		if (!path.startsWith(base)) {
-			return undefined;
-		}
-		const relative = path.slice(base.length);
+		const root = URI.file(cwd);
+		if (!extUriBiasedIgnorePathCase.isEqualOrParent(resource, root)) { return undefined; }
+		const relative = extUriBiasedIgnorePathCase.relativePath(root, resource);
 		// Our own index and the git directory churn constantly and are nobody's change to review.
 		return relative && !relative.startsWith('.git/') && !relative.startsWith('.openide/memory-indexes/') ? relative : undefined;
 	}

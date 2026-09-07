@@ -14,6 +14,7 @@
 //#region --- workbench common
 
 import './workbench.common.main.js';
+import './contrib/openideAgent/browser/openideNativeServices.js';
 
 //#endregion
 

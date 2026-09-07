@@ -21,11 +21,10 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
-import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
-import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
+import { IOpenideNativeServices } from '../common/openideNativeServices.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
@@ -39,7 +38,6 @@ import {
 	HOOK_TIMEOUT_MAX_SECONDS,
 	HOOK_TIMEOUT_MIN_SECONDS,
 	IOpenideAgentHostService,
-	OPENIDE_AGENT_HOST_CHANNEL,
 	shlexSplit,
 } from '../../../../platform/openideAgentHost/common/openideAgentHost.js';
 
@@ -153,7 +151,7 @@ export class OpenideAgentHooks extends Disposable {
 	private readonly consentInFlight = new Map<string, Promise<boolean>>();
 
 	constructor(
-		mainProcessService: IMainProcessService,
+		nativeServices: IOpenideNativeServices,
 		private readonly fileService: IFileService,
 		private readonly contextService: IWorkspaceContextService,
 		private readonly environmentService: IEnvironmentService,
@@ -164,7 +162,7 @@ export class OpenideAgentHooks extends Disposable {
 		private readonly logService: ILogService,
 	) {
 		super();
-		this.client = ProxyChannel.toService<IOpenideAgentHostService>(mainProcessService.getChannel(OPENIDE_AGENT_HOST_CHANNEL));
+		this.client = nativeServices.host;
 		this._register(this.fileService.onDidFilesChange(e => {
 			for (const uri of this.watchedFiles.values()) {
 				if (e.affects(uri)) {

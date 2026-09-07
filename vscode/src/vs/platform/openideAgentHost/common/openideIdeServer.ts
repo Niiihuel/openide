@@ -241,6 +241,7 @@ export interface IIdeToolSchema {
 	 * CLI knows it out of band, so advertising it would only spend prompt budget.
 	 */
 	readonly hidden?: boolean;
+	readonly annotations?: { readonly readOnlyHint?: boolean; readonly destructiveHint?: boolean; readonly idempotentHint?: boolean; readonly openWorldHint?: boolean };
 }
 
 const STRING = { type: 'string' } as const;
@@ -417,20 +418,8 @@ export interface IIdeServerStartOptions {
 	 * lockfile and is the one every CLI can use, so discovery is the exception, not the rule.
 	 */
 	readonly publishLockfile?: boolean;
-	/**
-	 * Bind here if it is free. Omitted means a random port.
-	 *
-	 * Paired with a stable `authToken`, this is what makes a one-time registration in a CLI that
-	 * has no per-session hook survive a restart.
-	 */
+	/** Prefer this address when free. Authentication is always minted for the current owner. */
 	readonly preferredPort?: number;
-	/**
-	 * Reuse this token instead of minting one.
-	 *
-	 * A token that changes every launch breaks a persistent registration just as thoroughly as a
-	 * changing port does — the CLI reconnects to the right address and gets a 401.
-	 */
-	readonly authToken?: string;
 }
 
 export interface IIdeServerInfo {
@@ -446,4 +435,11 @@ export interface IIdeToolRequest {
 	readonly connectionId: string;
 	readonly tool: string;
 	readonly args: unknown;
+}
+
+/** Window-level evidence only: HTTP requests do not establish a hosted CLI identity. */
+export interface IIdeDiscoveryStatus {
+	readonly initializedAt?: number;
+	readonly toolsListedAt?: number;
+	readonly toolCount: number;
 }

@@ -21,11 +21,10 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
-import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
-import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
+import { IOpenideNativeServices } from '../common/openideNativeServices.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
@@ -37,7 +36,6 @@ import {
 	MCP_CALL_TIMEOUT_DEFAULT_SECONDS,
 	MCP_CALL_TIMEOUT_MAX_SECONDS,
 	MCP_CALL_TIMEOUT_MIN_SECONDS,
-	OPENIDE_AGENT_HOST_CHANNEL,
 	isMcpToolAllowed,
 	sanitizeMcpToolName,
 	validateMcpServerConfig,
@@ -92,7 +90,7 @@ export class OpenideMcpManager extends Disposable {
 	private readonly configWatchScheduler: RunOnceScheduler;
 
 	constructor(
-		mainProcessService: IMainProcessService,
+		nativeServices: IOpenideNativeServices,
 		private readonly fileService: IFileService,
 		private readonly contextService: IWorkspaceContextService,
 		private readonly environmentService: IEnvironmentService,
@@ -101,7 +99,7 @@ export class OpenideMcpManager extends Disposable {
 		private readonly logService: ILogService,
 	) {
 		super();
-		this.client = ProxyChannel.toService<IOpenideAgentHostService>(mainProcessService.getChannel(OPENIDE_AGENT_HOST_CHANNEL));
+		this.client = nativeServices.host;
 		this.heartbeatTimer = setInterval(() => { void this.client.mcpHeartbeat(this.clientId, this.ownerToken).catch(() => undefined); }, 60_000);
 		(this.heartbeatTimer as unknown as { unref?: () => void }).unref?.();
 		void this.client.mcpHeartbeat(this.clientId, this.ownerToken).catch(() => undefined);

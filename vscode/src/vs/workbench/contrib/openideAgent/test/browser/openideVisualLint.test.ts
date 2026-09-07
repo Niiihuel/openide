@@ -5,7 +5,8 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { describeLint, IVisualLintReport, openideVisualLintRuntime } from '../../common/openideVisualLint.js';
+import { describeLint, IVisualLintReport } from '../../common/openideVisualLint.js';
+import { openideVisualLintRuntime } from '../../browser/openideVisualLint.js';
 
 /**
  * The lint, run against a real document in a real browser — the only place its answers mean

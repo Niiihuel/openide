@@ -29,6 +29,8 @@
  *  graph people navigate is worse than a missing one, because nothing about it looks wrong.
  *--------------------------------------------------------------------------------------------*/
 
+import { URI } from '../../../base/common/uri.js';
+import { memoryRecordRoot, parseMemoryRecord } from './openideMemoryRecord.js';
 import { ICodebaseMemoryEdge, ICodebaseMemoryNode, makeEvidence, makeNodeId } from './openideCodebaseMemoryTypes.js';
 
 /** Workspace-relative path of the shared memory. */
@@ -96,13 +98,13 @@ export function extractBareIdentifiers(text: string): string[] {
 }
 
 export function isCodebaseNotesUri(uri: string): boolean {
-	return uri.endsWith(`/${CODEBASE_NOTES_PATH}`);
+	return uri.endsWith(`/${CODEBASE_NOTES_PATH}`) || /\/\.openide\/memory\/notes\/[^/]+\.md$/.test(uri);
 }
 
 /** Workspace root of a notes uri (`<root>/.openide/MEMORY.md` gives `<root>`), or undefined. */
 export function notesWorkspaceRoot(uri: string): string | undefined {
 	const suffix = `/${CODEBASE_NOTES_PATH}`;
-	return uri.endsWith(suffix) ? uri.slice(0, -suffix.length) : undefined;
+	return uri.endsWith(suffix) ? uri.slice(0, -suffix.length) : memoryRecordRoot(uri);
 }
 
 export interface ICodebaseNoteEntry {
@@ -215,6 +217,18 @@ export function extractCodebaseNotes(workspaceKey: string, uri: string, content:
 	const nodes: ICodebaseMemoryNode[] = [];
 	const edges: ICodebaseMemoryEdge[] = [];
 	const fileNodeId = makeNodeId(workspaceKey, uri, 'file', uri);
+	if (memoryRecordRoot(uri)) {
+		const record = parseMemoryRecord(content);
+		if (!record) { throw new Error(`Invalid authored memory Markdown: ${uri}`); }
+		if (record.kind === 'session') { return { nodes, edges }; }
+		const id = makeNodeId(workspaceKey, 'memory', 'note', record.id);
+		nodes.push({ id: fileNodeId, kind: 'file', name: uri.slice(uri.lastIndexOf('/') + 1), uri, evidence, degree: 0 });
+		nodes.push({ id, kind: 'note', name: noteName(record.body.replace(/^#+\s*/, '')), qualifiedName: record.topic_key,
+			uri, documentation: record.body, evidence, degree: 0,
+			metadata: { ...record, body: undefined, [NOTE_MENTIONS_KEY]: [...new Set([...record.related, ...extractNoteMentions(record.body)])] } });
+		edges.push({ source: fileNodeId, target: id, type: 'CONTAINS', evidence });
+		return { nodes, edges };
+	}
 	nodes.push({ id: fileNodeId, kind: 'file', name: 'MEMORY.md', uri, evidence, degree: 0 });
 
 	for (const entry of parseCodebaseNotes(content)) {
@@ -259,7 +273,6 @@ export function linkCodebaseNotes(nodes: readonly ICodebaseMemoryNode[], mode: N
 	// The root comes from the notes file itself rather than from the caller: it is the one uri
 	// here whose shape is known, and a caller passing the wrong root would silently stop every
 	// path mention from resolving.
-	const workspaceRoot = notesWorkspaceRoot(notes[0].uri);
 	const byName = new Map<string, ICodebaseMemoryNode[]>();
 	const byUri = new Map<string, ICodebaseMemoryNode>();
 	for (const node of nodes) {
@@ -288,6 +301,7 @@ export function linkCodebaseNotes(nodes: readonly ICodebaseMemoryNode[], mode: N
 	const edges: ICodebaseMemoryEdge[] = [];
 	const seen = new Set<string>();
 	for (const note of notes) {
+		const workspaceRoot = notesWorkspaceRoot(note.uri);
 		const marked = note.metadata?.[NOTE_MENTIONS_KEY];
 		const mentions: string[] = Array.isArray(marked) ? marked.map(String) : [];
 		if (mode === 'identifiers') {
@@ -295,9 +309,12 @@ export function linkCodebaseNotes(nodes: readonly ICodebaseMemoryNode[], mode: N
 		}
 		for (const raw of mentions) {
 			const mention = String(raw);
-			const target = isPathMention(mention)
-				? resolvePathMention(mention, byUri, workspaceRoot)
-				: resolveSymbolMention(mention, byName);
+			const [path, symbol] = mention.split('#');
+			const declared = note.metadata?.['related'];
+			const pathReference = isPathMention(path) || Array.isArray(declared) && declared.includes(mention);
+			const file = pathReference ? resolvePathMention(path, byUri, workspaceRoot) : undefined;
+			const target = symbol && file ? resolveSymbolMention(symbol, byName, workspaceRoot, file.uri)
+				: pathReference ? file : resolveSymbolMention(mention, byName, workspaceRoot);
 			if (!target || target.id === note.id) {
 				continue;
 			}
@@ -313,9 +330,10 @@ export function linkCodebaseNotes(nodes: readonly ICodebaseMemoryNode[], mode: N
 }
 
 function resolvePathMention(mention: string, byUri: ReadonlyMap<string, ICodebaseMemoryNode>, workspaceRoot?: string): ICodebaseMemoryNode | undefined {
-	const clean = mention.replace(/^\.\//, '').replace(/^\/+/, '');
+	const clean = mention.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
+	if (clean.split('/').includes('..')) { return undefined; }
 	if (workspaceRoot) {
-		const direct = byUri.get(`${workspaceRoot}/${clean}`);
+		const direct = byUri.get(URI.joinPath(URI.parse(workspaceRoot), clean).toString());
 		if (direct) {
 			return direct;
 		}
@@ -325,7 +343,7 @@ function resolvePathMention(mention: string, byUri: ReadonlyMap<string, ICodebas
 	// root would make the feature useless for anyone writing notes by hand.
 	const matches: ICodebaseMemoryNode[] = [];
 	for (const [uri, node] of byUri) {
-		if (uri.endsWith(`/${clean}`)) {
+		if ((!workspaceRoot || uri.startsWith(`${workspaceRoot}/`)) && uri.endsWith(`/${clean}`)) {
 			matches.push(node);
 			if (matches.length > 1) {
 				return undefined;
@@ -335,8 +353,8 @@ function resolvePathMention(mention: string, byUri: ReadonlyMap<string, ICodebas
 	return matches[0];
 }
 
-function resolveSymbolMention(mention: string, byName: ReadonlyMap<string, ICodebaseMemoryNode[]>): ICodebaseMemoryNode | undefined {
-	const matches = byName.get(mention);
+function resolveSymbolMention(mention: string, byName: ReadonlyMap<string, ICodebaseMemoryNode[]>, root?: string, uri?: string): ICodebaseMemoryNode | undefined {
+	const matches = byName.get(mention)?.filter(node => (!root || node.uri.startsWith(`${root}/`)) && (!uri || node.uri === uri));
 	if (!matches || matches.length !== 1) {
 		return undefined; // unknown, or ambiguous: either way, no edge
 	}

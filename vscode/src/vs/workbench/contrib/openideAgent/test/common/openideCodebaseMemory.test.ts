@@ -7,11 +7,11 @@
 // that has no `strict` export, so that form throws at evaluation and the whole file is skipped.
 // The strict variants are spelled out below instead.
 import assert from 'assert';
-import { makeEdgeId, makeEvidence, makeNodeId, isVerifiedProvider } from '../../../../../code/common/openideCodebaseMemoryTypes.js';
-import { deduplicateEdges, deduplicateNodes, isTestFilePath, regexCodebaseMemoryProvider } from '../../../../../code/common/openideCodebaseMemoryProviders.js';
-import { detectCommunities, ICommunityGraphEdge } from '../../../../../code/common/openideCodebaseCommunities.js';
-import { isRelativeSpecifier, packageNameOf, resolveRelativeImport } from '../../../../../code/common/openideCodebaseImports.js';
-import { applySignal, classify, decayWeight, isExpired, learningKey } from '../../../../../code/common/openideCodebaseLearning.js';
+import { makeEdgeId, makeEvidence, makeNodeId, isVerifiedProvider } from '../../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
+import { deduplicateEdges, deduplicateNodes, isTestFilePath, regexCodebaseMemoryProvider } from '../../../../../platform/openideCodebase/common/openideCodebaseMemoryProviders.js';
+import { detectCommunities, ICommunityGraphEdge } from '../../../../../platform/openideCodebase/common/openideCodebaseCommunities.js';
+import { isRelativeSpecifier, packageNameOf, resolveRelativeImport } from '../../../../../platform/openideCodebase/common/openideCodebaseImports.js';
+import { applySignal, classify, decayWeight, isExpired, learningKey } from '../../../../../platform/openideCodebase/common/openideCodebaseLearning.js';
 
 suite('OpenIDE codebase memory', () => {
 	test('creates deterministic node and edge ids', () => {

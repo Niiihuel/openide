@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { OPENIDE_HOSTED_CLI_ENV_RESET, buildClaudeMcpConfig, buildExecutableProbe, buildOpencodeMcpConfig, buildOpenideCliLaunch, parseExecutableProbe, getOpenideCli, IOpenideMcpEndpoint, OPENIDE_MCP_TOOL_TIMEOUT_MS, groupOpenideSessions, isSafeProviderSessionId, OPENIDE_CLI_CATALOG, openideSessionGroupOf, reduceOpenideCliStatus, stripClaudeResumeArgs } from '../../common/openideAgentCliCatalog.js';
+import { OPENIDE_HOSTED_CLI_ENV_RESET, buildAmpMcpConfig, buildCopilotMcpConfig, buildClaudeSessionSettings, buildClaudeMcpConfig, buildExecutableProbe, buildOpencodeMcpConfig, buildOpenideCliLaunch, parseExecutableProbe, getOpenideCli, IOpenideMcpEndpoint, OPENIDE_MCP_TOOL_TIMEOUT_MS, groupOpenideSessions, isSafeProviderSessionId, OPENIDE_CLI_CATALOG, openideSessionGroupOf, reduceOpenideCliStatus, stripClaudeResumeArgs } from '../../common/openideAgentCliCatalog.js';
 import { OPENIDE_PROVIDER_BRANDS } from '../../common/openideProviderBranding.js';
 
 suite('OpenIDE CLI sessions — catalog, resume, state and grouping', () => {
@@ -229,9 +229,9 @@ suite('OpenIDE CLI sessions — catalog, resume, state and grouping', () => {
 		});
 
 		test('a CLI with no per-session mechanism still launches, injecting nothing', () => {
-			const amp = getOpenideCli('amp')!;
-			assert.strictEqual(amp.mcpInjection, undefined);
-			const launch = buildOpenideCliLaunch(amp, 'amp', undefined, endpoint);
+			const gemini = getOpenideCli('gemini')!;
+			assert.strictEqual(gemini.mcpInjection, undefined);
+			const launch = buildOpenideCliLaunch(gemini, 'gemini', undefined, endpoint);
 			assert.deepStrictEqual(launch.args, []);
 			assert.deepStrictEqual(launch.env, {});
 		});
@@ -253,6 +253,23 @@ suite('OpenIDE CLI sessions — catalog, resume, state and grouping', () => {
 				const launch = buildOpenideCliLaunch(cli, cli.binary, undefined, endpoint);
 				assert.equal(launch.env.MCP_TOOL_TIMEOUT, undefined, cli.id);
 			}
+		});
+
+		test('Copilot and Amp use their own additive file formats without blanket permissions', () => {
+			assert.deepStrictEqual(buildOpenideCliLaunch(getOpenideCli('copilot')!, 'copilot', undefined, endpoint).args, ['--additional-mcp-config', '@/tmp/openide-mcp/s1.json']);
+			assert.deepStrictEqual(buildOpenideCliLaunch(getOpenideCli('amp')!, 'amp', undefined, endpoint).args, ['--mcp-config', '/tmp/openide-mcp/s1.json']);
+			assert.strictEqual(JSON.parse(buildCopilotMcpConfig(endpoint)).mcpServers.openide.type, 'http');
+			assert.strictEqual(JSON.parse(buildAmpMcpConfig(endpoint)).openide.url, endpoint.url);
+			assert.strictEqual(JSON.parse(buildAmpMcpConfig(endpoint)).mcpServers, undefined);
+			for (const cli of OPENIDE_CLI_CATALOG) { assert.ok(!buildOpenideCliLaunch(cli, cli.binary, undefined, endpoint).args.some(arg => /allow-all|skip-permissions|strict-mcp/.test(arg))); }
+		});
+
+		test('Claude lifecycle orientation is launch-only and guarded to hosted sessions', () => {
+			const settings = JSON.parse(buildClaudeSessionSettings());
+			assert.deepStrictEqual(Object.keys(settings), ['hooks']);
+			assert.deepStrictEqual(Object.keys(settings.hooks), ['SessionStart']);
+			assert.ok(settings.hooks.SessionStart[0].hooks[0].command.includes('OPENIDE_HOOK_OWNER'));
+			assert.deepStrictEqual(buildOpenideCliLaunch(getOpenideCli('claude')!, 'claude', undefined, { ...endpoint, settingsFile: '/tmp/guidance.json' }).args, ['--mcp-config', endpoint.configFile, '--settings', '/tmp/guidance.json']);
 		});
 
 		test('a human review fits comfortably under the ceiling we ask for', () => {

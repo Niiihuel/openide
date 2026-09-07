@@ -566,6 +566,55 @@ suite('Base IPC', function () {
 		});
 	});
 
+	suite('connection-owned channels', () => {
+		test('disconnect before context cannot create a stale owner on the replacement handshake', () => {
+			const connected = store.add(new Emitter<ClientConnectionEvent>());
+			const disconnected = store.add(new Emitter<void>());
+			const messages = store.add(new Emitter<VSBuffer>());
+			const server = store.add(new IPCServer(connected.event));
+			let owners = 0;
+			server.registerConnectionChannel('owned', () => {
+				owners++;
+				return { call: async () => undefined as never, listen: () => Event.None };
+			});
+			const protocol: IMessagePassingProtocol = { onMessage: messages.event, send: () => { } };
+			connected.fire({ protocol, onDidClientDisconnect: disconnected.event });
+			disconnected.fire();
+			connected.fire({ protocol, onDidClientDisconnect: Event.None });
+			const context = store.add(new BufferWriter()); serialize(context, 'same-webcontents');
+			messages.fire(context.buffer);
+			assert.strictEqual(owners, 1);
+		});
+
+		test('identical client contexts keep separate services and dispose only their owner', async () => {
+			const server = store.add(new TestIPCServer());
+			const disposed: number[] = [];
+			let next = 0;
+			server.registerConnectionChannel('owned', (_connection, resources) => {
+				const owner = ++next;
+				resources.add({ dispose: () => { disposed.push(owner); } });
+				return ProxyChannel.fromService({ owner: async () => owner }, resources);
+			});
+			const a = store.add(server.createConnection('forged-same-window'));
+			const b = store.add(server.createConnection('forged-same-window'));
+			const result = await Promise.all([a.getChannel('owned').call('owner'), b.getChannel('owned').call('owner')]);
+			a.dispose();
+			assert.deepStrictEqual({ result, disposed, remaining: await b.getChannel('owned').call('owner') }, { result: [1, 2], disposed: [1], remaining: 2 });
+		});
+
+		test('late registration binds a different resource owner to existing connections', async () => {
+			const server = store.add(new TestIPCServer());
+			const a = store.add(server.createConnection('a'));
+			const b = store.add(server.createConnection('b'));
+			let next = 0;
+			server.registerConnectionChannel('owned', (_connection, resources) => {
+				const owner = ++next;
+				return ProxyChannel.fromService({ owner: async () => owner }, resources);
+			});
+			assert.deepStrictEqual(await Promise.all([a.getChannel('owned').call('owner'), b.getChannel('owned').call('owner')]), [1, 2]);
+		});
+	});
+
 	suite('one to many', function () {
 		test('all clients get pinged', async function () {
 			const service = store.add(new TestService());

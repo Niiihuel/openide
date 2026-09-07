@@ -13,6 +13,7 @@
 //#region --- workbench common
 
 import './workbench.common.main.js';
+import './contrib/openideAgent/electron-browser/openideNativeServices.js';
 
 //#endregion
 

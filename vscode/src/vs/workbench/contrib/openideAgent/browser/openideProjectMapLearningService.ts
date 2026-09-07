@@ -16,8 +16,8 @@
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
-import { ICodebaseMemoryNode } from '../../../../code/common/openideCodebaseMemoryTypes.js';
-import { applySignal, classify, ILearningEntry, learningKey, LearningState, pruneExpired } from '../../../../code/common/openideCodebaseLearning.js';
+import { ICodebaseMemoryNode } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
+import { applySignal, classify, ILearningEntry, learningKey, LearningState, pruneExpired } from '../../../../platform/openideCodebase/common/openideCodebaseLearning.js';
 
 export const IOpenideProjectMapLearningService = createDecorator<IOpenideProjectMapLearningService>('openideProjectMapLearningService');
 
@@ -55,6 +55,7 @@ export interface IOpenideProjectMapLearningService {
 }
 
 const STORAGE_KEY = 'openide.memory.learning.v1';
+const ASSOCIATIONS_KEY = 'openide.memory.learning.associations.v1';
 /** Ceiling of persisted entries; with decay-based pruning it is rarely reached. */
 const MAX_ENTRIES = 4000;
 /** Turns with context remembered in memory (the outcome arrives shortly after). */
@@ -64,13 +65,21 @@ export class OpenideProjectMapLearningService extends Disposable implements IOpe
 	declare readonly _serviceBrand: undefined;
 
 	private entries = new Map<string, ILearningEntry>();
-	/** messageId → node keys injected in that turn. In memory only: a turn's outcome arrives
-	 *  within the same session, so it need not survive a restart. */
+	/** Bounded associations survive restart so later explicit feedback still reaches its entities. */
+	private readonly creditedSignals = new Map<string, Set<LearningSignal>>();
 	private readonly contextByMessage = new Map<string, string[]>();
 
 	constructor(@IStorageService private readonly storageService: IStorageService) {
 		super();
 		this.load();
+		try {
+			const rows = JSON.parse(this.storageService.get(ASSOCIATIONS_KEY, StorageScope.WORKSPACE) ?? '[]') as { message: string; keys: string[]; signals: LearningSignal[] }[];
+			for (const row of rows.slice(-MAX_TRACKED_TURNS)) {
+				if (typeof row.message !== 'string' || !Array.isArray(row.keys) || !row.keys.every(key => typeof key === 'string')) { continue; }
+				this.contextByMessage.set(row.message, row.keys.slice(0, 100));
+				this.creditedSignals.set(row.message, new Set((row.signals ?? []).filter(signal => Object.hasOwn(LEARNING_WEIGHTS, signal))));
+			}
+		} catch { /* Derived learning associations are disposable, unlike authored memory. */ }
 	}
 
 	private now(): number { return Date.now(); }
@@ -93,7 +102,13 @@ export class OpenideProjectMapLearningService extends Disposable implements IOpe
 		}
 	}
 
+	private saveAssociations(): void {
+		const rows = [...this.contextByMessage].map(([message, keys]) => ({ message, keys, signals: [...(this.creditedSignals.get(message) ?? [])] }));
+		this.storageService.store(ASSOCIATIONS_KEY, JSON.stringify(rows), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+	}
+
 	private save(): void {
+		this.saveAssociations();
 		const now = this.now();
 		let entries = pruneExpired(this.entries, now);
 		if (entries.size > MAX_ENTRIES) {
@@ -107,12 +122,13 @@ export class OpenideProjectMapLearningService extends Disposable implements IOpe
 
 	recordContext(messageId: string, nodes: readonly ICodebaseMemoryNode[]): void {
 		if (!messageId || !nodes.length) { return; }
-		const keys = [...new Set(nodes.map(node => learningKey(node.uri, node.qualifiedName ?? node.name)))];
+		const keys = [...new Set(nodes.slice(0, 100).map(node => learningKey(node.uri, node.qualifiedName ?? node.name)))];
 		this.contextByMessage.set(messageId, keys);
 		if (this.contextByMessage.size > MAX_TRACKED_TURNS) {
 			const oldest = this.contextByMessage.keys().next();
-			if (!oldest.done) { this.contextByMessage.delete(oldest.value); }
+			if (!oldest.done) { this.contextByMessage.delete(oldest.value); this.creditedSignals.delete(oldest.value); }
 		}
+		this.saveAssociations();
 	}
 
 	hasContext(messageId: string): boolean { return this.contextByMessage.has(messageId); }
@@ -122,15 +138,16 @@ export class OpenideProjectMapLearningService extends Disposable implements IOpe
 		const now = this.now();
 		let touched = false;
 		for (const messageId of messageIds) {
+			const signals = this.creditedSignals.get(messageId) ?? new Set<LearningSignal>();
+			if (signals.has(signal)) { continue; }
 			const keys = this.contextByMessage.get(messageId);
 			if (!keys?.length) { continue; }
 			for (const key of keys) {
 				this.entries.set(key, applySignal(this.entries.get(key), weight, now));
 				touched = true;
 			}
-			// A turn credits once: if the user rolls back something already credited by
-			// "survived", that turn must not add again.
-			this.contextByMessage.delete(messageId);
+			// Each distinct signal credits once; a later rollback still contests a survived turn.
+			signals.add(signal); this.creditedSignals.set(messageId, signals);
 		}
 		if (touched) { this.save(); }
 	}
@@ -154,7 +171,8 @@ export class OpenideProjectMapLearningService extends Disposable implements IOpe
 
 	clear(): void {
 		this.entries = new Map();
-		this.contextByMessage.clear();
+		this.contextByMessage.clear(); this.creditedSignals.clear();
 		this.storageService.remove(STORAGE_KEY, StorageScope.WORKSPACE);
+		this.storageService.remove(ASSOCIATIONS_KEY, StorageScope.WORKSPACE);
 	}
 }

@@ -12,10 +12,13 @@
  *  shlex (hooks here; /commands use it for $1..$9 with quoting).
  *--------------------------------------------------------------------------------------------*/
 
+import { IOpenideMemoryRequest, IOpenideMemoryResponse } from '../../openideCodebase/common/openideMemoryRecord.js';
+import { IOpenideRunJournalEvent, IOpenideRunJournalRecord } from './openideRunJournal.js';
+import { IOpenideAgentTerminalRegistration, IOpenideProcessIsolationRequest, IOpenideProcessIsolationStatus, IOpenidePreparedProcess, IOpenideSubagentWorktree, IOpenideSubagentWorktreeApplyResult } from './openideProcessIsolation.js';
 import { ICredentialSourcesSnapshot } from './openideCredentialSources.js';
 import { Event } from '../../../base/common/event.js';
 import { OpenideWebFetchRequest, OpenideWebFetchResponse } from './openideWebResearch.js';
-import { IIdeServerInfo, IIdeServerStartOptions, IIdeToolRequest, IIdeToolResult, IIdeToolSchema } from './openideIdeServer.js';
+import { IIdeDiscoveryStatus, IIdeServerInfo, IIdeServerStartOptions, IIdeToolRequest, IIdeToolResult, IIdeToolSchema } from './openideIdeServer.js';
 
 export const OPENIDE_AGENT_HOST_CHANNEL = 'openideAgentHost';
 
@@ -164,7 +167,27 @@ export interface HookExecResult {
 
 // ---- contrato del servicio ----
 
+
 export interface IOpenideAgentHostService {
+	memoryRequest(request: IOpenideMemoryRequest): Promise<IOpenideMemoryResponse>;
+	setMemoryDirtyResources(paths: readonly string[]): Promise<void>;
+	validateWorkspacePath(request: { path: string; roots: readonly string[]; mutation?: boolean }): Promise<void>;
+	setRestoreWorkspace(roots: readonly string[], workspaceId?: string): Promise<void>;
+	openRunJournal(sessionId: string): Promise<IOpenideRunJournalRecord[]>;
+	appendRunJournal(sessionId: string, event: IOpenideRunJournalEvent): Promise<void>;
+	closeRunJournal(sessionId: string): Promise<void>;
+	registerAgentTerminal(request: IOpenideAgentTerminalRegistration): Promise<void>;
+	shutdownAgentTerminals(conversationId: string): Promise<void>;
+	processIsolationStatus(): Promise<IOpenideProcessIsolationStatus>;
+	prepareIsolatedProcess(request: IOpenideProcessIsolationRequest): Promise<IOpenidePreparedProcess>;
+	createSubagentWorktree(runId: string, workspaceRoot: string): Promise<IOpenideSubagentWorktree>;
+	applySubagentWorktree(runId: string): Promise<IOpenideSubagentWorktreeApplyResult>;
+	discardSubagentWorktree(runId: string): Promise<void>;
+	recoverableSubagentWorktrees(workspaceRoot: string): Promise<IOpenideSubagentWorktree[]>;
+	recoverSubagentWorktree(runId: string, workspaceRoot: string): Promise<IOpenideSubagentWorktree>;
+	acquireRestoreLocks(resources: readonly string[]): Promise<string | undefined>;
+	releaseRestoreLocks(lease: string): Promise<void>;
+
 	readonly onDidChangeMcpServerStatus: Event<McpServerStatus>;
 	/** The server signalled notifications/tools/list_changed and main already re-listed its tools. */
 	readonly onDidChangeMcpServerTools: Event<McpServerToolsEvent>;
@@ -203,8 +226,10 @@ export interface IOpenideAgentHostService {
 
 	/** A CLI called one of our tools; the workbench executes it and answers with ideRespondTool. */
 	readonly onDidRequestIdeTool: Event<IIdeToolRequest>;
+	readonly onDidCancelIdeTool: Event<string>;
 	/** Live agent connections. The dock paints its "connected" state from this. */
 	readonly onDidChangeIdeConnections: Event<number>;
+	readonly onDidChangeIdeDiscovery: Event<IIdeDiscoveryStatus>;
 	/** Binds the port, writes the discovery lockfile, starts accepting agents. Idempotent. */
 	ideServerStart(options: IIdeServerStartOptions, extraTools: readonly IIdeToolSchema[]): Promise<IIdeServerInfo>;
 	/** Answers a parked tools/call. Unknown ids are dropped, never thrown. */

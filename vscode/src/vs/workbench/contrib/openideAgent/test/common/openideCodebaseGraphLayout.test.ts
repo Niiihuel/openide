@@ -7,7 +7,7 @@
 // that has no `strict` export, so that form throws at evaluation and the whole file is skipped.
 // The strict variants are spelled out below instead.
 import assert from 'assert';
-import { ILayoutEdge, ILayoutInputNode, layoutGraph, layoutLayered } from '../../../../../code/common/openideCodebaseGraphLayout.js';
+import { ILayoutEdge, ILayoutInputNode, layoutGraph, layoutLayered } from '../../../../../platform/openideCodebase/common/openideCodebaseGraphLayout.js';
 
 /**
  * The Project Map used a force-directed layout and read like a cloud: it conveyed density, not

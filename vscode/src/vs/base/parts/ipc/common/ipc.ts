@@ -813,6 +813,8 @@ export interface ClientConnectionEvent {
 }
 
 interface Connection<TContext> extends Client<TContext> {
+	readonly event: ClientConnectionEvent;
+	readonly disposables: DisposableStore;
 	readonly channelServer: ChannelServer<TContext>;
 	readonly channelClient: ChannelClient;
 }
@@ -828,6 +830,7 @@ interface Connection<TContext> extends Client<TContext> {
 export class IPCServer<TContext = string> implements IChannelServer<TContext>, IRoutingChannelClient<TContext>, IConnectionHub<TContext>, IDisposable {
 
 	private channels = new Map<string, IServerChannel<TContext>>();
+	private readonly connectionChannels = new Map<string, (connection: ClientConnectionEvent, disposables: DisposableStore) => IServerChannel<TContext>>();
 	private _connections = new Set<Connection<TContext>>();
 
 	private readonly _onDidAddConnection = new Emitter<Connection<TContext>>();
@@ -845,37 +848,50 @@ export class IPCServer<TContext = string> implements IChannelServer<TContext>, I
 	}
 
 	constructor(onDidClientConnect: Event<ClientConnectionEvent>, ipcLogger?: IIPCLogger | null, timeoutDelay?: number) {
-		this.disposables.add(onDidClientConnect(({ protocol, onDidClientDisconnect }) => {
+		this.disposables.add(onDidClientConnect(event => {
+			const { protocol, onDidClientDisconnect } = event;
 			const onFirstMessage = Event.once(protocol.onMessage);
 
 			const connectionDisposables = new DisposableStore();
-
-			const onFirstMessageDisposable = onFirstMessage(msg => {
-				const reader = new BufferReader(msg);
-				const ctx = deserialize(reader) as TContext;
-
-				const channelServer = new ChannelServer(protocol, ctx, ipcLogger, timeoutDelay);
-				const channelClient = new ChannelClient(protocol, ipcLogger);
-
-				this.channels.forEach((channel, name) => channelServer.registerChannel(name, channel));
-
-				const connection: Connection<TContext> = { channelServer, channelClient, ctx };
-				this._connections.add(connection);
-				this._onDidAddConnection.fire(connection);
-
-				connectionDisposables.add(onDidClientDisconnect(() => {
-					channelServer.dispose();
-					channelClient.dispose();
+			this.disposables.add(connectionDisposables);
+			let connection: Connection<TContext> | undefined;
+			// A renderer can disconnect before it sends its context. Release that listener too:
+			// Electron may reuse the same WebContents for the next renderer generation.
+			connectionDisposables.add(Event.once(onDidClientDisconnect)(() => {
+				if (connection) {
+					connection.channelServer.dispose();
+					connection.channelClient.dispose();
 					this._connections.delete(connection);
 					this._onDidRemoveConnection.fire(connection);
-					this.disposables.delete(connectionDisposables);
-					connectionDisposables.dispose();
-				}));
-			});
+				}
+				this.disposables.delete(connectionDisposables);
+				connectionDisposables.dispose();
+			}));
 
-			connectionDisposables.add(onFirstMessageDisposable);
-			this.disposables.add(connectionDisposables);
+			connectionDisposables.add(onFirstMessage(msg => {
+				if (connectionDisposables.isDisposed) { return; }
+				const reader = new BufferReader(msg);
+				const ctx = deserialize(reader) as TContext;
+				const channelServer = new ChannelServer(protocol, ctx, ipcLogger, timeoutDelay);
+				const channelClient = new ChannelClient(protocol, ipcLogger);
+				this.channels.forEach((channel, name) => channelServer.registerChannel(name, channel));
+				this.connectionChannels.forEach((factory, name) => channelServer.registerChannel(name, factory(event, connectionDisposables)));
+				connection = { channelServer, channelClient, ctx, event, disposables: connectionDisposables };
+				this._connections.add(connection);
+				this._onDidAddConnection.fire(connection);
+			}));
 		}));
+	}
+
+	/** Registers a channel whose service and resources belong to the transport connection. */
+	registerConnectionChannel(channelName: string, factory: (connection: ClientConnectionEvent, disposables: DisposableStore) => IServerChannel<TContext>): void {
+		if (this.channels.has(channelName) || this.connectionChannels.has(channelName)) {
+			throw new Error(`Channel already registered: ${channelName}`);
+		}
+		this.connectionChannels.set(channelName, factory);
+		for (const connection of this._connections) {
+			connection.channelServer.registerChannel(channelName, factory(connection.event, connection.disposables));
+		}
 	}
 
 	/**
@@ -983,6 +999,7 @@ export class IPCServer<TContext = string> implements IChannelServer<TContext>, I
 	}
 
 	registerChannel(channelName: string, channel: IServerChannel<TContext>): void {
+		if (this.connectionChannels.has(channelName)) { throw new Error(`Connection channel already registered: ${channelName}`); }
 		this.channels.set(channelName, channel);
 
 		for (const connection of this._connections) {
@@ -1000,6 +1017,7 @@ export class IPCServer<TContext = string> implements IChannelServer<TContext>, I
 
 		this._connections.clear();
 		this.channels.clear();
+		this.connectionChannels.clear();
 		this._onDidAddConnection.dispose();
 		this._onDidRemoveConnection.dispose();
 	}

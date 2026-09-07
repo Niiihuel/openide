@@ -16,8 +16,8 @@ import {
 	noteLinkingFromSetting,
 	notesWorkspaceRoot,
 	parseCodebaseNotes,
-} from '../../../../../code/common/openideCodebaseNotes.js';
-import { ICodebaseMemoryNode, makeEvidence, makeNodeId } from '../../../../../code/common/openideCodebaseMemoryTypes.js';
+} from '../../../../../platform/openideCodebase/common/openideCodebaseNotes.js';
+import { ICodebaseMemoryNode, makeEvidence, makeNodeId } from '../../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
 
 const ROOT = 'file:///repo';
 const NOTES_URI = `${ROOT}/.openide/MEMORY.md`;

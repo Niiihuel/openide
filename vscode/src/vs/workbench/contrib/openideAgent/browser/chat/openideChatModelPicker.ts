@@ -13,7 +13,9 @@ import { ICommandService } from '../../../../../platform/commands/common/command
 import { AnchorAlignment, AnchorPosition } from '../../../../../base/browser/ui/contextview/contextview.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { defaultListStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
-import { IOpenideAgentService, IOpenidePickerGroup, IOpenidePickerModel } from '../openideAgentService.js';
+import { IOpenideProviderService } from '../openideProviderService.js';
+import { IOpenidePickerPreferencesService } from '../openidePickerPreferencesService.js';
+import { IOpenidePickerGroup, IOpenidePickerModel } from '../../common/openidePickerModels.js';
 import { createCodicon, createMenuCheck, createMenuContent, createMenuEmpty, createMenuRow, OpenideComposerPopover } from './openideComposerMenu.js';
 import { OpenideChatModelDetail } from './openideChatModelDetail.js';
 import { OpenideChatModelEffort } from './openideChatModelEffort.js';
@@ -141,7 +143,7 @@ export class OpenideChatModelPicker extends Disposable {
 	private _generation = 0;
 
 	constructor(
-		private readonly agentService: IOpenideAgentService,
+		private readonly agentService: Pick<IOpenideProviderService, 'getConnectedModelGroups' | 'getActiveProviderId' | 'getModel' | 'getReasoningEfforts' | 'getReasoningEffort' | 'setReasoningEffort' | 'setActiveProvider' | 'setModel' | 'findProvider'> & Pick<IOpenidePickerPreferencesService, 'getCollapsedSections' | 'getPickerFavorites' | 'getPickerRecents' | 'toggleCollapsedSection' | 'togglePickerFavorite' | 'recordPickerUse'>,
 		contextViewService: IContextViewService,
 		private readonly commandService: ICommandService,
 		private readonly onDidChangeSelection: () => void,

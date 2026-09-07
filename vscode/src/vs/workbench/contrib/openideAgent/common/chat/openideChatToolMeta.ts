@@ -21,6 +21,8 @@
  * just a gap, and the gap is not worth reopening in a file that is being deleted.
  */
 
+import { t } from '../openideStrings.js';
+
 export interface IOpenideToolMeta {
 	/** Codicon id, without the `codicon-` prefix. */
 	readonly icon: string;
@@ -73,6 +75,11 @@ export const OPENIDE_TOOL_META: Readonly<Record<string, IOpenideToolMeta>> = {
 	update_todos: { icon: 'checklist', verb: 'Updating todos', done: 'Updated todos', key: '' },
 	ask_user: { icon: 'question', verb: 'Asking', done: 'Asked', key: 'question' },
 	memory: { icon: 'database', verb: 'Updating memory', done: 'Updated memory', key: '' },
+	memory_save: { icon: 'database', verb: t('memory.tool.save'), done: t('memory.tool.saveDone'), key: 'topic_key' },
+	memory_search: { icon: 'database', verb: t('memory.tool.search'), done: t('memory.tool.searchDone'), key: 'query', explore: true, exploreKind: 'search' },
+	memory_get: { icon: 'database', verb: t('memory.tool.get'), done: t('memory.tool.getDone'), key: '', explore: true, exploreKind: 'search' },
+	memory_session_summary: { icon: 'database', verb: t('memory.tool.session_summary'), done: t('memory.tool.session_summaryDone'), key: 'topic_key' },
+	memory_forget: { icon: 'database', verb: t('memory.tool.forget'), done: t('memory.tool.forgetDone'), key: '' },
 	skill_view: { icon: 'book', verb: 'Loading skill', done: 'Loaded skill', key: 'name' },
 	skill_save: { icon: 'book', verb: 'Saving skill', done: 'Saved skill', key: 'name' },
 	plan_save: { icon: 'checklist', verb: 'Saving plan', done: 'Saved plan', key: 'title' },

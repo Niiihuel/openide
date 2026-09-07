@@ -11,19 +11,20 @@
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { VSBuffer } from '../../../../base/common/buffer.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { CodebaseMemoryIndexer, IIndexProgress } from './openideCodebaseMemoryIndexer.js';
 import { CodebaseMemoryStorage } from './openideCodebaseMemoryStorage.js';
-import { ICodebaseIndexVersion, ICodebaseMemoryEdge, ICodebaseMemoryNode } from '../../../common/openideCodebaseMemoryTypes.js';
-import { CODEBASE_MEMORY_MAX_CHANGE_BYTES, CODEBASE_MEMORY_MAX_CHANGES, CODEBASE_MEMORY_MAX_EXTRACTION_EDGES, CODEBASE_MEMORY_MAX_EXTRACTION_NODES, DEFAULT_CODEBASE_MEMORY_INDEX_OPTIONS, ICodebaseMemoryChange, ICodebaseMemoryChannel, ICodebaseMemoryIndexOptions, ICodebaseMemorySnapshotDto, ICodebaseIndexProgress } from '../../../common/openideCodebaseMemoryProtocol.js';
-import { deduplicateEdges, deduplicateNodes, IProviderExtraction, mergeExtractions } from '../../../common/openideCodebaseMemoryProviders.js';
-import { DEFAULT_NOTE_LINKING, linkCodebaseNotes, NoteLinkingMode } from '../../../common/openideCodebaseNotes.js';
+import { ICodebaseIndexVersion, ICodebaseMemoryEdge, ICodebaseMemoryNode } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
+import { CODEBASE_MEMORY_MAX_CHANGE_BYTES, CODEBASE_MEMORY_MAX_CHANGES, CODEBASE_MEMORY_MAX_EXTRACTION_EDGES, CODEBASE_MEMORY_MAX_EXTRACTION_NODES, DEFAULT_CODEBASE_MEMORY_INDEX_OPTIONS, ICodebaseMemoryChange, ICodebaseMemoryChannel, ICodebaseMemoryIndexOptions, ICodebaseMemorySnapshotDto, ICodebaseIndexProgress } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProtocol.js';
+import { deduplicateEdges, deduplicateNodes, IProviderExtraction, mergeExtractions } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProviders.js';
+import { DEFAULT_NOTE_LINKING, notesWorkspaceRoot, linkCodebaseNotes, NoteLinkingMode } from '../../../../platform/openideCodebase/common/openideCodebaseNotes.js';
 
 /** Accepted values, so a bad one over IPC falls back instead of disabling linking silently. */
 const NOTE_LINKING_MODES: readonly NoteLinkingMode[] = ['explicit', 'identifiers', 'off'];
-import { detectCommunities, ICommunityGraphEdge } from '../../../common/openideCodebaseCommunities.js';
-import { ALIAS_URI_PREFIX, isInternalSpecifier, PACKAGE_URI_PREFIX, resolveInternalImport } from '../../../common/openideCodebaseImports.js';
+import { detectCommunities, ICommunityGraphEdge } from '../../../../platform/openideCodebase/common/openideCodebaseCommunities.js';
+import { ALIAS_URI_PREFIX, isInternalSpecifier, PACKAGE_URI_PREFIX, resolveInternalImport } from '../../../../platform/openideCodebase/common/openideCodebaseImports.js';
 
 interface IRuntime {
 	readonly folders: readonly URI[];
@@ -236,7 +237,14 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 		}, MANIFEST_FLUSH_DEBOUNCE_MS);
 	}
 
-	async rebuildFull(key: string, token?: import('../../../../base/common/cancellation.js').CancellationToken): Promise<ICodebaseIndexProgress> {
+	rebuildFull(key: string, token?: import('../../../../base/common/cancellation.js').CancellationToken): Promise<ICodebaseIndexProgress> {
+		const runtime = this.runtime(key);
+		const operation = runtime.mutationQueue.then(() => this.rebuildFullUnsafe(key, token));
+		runtime.mutationQueue = operation.then(() => undefined, () => undefined);
+		return operation;
+	}
+
+	private async rebuildFullUnsafe(key: string, token?: import('../../../../base/common/cancellation.js').CancellationToken): Promise<ICodebaseIndexProgress> {
 		const runtime = this.runtime(key);
 		const cts = new CancellationTokenSource(token);
 		try {
@@ -338,22 +346,23 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 	 * Hanging it off the READ means an index already broken on disk repairs itself when opened,
 	 * without reindexing; and the incremental path — which never finalized — is covered by the same check.
 	 */
-	private async ensureGraphFinalized(runtime: IRuntime): Promise<boolean> {
-		if (!runtime.storage.getManifest() || runtime.storage.isGraphFinalized()) { return false; }
-		const mutation = runtime.mutationQueue.then(async () => {
-			// Revalidate inside the queue: another call in flight may have finalized it already.
-			if (runtime.storage.isGraphFinalized()) { return; }
-			await this.finalizeGraph(runtime, runtime.storage.getCommunities());
-			await runtime.storage.flush();
-		});
-		runtime.mutationQueue = mutation.catch(() => undefined);
-		await mutation;
-		return true;
+	private async ensureGraphFinalized(runtime: IRuntime): Promise<void> {
+		// Called inside the workspace queue shared by writes, finalization and snapshot reads.
+		if (!runtime.storage.getVersion() || runtime.storage.isGraphFinalized()) { return; }
+		await this.finalizeGraph(runtime, runtime.storage.getCommunities());
+		await runtime.storage.flush();
 	}
 
-	async indexIncremental(key: string, changes: ICodebaseMemoryChange[], token?: import('../../../../base/common/cancellation.js').CancellationToken): Promise<ICodebaseIndexProgress> {
+	indexIncremental(key: string, changes: ICodebaseMemoryChange[], token?: import('../../../../base/common/cancellation.js').CancellationToken): Promise<ICodebaseIndexProgress> {
+		const runtime = this.runtime(key);
+		const operation = runtime.mutationQueue.then(() => this.indexIncrementalUnsafe(key, changes, token));
+		runtime.mutationQueue = operation.then(() => undefined, () => undefined);
+		return operation;
+	}
+
+	private async indexIncrementalUnsafe(key: string, changes: ICodebaseMemoryChange[], token?: import('../../../../base/common/cancellation.js').CancellationToken): Promise<ICodebaseIndexProgress> {
 		if (changes.length > CODEBASE_MEMORY_MAX_CHANGES) { throw new Error('Demasiados cambios en un lote IPC.'); }
-		if (changes.some(change => (change.content?.length ?? 0) > CODEBASE_MEMORY_MAX_CHANGE_BYTES)) { throw new Error('Archivo demasiado grande para actualización IPC.'); }
+		if (changes.some(change => change.content !== undefined && VSBuffer.fromString(change.content).byteLength > CODEBASE_MEMORY_MAX_CHANGE_BYTES)) { throw new Error('Archivo demasiado grande para actualización IPC.'); }
 		const runtime = this.runtime(key);
 		const cts = new CancellationTokenSource(token);
 		try {
@@ -369,7 +378,14 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 		return this.runtime(key).storage.getVersion();
 	}
 
-	async getSnapshot(key: string): Promise<ICodebaseMemorySnapshotDto | undefined> {
+	getSnapshot(key: string): Promise<ICodebaseMemorySnapshotDto | undefined> {
+		const runtime = this.runtime(key);
+		const operation = runtime.mutationQueue.then(() => this.getSnapshotUnsafe(key));
+		runtime.mutationQueue = operation.then(() => undefined, () => undefined);
+		return operation;
+	}
+
+	private async getSnapshotUnsafe(key: string): Promise<ICodebaseMemorySnapshotDto | undefined> {
 		const runtime = this.runtime(key);
 		await this.ensureGraphFinalized(runtime);
 		const storage = runtime.storage;
@@ -394,7 +410,23 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 		const aliasedEdges = rawEdges.map(edge => (aliases[edge.source] || aliases[edge.target])
 			? { ...edge, source: canonical(edge.source), target: canonical(edge.target) }
 			: edge);
-		const nodes = deduplicateNodes(aliasedNodes);
+		const authoredIds = new Map<string, string>();
+		for (const node of aliasedNodes) {
+			if (node.kind !== 'note' || !node.metadata?.['id']) { continue; }
+			const previous = authoredIds.get(node.id);
+			if (previous && previous !== node.uri) { throw new Error(`Duplicate memory identity in ${previous} and ${node.uri}`); }
+			authoredIds.set(node.id, node.uri);
+		}
+		const nodes = deduplicateNodes(aliasedNodes).map(node => {
+			const hashes = node.metadata?.['related_hashes'];
+			if (node.kind !== 'note' || !Array.isArray(hashes)) { return node; }
+			const root = notesWorkspaceRoot(node.uri);
+			const stale = hashes.filter(value => {
+				const [path, hash] = String(value).split('|');
+				return (root ? manifest.files[URI.joinPath(URI.parse(root), path).toString()]?.hash : undefined) !== hash;
+			}).map(value => String(value).split('|')[0]);
+			return { ...node, metadata: { ...node.metadata, references_needing_review: stale } };
+		});
 		// Notes are wired to what they mention HERE and not at index time, for the same reason the
 		// alias table is applied here: a note's target may live in a file that was reindexed after
 		// the note was. Computed on read, the link can never be stale; stored, it would be.

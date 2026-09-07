@@ -4,8 +4,17 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { mainWindow } from '../../../../../base/browser/window.js';
+import { toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { summarizeCommandExecutables, terminalCardTitle } from '../../browser/chat/parts/openideChatTerminalPart.js';
+import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
+import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { OpenideChatTerminalPart, summarizeCommandExecutables, terminalCardTitle } from '../../browser/chat/parts/openideChatTerminalPart.js';
+import { IOpenideChatContentPartContext } from '../../browser/chat/openideChatContentPart.js';
+import { IOpenideAgentService } from '../../browser/openideAgentService.js';
+import { t } from '../../common/openideStrings.js';
+import '../../browser/chat/media/openideChatNative.css';
 
 /**
  * The one-line header of the terminal card names the executables a command chains ("cd, bun").
@@ -45,5 +54,78 @@ suite('OpenIDE ChatTerminalPart — header summary', () => {
 		assert.strictEqual(terminalCardTitle('cd x && bun test', '   '), 'cd');
 		assert.strictEqual(terminalCardTitle('FOO=1 ./scripts/run.sh --fast'), 'run.sh');
 		assert.strictEqual(terminalCardTitle(''), '');
+	});
+});
+
+suite('OpenIDE ChatTerminalPart — output viewport', () => {
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	function create(output: string, width = 360) {
+		const host = mainWindow.document.createElement('div');
+		host.className = 'monaco-workbench openide-chat-native';
+		host.style.cssText = `position:fixed;top:0;left:0;width:${width}px;--oi-chat-card-radius:8px;--oi-chat-card-border:gray`;
+		mainWindow.document.body.append(host);
+		store.add(toDisposable(() => host.remove()));
+		const part = store.add(new OpenideChatTerminalPart({
+			kind: 'terminal', callId: 'viewport', command: 'curl http://localhost:3000',
+			background: false, output, state: 'exited', exitCode: 0,
+		}, {} as IOpenideChatContentPartContext, {
+			createInstance: () => ({ dispose() { } }),
+		} as unknown as IInstantiationService, {} as IContextViewService, {} as IOpenideAgentService, {
+			setupDelayedHover: () => toDisposable(() => { }),
+		} as unknown as IHoverService));
+		host.append(part.domNode);
+		return {
+			host, part,
+			out: part.domNode.querySelector<HTMLElement>('.openide-chat-term-out')!,
+			fold: part.domNode.querySelector<HTMLElement>('.openide-chat-term-fold')!,
+			button: part.domNode.querySelector<HTMLButtonElement>('.openide-fold-expand')!,
+		};
+	}
+
+	async function layout() {
+		for (let frame = 0; frame < 4; frame++) {
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+		}
+	}
+
+	test('short output stays readable without an unnecessary expansion overlay', async () => {
+		const { part, button, out } = create('200 http://localhost:3000');
+		await layout();
+		assert.strictEqual(mainWindow.getComputedStyle(button).display, 'none');
+		assert.strictEqual(out.scrollHeight, out.clientHeight);
+		assert.strictEqual(mainWindow.getComputedStyle(part.domNode.querySelector('.openide-fold-fade')!).display, 'none');
+	});
+
+	test('long output expands in a separate footer without covering the frame or last visible line', async () => {
+		const { part, button, out } = create(Array.from({ length: 40 }, (_, i) => `Build step ${i}`).join('\n'));
+		await layout();
+		assert.ok(button.getBoundingClientRect().top >= out.getBoundingClientRect().bottom);
+		assert.ok(button.getBoundingClientRect().bottom < part.domNode.getBoundingClientRect().bottom);
+		assert.strictEqual(out.clientHeight, 108);
+		assert.strictEqual(button.getAttribute('aria-label'), t('chat.part.expandOutput'));
+		button.click();
+		await layout();
+		assert.strictEqual(button.getAttribute('aria-expanded'), 'true');
+		assert.strictEqual(out.clientHeight, 320);
+		assert.strictEqual(mainWindow.getComputedStyle(out).overflowY, 'auto');
+		button.click();
+		await layout();
+		assert.strictEqual(button.getAttribute('aria-expanded'), 'false');
+		assert.strictEqual(out.clientHeight, 108);
+	});
+
+	test('resizing a finished card remeasures wrapped output and exposes expansion', async () => {
+		const { host, fold, button } = create('abcdefghij '.repeat(20), 800);
+		await layout();
+		assert.strictEqual(fold.classList.contains('needs-expand'), false);
+		host.style.width = '220px';
+		await layout();
+		assert.strictEqual(fold.classList.contains('needs-expand'), true);
+		assert.notStrictEqual(mainWindow.getComputedStyle(button).display, 'none');
+		let bubbled = false;
+		host.addEventListener('keydown', () => { bubbled = true; }, { once: true });
+		button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		assert.strictEqual(bubbled, false, 'The chat tree must not intercept expansion keystrokes');
 	});
 });

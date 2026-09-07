@@ -231,7 +231,7 @@ export interface IToolDefinition {
 export type AgentStreamEvent =
 	| { type: 'text'; delta: string }
 	| { type: 'reasoning'; delta: string }
-	| { type: 'info'; message: string }
+	| { type: 'info'; message: string; severity?: 'info' | 'warning' }
 	| { type: 'toolCall'; call: IToolCall }
 	/**
 	 * Chunk of the ARGUMENTS of a tool call that is still being written. The provider was
@@ -433,7 +433,7 @@ export type AgentLoopEvent =
 	// The active account is spent and several could take over: the UI shows the choice and answers
 	// with resolveAccountChoice(id, accountId | 'stop').
 	| { type: 'accountChoiceRequest'; id: string; spentLabel: string; candidates: readonly { accountId: string; label: string; paid?: boolean }[] }
-	| { type: 'info'; message: string }
+	| { type: 'info'; message: string; severity?: 'info' | 'warning' }
 	| {
 		type: 'compaction';
 		status: 'started' | 'completed' | 'skipped' | 'failed';

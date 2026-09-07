@@ -50,7 +50,7 @@ export const OPENIDE_EXTERNAL_TOOL_FAMILIES: readonly string[] = [
 export const OPENIDE_EXTERNAL_TOOLS: readonly string[] = [
 	'project_map_query',
 	'plan_save',
-	'memory',
+	'memory', 'memory_search', 'memory_get', 'memory_save', 'memory_session_summary', 'memory_forget',
 ];
 
 /**
@@ -98,34 +98,12 @@ const NEVER_EXPOSED: readonly string[] = [
  * The one thing worth saying is the thing they cannot get elsewhere: it is THE window on screen.
  */
 const EXTERNAL_CONTEXT: readonly { readonly match: (name: string) => boolean; readonly text: string }[] = [
-	{
-		// Before the generic browser entry: `find` takes the first match, and a CLI needs to be
-		// TOLD when a recording beats a screenshot — nothing in its own toolbox records anything.
-		match: name => name.startsWith('browser_record_'),
-		text: 'Records the browser the user has open in OpenIDE, as VIDEO, while you drive it (browser_record_start → your actions → browser_record_stop). A screenshot shows a state; a recording shows the transition, and it is the only way to judge an animation, a hover, a modal sliding in, a list re-sorting, a loading sequence or any flow of two or more steps.\n\nIt does not just record: it MEASURES. The result carries a list of motion findings, each with the exact millisecond to look at — an animation that stalled mid-flight, a single frame that flashed and reverted, motion that never came to rest, a layout that shifted with no click to explain it, an action that changed nothing on screen. It also carries what the page said about itself at the end: clipped text, broken images, contrast below WCAG AA, overlapping or undersized controls. Read those two lists FIRST and use them to aim; they turn "review this video" into "look at 00:04.2". A finding is a place to look, not a verdict — the video says whether it is a bug.\n\nYou get flow.webm (hand the path to a model or CLI that accepts video), sheet.jpg (every step tiled in ONE image, attached as an image: look at it before concluding) and frames/ (one JPEG per step). Every browser_click/type/navigate becomes a step; browser_record_mark names a moment no tool produced. One flow per recording, short.',
-	},
-	{
-		// Also before the generic entry: measuring a page is the one browser capability a CLI has
-		// no equivalent for, and the least guessable from a name.
-		match: name => name === 'browser_check_visual',
-		text: 'Measures the page the user has open for the visual defects a screenshot contains but no reader can reliably judge: text cut by an overflow with no ellipsis, images that loaded no pixels, text below the WCAG AA contrast ratio against the colour actually behind it, controls under 24x24, controls overlapping each other, a document wider than its viewport. Every finding carries a selector, a rectangle and the number that failed. Use it ALONGSIDE browser_screenshot, never instead of it: this answers "is that text clipped, is that contrast 2.9:1", and the picture answers "does this look right".',
-	},
-	{
-		match: name => name.startsWith('browser_'),
-		text: 'Drives the browser the user has OPEN inside OpenIDE, with their session, their login and their current state — not a fresh instance and not headless. Prefer it over launching your own browser: it is the only way to see what the user is actually looking at.',
-	},
-	{
-		match: name => name === 'project_map_query',
-		text: 'Queries the codebase graph OpenIDE keeps incrementally up to date (modules, dependencies, the blast radius of a change). Answer from this before rebuilding it by hand with searches: it is one call here and many greps otherwise.',
-	},
-	{
-		match: name => name === MEMORY_TOOL,
-		text: 'Shared memory for THIS repository (.openide/MEMORY.md), read by every session, by the other CLIs and by the user\'s own harness. Maintain it: when you learn something durable — a convention, an architectural decision, a gotcha that cost you — write it here instead of leaving the next session to rediscover it. Read with openide_memory_read first so you do not duplicate, and consolidate old entries rather than piling on. Do NOT store passing state or single-turn detail.',
-	},
-	{
-		match: name => name === 'plan_save',
-		text: 'BLOCKING: saves the plan, opens it in OpenIDE\'s plan editor and does NOT answer until the user has reviewed it. The reply carries the plan as it stands AFTER their edits — run that one, not the one you sent. If they discard it, run nothing.',
-	},
+	{ match: name => name.startsWith('browser_record_'), text: 'Record the live OpenIDE browser: start → actions → stop. Use video for motion and multi-step flows. Inspect findings, timestamps and the contact sheet; findings need visual confirmation. Result includes flow.webm, sheet.jpg and key frames.' },
+	{ match: name => name === 'browser_check_visual', text: 'Measure defects in the live OpenIDE page (clipping, contrast, images, targets, overflow). Inspect alongside a screenshot; measurements do not replace visual judgment.' },
+	{ match: name => name.startsWith('browser_'), text: "Use the user's live OpenIDE browser, preserving login and current state. Host restrictions and client permissions apply." },
+	{ match: name => name === 'project_map_query', text: 'Query architecture, dependencies and change impact in the derived Project Map; verify stale evidence against source.' },
+	{ match: name => name === MEMORY_TOOL || name.startsWith('memory_'), text: 'Shared canonical notes: .openide/memory/notes/*.md; MEMORY.md is the compatibility overview. Search before saving; get revision/hash before updates. Save durable topics; use session_summary for handoffs. Only a successful receipt proves persistence.' },
+	{ match: name => name === 'plan_save', text: 'BLOCKING: waits for user review. Execute the returned edited plan only if approved. If discarded, run nothing.' },
 ];
 
 /** The description an external agent reads for one of our tools. */

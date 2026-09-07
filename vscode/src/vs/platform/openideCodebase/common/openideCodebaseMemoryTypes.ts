@@ -10,7 +10,7 @@
  *  format (openideMemoryTypes.ts) the legacy visual editor uses.
  *--------------------------------------------------------------------------------------------*/
 
-import { URI } from '../../base/common/uri.js';
+import { URI } from '../../../base/common/uri.js';
 
 /** The extended node taxonomy of the codebase. Compatible with the legacy MemoryNodeLabel. */
 export type CodebaseMemoryNodeKind =

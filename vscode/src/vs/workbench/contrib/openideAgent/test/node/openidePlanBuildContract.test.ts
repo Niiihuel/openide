@@ -45,7 +45,7 @@ suite('OpenIDE plan build contract', () => {
 		assert.strictEqual(stop.length > 0, true, 'the turn cut after plan_save is missing');
 		const block = stop.slice(0, 420);
 		assert.strictEqual(/onEvent\(\{ type: 'done', reason: 'plan-saved' \}\)/.test(block), true, 'it has to close the turn');
-		assert.strictEqual(/\breturn;/.test(block), true, 'and leave the loop, not merely report');
+		assert.strictEqual(/\breturn true;/.test(block), true, 'the tool adapter must tell the extracted runtime to stop');
 		assert.strictEqual(block.includes("!out.startsWith('Error')"), true, 'a failed plan_save may not close the turn');
 	});
 

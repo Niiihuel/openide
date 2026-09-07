@@ -9,6 +9,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { FileChangeType, IFileService } from '../../../../platform/files/common/files.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
+import { OPENIDE_CLI_HOOK_OWNER } from '../common/openideCliHookOwner.js';
 import { OpenideCliSessionEvent } from '../common/openideAgentCliCatalog.js';
 
 /**
@@ -66,8 +67,8 @@ function hookCommand(): string {
 	// half-written `.json`. `$$` and the nanosecond clock keep concurrent hooks apart.
 	// The name is computed ONCE into `f`: the clock read inline twice would name the `.tmp` and
 	// the `mv` target differently, and the rename would fail for every drop.
-	const dir = `$HOME/${MARKER}`;
-	return `if [ -z "$OPENIDE_SESSION_ID" ]; then cat >/dev/null; exit 0; fi; mkdir -p "${dir}" && f="${dir}/$(date +%s%N)-$$.json" && { printf '{"${SENTINEL}":"%s","payload":' "$OPENIDE_SESSION_ID"; cat; printf '}'; } > "$f.tmp" && mv "$f.tmp" "$f"`;
+	const dir = `$HOME/${MARKER}/$OPENIDE_HOOK_OWNER`;
+	return `if [ -z "$OPENIDE_SESSION_ID" ] || [ -z "$OPENIDE_HOOK_OWNER" ]; then cat >/dev/null; exit 0; fi; mkdir -p "${dir}" && f="${dir}/$(date +%s%N)-$$.json" && { printf '{"${SENTINEL}":"%s","payload":' "$OPENIDE_SESSION_ID"; cat; printf '}'; } > "$f.tmp" && mv "$f.tmp" "$f"`;
 }
 
 function isOpenideHook(hook: unknown): boolean {
@@ -75,7 +76,7 @@ function isOpenideHook(hook: unknown): boolean {
 }
 
 function isCurrentOpenideHook(hook: unknown): boolean {
-	return isOpenideHook(hook) && String((hook as { command: unknown }).command).includes(SENTINEL);
+	return isOpenideHook(hook) && String((hook as { command: unknown }).command).includes(SENTINEL) && String((hook as { command: unknown }).command).includes('OPENIDE_HOOK_OWNER');
 }
 
 function hookListOf(group: unknown): unknown[] {
@@ -211,7 +212,7 @@ export class OpenideClaudeHooks extends Disposable {
 	}
 
 	private get dropDir(): URI {
-		return URI.joinPath(this.home, ...HOOK_DIR);
+		return URI.joinPath(this.home, ...HOOK_DIR, OPENIDE_CLI_HOOK_OWNER);
 	}
 
 	/**

@@ -10,19 +10,22 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/openideChat.css';
+import { IOpenideNativeServices } from '../common/openideNativeServices.js';
+import { IWorkingCopyService } from '../../../services/workingCopy/common/workingCopyService.js';
 import { FileAccess } from '../../../../base/common/network.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
-import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
+import { ICommandService, CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import { OPENIDE_CLI_CATALOG } from '../common/openideAgentCliCatalog.js';
+import { OPENIDE_MCP_REGISTRATION_STORAGE_PREFIX, OpenideMcpRegistrationManager } from '../common/openideMcpRegistration.js';
 import { VOICE_TRANSPORTS } from '../common/openideVoiceTransport.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
-import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
+import { Extensions as ConfigurationExtensions, IConfigurationRegistry, ConfigurationScope } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
-import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+import { IStorageService, StorageScope, StorageTarget, WillSaveStateReason } from '../../../../platform/storage/common/storage.js';
 import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
 import { IHostService } from '../../../services/host/browser/host.js';
 import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
@@ -94,7 +97,7 @@ import { IOpenideCliChangesService, OpenideCliChangesService } from './openideCl
 import { OpenideCliChangesView, OPENIDE_CLI_CHANGES_VIEW_ID } from './openideCliChangesView.js';
 import { IOpenideIdePlanReview, OpenideIdePlanReview, OPENIDE_IDE_PLAN_APPROVE, OPENIDE_IDE_PLAN_REJECT, planDecisionMessage, planPathFromSaveResult } from './openideIdePlanReview.js';
 import { externalToolName } from '../common/openideIdeExposure.js';
-import { CODEBASE_NOTES_ENABLED_SETTING, CODEBASE_NOTES_LINKING_SETTING, CODEBASE_NOTES_MAX_CHARS_SETTING } from '../../../../code/common/openideCodebaseNotes.js';
+import { CODEBASE_NOTES_ENABLED_SETTING, CODEBASE_NOTES_LINKING_SETTING, CODEBASE_NOTES_MAX_CHARS_SETTING } from '../../../../platform/openideCodebase/common/openideCodebaseNotes.js';
 import { text } from '../../../../platform/openideAgentHost/common/openideIdeServer.js';
 import { IExternalUriOpenerService, IExternalOpenerProvider, IExternalUriOpener } from '../../externalUriOpener/common/externalUriOpenerService.js';
 import { ExternalUriOpenerPriority } from '../../../../editor/common/languages.js';
@@ -102,7 +105,7 @@ import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { URI } from '../../../../base/common/uri.js';
 import { joinPath } from '../../../../base/common/resources.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
-import { IDisposable, Disposable } from '../../../../base/common/lifecycle.js';
+import { IDisposable, Disposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { ISubagentDefinitionService, SubagentDefinitionService } from './openideSubagentDefinitionService.js';
 import { ISubagentRegistryService, SubagentRegistryService } from './openideSubagentRegistryService.js';
 import { ISubagentRunStorageService, SubagentRunStorageService } from './openideSubagentRunStorageService.js';
@@ -120,6 +123,10 @@ import { OPENIDE_LANGUAGE_SETTING, resolveOpenideLanguage, t } from '../common/o
 import { validateOpenideMarkdown } from '../common/openideMarkdownDiagnostics.js';
 import { ILanguagePackItem, ILanguagePackService } from '../../../../platform/languagePacks/common/languagePacks.js';
 import { ILocaleService } from '../../../services/localization/common/locale.js';
+
+import { IOpenideAgentRunStateService, OpenideAgentRunStateService } from '../common/openideAgentRunState.js';
+
+registerSingleton(IOpenideAgentRunStateService, OpenideAgentRunStateService, InstantiationType.Delayed);
 
 const CHANNEL_ID = 'openideAgent';
 const MARKDOWN_CHANNEL_ID = 'openideMarkdown';
@@ -148,6 +155,22 @@ registerSingleton(IOpenideIdeServerService, OpenideIdeServerService, Instantiati
 registerSingleton(IOpenideIdePlanReview, OpenideIdePlanReview, InstantiationType.Delayed);
 registerSingleton(IOpenideCliChangesService, OpenideCliChangesService, InstantiationType.Delayed);
 
+const mcpRegistrationManagers = new WeakMap<IStorageService, OpenideMcpRegistrationManager>();
+
+function mcpRegistrationManager(storage: IStorageService): OpenideMcpRegistrationManager {
+	let manager = mcpRegistrationManagers.get(storage);
+	if (!manager) {
+		manager = new OpenideMcpRegistrationManager({
+			read: () => storage.keys(StorageScope.APPLICATION, StorageTarget.MACHINE)
+				.filter(key => key.startsWith(OPENIDE_MCP_REGISTRATION_STORAGE_PREFIX))
+				.map(key => { try { return JSON.parse(storage.get(key, StorageScope.APPLICATION) || 'null') as unknown; } catch { return undefined; } }),
+			write: record => storage.store(OPENIDE_MCP_REGISTRATION_STORAGE_PREFIX + record.id, JSON.stringify(record), StorageScope.APPLICATION, StorageTarget.MACHINE),
+		});
+		mcpRegistrationManagers.set(storage, manager);
+	}
+	return manager;
+}
+
 /**
  * Opens OpenIDE's IDE server so an external CLI (Claude Code and anything speaking MCP) can
  * reach this window's editors, selection and diagnostics.
@@ -161,6 +184,10 @@ class OpenideIdeServerContribution extends Disposable implements IWorkbenchContr
 		@IOpenideIdeServerService ideServer: OpenideIdeServerService,
 		@IOpenideAgentService agentService: IOpenideAgentService,
 		@IOpenideIdePlanReview planReview: OpenideIdePlanReview,
+		@IStorageService storage: IStorageService,
+		@IWorkspaceContextService workspace: IWorkspaceContextService,
+		@INotificationService notifications: INotificationService,
+		@ICommandService commands: ICommandService,
 	) {
 		super();
 		// What OpenIDE has and the CLIs do not — today the browser surface. Registered before the
@@ -176,19 +203,19 @@ class OpenideIdeServerContribution extends Disposable implements IWorkbenchContr
 		this._register(CommandsRegistry.registerCommand(OPENIDE_IDE_PLAN_REJECT, (_accessor, path?: unknown) => {
 			if (typeof path === 'string') { planReview.reject(path); }
 		}));
-		const completions = new Map<string, (output: string) => Promise<string>>([
-			[externalToolName('plan_save'), async output => {
+		const completions = new Map<string, (output: string, token: CancellationToken) => Promise<string>>([
+			[externalToolName('plan_save'), async (output, token) => {
 				const path = planPathFromSaveResult(output);
 				if (!path) {
 					return output; // plan_save failed; there is nothing to review
 				}
-				const decision = await planReview.awaitDecision(path, path.split('/').pop() ?? path);
+				const decision = await planReview.awaitDecision(path, path.split('/').pop() ?? path, token);
 				return planDecisionMessage(decision);
 			}],
 		]);
 		ideServer.bridgeAgentTools(
 			agentService.externalTools(),
-			(name, args, token) => agentService.invokeExternalTool(name, args, token),
+			(name, args, token) => agentService.invokeExternalToolResult(name, args, token),
 			completions,
 		);
 		// A read of the shared memory, which has no native counterpart: OpenIDE's own loop gets it
@@ -197,24 +224,34 @@ class OpenideIdeServerContribution extends Disposable implements IWorkbenchContr
 		ideServer.registerTools([{
 			schema: {
 				name: 'openide_memory_read',
-				description: 'Devuelve la memoria compartida de este repo (.openide/MEMORY.md): convenciones, decisiones y gotchas que dejaron sesiones anteriores, tuyas o de otros agentes. Consultala al empezar, antes de reconstruir contexto leyendo archivos.',
+				description: 'Read the shared project memory overview and canonical note summary. Use openide_memory_search to find relevant topics and openide_memory_get to expand a note with its revision/hash.',
 				inputSchema: { type: 'object', properties: {} },
 			},
 			invoke: async () => text(await agentService.externalMemoryRead()),
 		}]);
-		void ideServer.start('OpenIDE');
+		const registrations = mcpRegistrationManager(storage);
+		this._register(storage.onWillSaveState(event => {
+			if (event.reason === WillSaveStateReason.SHUTDOWN) { registrations.dispose(); }
+		}));
+		this._register(toDisposable(() => { registrations.dispose(); mcpRegistrationManagers.delete(storage); }));
+		void ideServer.start('OpenIDE').then(() => {
+			if (this._store.isDisposed || !ideServer.mcpEndpoint()) { return; }
+			const expired = registrations.previous(workspace.getWorkspace().id).find(record => record.state === 'expired');
+			if (expired) {
+				const notification = notifications.prompt(Severity.Info, t('ide.register.expired', expired.name), [{
+					label: t('ide.register.reconnect'), run: () => commands.executeCommand('openide.ide.registerMcp', expired.cliId),
+				}]);
+				this._register(toDisposable(() => notification.close()));
+			}
+		});
 	}
 }
 PlatformRegistry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench)
 	.registerWorkbenchContribution(OpenideIdeServerContribution, LifecyclePhase.Restored);
 
 /**
- * Registers OpenIDE's tools in a CLI that has no per-session config hook — grok today.
- *
- * A one-time write into the CLI's own config, which only makes sense because the port and the
- * token are derived from the workspace and survive a restart. Runs the CLI's own `mcp add`
- * rather than editing its config file by hand: the format is theirs to change, and a file we
- * rewrote by pattern-matching is a file we will eventually corrupt.
+ * Manual registration for CLIs without a launch-scoped config. Credentials expire with this
+ * window generation, so reconnect creates a unique entry and leaves all previous entries alone.
  */
 registerAction2(class extends Action2 {
 	constructor() {
@@ -226,32 +263,40 @@ registerAction2(class extends Action2 {
 		});
 	}
 
-	async run(accessor: ServicesAccessor): Promise<void> {
+	async run(accessor: ServicesAccessor, cliId?: string): Promise<void> {
 		const ideServer = accessor.get(IOpenideIdeServerService);
 		const agentService = accessor.get(IOpenideAgentService);
 		const quickInputService = accessor.get(IQuickInputService);
 		const notificationService = accessor.get(INotificationService);
-		const endpoint = ideServer.mcpEndpoint();
-		if (!endpoint) {
+		const storage = accessor.get(IStorageService);
+		const workspaceId = accessor.get(IWorkspaceContextService).getWorkspace().id;
+		const commands = accessor.get(ICommandService);
+		if (!ideServer.mcpEndpoint()) {
 			notificationService.warn(t('ide.register.noServer'));
 			return;
 		}
 		const candidates = OPENIDE_CLI_CATALOG.filter(cli => cli.mcpRegisterArgs);
-		const picked = await quickInputService.pick(
+		const selected = candidates.find(cli => cli.id === cliId);
+		const picked = selected ? { cli: selected } : await quickInputService.pick(
 			candidates.map(cli => ({ label: cli.name, description: cli.binary, cli })),
 			{ placeHolder: t('ide.register.pick') },
 		);
-		if (!picked) {
-			return;
-		}
+		if (!picked) { return; }
 		const executable = await agentService.resolveExecutable(picked.cli.binary);
 		if (!executable) {
 			notificationService.warn(t('ide.register.notFound', picked.cli.binary));
 			return;
 		}
 		try {
-			await ideServer.registerInCli(executable, picked.cli.mcpRegisterArgs!(endpoint));
-			notificationService.info(t('ide.register.done', picked.cli.name));
+			const result = await mcpRegistrationManager(storage).register(picked.cli.id, workspaceId,
+				() => ideServer.mcpEndpoint(), async endpoint => { await ideServer.registerInCli(executable, picked.cli.mcpRegisterArgs!(endpoint)); });
+			if (result.expired) {
+				notificationService.prompt(Severity.Warning, t('ide.register.expired', result.registration.name), [{
+					label: t('ide.register.reconnect'), run: () => commands.executeCommand('openide.ide.registerMcp', picked.cli.id),
+				}]);
+			} else {
+				notificationService.info(t(result.reused ? 'ide.register.already' : 'ide.register.done', picked.cli.name, result.registration.name));
+			}
 		} catch (error) {
 			notificationService.error(t('ide.register.failed', picked.cli.name, error instanceof Error ? error.message : String(error)));
 		}
@@ -1334,6 +1379,11 @@ configurationRegistry.registerConfiguration({
 			order: 6,
 			description: t('contrib.config.accountFailover.desc'),
 		},
+		'openide.memory.semantic.enabled': { type: 'boolean', default: false, scope: ConfigurationScope.APPLICATION, description: t('memory.semanticEnabled') },
+		'openide.memory.semantic.endpoint': { type: 'string', default: 'http://127.0.0.1:8000', scope: ConfigurationScope.APPLICATION, description: t('memory.semanticEndpoint') },
+		'openide.memory.captureMode': { type: 'string', enum: ['automatic', 'manual', 'off'], default: 'automatic', description: t('memory.captureMode') },
+		'openide.memory.maxNoteBytes': { type: 'number', default: 8192, minimum: 1024, maximum: 131072, description: t('memory.maxNoteBytes') },
+		'openide.memory.maxNotes': { type: 'number', default: 500, minimum: 1, maximum: 2000, description: t('memory.maxNotes') },
 		'openide.memory.enabled': { type: 'boolean', default: true, order: 20, description: t('contrib.config.memory.enabled') },
 		'openide.memory.indexOnOpen': { type: 'boolean', default: true, order: 21, description: t('contrib.config.memory.indexOnOpen') },
 		'openide.memory.incrementalIndexing': { type: 'boolean', default: true, order: 22, description: t('contrib.config.memory.incremental') },
@@ -1397,6 +1447,14 @@ configurationRegistry.registerConfiguration({
 			default: 'toggle',
 			order: 11.51,
 			description: t('contrib.config.voiceMode.desc'),
+		},
+		'openide.agent.processIsolation': {
+			type: 'string', enum: ['off', 'required'], default: 'off',
+			description: t('contrib.config.processIsolation'),
+		},
+		'openide.agent.processIsolationNetwork': {
+			type: 'string', enum: ['deny', 'allow'], default: 'deny',
+			description: t('contrib.config.processIsolationNetwork'),
 		},
 		'openide.agent.autoCompact': {
 			type: 'boolean',
@@ -2075,4 +2133,58 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			markdownDescription: t('contrib.config.chat.selectionToCli'),
 		},
 	},
+});
+
+for (const operation of ['apply', 'discard'] as const) {
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({ id: `openide.agent.${operation}SubagentChanges`, title: { value: t(operation === 'apply' ? 'contrib.cmd.subagent.apply' : 'contrib.cmd.subagent.discard'), original: operation === 'apply' ? 'OpenIDE: Apply Subagent Changes' : 'OpenIDE: Discard Subagent Changes' }, category: Categories.Help, f1: true });
+		}
+		async run(accessor: ServicesAccessor): Promise<void> {
+			const workspaces = accessor.get(ISubagentWorkspaceService);
+			const quickInput = accessor.get(IQuickInputService);
+			const notifications = accessor.get(INotificationService);
+			const workingCopies = accessor.get(IWorkingCopyService);
+			const runState = accessor.get(IOpenideAgentRunStateService);
+			accessor.get(IOpenideAgentService);
+			const leases = workspaces.getCompletedWorktrees();
+			if (!leases.length) { notifications.info(t('contrib.msg.subagent.noWorktrees')); return; }
+			const selected = await quickInput.pick(leases.map(lease => ({ label: lease.runId, description: lease.root.fsPath, lease })), { placeHolder: t('contrib.msg.subagent.chooseWorktree') });
+			if (!selected) { return; }
+			try {
+				if (operation === 'apply') {
+					if (workingCopies.dirtyCount || runState.hasActiveRuns()) { throw new Error(t('contrib.msg.subagent.dirtyEditors')); }
+					await workspaces.apply(selected.lease.runId);
+				} else {
+					const confirmed = await quickInput.pick([{ label: t('contrib.cmd.subagent.discard'), confirmed: true }, { label: t('contrib.msg.subagent.keep'), confirmed: false }], { placeHolder: selected.lease.root.fsPath });
+					if (!confirmed?.confirmed) { return; }
+					await workspaces.discard(selected.lease.runId);
+				}
+				notifications.info(t('contrib.msg.subagent.finished'));
+			} catch (error) { notifications.error(error instanceof Error ? error : String(error)); }
+		}
+	});
+}
+
+registerAction2(class extends Action2 {
+	constructor() { super({ id: 'openide.agent.recoverSubagentChanges', title: { value: t('contrib.cmd.subagent.recover'), original: 'OpenIDE: Recover Subagent Changes' }, category: Categories.Help, f1: true }); }
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const native = accessor.get(IOpenideNativeServices);
+		const context = accessor.get(IWorkspaceContextService);
+		const quickInput = accessor.get(IQuickInputService);
+		const notifications = accessor.get(INotificationService);
+		const workspaces = accessor.get(ISubagentWorkspaceService);
+		accessor.get(IOpenideAgentService);
+		try {
+			const candidates = (await Promise.all(context.getWorkspace().folders.filter(folder => folder.uri.scheme === 'file').map(async folder =>
+				(await native.host.recoverableSubagentWorktrees(folder.uri.fsPath)).map(lease => ({ label: lease.runId, description: lease.path, lease, root: folder.uri.fsPath }))
+			))).flat();
+			if (!candidates.length) { notifications.info(t('contrib.msg.subagent.noWorktrees')); return; }
+			const selected = await quickInput.pick(candidates, { placeHolder: t('contrib.msg.subagent.chooseWorktree') });
+			if (!selected) { return; }
+			const lease = await native.host.recoverSubagentWorktree(selected.lease.runId, selected.root);
+			workspaces.adoptCompletedWorktree(lease.runId, URI.file(lease.path));
+			notifications.info(t('contrib.msg.subagent.recovered'));
+		} catch (error) { notifications.error(error instanceof Error ? error : String(error)); }
+	}
 });

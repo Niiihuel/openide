@@ -37,7 +37,7 @@ suite('OpenIDE chat tool catalog', () => {
 	test('the catalog still covers the whole built-in surface', () => {
 		// A dropped entry degrades that tool to a nameless generic row, which is the exact symptom
 		// this file exists to prevent. The count is the cheapest tripwire.
-		assert.strictEqual(Object.keys(OPENIDE_TOOL_META).length, 61);
+		assert.strictEqual(Object.keys(OPENIDE_TOOL_META).length, 66);
 		assert.strictEqual(OPENIDE_TOOL_META['read_file'].icon, 'file');
 		assert.strictEqual(OPENIDE_TOOL_META['run_command'].icon, 'terminal');
 		assert.strictEqual(OPENIDE_TOOL_META['delegate_task'].icon, 'run-all');
@@ -62,6 +62,7 @@ suite('OpenIDE chat tool catalog', () => {
 			'memory_graph_related_tests', 'codebase_save_priority', 'git_status', 'git_preflight',
 			'git_commit', 'git_checkpoint', 'workflow_configure', 'git_configure', 'browser_open',
 			'await_subagent', 'cancel_subagent', 'suggest_mode', 'memory', 'review_changes',
+			'memory_search', 'memory_get', 'memory_save', 'memory_forget', 'memory_session_summary',
 		];
 		for (const name of runtime) {
 			assert.notStrictEqual(OPENIDE_TOOL_META[name], undefined, `${name} is missing from the catalog`);

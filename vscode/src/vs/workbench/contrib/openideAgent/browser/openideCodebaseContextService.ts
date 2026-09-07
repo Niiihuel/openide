@@ -10,14 +10,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { CODEBASE_NOTES_PATH } from '../../../../code/common/openideCodebaseNotes.js';
-import { ICodebaseMemoryNode } from '../../../../code/common/openideCodebaseMemoryTypes.js';
+import { ICodebaseMemoryNode } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
 import { IOpenideCodebaseQueryService, queryTerms } from './openideCodebaseQueryService.js';
 import { IOpenideProjectMapLearningService } from './openideProjectMapLearningService.js';
 
 export const IOpenideCodebaseContextService = createDecorator<IOpenideCodebaseContextService>('openideCodebaseContextService');
 
-export interface ICodebaseContextOptions { readonly runId?: string; readonly maxTokens?: number; readonly maxNodes?: number; readonly targets?: string[]; }
+export interface ICodebaseContextOptions { readonly excludeAuthoredNotes?: boolean; readonly runId?: string; readonly maxTokens?: number; readonly maxNodes?: number; readonly targets?: string[]; }
 export interface ICodebaseContextSelection { readonly runId?: string; readonly text: string; readonly nodes: ICodebaseMemoryNode[]; readonly estimatedTokens: number; readonly providers: string[]; readonly indexVersion: number; readonly isStale: boolean; }
 
 export interface IOpenideCodebaseContextService {
@@ -35,7 +34,8 @@ export class OpenideCodebaseContextService implements IOpenideCodebaseContextSer
 	) { }
 
 	async select(task: string, options: ICodebaseContextOptions = {}): Promise<ICodebaseContextSelection> {
-		const maxTokens = Math.max(300, options.maxTokens ?? 2_000);
+		const totalBudget = Math.max(0, options.maxTokens ?? 2_000);
+		const maxTokens = Math.max(0, totalBudget - 100);
 		const maxNodes = Math.max(3, options.maxNodes ?? 24);
 		const terms = queryTerms(task);
 		const found = await this.query.search(terms.join(' '), { limit: Math.min(maxNodes, 12) });
@@ -46,13 +46,13 @@ export class OpenideCodebaseContextService implements IOpenideCodebaseContextSer
 		if (!seeds.length) {
 			return { runId: options.runId, text: '', nodes: [], estimatedTokens: 0, providers: [], indexVersion: found.indexVersion, isStale: found.isStale };
 		}
-		const nodes = [...found.data];
+		const nodes = found.data.filter(node => !options.excludeAuthoredNotes || node.kind !== 'note');
 		const relationLines: string[] = [];
 		for (const target of seeds.slice(0, 6)) {
 			const rel = await this.query.explore(target, 'both', undefined, 1, Math.max(4, Math.floor(maxNodes / seeds.length)));
 			const seed = nodes.find(node => node.id === target);
 			for (const row of rel.data) {
-				if (!nodes.some(node => node.id === row.node.id)) { nodes.push(row.node); }
+				if ((!options.excludeAuthoredNotes || row.node.kind !== 'note') && !nodes.some(node => node.id === row.node.id)) { nodes.push(row.node); }
 				if (seed && relationLines.length < maxNodes) {
 					relationLines.push(`- ${seed.qualifiedName ?? seed.name} —${row.edge.type}→ ${row.node.qualifiedName ?? row.node.name} [confidence=${Math.round(row.edge.evidence.confidence * 100)}%]`);
 				}
@@ -76,7 +76,7 @@ export class OpenideCodebaseContextService implements IOpenideCodebaseContextSer
 			// 80 chars and send the agent off to open the file — which is the round trip this
 			// whole thing exists to remove.
 			const line = node.kind === 'note'
-				? `- NOTE (${CODEBASE_NOTES_PATH}:${node.range?.startLine ?? 0}): ${node.documentation ?? node.name}`
+				? `- NOTE (${node.uri}:${node.range?.startLine ?? 0}): ${node.documentation ?? node.name}`
 				: `- ${node.qualifiedName ?? node.name} — ${node.uri}${node.range ? ':' + node.range.startLine : ''} [${node.kind}; confidence=${Math.round(node.evidence.confidence * 100)}%; provider=${node.evidence.provider}${community ? `; module=${community}` : ''}${learning ? `; learning=${learning}` : ''}]`;
 			if (estimateTokens(lines.concat(line).join('\n')) > maxTokens) { break; }
 			lines.push(line); selected.push({ ...node }); providers.add(node.evidence.provider);
@@ -94,11 +94,10 @@ export class OpenideCodebaseContextService implements IOpenideCodebaseContextSer
 		// the budget on purpose.
 		const truncated = selected.length < totalCandidates || relationsShown < relationLines.length;
 		if (truncated) {
-			const notice = `[!] TRUNCATED: showing ${selected.length} of ${totalCandidates} entities and ${relationsShown} of ${relationLines.length} relations (~${maxTokens}-token budget). The answer may be among the cut items — raise openide.memory.maxContextTokens or narrow the question.`;
+			const notice = `[TRUNCATED: ${selected.length}/${totalCandidates} entities; ${relationsShown}/${relationLines.length} relations. Narrow the query or increase the memory budget.]`;
 			lines.unshift(notice);
-			lines.push(notice);
 		}
-		const text = lines.join('\n');
+		const text = lines.join('\n').slice(0, totalBudget * 4);
 		return { runId: options.runId, text, nodes: selected, estimatedTokens: estimateTokens(text), providers: [...providers], indexVersion: found.indexVersion, isStale: found.isStale };
 	}
 }

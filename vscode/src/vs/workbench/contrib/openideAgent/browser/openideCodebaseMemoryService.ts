@@ -15,13 +15,12 @@ import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { ISharedProcessService } from '../../../../platform/ipc/electron-browser/services.js';
-import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js';
+import { IOpenideNativeServices } from '../common/openideNativeServices.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
-import { ICodebaseMemoryChannel, ICodebaseMemoryIndexOptions, ICodebaseMemorySnapshotDto, ICodebaseIndexProgress, ICodebaseMemoryChange } from '../../../../code/common/openideCodebaseMemoryProtocol.js';
-import { ICodebaseIndexVersion, ICodebaseMemoryNode } from '../../../../code/common/openideCodebaseMemoryTypes.js';
-import { CODEBASE_NOTES_ENABLED_SETTING, CODEBASE_NOTES_LINKING_SETTING, noteLinkingFromSetting } from '../../../../code/common/openideCodebaseNotes.js';
+import { ICodebaseMemoryChannel, ICodebaseMemoryIndexOptions, ICodebaseMemorySnapshotDto, ICodebaseIndexProgress, ICodebaseMemoryChange } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProtocol.js';
+import { ICodebaseIndexVersion, ICodebaseMemoryNode } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
+import { CODEBASE_NOTES_ENABLED_SETTING, CODEBASE_NOTES_LINKING_SETTING, noteLinkingFromSetting } from '../../../../platform/openideCodebase/common/openideCodebaseNotes.js';
 import { t } from '../common/openideStrings.js';
 
 export const ICodebaseMemoryService = createDecorator<ICodebaseMemoryService>('openideCodebaseMemoryService');
@@ -38,7 +37,7 @@ export interface ICodebaseMemoryService {
 	getVersion(): Promise<ICodebaseIndexVersion | undefined>;
 	getSnapshot(): Promise<ICodebaseMemorySnapshotDto | undefined>;
 	getFileNodes(uri: string): Promise<ICodebaseMemoryNode[]>;
-	addLanguageServerExtraction(uri: string, extraction: import('../../../../code/common/openideCodebaseMemoryProviders.js').IProviderExtraction): Promise<void>;
+	addLanguageServerExtraction(uri: string, extraction: import('../../../../platform/openideCodebase/common/openideCodebaseMemoryProviders.js').IProviderExtraction): Promise<void>;
 	clear(): Promise<void>;
 	/** Counters from the last full rebuild (what was left out of the scan, and why). */
 	getLastScanCounters(): { excludedByUser: number; excludedTests: number; skippedTooLarge: number } | undefined;
@@ -66,34 +65,33 @@ export class CodebaseMemoryService extends Disposable implements ICodebaseMemory
 	private workspaceKeyPromise!: Promise<string>;
 	private readonly remote: ICodebaseMemoryChannel;
 	private workspaceFolders: string[];
-	private workspaceGeneration = 0;
+	private snapshotGeneration = 0;
+	private snapshotLoad: { generation: number; promise: Promise<ICodebaseMemorySnapshotDto | undefined> } | undefined;
 	private snapshotCache: { workspaceKey: string; version: number; snapshot: ICodebaseMemorySnapshotDto } | undefined;
-	private lastVersion: number | undefined;
 	private lastScanCounters: { excludedByUser: number; excludedTests: number; skippedTooLarge: number } | undefined;
 
 
 	constructor(
 		@IEnvironmentService private readonly environmentService: IEnvironmentService,
-		@ISharedProcessService sharedProcessService: ISharedProcessService,
+		@IOpenideNativeServices nativeServices: IOpenideNativeServices,
 		@IWorkspaceContextService contextService: IWorkspaceContextService,
 		@IWorkspaceTrustManagementService private readonly workspaceTrust: IWorkspaceTrustManagementService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
 		super();
-		this.remote = ProxyChannel.toService<ICodebaseMemoryChannel>(sharedProcessService.getChannel('openideCodebaseMemory'));
+		this.remote = nativeServices.codebase;
 		const folders = contextService.getWorkspace().folders.map(folder => folder.uri.toString());
 		this.workspaceFolders = folders;
 		this.setWorkspaceKeyPromise(this.initialize(folders));
 		this._register(contextService.onDidChangeWorkspaceFolders(() => {
-			this.workspaceGeneration++;
 			this.workspaceFolders = contextService.getWorkspace().folders.map(folder => folder.uri.toString());
 			this.setWorkspaceKeyPromise(this.initialize(this.workspaceFolders));
-			this.snapshotCache = undefined;
-			this.lastVersion = undefined;
+			this.invalidateSnapshot();
+
 			this._onDidChange.fire({ version: 0, workspaceKey: this.workspaceFolders.join('|'), builtAt: Date.now(), staleCount: 0, nodeCount: 0, edgeCount: 0 });
 		}));
 		this._register(this.workspaceTrust.onDidChangeTrust(trusted => {
-			this.snapshotCache = undefined; this.lastVersion = undefined;
+			this.invalidateSnapshot();
 			if (trusted) { this.setWorkspaceKeyPromise(this.initialize(this.workspaceFolders)); }
 			void this.workspaceKeyPromise.then(key => this.remote.setTrusted(key, trusted)).catch(() => undefined);
 			this._onDidChange.fire({ version: 0, workspaceKey: this.workspaceFolders.join('|'), builtAt: Date.now(), staleCount: 0, nodeCount: 0, edgeCount: 0 });
@@ -103,7 +101,7 @@ export class CodebaseMemoryService extends Disposable implements ICodebaseMemory
 		}));
 		this._register(this.remote.onDidChange((event: { workspaceKey: string; version: ICodebaseIndexVersion }) => {
 			void this.workspaceKeyPromise.then(key => {
-				if (key === event.workspaceKey) { this.lastVersion = event.version.version; this.snapshotCache = undefined; this._onDidChange.fire(event.version); }
+				if (key === event.workspaceKey) { this.invalidateSnapshot(); this._onDidChange.fire(event.version); }
 			}, () => undefined);
 		}));
 		// Indexing options live in the renderer's config (the shared process does not know the
@@ -111,6 +109,8 @@ export class CodebaseMemoryService extends Disposable implements ICodebaseMemory
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
 			const affectsFileSet = ['openide.memory.exclude', 'openide.memory.include', 'openide.memory.indexTests', 'openide.memory.enableRegexFallback', 'openide.memory.persistIndex', CODEBASE_NOTES_ENABLED_SETTING, CODEBASE_NOTES_LINKING_SETTING].some(key => e.affectsConfiguration(key));
 			if (!affectsFileSet) { return; }
+			this.invalidateSnapshot();
+			this._onDidChange.fire({ version: 0, workspaceKey: this.workspaceFolders.join('|'), builtAt: Date.now(), staleCount: 0, nodeCount: 0, edgeCount: 0 });
 			void this.workspaceKeyPromise
 				.then(key => this.remote.setOptions(key, this.indexOptions()))
 				.then(() => this.rebuildFull())
@@ -179,19 +179,35 @@ export class CodebaseMemoryService extends Disposable implements ICodebaseMemory
 	async indexIncremental(changes: ICodebaseMemoryChange[]): Promise<IIndexProgressResult> { return this.remote.indexIncremental(await this.key(), changes); }
 	async getVersion(): Promise<ICodebaseIndexVersion | undefined> { return this.remote.getVersion(await this.key()); }
 	async getFileNodes(uri: string): Promise<ICodebaseMemoryNode[]> { return this.remote.getFileNodes(await this.key(), uri); }
-	async addLanguageServerExtraction(uri: string, extraction: import('../../../../code/common/openideCodebaseMemoryProviders.js').IProviderExtraction): Promise<void> { await this.remote.addLanguageServerExtraction(await this.key(), uri, extraction); }
-	async clear(): Promise<void> { this.snapshotCache = undefined; this.lastVersion = undefined; await this.remote.clear(await this.key()); this._onDidChange.fire({ version: 0, workspaceKey: await this.key(), builtAt: Date.now(), staleCount: 0, nodeCount: 0, edgeCount: 0 }); }
+	async addLanguageServerExtraction(uri: string, extraction: import('../../../../platform/openideCodebase/common/openideCodebaseMemoryProviders.js').IProviderExtraction): Promise<void> { await this.remote.addLanguageServerExtraction(await this.key(), uri, extraction); }
+	async clear(): Promise<void> { this.invalidateSnapshot();  await this.remote.clear(await this.key()); this._onDidChange.fire({ version: 0, workspaceKey: await this.key(), builtAt: Date.now(), staleCount: 0, nodeCount: 0, edgeCount: 0 }); }
 
-	async getSnapshot(): Promise<ICodebaseMemorySnapshotDto | undefined> {
-		const generation = this.workspaceGeneration;
+	private invalidateSnapshot(): void {
+		this.snapshotGeneration++;
+		this.snapshotCache = undefined;
+		this.snapshotLoad = undefined;
+	}
+
+	getSnapshot(): Promise<ICodebaseMemorySnapshotDto | undefined> {
+		if (!this.workspaceTrust.isWorkspaceTrusted()) { return Promise.resolve(undefined); }
+		if (this.snapshotCache) { return Promise.resolve(this.snapshotCache.snapshot); }
+		if (this.snapshotLoad?.generation === this.snapshotGeneration) { return this.snapshotLoad.promise; }
+		const generation = this.snapshotGeneration;
+		const promise = this.loadSnapshot(generation).finally(() => {
+			if (this.snapshotLoad?.promise === promise) { this.snapshotLoad = undefined; }
+		});
+		this.snapshotLoad = { generation, promise };
+		return promise;
+	}
+
+	private async loadSnapshot(generation: number): Promise<ICodebaseMemorySnapshotDto | undefined> {
 		const key = await this.key();
-		const version = await this.remote.getVersion(key);
-		if (!version) { return undefined; }
-		if (this.snapshotCache && this.lastVersion === version.version && this.snapshotCache.workspaceKey === key && this.snapshotCache.version === version.version) { return this.snapshotCache.snapshot; }
+		if (generation !== this.snapshotGeneration) { return this.getSnapshot(); }
 		const snapshot = await this.remote.getSnapshot(key);
-		if (generation !== this.workspaceGeneration || (await this.key()) !== key) { return undefined; }
-		if (snapshot) { this.snapshotCache = { workspaceKey: key, version: version.version, snapshot }; }
-		this.lastVersion = version.version;
+		if (generation !== this.snapshotGeneration) { return this.getSnapshot(); }
+		if (snapshot) {
+			this.snapshotCache = { workspaceKey: key, version: snapshot.version.version, snapshot };
+		}
 		return snapshot;
 	}
 }

@@ -7,7 +7,8 @@ import { addDisposableListener, clearNode, getWindow } from '../../../../../base
 import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent.js';
 import { KeyCode } from '../../../../../base/common/keyCodes.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
-import { IOpenideAgentService, IOpenidePickerGroup, IOpenidePickerModel } from '../openideAgentService.js';
+import { IOpenideProviderService } from '../openideProviderService.js';
+import { IOpenidePickerGroup, IOpenidePickerModel } from '../../common/openidePickerModels.js';
 import { availableReasoningEfforts } from './openideChatReasoning.js';
 import { createMenuRow, createMenuSection } from './openideComposerMenu.js';
 import { t } from '../../common/openideStrings.js';
@@ -35,7 +36,7 @@ export class OpenideChatModelEffort extends Disposable {
 	private readonly _open = this._register(new DisposableStore());
 
 	constructor(
-		private readonly agentService: IOpenideAgentService,
+		private readonly agentService: Pick<IOpenideProviderService, 'getReasoningEffort' | 'setReasoningEffort'>,
 		private readonly onDidChangeEffort: () => void,
 	) {
 		super();

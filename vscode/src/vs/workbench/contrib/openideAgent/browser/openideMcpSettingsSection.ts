@@ -25,21 +25,19 @@ import { IContextViewService } from '../../../../platform/contextview/browser/co
 import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
-import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
-import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
+import { IOpenideNativeServices } from '../common/openideNativeServices.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import {
 	IOpenideAgentHostService,
 	McpServerConfig,
 	McpServerStatus,
-	OPENIDE_AGENT_HOST_CHANNEL,
 	validateMcpServerConfig,
 } from '../../../../platform/openideAgentHost/common/openideAgentHost.js';
 import { IQuickInputService, IQuickPickItem, QuickPickInput } from '../../../../platform/quickinput/common/quickInput.js';
@@ -128,14 +126,14 @@ export class OpenideMcpSettingsSection extends Disposable implements IOpenideSet
 		@IEnvironmentService private readonly environmentService: IEnvironmentService,
 		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
-		@IMainProcessService mainProcessService: IMainProcessService,
+		@IOpenideNativeServices nativeServices: IOpenideNativeServices,
 		@IQuickInputService private readonly quickInputService: IQuickInputService,
 		@INotificationService private readonly notificationService: INotificationService,
 		@IEditorService private readonly editorService: IEditorService,
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
-		this.hostClient = ProxyChannel.toService<IOpenideAgentHostService>(mainProcessService.getChannel(OPENIDE_AGENT_HOST_CHANNEL));
+		this.hostClient = nativeServices.host;
 
 		// Live state (the "Connected (N tools)" / "Error" pill), hand edits to the file and
 		// settings changes: everything ends in a single batched repaint.

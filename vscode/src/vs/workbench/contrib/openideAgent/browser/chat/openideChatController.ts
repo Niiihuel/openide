@@ -238,6 +238,12 @@ export class OpenideChatController extends Disposable {
 	) {
 		super();
 		this._effects = this._register(instantiationService.createInstance(OpenideChatSessionEffects, sessions));
+		if (agentService.onDidChangeMemoryCapture) {
+			this._register(agentService.onDidChangeMemoryCapture(({ conversationId, event }) => {
+				if (conversationId === this._activeId) { this.publishNotice(event.severity === 'info' ? 'info' : 'warning', event.message); }
+			}));
+		}
+
 
 		// A persistent subagent run that finishes while nobody is looking still has to land in its
 		// parent conversation, or its result is lost the moment the orchestration forgets it. Same

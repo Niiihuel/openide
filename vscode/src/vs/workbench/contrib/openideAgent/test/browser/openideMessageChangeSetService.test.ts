@@ -15,8 +15,9 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/tes
 import { IFileContent, IFileService } from '../../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { OpenideMessageChangeSetService, fileEditEvent } from '../../browser/openideMessageChangeSetService.js';
+import { IOpenideRestoreSafety } from '../../browser/openideRestoreEngine.js';
 
-function harness(initial: Record<string, string> = {}) {
+function harness(initial: Record<string, string> = {}, safety: IOpenideRestoreSafety = {}) {
 	const files = new Map<string, string>(Object.entries(initial).map(([path, content]) => [URI.file('/workspace/' + path).toString(), content]));
 	const writes: string[] = [];
 	const fileService = new class extends mock<IFileService>() {
@@ -42,7 +43,7 @@ function harness(initial: Record<string, string> = {}) {
 	const context = new class extends mock<IWorkspaceContextService>() {
 		override getWorkspace(): any { return { folders: [{ uri: URI.file('/workspace'), name: 'workspace', index: 0 }] }; }
 	};
-	const service = new OpenideMessageChangeSetService(fileService, context);
+	const service = new OpenideMessageChangeSetService(fileService, context, safety);
 	const read = (path: string) => files.get(URI.file('/workspace/' + path).toString());
 	const writeManual = (path: string, content: string) => files.set(URI.file('/workspace/' + path).toString(), content);
 	return { service, read, writeManual, writes };
@@ -58,6 +59,12 @@ suite('OpenIDE MessageChangeSetService', () => {
 		assert.strictEqual(result.status, 'noop');
 		assert.deepStrictEqual(h.writes, []);
 		assert.strictEqual(h.read('a.ts'), 'a');
+	});
+
+	test('empty and unavailable history do not acquire a restore lease', async () => {
+		const h = harness({}, { acquire: async () => { throw new Error('A no-op must never acquire a lease'); } });
+		assert.deepStrictEqual(await h.service.rollback({ messageId: 'empty', timestamp: 0, state: 'finalized', files: [] }), { messageId: 'empty', status: 'noop', files: [] });
+		assert.deepStrictEqual(await h.service.rollback({ messageId: 'legacy', timestamp: 0, state: 'unavailable', files: [] }), { messageId: 'legacy', status: 'unavailable', files: [] });
 	});
 
 	test('two messages modifying different files stay isolated', async () => {

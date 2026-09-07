@@ -15,8 +15,8 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IServerChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { CodebaseMemoryChannel } from './openideCodebaseMemoryChannel.js';
-import { IProviderExtraction } from '../../../common/openideCodebaseMemoryProviders.js';
-import { ICodebaseMemoryIndexOptions } from '../../../common/openideCodebaseMemoryProtocol.js';
+import { IProviderExtraction } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProviders.js';
+import { ICodebaseMemoryIndexOptions } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProtocol.js';
 
 export class CodebaseMemoryServerChannel extends Disposable implements IServerChannel<string> {
 	private readonly service: CodebaseMemoryChannel;

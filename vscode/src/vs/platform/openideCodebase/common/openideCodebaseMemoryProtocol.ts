@@ -8,7 +8,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { DEFAULT_NOTE_LINKING, NoteLinkingMode } from './openideCodebaseNotes.js';
-import { Event } from '../../base/common/event.js';
+import { Event } from '../../../base/common/event.js';
 import { ICodebaseIndexVersion, ICodebaseMemoryEdge, ICodebaseMemoryNode } from './openideCodebaseMemoryTypes.js';
 import { IProviderExtraction } from './openideCodebaseMemoryProviders.js';
 import { ICodebaseCommunity } from './openideCodebaseCommunities.js';

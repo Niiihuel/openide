@@ -146,7 +146,7 @@ function reduceRootEvent(draft: IOpenideChatDraft, ev: AgentLoopEvent): void {
 			// The engine's `info` is an advisory, not a status line: the webview paints it with the
 			// warning glyph, and downgrading it to 'info' here would make it disappear into the prose.
 			interrupt(draft);
-			pushOpenideChatContent(draft, { kind: 'notice', severity: 'warning', message: ev.message });
+			pushOpenideChatContent(draft, { kind: 'notice', severity: ev.severity ?? 'warning', message: ev.message });
 			return;
 		case 'compaction': applyCompaction(draft, ev); return;
 		case 'retry': applyRetry(draft, ev); return;
@@ -226,11 +226,16 @@ function applyReasoning(draft: IOpenideChatDraft, delta: string): void {
 	draft.thinkingIndex = pushOpenideChatContent(draft, { kind: 'thinking', text: delta, isComplete: false });
 }
 
-/**
- * Granting a permission leaves NO trace: the tool card that follows is already the canonical record
- * of what ran. Only denials are written down, and as a flat line, never a card (commit 4146dda).
- */
+/** Persist an answered inline card so transcript repaints cannot offer its approval again. */
 function applyApproval(draft: IOpenideChatDraft, tool: string, decision: string): void {
+	if (decision === 'once' || decision === 'session' || decision === 'always' || decision === 'deny') {
+		const index = draft.content.findLastIndex(content => content.kind === 'confirmation' && content.tool === tool && !content.decision);
+		const confirmation = draft.content[index];
+		if (confirmation?.kind === 'confirmation') {
+			setOpenideChatContentAt(draft, index, { ...confirmation, decision });
+			return;
+		}
+	}
 	if (decision !== 'deny') { return; }
 	interrupt(draft);
 	pushOpenideChatContent(draft, { kind: 'decision', tool, decision: 'deny' });

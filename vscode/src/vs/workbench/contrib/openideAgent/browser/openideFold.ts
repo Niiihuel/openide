@@ -24,6 +24,8 @@ export interface IOpenideFoldOptions {
 	readonly fadeEdge?: 'bottom' | 'top';
 	/** The content's height, when it is not simply the host's scroll height. */
 	readonly measure?: () => number;
+	/** Accessible names for content other than a diff. */
+	readonly label?: (open: boolean) => string;
 }
 
 /**
@@ -53,14 +55,19 @@ export class OpenideFold extends Disposable {
 		super();
 		host.classList.add('openide-fold', options.fadeEdge === 'top' ? 'openide-fold-top' : 'openide-fold-bottom');
 		this.fade = $('div.openide-fold-fade');
-		this.expand = $('button.openide-fold-expand', { type: 'button' });
+		this.expand = $('button.openide-fold-expand', { type: 'button', 'aria-expanded': 'false' });
 		// The `open` class is the state itself, so the factory reads the DOM rather than a second
 		// copy of it; `update()` from the two places that toggle it keeps the accessible name honest.
-		this.tooltip = this._register(setupChatTooltip(hoverService, this.expand, () => t(this.isOpen ? 'chat.part.collapseDiff' : 'chat.part.expandDiff')));
+		this.tooltip = this._register(setupChatTooltip(hoverService, this.expand, () => options.label?.(this.isOpen) ?? t(this.isOpen ? 'chat.part.collapseDiff' : 'chat.part.expandDiff')));
 		append(this.expand, $('span.codicon.codicon-chevron-down'));
 		this._register(addDisposableListener(this.expand, 'click', event => {
 			event.stopPropagation();
 			this.toggle();
+		}));
+		this._register(addDisposableListener(this.expand, 'keydown', event => {
+			if (event.key === 'Enter' || event.key === ' ') {
+				event.stopPropagation();
+			}
 		}));
 		this.mount();
 	}
@@ -78,6 +85,7 @@ export class OpenideFold extends Disposable {
 	/** Forgets the open state and re-measures — the host has new content. */
 	reset(): void {
 		this.host.classList.remove('open', 'needs-expand');
+		this.expand.setAttribute('aria-expanded', 'false');
 		this.expand.replaceChildren($('span.codicon.codicon-chevron-down'));
 		this.tooltip.update();
 		this.measure();
@@ -112,6 +120,7 @@ export class OpenideFold extends Disposable {
 
 	setOpen(open: boolean): void {
 		this.host.classList.toggle('open', open);
+		this.expand.setAttribute('aria-expanded', String(open));
 		this.expand.replaceChildren($(`span.codicon.codicon-chevron-${open ? 'up' : 'down'}`));
 		this.tooltip.update();
 		this._onDidChangeHeight.fire();

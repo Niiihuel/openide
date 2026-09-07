@@ -28,7 +28,7 @@ import { createDecorator } from '../../../../platform/instantiation/common/insta
 import { URI } from '../../../../base/common/uri.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { getWorkspaceSymbols } from '../../search/common/search.js';
-import { CodebaseMemoryNodeKind } from '../../../../code/common/openideCodebaseMemoryTypes.js';
+import { CodebaseMemoryNodeKind } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
 import { CallHierarchyItem, CallHierarchyModel } from '../../callHierarchy/common/callHierarchy.js';
 
 export const IOpenideCodebaseGraph = createDecorator<IOpenideCodebaseGraph>('openideCodebaseGraph');

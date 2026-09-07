@@ -176,7 +176,8 @@
 	padding: 0;
 	border: none;
 	border-top: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
-	border-radius: 0;
+	border-radius: 0 0 var(--oi-chat-card-radius) var(--oi-chat-card-radius);
+	overflow: hidden;
 }
 
 .openide-chat-term-card.openide-chat-term-open .openide-chat-term-body {
@@ -189,11 +190,41 @@
 .openide-chat-term-fold:not(.open) > .openide-chat-term-out { max-height: 108px; overflow: hidden; }
 .openide-chat-term-fold.open > .openide-chat-term-out { max-height: 320px; overflow: auto; }
 .openide-chat-term-out {
-	padding: 8px 10px;
+	box-sizing: border-box;
+	margin: 8px 10px;
+	padding: 0;
 	color: var(--vscode-descriptionForeground);
 	font-family: var(--oi-font-mono);
 	font-size: 12px;
-	line-height: 1.45;
+	line-height: 18px;
+}
+
+/* The output viewport owns clipping. Its control occupies a separate row, so neither the
+   command's last line nor the rounded frame is covered by a gradient or a floating button. */
+.openide-chat-term-fold > .openide-fold-fade {
+	display: none;
+}
+
+.openide-chat-term-fold > .openide-fold-expand {
+	position: static;
+	transform: none;
+	width: 100%;
+	height: 24px;
+	border: 0;
+	border-top: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
+	border-radius: 0;
+	background: transparent;
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.openide-chat-term-fold > .openide-fold-expand:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.openide-chat-term-fold > .openide-fold-expand:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -2px;
 }
 
 .openide-chat-term-line {

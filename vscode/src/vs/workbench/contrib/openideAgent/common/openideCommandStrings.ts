@@ -5,6 +5,17 @@
 
 /** Command titles, notifications, pickers and setting descriptions registered by `openideAgent.contribution.ts`. */
 export const OPENIDE_COMMAND_STRINGS = {
+	'contrib.cmd.subagent.recover': { es: 'OpenIDE: Recuperar cambios de un subagente', en: 'OpenIDE: Recover Subagent Changes' },
+	'contrib.msg.subagent.recovered': { es: 'Worktree recuperado. Podés aplicar o descartar sus cambios desde la paleta de comandos.', en: 'Worktree recovered. Apply or discard its changes from the command palette.' },
+	'contrib.config.processIsolation': { es: 'Confinar los comandos del agente. required exige bubblewrap operativo en Linux y bloquea la ejecución si no está disponible.', en: 'Confine agent commands. required requires working bubblewrap on Linux and blocks execution when unavailable.' },
+	'contrib.config.processIsolationNetwork': { es: 'Acceso a red de los comandos confinados del agente. Solo se aplica con processIsolation=required.', en: 'Network access for confined agent commands. Applies only with processIsolation=required.' },
+	'contrib.cmd.subagent.apply': { es: 'OpenIDE: Aplicar cambios de un subagente', en: 'OpenIDE: Apply Subagent Changes' },
+	'contrib.cmd.subagent.discard': { es: 'OpenIDE: Descartar cambios de un subagente', en: 'OpenIDE: Discard Subagent Changes' },
+	'contrib.msg.subagent.noWorktrees': { es: 'No hay worktrees terminados de subagentes en esta ventana.', en: 'No completed subagent worktrees in this window.' },
+	'contrib.msg.subagent.chooseWorktree': { es: 'Elegí el worktree del subagente', en: 'Choose the subagent worktree' },
+	'contrib.msg.subagent.dirtyEditors': { es: 'Esperá que terminen los agentes y guardá o descartá los cambios abiertos antes de aplicar el worktree.', en: 'Wait for agents to finish and save or discard unsaved editor changes before applying the worktree.' },
+	'contrib.msg.subagent.keep': { es: 'Conservar cambios', en: 'Keep Changes' },
+	'contrib.msg.subagent.finished': { es: 'Operación del worktree completada.', en: 'Worktree operation completed.' },
 	'contrib.icon.planExecModel': { es: 'Icono del modelo que ejecutará el plan.', en: 'Icon for the model that will run the plan.' },
 	'contrib.cmd.ide.registerMcp': { es: 'OpenIDE: Registrar las herramientas de OpenIDE en un CLI', en: 'OpenIDE: Register OpenIDE tools in a CLI' },
 	'contrib.opener.preview': { es: 'Abrir en la vista previa del IDE', en: 'Open in the IDE preview' },

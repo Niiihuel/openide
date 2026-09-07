@@ -17,8 +17,8 @@ import { joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import * as crypto from 'crypto';
-import { ICodebaseIndexVersion, ICodebaseIndexedFile, ICodebaseMemoryEdge, ICodebaseMemoryNode } from '../../../common/openideCodebaseMemoryTypes.js';
-import { ICodebaseCommunity } from '../../../common/openideCodebaseCommunities.js';
+import { ICodebaseIndexVersion, ICodebaseIndexedFile, ICodebaseMemoryEdge, ICodebaseMemoryNode } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
+import { ICodebaseCommunity } from '../../../../platform/openideCodebase/common/openideCodebaseCommunities.js';
 
 
 const SCHEMA_VERSION = 1;
@@ -66,6 +66,7 @@ export class CodebaseMemoryStorage extends Disposable {
 	private readonly fileCache = new Map<string, IStoredFilePayload>();
 	/** With persist=false the index lives in RAM alone: manifest + fileCache, disk untouched. */
 	private persist = true;
+	private directoryReady: Promise<void> | undefined;
 
 	constructor(
 		private readonly fileService: IFileService,
@@ -79,10 +80,21 @@ export class CodebaseMemoryStorage extends Disposable {
 	async setPersist(value: boolean): Promise<void> {
 		if (this.persist === value) { return; }
 		this.persist = value;
+		this.directoryReady = undefined;
 		if (!value) { await this.fileService.del(this.indexRoot, { recursive: true }).catch(() => { }); }
 	}
 
 	isPersisting(): boolean { return this.persist; }
+
+	private ensureDirectory(): Promise<void> {
+		if (!this.directoryReady) {
+			this.directoryReady = this.fileService.createFolder(joinPath(this.indexRoot, 'files')).then(() => undefined).catch(error => {
+				this.directoryReady = undefined;
+				throw error;
+			});
+		}
+		return this.directoryReady;
+	}
 
 	private manifestUri(): URI { return joinPath(this.indexRoot, 'manifest.json'); }
 	private fileUri(hash: string): URI { return joinPath(this.indexRoot, 'files', `${hash}.json`); }
@@ -149,13 +161,13 @@ export class CodebaseMemoryStorage extends Disposable {
 		const previousPayload = await this.readFile(uri);
 		const prev = this.manifest.files[uri];
 		if (this.persist) {
-			await this.fileService.createFolder(this.indexRoot).catch(() => { });
-			await this.fileService.createFolder(joinPath(this.indexRoot, 'files')).catch(() => { });
+			await this.ensureDirectory();
 			await this.fileService.writeFile(this.fileUri(hashString(uri)), VSBuffer.fromString(JSON.stringify(payload)));
 		}
 		this.fileCache.set(uri, payload);
 		const nodeCount = payload.nodes.length;
-		const files = { ...this.manifest.files, [uri]: { uri, hash, language, indexedAt: Date.now(), nodeCount, status: 'indexed' as const } };
+		const files = this.manifest.files;
+		files[uri] = { uri, hash, language, indexedAt: Date.now(), nodeCount, status: 'indexed' };
 		const deltaNodes = nodeCount - (prev?.nodeCount ?? 0);
 		this.manifest = {
 			...this.manifest,
@@ -164,7 +176,7 @@ export class CodebaseMemoryStorage extends Disposable {
 				...this.manifest.version,
 				version: this.manifest.version.version + 1,
 				builtAt: Date.now(),
-				staleCount: Object.values(files).filter(file => file.status === 'stale').length,
+				staleCount: this.manifest.version.staleCount - (prev?.status === 'stale' ? 1 : 0),
 				nodeCount: this.manifest.version.nodeCount + deltaNodes,
 				edgeCount: this.manifest.version.edgeCount + payload.edges.length - (previousPayload?.edges.length ?? 0),
 			},
@@ -175,8 +187,9 @@ export class CodebaseMemoryStorage extends Disposable {
 	/** Removes a file from the index (the file was deleted from the workspace). */
 	async removeFile(uri: string): Promise<void> {
 		if (!this.manifest || !this.manifest.files[uri]) { return; }
+		const previousMeta = this.manifest.files[uri];
 		const prev = await this.readFile(uri).catch(() => undefined);
-		const files = { ...this.manifest.files };
+		const files = this.manifest.files;
 		delete files[uri];
 		this.manifest = {
 			...this.manifest,
@@ -185,8 +198,8 @@ export class CodebaseMemoryStorage extends Disposable {
 				...this.manifest.version,
 				version: this.manifest.version.version + 1,
 				builtAt: Date.now(),
-				staleCount: Object.values(files).filter(file => file.status === 'stale').length,
-				nodeCount: Math.max(0, this.manifest.version.nodeCount - (prev?.nodes.length ?? 0)),
+				staleCount: this.manifest.version.staleCount - (previousMeta.status === 'stale' ? 1 : 0),
+				nodeCount: Math.max(0, this.manifest.version.nodeCount - previousMeta.nodeCount),
 				edgeCount: Math.max(0, this.manifest.version.edgeCount - (prev?.edges.length ?? 0)),
 			},
 		};
@@ -203,13 +216,13 @@ export class CodebaseMemoryStorage extends Disposable {
 
 	/** Marks a uri stale (it changed on disk but has not been reindexed yet). */
 	markStale(uri: string): void {
-		if (!this.manifest?.files[uri]) { return; }
-		const files = { ...this.manifest.files };
+		if (!this.manifest?.files[uri] || this.manifest.files[uri].status === 'stale') { return; }
+		const files = this.manifest.files;
 		files[uri] = { ...files[uri], status: 'stale' };
-		this.manifest = { ...this.manifest, files, version: { ...this.manifest.version, staleCount: Object.values(files).filter(file => file.status === 'stale').length } };
+		this.manifest = { ...this.manifest, files, version: { ...this.manifest.version, staleCount: this.manifest.version.staleCount + 1 } };
 	}
 
-	getManifest(): IStoredManifest | undefined { return this.manifest; }
+	getManifest(): IStoredManifest | undefined { return this.manifest ? { ...this.manifest, files: { ...this.manifest.files } } : undefined; }
 	getVersion(): ICodebaseIndexVersion | undefined { return this.manifest?.version; }
 	getCommunities(): ICodebaseCommunity[] { return Array.isArray(this.manifest?.communities) ? this.manifest.communities : []; }
 	setCommunities(communities: ICodebaseCommunity[]): void {
@@ -243,13 +256,14 @@ export class CodebaseMemoryStorage extends Disposable {
 	/** Persiste el manifiesto a disco. */
 	async flush(): Promise<void> {
 		if (!this.manifest || !this.persist) { return; }
-		await this.fileService.createFolder(this.indexRoot).catch(() => { });
+		await this.ensureDirectory();
 		await this.fileService.writeFile(this.manifestUri(), VSBuffer.fromString(JSON.stringify(this.manifest)));
 	}
 
 	/** Deletes the whole index of the current workspace. */
 	async clear(): Promise<void> {
 		this.manifest = undefined;
+		this.directoryReady = undefined;
 		this.fileCache.clear();
 		await this.fileService.del(this.indexRoot).catch(() => { });
 	}

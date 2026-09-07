@@ -11,20 +11,20 @@
 
 import { encodeBase64, VSBuffer } from '../../../../base/common/buffer.js';
 import { joinPath } from '../../../../base/common/resources.js';
-import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IPlaywrightService, IInvokeFunctionResult } from '../../../../platform/browserView/common/playwrightService.js';
-import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
-import { IOpenideBrowserAutomation, OPENIDE_BROWSER_AUTOMATION_CHANNEL } from '../../../../platform/openideBrowser/common/openideBrowserAutomation.js';
+import { IOpenideNativeServices } from '../common/openideNativeServices.js';
+import { IOpenideBrowserAutomation } from '../../../../platform/openideBrowser/common/openideBrowserAutomation.js';
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
 import { normalizeLocalUrl } from '../common/openideLocalUrl.js';
 import { cursorInstallScript, OPENIDE_CURSOR_GLOBAL, stripCursorHost } from '../common/openideBrowserCursor.js';
 import { flowSlug, formatFlowTime, IFlowFrame, IFlowVideoResult, IRecorderStatus, pickKeyFrames, recorderRuntimeSource, videoMarker } from '../common/openideBrowserRecorder.js';
 import { encodeFlowWebm, frameBytes, frameSignatures, renderContactSheet } from './openideFlowVideo.js';
 import { analyseFlow, describeFindings, IVisualFinding } from '../common/openideVisualAnalysis.js';
-import { describeLint, IVisualLintReport, visualLintSource } from '../common/openideVisualLint.js';
+import { describeLint, IVisualLintReport } from '../common/openideVisualLint.js';
+import { visualLintSource } from './openideVisualLint.js';
 import { IAgentTool, IAgentToolContext, OpenideToolRegistry } from './openideTools.js';
 
 /** Prefix of the image marker in tool results (interpreted by the run loop). */
@@ -89,14 +89,14 @@ export class OpenideBrowserAutomation {
 	private recording: { id: string; label: string } | undefined;
 
 	constructor(
-		mainProcessService: IMainProcessService,
+		nativeServices: IOpenideNativeServices,
 		private readonly configurationService: IConfigurationService,
 		private readonly browserViewService: IBrowserViewWorkbenchService,
 		private readonly playwrightService: IPlaywrightService,
 		private readonly fileService: IFileService,
 		private readonly environmentService: IEnvironmentService,
 	) {
-		this.client = ProxyChannel.toService<IOpenideBrowserAutomation>(mainProcessService.getChannel(OPENIDE_BROWSER_AUTOMATION_CHANNEL));
+		this.client = nativeServices.browserAutomation;
 	}
 
 	/** Channel used only by the Pick & Polish visual selector. */
@@ -327,10 +327,11 @@ export class OpenideBrowserAutomation {
 		for (const tool of this.buildTools()) {
 			const invoke = tool.invoke;
 			tool.invoke = async (args: any, token, context?: IAgentToolContext) => {
-				if (!this.enabled()) {
-					return 'Error: the agent browser tools are disabled (openide.agent.browserTools.enabled).';
-				}
-				return invoke(args, token, context);
+				const output = this.enabled() ? await invoke(args, token, context) : 'Error: the agent browser tools are disabled (openide.agent.browserTools.enabled).';
+				// This family owns an anchored Error: sentinel. Normalize it at its own boundary,
+				// never guess errors from arbitrary text returned by unrelated tools.
+				if (context?.external && output.startsWith('Error:')) { throw new Error(output); }
+				return output;
 			};
 			registry.registerTool(tool);
 		}

@@ -22,9 +22,8 @@ import { URI } from '../../../../base/common/uri.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
+import { IOpenideNativeServices } from '../common/openideNativeServices.js';
 import { asText, IRequestService } from '../../../../platform/request/common/request.js';
-import { OPENIDE_REQUEST_CHANNEL, OpenideRequestChannelClient } from '../../../../platform/request/common/openideRequestIpc.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 import {
 	cliCredentialExpired,
@@ -78,11 +77,11 @@ export class OpenideCliUsageSource extends Disposable implements IOpenideCliUsag
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
 		@IOpenideUsageService private readonly usageService: IOpenideUsageService,
-		@IMainProcessService mainProcessService: IMainProcessService,
+		@IOpenideNativeServices nativeServices: IOpenideNativeServices,
 	) {
 		super();
 		// Same MAIN channel as the usage service: no CORS, no bearer in the renderer log.
-		this.net = new OpenideRequestChannelClient(mainProcessService.getChannel(OPENIDE_REQUEST_CHANNEL));
+		this.net = nativeServices.requests;
 	}
 
 	private credentialUri(def: ICliUsageAccountDef): URI {

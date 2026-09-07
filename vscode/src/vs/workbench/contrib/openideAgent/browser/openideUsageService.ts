@@ -10,11 +10,10 @@
 
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
-import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
+import { IOpenideNativeServices } from '../common/openideNativeServices.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { asText, IRequestService } from '../../../../platform/request/common/request.js';
-import { OPENIDE_REQUEST_CHANNEL, OpenideRequestChannelClient } from '../../../../platform/request/common/openideRequestIpc.js';
 import {
 	IProviderRateLimits,
 	normalizeAnthropicUsageJson,
@@ -81,11 +80,11 @@ export class OpenideUsageService extends Disposable implements IOpenideUsageServ
 	private readonly cache = new Map<string, IProviderRateLimits>();
 
 	constructor(
-		@IMainProcessService mainProcessService: IMainProcessService,
+		@IOpenideNativeServices nativeServices: IOpenideNativeServices,
 	) {
 		super();
 		// Same MAIN channel as OAuth/providers: no CORS and no leaking the bearer into the renderer log.
-		this.net = new OpenideRequestChannelClient(mainProcessService.getChannel(OPENIDE_REQUEST_CHANNEL));
+		this.net = nativeServices.requests;
 	}
 
 	supportsProvider(entry: { protocol?: string; auth?: string; baseUrl?: string; id?: string } | undefined): boolean {

@@ -144,3 +144,12 @@ export function formatVoiceSetting(providerId: string, model: string): string {
 export function isVoiceSettingFor(setting: VoiceSetting, providerId: string, model: string): boolean {
 	return setting.kind === 'pinned' && setting.providerId === providerId && setting.model === model;
 }
+
+export interface IVoiceCapability {
+	readonly available: boolean;
+	readonly providerId?: string;
+	readonly providerLabel?: string;
+	readonly model?: string;
+	readonly overridden?: boolean;
+	readonly reason?: string;
+}

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, append, getWindow, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
-import { MutableDisposable } from '../../../../../../base/common/lifecycle.js';
+import { MutableDisposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { IContextViewService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
@@ -95,13 +95,19 @@ export class OpenideChatTerminalPart extends OpenideChatContentPart {
 		append(dots, $('span.codicon.codicon-ellipsis'));
 
 		const body = append(this.domNode, $('div.openide-chat-term-body'));
-		// The output folds the way an edit's diff does (openideFold.ts): the first lines at rest,
-		// the fade at the bottom, the chevron on hover. While folded the output is read from its
-		// start, like a diff; open, it follows its tail the way a terminal does.
+		// Keep expansion in its own footer, outside the output viewport and the card's border.
+		// Collapsed output shows six complete lines; expanded output follows the terminal's tail.
 		const fold = append(body, $('div.openide-chat-term-fold'));
 		this._out = append(fold, $('div.openide-chat-term-out'));
-		this._fold = this._register(new OpenideFold(fold, hoverService, { measure: () => this._out.scrollHeight }));
+		this._fold = this._register(new OpenideFold(fold, hoverService, {
+			collapsed: 108, // Six complete 18px lines, matching the viewport CSS.
+			measure: () => this._out.scrollHeight,
+			label: open => t(open ? 'chat.part.collapseOutput' : 'chat.part.expandOutput'),
+		}));
 		this._register(this._fold.onDidChangeHeight(() => this._onDidChangeHeight.fire()));
+		const outputObserver = new (getWindow(this._out).ResizeObserver)(() => this._fold.measure());
+		this._register(toDisposable(() => outputObserver.disconnect()));
+		outputObserver.observe(this._out);
 
 		// `$ command` is the first line of the scroll box and never part of `output`, so the streamed
 		// lines can be diffed against the content by index without an off-by-one everywhere.

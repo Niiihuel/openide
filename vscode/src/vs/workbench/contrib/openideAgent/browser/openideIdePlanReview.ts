@@ -22,6 +22,7 @@
  *  server stops. An approval must be something a person actually did.
  *--------------------------------------------------------------------------------------------*/
 
+import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -114,7 +115,8 @@ export class OpenideIdePlanReview extends Disposable {
 	 * The same plan being reviewed twice settles the older call as rejected instead of leaving
 	 * two agents waiting on one answer — whoever asked first is no longer the one on screen.
 	 */
-	awaitDecision(path: PlanPath, title: string): Promise<IIdePlanDecision> {
+	awaitDecision(path: PlanPath, title: string, token: CancellationToken = CancellationToken.None): Promise<IIdePlanDecision> {
+		if (token.isCancellationRequested) { return Promise.resolve({ approved: false, markdown: '', reason: 'gone' }); }
 		this.settle(path, { approved: false, markdown: '', reason: 'gone' });
 		return new Promise<IIdePlanDecision>(resolve => {
 			const store = new DisposableStore();
@@ -146,15 +148,15 @@ export class OpenideIdePlanReview extends Disposable {
 					}
 				}));
 			}
+			store.add(token.onCancellationRequested(() => this.settle(path, { approved: false, markdown: '', reason: 'gone' })));
 			this._onDidChangePending.fire(this.pendingPlans);
 		});
 	}
 
 	/** Approves: reads the plan back from disk so the user's edits are what the agent receives. */
 	async approve(path: PlanPath): Promise<void> {
-		if (!this.pending.has(path)) {
-			return;
-		}
+		const review = this.pending.get(path);
+		if (!review) { return; }
 		let markdown = '';
 		const resource = this.resolvePlan(path);
 		if (resource) {
@@ -164,11 +166,12 @@ export class OpenideIdePlanReview extends Disposable {
 				// Approving a plan we cannot read would send the agent the model's own version and
 				// call it "what the user approved". Refuse instead of lying about it.
 				this.logService.warn('[openide-ide] could not read the approved plan', error);
-				this.settle(path, { approved: false, markdown: '', reason: 'gone' });
+				if (this.pending.get(path) === review) { this.settle(path, { approved: false, markdown: '', reason: 'gone' }); }
 				return;
 			}
 		}
-		this.settle(path, { approved: true, markdown, reason: 'approved' });
+		// An approval that was reading disk cannot answer a replacement request for this path.
+		if (this.pending.get(path) === review) { this.settle(path, { approved: true, markdown, reason: 'approved' }); }
 	}
 
 	reject(path: PlanPath): void {

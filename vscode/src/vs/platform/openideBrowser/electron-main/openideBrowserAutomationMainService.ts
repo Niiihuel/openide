@@ -16,8 +16,11 @@
  *  apps only), will-navigate is blocked outside that, and window.open is denied.
  *--------------------------------------------------------------------------------------------*/
 
-import { BrowserWindow, WebFrameMain, webContents as electronWebContents } from 'electron';
+import { BrowserWindow, WebFrameMain, WebContents, webContents as electronWebContents } from 'electron';
 import { Disposable } from '../../../base/common/lifecycle.js';
+import { raceCancellation } from '../../../base/common/async.js';
+import { CancellationTokenSource } from '../../../base/common/cancellation.js';
+import { randomUUID } from 'crypto';
 import { BrowserOpResult, IBrowserConsoleEntry, IBrowserPickResult, IOpenideBrowserAutomation, isAllowedLocalBrowserUrl, OPENIDE_PICK_STYLE_PROPS } from '../common/openideBrowserAutomation.js';
 
 const PARTITION = 'persist:openide-automation';
@@ -96,18 +99,41 @@ const RESOLVER_SCRIPT = `(() => {
 
 export class OpenideBrowserAutomationMainService extends Disposable implements IOpenideBrowserAutomation {
 
+	constructor(private readonly owner?: WebContents, private readonly ownedBrowserContents: () => Promise<readonly WebContents[]> = async () => []) {
+		super();
+	}
+
+	private readonly lifetime = this._register(new CancellationTokenSource());
+	private readonly pickerWindows = new Set<BrowserWindow>();
+	private readonly pickerFrames = new Map<WebFrameMain, string>();
 	private window: BrowserWindow | undefined;
 	private consoleBuffer: IBrowserConsoleEntry[] = [];
 	private idleTimer: ReturnType<typeof setTimeout> | undefined;
 
 	override dispose(): void {
-		void this.disposeSession();
+		this.lifetime.cancel();
 		super.dispose();
+		void this.disposeSession();
+	}
+
+	private get active(): boolean { return !this._store.isDisposed && (!this.owner || !this.owner.isDestroyed()); }
+
+	private assertActive(): void {
+		if (!this.active) { throw new Error('Browser owner disconnected.'); }
+	}
+
+	/** Cleanup is qualified by the exact picker invocation, so it cannot remove a new overlay. */
+	private cleanupPicker(frame: WebFrameMain, id: string): Promise<void> {
+		if (this.pickerFrames.get(frame) === id) { this.pickerFrames.delete(frame); }
+		try {
+			return frame.executeJavaScript(`if (window.__openidePickOwner === ${JSON.stringify(id)}) { window.__openidePickCleanup && window.__openidePickCleanup(); delete window.__openidePickOwner; window.__openidePickState = 'cancelled'; }`).then(() => undefined, () => undefined);
+		} catch { return Promise.resolve(); }
 	}
 
 	// ---- ciclo de vida de la ventana oculta ----
 
 	private touch(): void {
+		if (!this.active) { return; }
 		if (this.idleTimer) {
 			clearTimeout(this.idleTimer);
 		}
@@ -115,6 +141,7 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 	}
 
 	private ensureWindow(): BrowserWindow {
+		this.assertActive();
 		if (this.window && !this.window.isDestroyed()) {
 			this.touch();
 			return this.window;
@@ -185,10 +212,12 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 					clearTimeout(timer);
 					wc.removeListener('did-finish-load', onFinish);
 					wc.removeListener('did-fail-load', onFail);
+					wc.removeListener('destroyed', onDestroyed);
 					resolve(r);
 				}
 			};
-			const onFinish = () => done({ ok: true, url: wc.getURL(), title: wc.getTitle() });
+			const onDestroyed = () => done({ ok: false, error: 'Browser window closed.' });
+			const onFinish = () => this.active && !wc.isDestroyed() ? done({ ok: true, url: wc.getURL(), title: wc.getTitle() }) : onDestroyed();
 			const onFail = (_e: unknown, code: number, desc: string, _u: string, isMainFrame: boolean) => {
 				if (isMainFrame) {
 					done({ ok: false, error: `No se pudo cargar (${desc || code}). ¿El server local está corriendo?` });
@@ -197,6 +226,7 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 			const timer = setTimeout(() => done({ ok: false, error: `Timeout cargando ${url} (${NAV_TIMEOUT_MS / 1000}s).` }), NAV_TIMEOUT_MS);
 			wc.on('did-finish-load', onFinish);
 			wc.on('did-fail-load', onFail);
+			wc.on('destroyed', onDestroyed);
 			wc.loadURL(url).catch(e => done({ ok: false, error: errText(e) }));
 		});
 	}
@@ -204,6 +234,7 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 	// ---- API del canal ----
 
 	async navigate(url: string, extraHosts: string[]): Promise<BrowserOpResult<{ url: string; title: string }>> {
+		if (!this.active) { return { ok: false, error: 'Browser owner disconnected.' }; }
 		if (!isAllowedLocalBrowserUrl(url, extraHosts)) {
 			return { ok: false, error: 'URL no permitida: la automatización es SOLO para apps locales (localhost, 127.0.0.1, *.localhost o los hosts de openide.agent.browserAllowedHosts).' };
 		}
@@ -215,7 +246,7 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 
 	async screenshot(selector?: string): Promise<BrowserOpResult<{ base64: string; width: number; height: number }>> {
 		const win = this.window;
-		if (!win || win.isDestroyed()) {
+		if (!this.active || !win || win.isDestroyed()) {
 			return { ok: false, error: 'No hay página cargada: usá browser_navigate primero.' };
 		}
 		this.touch();
@@ -223,13 +254,16 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 			let rect: { x: number; y: number; width: number; height: number } | undefined;
 			if (selector) {
 				const r = await this.resolveElement(win, selector); // auto-wait + text=/role=
+				this.assertActive();
 				if ('error' in r) {
 					return { ok: false, error: r.error };
 				}
 				rect = { x: Math.max(0, Math.round(r.rect.x)), y: Math.max(0, Math.round(r.rect.y)), width: Math.max(1, Math.round(r.rect.w)), height: Math.max(1, Math.round(r.rect.h)) };
 				await new Promise(res => setTimeout(res, 120)); // dejar asentar el scroll
+				this.assertActive();
 			}
 			const image = rect ? await win.webContents.capturePage(rect) : await win.webContents.capturePage();
+			this.assertActive();
 			const size = image.getSize();
 			return { ok: true, base64: image.toJPEG(70).toString('base64'), width: size.width, height: size.height };
 		} catch (e) {
@@ -239,7 +273,7 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 
 	async readDom(selector?: string): Promise<BrowserOpResult<{ html: string }>> {
 		const win = this.window;
-		if (!win || win.isDestroyed()) {
+		if (!this.active || !win || win.isDestroyed()) {
 			return { ok: false, error: 'No hay página cargada: usá browser_navigate primero.' };
 		}
 		this.touch();
@@ -248,6 +282,7 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 				? `(() => { const el = document.querySelector(${JSON.stringify(selector)}); return el ? el.outerHTML.slice(0, ${DOM_CAP}) : ''; })()`
 				: `document.documentElement.outerHTML.slice(0, ${DOM_CAP})`;
 			const html = String(await win.webContents.executeJavaScript(script) ?? '');
+			this.assertActive();
 			if (!html && selector) {
 				return { ok: false, error: `No existe ningún elemento para el selector ${selector}.` };
 			}
@@ -258,6 +293,7 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 	}
 
 	async consoleEntries(): Promise<IBrowserConsoleEntry[]> {
+		if (!this.active) { return []; }
 		this.touch();
 		return this.consoleBuffer.slice(-50);
 	}
@@ -265,17 +301,22 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 	/** Resolves a selector with AUTO-WAIT (Playwright pattern): retries up to ACTION_TIMEOUT_MS
 	 *  for the element to exist, be visible and end up centred. Returns its click point. */
 	private async resolveElement(win: BrowserWindow, selector: string): Promise<{ x: number; y: number; rect: { x: number; y: number; w: number; h: number } } | { error: string }> {
+		this.assertActive();
 		await win.webContents.executeJavaScript(RESOLVER_SCRIPT);
+		this.assertActive();
 		const deadline = Date.now() + ACTION_TIMEOUT_MS;
 		let last = 'missing';
 		while (Date.now() < deadline) {
+			this.assertActive();
 			const raw = await win.webContents.executeJavaScript(`JSON.stringify(window.__openideResolve(${JSON.stringify(selector)}, true))`);
+			this.assertActive();
 			const res = JSON.parse(String(raw || '{}'));
 			if (res.state === 'ok') {
 				return { x: res.x, y: res.y, rect: res.rect };
 			}
 			last = res.state;
 			await new Promise(r => setTimeout(r, 100));
+			this.assertActive();
 		}
 		const why = last === 'hidden' ? 'existe pero no está visible' : 'no apareció';
 		return { error: `El elemento "${selector}" ${why} tras esperar ${ACTION_TIMEOUT_MS / 1000}s. Podés usar CSS, "text=Texto visible" o "role=button[name=Texto]".` };
@@ -283,7 +324,7 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 
 	async click(selector?: string, x?: number, y?: number): Promise<BrowserOpResult> {
 		const win = this.window;
-		if (!win || win.isDestroyed()) {
+		if (!this.active || !win || win.isDestroyed()) {
 			return { ok: false, error: 'No hay página cargada: usá browser_navigate primero.' };
 		}
 		this.touch();
@@ -292,15 +333,18 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 			let cy = y ?? 0;
 			if (selector) {
 				const r = await this.resolveElement(win, selector);
+				this.assertActive();
 				if ('error' in r) {
 					return { ok: false, error: r.error };
 				}
 				cx = r.x;
 				cy = r.y;
 				await new Promise(res => setTimeout(res, 60)); // dejar asentar el scroll
+				this.assertActive();
 			}
 			win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(cx), y: Math.round(cy), button: 'left', clickCount: 1 });
 			await new Promise(res => setTimeout(res, 30));
+			this.assertActive();
 			win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(cx), y: Math.round(cy), button: 'left', clickCount: 1 });
 			return { ok: true };
 		} catch (e) {
@@ -310,12 +354,13 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 
 	async typeText(selector: string, text: string): Promise<BrowserOpResult> {
 		const win = this.window;
-		if (!win || win.isDestroyed()) {
+		if (!this.active || !win || win.isDestroyed()) {
 			return { ok: false, error: 'No hay página cargada: usá browser_navigate primero.' };
 		}
 		this.touch();
 		try {
 			const r = await this.resolveElement(win, selector);
+			this.assertActive();
 			if ('error' in r) {
 				return { ok: false, error: r.error };
 			}
@@ -323,7 +368,9 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 			win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(r.x), y: Math.round(r.y), button: 'left', clickCount: 1 });
 			win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(r.x), y: Math.round(r.y), button: 'left', clickCount: 1 });
 			await new Promise(res => setTimeout(res, 40));
+			this.assertActive();
 			await win.webContents.insertText(String(text ?? ''));
+			this.assertActive();
 			return { ok: true };
 		} catch (e) {
 			return { ok: false, error: errText(e) };
@@ -332,13 +379,14 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 
 	async evaluate(expression: string): Promise<BrowserOpResult<{ value: string }>> {
 		const win = this.window;
-		if (!win || win.isDestroyed()) {
+		if (!this.active || !win || win.isDestroyed()) {
 			return { ok: false, error: 'No hay página cargada: usá browser_navigate primero.' };
 		}
 		this.touch();
 		try {
 			const script = `(async () => { try { const __v = await (${expression}\n); const __s = JSON.stringify(__v); return __s === undefined ? String(__v) : __s; } catch (e) { return 'Error: ' + (e && e.message || String(e)); } })()`;
 			const value = String(await win.webContents.executeJavaScript(script) ?? 'undefined');
+			this.assertActive();
 			return { ok: true, value: value.slice(0, 20_000) };
 		} catch (e) {
 			return { ok: false, error: errText(e) };
@@ -347,13 +395,14 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 
 	async setStyle(selector: string, cssText: string): Promise<BrowserOpResult<{ count: number }>> {
 		const win = this.window;
-		if (!win || win.isDestroyed()) {
+		if (!this.active || !win || win.isDestroyed()) {
 			return { ok: false, error: 'No hay página cargada: usá browser_navigate primero.' };
 		}
 		this.touch();
 		try {
 			const count = Number(await win.webContents.executeJavaScript(
 				`(() => { const els = document.querySelectorAll(${JSON.stringify(selector)}); els.forEach(el => { el.style.cssText += ';' + ${JSON.stringify(cssText)}; }); return els.length; })()`) || 0);
+			this.assertActive();
 			return count > 0 ? { ok: true, count } : { ok: false, error: `No existe ningún elemento para el selector ${selector}.` };
 		} catch (e) {
 			return { ok: false, error: errText(e) };
@@ -363,6 +412,7 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 	// ---- Pick & Polish: visible window + selection overlay ----
 
 	async pick(url: string, extraHosts: string[]): Promise<BrowserOpResult<{ result: IBrowserPickResult }> | { ok: false; cancelled: true }> {
+		if (!this.active) { return { ok: false, cancelled: true }; }
 		if (!isAllowedLocalBrowserUrl(url, extraHosts)) {
 			return { ok: false, error: 'URL no permitida: el picker es SOLO para apps locales.' };
 		}
@@ -378,20 +428,24 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 				nodeIntegration: false,
 			},
 		});
+		this.pickerWindows.add(win);
 		this.hardenWebContents(win, () => extraHosts);
 		try {
 			const loaded = await this.loadAndWait(win, url);
+			this.assertActive();
 			if (!loaded.ok) {
 				win.destroy();
 				return loaded;
 			}
 			await win.webContents.executeJavaScript(PICK_OVERLAY_SCRIPT);
+			this.assertActive();
 			const started = Date.now();
 			while (Date.now() - started < PICK_TIMEOUT_MS) {
-				if (win.isDestroyed()) {
+				if (!this.active || win.isDestroyed()) {
 					return { ok: false, cancelled: true };
 				}
 				const state = String(await win.webContents.executeJavaScript('window.__openidePickState || \'\'').catch(() => ''));
+				this.assertActive();
 				if (state === 'cancelled') {
 					win.destroy();
 					return { ok: false, cancelled: true };
@@ -405,6 +459,7 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 						height: Math.max(1, Math.round(picked.rect.h)),
 					};
 					const image = await win.webContents.capturePage(rect);
+					this.assertActive();
 					const result: IBrowserPickResult = {
 						selector: String(picked.selector ?? ''),
 						html: String(picked.html ?? ''),
@@ -417,6 +472,7 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 					return { ok: true, result };
 				}
 				await new Promise(res => setTimeout(res, 250));
+				this.assertActive();
 			}
 			win.destroy();
 			return { ok: false, error: 'Pick expirado (5 min sin selección).' };
@@ -426,11 +482,17 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 			if (!closedByUser) {
 				win.destroy();
 			}
-			return closedByUser ? { ok: false, cancelled: true } : { ok: false, error: errText(e) };
+			return closedByUser || !this.active ? { ok: false, cancelled: true } : { ok: false, error: errText(e) };
+		} finally {
+			this.pickerWindows.delete(win);
+			if (!win.isDestroyed()) { win.destroy(); }
 		}
 	}
 
 	async disposeSession(): Promise<void> {
+		for (const win of this.pickerWindows) { if (!win.isDestroyed()) { win.destroy(); } }
+		this.pickerWindows.clear();
+		for (const [frame, id] of this.pickerFrames) { void this.cleanupPicker(frame, id); }
 		if (this.idleTimer) {
 			clearTimeout(this.idleTimer);
 			this.idleTimer = undefined;
@@ -448,8 +510,20 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 	// the native preview (without opening another window). No element screenshot: the rect
 	// is relative to the iframe viewport and the absolute offset is not computable cross-origin.
 
-	private findLocalFrame(targetOrigin: string): WebFrameMain | undefined {
+	private async findLocalFrame(targetOrigin: string): Promise<WebFrameMain | undefined> {
+		if (!this.active || !this.owner || this.owner.isDestroyed()) {
+			return undefined;
+		}
+		const ownerWindow = BrowserWindow.fromWebContents(this.owner);
+		const candidates = new Set(await raceCancellation(this.ownedBrowserContents(), this.lifetime.token, []));
+		if (!this.active) { return undefined; }
 		for (const wc of electronWebContents.getAllWebContents()) {
+			if (wc === this.owner || (ownerWindow && BrowserWindow.fromWebContents(wc) === ownerWindow)) {
+				candidates.add(wc);
+			}
+		}
+		for (const wc of candidates) {
+			if (wc.isDestroyed()) { continue; }
 			const main = wc.mainFrame;
 			if (!main) {
 				continue;
@@ -466,6 +540,7 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 	}
 
 	async pickInPage(url: string, extraHosts: string[], waitFrameMs: number): Promise<BrowserOpResult<{ result: IBrowserPickResult }> | { ok: false; cancelled: true } | { ok: false; noFrame: true }> {
+		if (!this.active) { return { ok: false, cancelled: true }; }
 		if (!isAllowedLocalBrowserUrl(url, extraHosts)) {
 			return { ok: false, error: 'URL no permitida: el picker es SOLO para apps locales.' };
 		}
@@ -477,31 +552,40 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 		}
 		// wait for the preview iframe to exist (it may be in the middle of opening)
 		const findDeadline = Date.now() + Math.max(0, waitFrameMs);
-		let frame = this.findLocalFrame(origin);
+		let frame = await this.findLocalFrame(origin);
+		if (!this.active) { return { ok: false, cancelled: true }; }
 		while (!frame && Date.now() < findDeadline) {
 			await new Promise(res => setTimeout(res, 300));
-			frame = this.findLocalFrame(origin);
+			if (!this.active) { return { ok: false, cancelled: true }; }
+			frame = await this.findLocalFrame(origin);
+			if (!this.active) { return { ok: false, cancelled: true }; }
 		}
 		if (!frame) {
 			return { ok: false, noFrame: true };
 		}
+		const pickId = randomUUID();
+		this.pickerFrames.set(frame, pickId);
 		try {
-			await frame.executeJavaScript(PICK_OVERLAY_SCRIPT);
+			this.assertActive();
+			await frame.executeJavaScript(`if (window.__openidePickOwner !== ${JSON.stringify(pickId)}) { window.__openidePickCleanup && window.__openidePickCleanup(); } window.__openidePickOwner = ${JSON.stringify(pickId)}; ${PICK_OVERLAY_SCRIPT}`);
+			this.assertActive();
 			const started = Date.now();
 			while (Date.now() - started < PICK_TIMEOUT_MS) {
 				let state = '';
 				try {
-					state = String(await frame.executeJavaScript('window.__openidePickState || \'\'') ?? '');
+					state = String(await frame.executeJavaScript(`window.__openidePickOwner === ${JSON.stringify(pickId)} ? (window.__openidePickState || '') : 'cancelled'`) ?? '');
 				} catch {
 					// the iframe navigated / the preview closed → cancellation
 					return { ok: false, cancelled: true };
 				}
+				this.assertActive();
 				if (state === 'cancelled') {
 					return { ok: false, cancelled: true };
 				}
 				if (state) {
 					const picked = JSON.parse(state);
-					await frame.executeJavaScript('window.__openidePickState = \'\'').catch(() => { /* best effort */ });
+					await this.cleanupPicker(frame, pickId);
+					this.assertActive();
 					const result: IBrowserPickResult = {
 						selector: String(picked.selector ?? ''),
 						html: String(picked.html ?? ''),
@@ -517,11 +601,14 @@ export class OpenideBrowserAutomationMainService extends Disposable implements I
 					return { ok: true, result };
 				}
 				await new Promise(res => setTimeout(res, 250));
+				this.assertActive();
 			}
-			await frame.executeJavaScript('window.__openidePickCleanup && window.__openidePickCleanup()').catch(() => { /* best effort */ });
+			await this.cleanupPicker(frame, pickId);
 			return { ok: false, error: 'Pick expirado (5 min sin selección).' };
 		} catch (e) {
-			return { ok: false, error: errText(e) };
+			return this.active ? { ok: false, error: errText(e) } : { ok: false, cancelled: true };
+		} finally {
+			await this.cleanupPicker(frame, pickId);
 		}
 	}
 }

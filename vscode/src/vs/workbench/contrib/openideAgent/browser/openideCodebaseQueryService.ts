@@ -13,7 +13,7 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { ICodebaseMemoryService } from './openideCodebaseMemoryService.js';
-import { ICodebaseMemoryEdge, ICodebaseMemoryNode, CodebaseMemoryProvider, CodebaseMemoryRelationType, ICodebaseMemoryQueryResult } from '../../../../code/common/openideCodebaseMemoryTypes.js';
+import { ICodebaseMemoryEdge, ICodebaseMemoryNode, CodebaseMemoryProvider, CodebaseMemoryRelationType, ICodebaseMemoryQueryResult } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
 
 export const IOpenideCodebaseQueryService = createDecorator<IOpenideCodebaseQueryService>('openideCodebaseQueryService');
 
@@ -21,7 +21,11 @@ export interface ICodebaseSearchOptions { readonly kinds?: string[]; readonly la
 export interface ICodebaseRelationResult { readonly node: ICodebaseMemoryNode; readonly edge: ICodebaseMemoryEdge; readonly depth: number; }
 export interface ICodebaseImpactResult { readonly direct: ICodebaseRelationResult[]; readonly transitive: ICodebaseRelationResult[]; readonly tests: ICodebaseRelationResult[]; }
 
+interface ISearchText { readonly name: string; readonly body: string; readonly qualified: string; readonly uri: string; readonly text: string; }
+
 interface IQuerySnapshot {
+	readonly searchText: ReadonlyMap<string, ISearchText>;
+	readonly searchEntries: readonly { node: ICodebaseMemoryNode; text: ISearchText }[];
 	readonly nodes: readonly ICodebaseMemoryNode[];
 	readonly edges: readonly ICodebaseMemoryEdge[];
 	readonly version: number;
@@ -55,18 +59,22 @@ export interface IOpenideCodebaseQueryService {
 export class OpenideCodebaseQueryService extends Disposable implements IOpenideCodebaseQueryService {
 	declare readonly _serviceBrand: undefined;
 	private snapshot: IQuerySnapshot | undefined;
+	private generation = 0;
+	private loading: { generation: number; promise: Promise<IQuerySnapshot> } | undefined;
 
 	constructor(
 		@ICodebaseMemoryService private readonly memory: ICodebaseMemoryService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
 		super();
-		this._register(memory.onDidChange(() => { this.snapshot = undefined; }));
+		this._register(memory.onDidChange(() => { this.invalidate(); }));
 		// The snapshot is built with the heuristics filter applied: if it changes, it is rebuilt.
 		this._register(configurationService.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration('openide.memory.showHeuristicRelations')) { this.snapshot = undefined; }
+			if (e.affectsConfiguration('openide.memory.showHeuristicRelations')) { this.invalidate(); }
 		}));
 	}
+
+	private invalidate(): void { this.generation++; this.snapshot = undefined; this.loading = undefined; }
 
 	/** Configurable depth ceiling for every graph traversal (default 3, cap 6). */
 	private configuredMaxDepth(): number {
@@ -74,48 +82,64 @@ export class OpenideCodebaseQueryService extends Disposable implements IOpenideC
 		return Number.isFinite(value) && value >= 1 ? Math.min(6, value) : 3;
 	}
 
-	private async current() {
-		if (!this.snapshot) {
-			const snapshot = await this.memory.getSnapshot();
-			const nodes = snapshot?.nodes ?? [];
-			// Con showHeuristicRelations=false solo sobreviven ARISTAS verificadas (language
-			// server). The nodes stay: filtering them would empty the graph (file-nodes are regex/text).
-			const includeHeuristic = this.configurationService.getValue('openide.memory.showHeuristicRelations') !== false;
-			const edges = (snapshot?.edges ?? []).filter(edge => includeHeuristic || edge.evidence.verified);
-			const edgesBySource = new Map<string, ICodebaseMemoryEdge[]>();
-			const edgesByTarget = new Map<string, ICodebaseMemoryEdge[]>();
-			for (const edge of edges) {
-				const outgoing = edgesBySource.get(edge.source) ?? [];
-				outgoing.push(edge);
-				edgesBySource.set(edge.source, outgoing);
-				const incoming = edgesByTarget.get(edge.target) ?? [];
-				incoming.push(edge);
-				edgesByTarget.set(edge.target, incoming);
-			}
-			const degreeById = new Map<string, number>();
-			for (const edge of edges) {
-				degreeById.set(edge.source, (degreeById.get(edge.source) ?? 0) + 1);
-				degreeById.set(edge.target, (degreeById.get(edge.target) ?? 0) + 1);
-			}
-			const degreesSorted = [...degreeById.values()].sort((a, b) => a - b);
-			const p99 = degreesSorted.length ? degreesSorted[Math.min(degreesSorted.length - 1, Math.floor(degreesSorted.length * 0.99))] : 0;
-			const communityLabelByUri = new Map<string, string>();
-			for (const community of snapshot?.communities ?? []) {
-				for (const member of community.members) { communityLabelByUri.set(member, community.label); }
-			}
-			this.snapshot = {
-				nodes,
-				edges,
-				version: snapshot?.version.version ?? 0,
-				dirty: new Set(snapshot?.dirtyUris ?? []),
-				nodesById: new Map(nodes.map(node => [node.id, node] as const)),
-				edgesBySource,
-				edgesByTarget,
-				hubThreshold: Math.max(50, p99),
-				degreeById,
-				communityLabelByUri,
-			};
+	private current(): Promise<IQuerySnapshot> {
+		if (this.snapshot) { return Promise.resolve(this.snapshot); }
+		if (this.loading?.generation === this.generation) { return this.loading.promise; }
+		const generation = this.generation;
+		const promise = this.buildSnapshot(generation).finally(() => {
+			if (this.loading?.promise === promise) { this.loading = undefined; }
+		});
+		this.loading = { generation, promise };
+		return promise;
+	}
+
+	private async buildSnapshot(generation: number): Promise<IQuerySnapshot> {
+		const snapshot = await this.memory.getSnapshot();
+		if (generation !== this.generation) { return this.current(); }
+		const allNodes = snapshot?.nodes ?? [];
+		const superseded = new Set(allNodes.filter(node => node.kind === 'note').map(node => node.metadata?.['supersedes']).filter(Boolean));
+		const nodes = allNodes.filter(node => node.kind !== 'note' || node.metadata?.['status'] !== 'superseded' && !superseded.has(node.metadata?.['id']));
+		const activeIds = new Set(nodes.map(node => node.id));
+		// Con showHeuristicRelations=false solo sobreviven ARISTAS verificadas (language
+		// server). The nodes stay: filtering them would empty the graph (file-nodes are regex/text).
+		const includeHeuristic = this.configurationService.getValue('openide.memory.showHeuristicRelations') !== false;
+		const edges = (snapshot?.edges ?? []).filter(edge => activeIds.has(edge.source) && activeIds.has(edge.target) && (includeHeuristic || edge.evidence.verified));
+		const edgesBySource = new Map<string, ICodebaseMemoryEdge[]>();
+		const edgesByTarget = new Map<string, ICodebaseMemoryEdge[]>();
+		for (const edge of edges) {
+			const outgoing = edgesBySource.get(edge.source) ?? [];
+			outgoing.push(edge);
+			edgesBySource.set(edge.source, outgoing);
+			const incoming = edgesByTarget.get(edge.target) ?? [];
+			incoming.push(edge);
+			edgesByTarget.set(edge.target, incoming);
 		}
+		const degreeById = new Map<string, number>();
+		for (const edge of edges) {
+			degreeById.set(edge.source, (degreeById.get(edge.source) ?? 0) + 1);
+			degreeById.set(edge.target, (degreeById.get(edge.target) ?? 0) + 1);
+		}
+		const degreesSorted = [...degreeById.values()].sort((a, b) => a - b);
+		const p99 = degreesSorted.length ? degreesSorted[Math.min(degreesSorted.length - 1, Math.floor(degreesSorted.length * 0.99))] : 0;
+		const communityLabelByUri = new Map<string, string>();
+		for (const community of snapshot?.communities ?? []) {
+			for (const member of community.members) { communityLabelByUri.set(member, community.label); }
+		}
+		const searchEntries = nodes.map(node => ({ node, text: { name: node.name.toLowerCase(), body: (node.documentation ?? '').toLowerCase(), qualified: (node.qualifiedName ?? '').toLowerCase(), uri: node.uri.toLowerCase(), text: searchableNodeText(node) } }));
+		this.snapshot = {
+			searchEntries,
+			searchText: new Map(searchEntries.map(entry => [entry.node.id, entry.text])),
+			nodes,
+			edges,
+			version: snapshot?.version.version ?? 0,
+			dirty: new Set(snapshot?.dirtyUris ?? []),
+			nodesById: new Map(nodes.map(node => [node.id, node] as const)),
+			edgesBySource,
+			edgesByTarget,
+			hubThreshold: Math.max(50, p99),
+			degreeById,
+			communityLabelByUri,
+		};
 		return this.snapshot;
 	}
 
@@ -126,21 +150,33 @@ export class OpenideCodebaseQueryService extends Disposable implements IOpenideC
 	async search(query: string, options: ICodebaseSearchOptions = {}): Promise<ICodebaseMemoryQueryResult<ICodebaseMemoryNode[]>> {
 		const snapshot = await this.current(); const terms = queryTerms(query);
 		const kinds = options.kinds?.map(k => k.toLowerCase()); const languages = options.languages?.map(k => k.toLowerCase()); const prefix = options.pathPrefix?.toLowerCase();
-		const candidates = !terms.length ? [] : snapshot.nodes.filter(node => {
+		const candidates = !terms.length ? [] : snapshot.searchEntries.filter(({ node, text }) => {
 			if (kinds?.length && !kinds.includes(node.kind.toLowerCase())) { return false; }
 			if (languages?.length && !languages.includes((node.language ?? '').toLowerCase())) { return false; }
 			if (prefix && !node.uri.toLowerCase().includes(prefix)) { return false; }
-			const haystack = searchableNodeText(node);
+			const haystack = text.text;
 			return terms.some(term => haystack.includes(term));
 		});
 		const documentFrequency = new Map<string, number>();
 		for (const term of terms) {
-			documentFrequency.set(term, candidates.reduce((count, node) => count + (searchableNodeText(node).includes(term) ? 1 : 0), 0));
+			documentFrequency.set(term, candidates.reduce((count, entry) => count + (entry.text.text.includes(term) ? 1 : 0), 0));
 		}
-		const scored = candidates
-			.map(node => ({ node, score: this.score(node, terms, documentFrequency, snapshot.nodes.length) }))
-			.sort((a, b) => b.score - a.score || a.node.name.length - b.node.name.length || a.node.id.localeCompare(b.node.id));
-		const data = scored.slice(0, options.limit ?? 50).map(entry => entry.node);
+		const limit = Number.isFinite(options.limit) ? Math.max(0, Math.floor(options.limit!)) : 50;
+		const weights = terms.map(term => Math.log((snapshot.nodes.length + 1) / ((documentFrequency.get(term) ?? 0) + 1)) + 1);
+		const joinedIdf = Math.max(1, ...weights);
+		const scored: { node: ICodebaseMemoryNode; score: number }[] = [];
+		const compare = (a: typeof scored[number], b: typeof scored[number]) => b.score - a.score || a.node.name.length - b.node.name.length || a.node.id.localeCompare(b.node.id);
+		// Keep only the requested prefix instead of sorting the entire graph on every query.
+		for (const { node, text } of candidates) {
+			if (!limit) { break; }
+			const entry = { node, score: this.score(node, terms, documentFrequency, snapshot.nodes.length, text, weights, joinedIdf) };
+			if (scored.length === limit && compare(entry, scored[scored.length - 1]) >= 0) { continue; }
+			let low = 0; let high = scored.length;
+			while (low < high) { const middle = (low + high) >>> 1; if (compare(entry, scored[middle]) < 0) { high = middle; } else { low = middle + 1; } }
+			scored.splice(low, 0, entry);
+			if (scored.length > limit) { scored.pop(); }
+		}
+		const data = scored.map(entry => entry.node);
 		return this.result(data, snapshot, data.map(node => node.evidence.provider), data.length ? Math.max(...data.map(node => node.evidence.confidence)) : 0);
 	}
 
@@ -151,25 +187,26 @@ export class OpenideCodebaseQueryService extends Disposable implements IOpenideC
 	 * prefix+substring covering almost all of them, because the exact tier is worth
 	 * 10x el de prefijo.
 	 */
-	private score(node: ICodebaseMemoryNode, terms: readonly string[], documentFrequency: ReadonlyMap<string, number>, nodeCount: number): number {
+	private score(node: ICodebaseMemoryNode, terms: readonly string[], documentFrequency: ReadonlyMap<string, number>, nodeCount: number, cached?: ISearchText, weights?: readonly number[], precomputedJoinedIdf?: number): number {
 		if (!terms.length) { return 0; }
-		const name = node.name.toLowerCase(); const qualified = (node.qualifiedName ?? '').toLowerCase(); const uri = node.uri.toLowerCase();
+		const name = cached?.name ?? node.name.toLowerCase(); const body = cached?.body ?? (node.documentation ?? '').toLowerCase(); const qualified = cached?.qualified ?? (node.qualifiedName ?? '').toLowerCase(); const uri = cached?.uri ?? node.uri.toLowerCase();
 		const base = node.evidence.confidence * 4 + Math.min(node.degree, 20) * 0.15;
 		const joined = terms.join('');
 		let tiered = 0;
 		let matched = 0;
-		for (const term of terms) {
-			const frequency = documentFrequency.get(term) ?? 0;
-			const idf = Math.log((nodeCount + 1) / (frequency + 1)) + 1;
+		for (let index = 0; index < terms.length; index++) {
+			const term = terms[index];
+			const idf = weights?.[index] ?? Math.log((nodeCount + 1) / ((documentFrequency.get(term) ?? 0) + 1)) + 1;
 			if (name === term) { tiered += 1000 * idf; matched++; }
 			else if (name.startsWith(term)) { tiered += 100 * idf; matched++; }
 			else if (name.includes(term) || qualified.includes(term)) { tiered += 1 * idf; matched++; }
 			// The path adds signal but does NOT count as coverage: a term appearing only in the
 			// path does not mean the entity is about it.
+			else if (node.kind === 'note' && body.includes(term)) { tiered += 10 * idf; matched++; }
 			else if (uri.includes(term)) { tiered += 0.5 * idf; }
 		}
 		// Full-query tier: the name IS the query (or prefixes it).
-		const joinedIdf = Math.max(1, ...terms.map(term => Math.log((nodeCount + 1) / ((documentFrequency.get(term) ?? 0) + 1)) + 1));
+		const joinedIdf = precomputedJoinedIdf ?? Math.max(1, ...terms.map(term => Math.log((nodeCount + 1) / ((documentFrequency.get(term) ?? 0) + 1)) + 1));
 		if (name === joined || qualified === joined || node.id === joined) { tiered += 1000 * 10 * joinedIdf; }
 		else if (name.startsWith(joined)) { tiered += 100 * 10 * joinedIdf; }
 		const coverage = matched / terms.length;
@@ -191,14 +228,14 @@ export class OpenideCodebaseQueryService extends Disposable implements IOpenideC
 		const snapshot = await this.current();
 		const documentFrequency = new Map<string, number>();
 		for (const term of terms) {
-			documentFrequency.set(term, ranked.reduce((count, node) => count + (searchableNodeText(node).includes(term) ? 1 : 0), 0));
+			documentFrequency.set(term, ranked.reduce((count, node) => count + (snapshot.searchText.get(node.id)!.text.includes(term) ? 1 : 0), 0));
 		}
 		const topScore = this.score(ranked[0], terms, documentFrequency, snapshot.nodes.length);
 		const seeds: ICodebaseMemoryNode[] = [];
 		const seenLabels = new Set<string>();
 		for (const node of ranked) {
 			if (seeds.length >= max) { break; }
-			if (this.score(node, terms, documentFrequency, snapshot.nodes.length) < topScore * 0.2) { break; }
+			if (this.score(node, terms, documentFrequency, snapshot.nodes.length, snapshot.searchText.get(node.id)) < topScore * 0.2) { break; }
 			const label = (node.qualifiedName ?? node.name).toLowerCase();
 			if (seenLabels.has(label)) { continue; }
 			seenLabels.add(label); seeds.push(node);
@@ -309,5 +346,5 @@ export function queryTerms(query: string): string[] {
 }
 
 function searchableNodeText(node: ICodebaseMemoryNode): string {
-	return `${node.name} ${node.qualifiedName ?? ''} ${node.uri} ${node.signature ?? ''}`.toLowerCase();
+	return `${node.name} ${node.qualifiedName ?? ''} ${node.uri} ${node.signature ?? ''} ${node.documentation ?? ''}`.toLowerCase();
 }

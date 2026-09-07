@@ -387,7 +387,6 @@
 /* `.openide-chat-ask.answered` and not the bare class: while the run waits, the ask row is only
    the "Asking questions" shimmer line and a frame around a shimmer reads as an empty card. */
 .openide-chat-native .openide-chat-ask.answered,
-.openide-chat-native .openide-chat-approval,
 .openide-chat-native .openide-chat-todos-card,
 .openide-chat-native .openide-chat-term-card,
 .openide-chat-native .openide-chat-suggest-card,
@@ -427,23 +426,17 @@
 	padding-right: 0;
 }
 /* Heads: no tinted band, 12px muted title. */
-.openide-chat-native .openide-chat-approval-body,
-.openide-chat-native .openide-chat-approval-kind,
 .openide-chat-native .openide-chat-compaction-kind,
-.openide-chat-native .openide-chat-approval-cmd,
 .openide-chat-native .openide-chat-ask-free,
 .openide-chat-native .openide-chat-shot-body {
 	background: transparent;
 }
-.openide-chat-native .openide-chat-approval-body { border-top: var(--vscode-strokeThickness, 1px) solid var(--vscode-chat-requestBorder, var(--oi-border)); }
-.openide-chat-native .openide-chat-approval-cmd,
 .openide-chat-native .openide-chat-ask-free,
 .openide-chat-native .openide-chat-ask-option {
 	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-chat-requestBorder, var(--oi-border));
 	border-radius: var(--oi-radius-sm);
 }
 .openide-chat-native .openide-chat-ask-head,
-.openide-chat-native .openide-chat-approval-title,
 .openide-chat-native .openide-chat-tt-title,
 .openide-chat-native .openide-chat-term-title,
 .openide-chat-native .openide-chat-suggest-title,
@@ -460,14 +453,12 @@
    The plan card is NOT in these lists any more: it owns its whole look in openideChatPlan.css
    (one row of actions, ghost + filled), and the shared secondary-button skin was what kept
    turning its ghost buttons into filled ones. */
-.openide-chat-native .openide-chat-approval-actions,
 .openide-chat-native .openide-chat-suggest-actions,
 .openide-chat-native .openide-chat-plan-actions,
 .openide-chat-native .openide-chat-canvas-head,
 .openide-chat-native .openide-chat-decision-line {
 	justify-content: flex-end;
 }
-.openide-chat-native .openide-chat-abtn,
 .openide-chat-native .openide-chat-suggest-dismiss,
 .openide-chat-native .openide-chat-notice-action,
 .openide-chat-native .openide-chat-sub-action,
@@ -480,7 +471,6 @@
 	font-size: 12px;
 	line-height: 18px;
 }
-.openide-chat-native .openide-chat-abtn:hover,
 .openide-chat-native .openide-chat-suggest-dismiss:hover,
 .openide-chat-native .openide-chat-notice-action:hover,
 .openide-chat-native .openide-chat-sub-action:hover,

@@ -211,6 +211,18 @@ suite('OpenIDE chat reducer', () => {
 		assert.deepStrictEqual(kinds(denied), ['decision']);
 	});
 
+	test('inline approvals remain answered when later tool and text events repaint the transcript', () => {
+		const step = run([
+			{ type: 'toolStart', id: 't1', name: 'write_file', argumentsJson: '{"path":"a.txt","content":"updated"}' },
+			{ type: 'approvalRequest', id: 'a1', tool: 'write_file', title: 'Write', risk: 'write' },
+			{ type: 'approval', name: 'write_file', decision: 'once' },
+			{ type: 'toolResult', id: 't1', name: 'write_file', result: 'saved', isError: false },
+			{ type: 'text', delta: 'Finished.' },
+		]);
+		const confirmation = contentOf(step).find(content => content.kind === 'confirmation');
+		assert.strictEqual(confirmation?.kind === 'confirmation' && confirmation.decision, 'once');
+	});
+
 	test('approvalRequest, ask and suggestMode survive as blocking cards with their id', () => {
 		const step = run([
 			{ type: 'approvalRequest', id: 'a1', tool: 'run_command', title: 'Run', risk: 'exec' },

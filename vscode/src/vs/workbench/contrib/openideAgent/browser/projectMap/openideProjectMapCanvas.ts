@@ -15,7 +15,7 @@
 import { addDisposableListener, getWindow, scheduleAtNextAnimationFrame } from '../../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
-import { ILayoutNode } from '../../../../../code/common/openideCodebaseGraphLayout.js';
+import { ILayoutNode } from '../../../../../platform/openideCodebase/common/openideCodebaseGraphLayout.js';
 import { IGraphView, IGraphViewNode } from '../openideCodebaseGraphService.js';
 
 /** Graphify's palette: one colour per community, in size order. */

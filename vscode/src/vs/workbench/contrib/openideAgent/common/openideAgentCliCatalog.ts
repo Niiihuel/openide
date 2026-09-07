@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { OPENIDE_CAPABILITY_INSTRUCTIONS } from '../../../../platform/openideAgentHost/common/openideCapabilityCatalog.js';
+
 /**
  * The external coding agents the chat dock can host as a TUI in an embedded terminal, with
  * everything the dock needs to know about each: how to launch it, how to resume one of its
@@ -51,11 +53,13 @@ export interface IOpenideCliDefinition {
 	 * with the caller: the caller only has to write whatever string comes back, 0600, and hand
 	 * back the path.
 	 */
+	/** Evidence for the adapter, not a claim that the CLI is authenticated or connected. */
+	readonly mcpVerification?: string;
 	readonly mcpConfigBuilder?: (endpoint: IOpenideMcpEndpoint) => string;
 	/**
-	 * Argv for a ONE-TIME registration in the CLI's own config, for the ones with no per-session
-	 * hook. Only meaningful because the port and the token are stable per workspace — against a
-	 * random port this would write an entry that is dead by tomorrow.
+	 * Argv for an explicit registration in the CLI's own config. The caller supplies a unique
+	 * name for this window generation; reconnect creates a separate entry because credentials
+	 * expire on close/reload and this API does not establish safe ownership of older entries.
 	 */
 	readonly mcpRegisterArgs?: (endpoint: IOpenideMcpEndpoint) => readonly string[];
 }
@@ -79,6 +83,8 @@ export interface IOpenideMcpEndpoint {
 	 * a config file. Undefined when the caller could not write one.
 	 */
 	readonly configFile?: string;
+	/** Optional launch-only lifecycle guidance; never modifies the user's hook settings. */
+	readonly settingsFile?: string;
 }
 
 export interface IOpenideMcpInjectionResult {
@@ -95,7 +101,7 @@ export type OpenideMcpInjection = (endpoint: IOpenideMcpEndpoint) => IOpenideMcp
  * OpenIDE is adding a server, not taking over their setup.
  */
 const claudeMcpInjection: OpenideMcpInjection = endpoint =>
-	endpoint.configFile ? { args: ['--mcp-config', endpoint.configFile], env: {} } : { args: [], env: {} };
+	endpoint.configFile ? { args: ['--mcp-config', endpoint.configFile, ...(endpoint.settingsFile ? ['--settings', endpoint.settingsFile] : [])], env: {} } : { args: [], env: {} };
 
 /**
  * opencode: `OPENCODE_CONFIG` names a config file loaded BETWEEN the global and project ones, so
@@ -124,10 +130,9 @@ export function buildOpencodeMcpConfig(endpoint: IOpenideMcpEndpoint): string {
 }
 
 /**
- * grok: no per-session hook (GROK_HOME swaps the whole home and takes the user's auth with it,
- * and GROK_MANAGED_CONFIG ignores a local file — measured against 0.2.118). What it does have is
- * `grok mcp add` with `-H` for headers, so a single registration carries the bearer and keeps
- * working, now that the address it points at no longer moves.
+ * Grok 1.0.13 has mcp add/remove/doctor but no verified launch-only config.
+ * Explicit registrations retain unique ownership names. Never remove an old entry merely
+ * because its name looks like ours: the user may have edited it after registration.
  */
 const grokMcpRegisterArgs = (endpoint: IOpenideMcpEndpoint): readonly string[] => [
 	'mcp', 'add', endpoint.name, endpoint.url,
@@ -160,6 +165,14 @@ const codexMcpInjection: OpenideMcpInjection = endpoint => ({
  */
 export const OPENIDE_MCP_TOOL_TIMEOUT_MS = 3_600_000;
 
+/** Claude merges launch settings with existing settings. Only OpenIDE-hosted child sessions emit context. */
+export function buildClaudeSessionSettings(): string {
+	const context = JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: OPENIDE_CAPABILITY_INSTRUCTIONS } });
+	const quoted = "'" + context.replace(/'/g, "'\\''") + "'";
+	const command = `cat >/dev/null; if [ -n "$OPENIDE_SESSION_ID" ] && [ -n "$OPENIDE_HOOK_OWNER" ]; then printf '%s\\n' ${quoted}; fi`;
+	return JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command }] }] } }, null, '\t') + '\n';
+}
+
 /** The JSON `--mcp-config` expects. Written to a 0600 file by the caller, never to argv. */
 export function buildClaudeMcpConfig(endpoint: IOpenideMcpEndpoint): string {
 	return JSON.stringify({
@@ -174,14 +187,24 @@ export function buildClaudeMcpConfig(endpoint: IOpenideMcpEndpoint): string {
 	}, null, '\t') + '\n';
 }
 
+/** Copilot 1.0.83: @path augments session configuration, without granting tool permissions. */
+export function buildCopilotMcpConfig(endpoint: IOpenideMcpEndpoint): string {
+	return JSON.stringify({ mcpServers: { [endpoint.name]: { type: 'http', url: endpoint.url, headers: { Authorization: `Bearer ${endpoint.token}` }, tools: ['*'], timeout: OPENIDE_MCP_TOOL_TIMEOUT_MS } } }, null, '\t') + '\n';
+}
+
+/** Amp 0.0.1788739286-gf348fe expects the server map directly, not Claude's mcpServers wrapper. */
+export function buildAmpMcpConfig(endpoint: IOpenideMcpEndpoint): string {
+	return JSON.stringify({ [endpoint.name]: { url: endpoint.url, headers: { Authorization: `Bearer ${endpoint.token}` } } }, null, '\t') + '\n';
+}
+
 export const OPENIDE_CLI_CATALOG: readonly IOpenideCliDefinition[] = [
 	{ id: 'claude', name: 'Claude Code', binary: 'claude', launchArgs: [], resumeArgs: id => ['--resume', id], supportsHooks: true, icon: 'claude', transcriptDir: '.claude/projects', mcpInjection: claudeMcpInjection, mcpConfigBuilder: buildClaudeMcpConfig },
 	{ id: 'codex', name: 'Codex', binary: 'codex', launchArgs: [], resumeArgs: id => ['resume', id], supportsHooks: false, icon: 'openai', transcriptDir: '.codex/sessions', mcpInjection: codexMcpInjection },
 	{ id: 'gemini', name: 'Gemini CLI', binary: 'gemini', launchArgs: [], resumeArgs: id => ['--resume', id], supportsHooks: false, icon: 'gemini' },
 	{ id: 'opencode', name: 'opencode', binary: 'opencode', launchArgs: [], resumeArgs: id => ['--session', id], supportsHooks: false, icon: 'opencode', mcpInjection: opencodeMcpInjection, mcpConfigBuilder: buildOpencodeMcpConfig },
-	{ id: 'amp', name: 'Amp', binary: 'amp', launchArgs: [], supportsHooks: false, icon: 'amp' },
+	{ id: 'amp', name: 'Amp', binary: 'amp', launchArgs: [], supportsHooks: false, icon: 'amp', mcpConfigBuilder: buildAmpMcpConfig, mcpInjection: endpoint => endpoint.configFile ? { args: ['--mcp-config', endpoint.configFile], env: {} } : { args: [], env: {} }, mcpVerification: '0.0.1788739286-gf348fe: additive config merge verified; model use not certified' },
 	{ id: 'droid', name: 'Factory Droid', binary: 'droid', launchArgs: [], supportsHooks: false, icon: 'droid' },
-	{ id: 'copilot', name: 'Copilot CLI', binary: 'copilot', launchArgs: [], supportsHooks: false, icon: 'copilot' },
+	{ id: 'copilot', name: 'Copilot CLI', binary: 'copilot', launchArgs: [], supportsHooks: false, icon: 'copilot', mcpConfigBuilder: buildCopilotMcpConfig, mcpInjection: endpoint => endpoint.configFile ? { args: ['--additional-mcp-config', `@${endpoint.configFile}`], env: {} } : { args: [], env: {} }, mcpVerification: '1.0.83: flag verified and schema documented; model use not certified' },
 	{ id: 'grok', name: 'Grok', binary: 'grok', launchArgs: [], resumeArgs: id => ['--resume', id], supportsHooks: false, icon: 'xai', mcpRegisterArgs: grokMcpRegisterArgs },
 ];
 

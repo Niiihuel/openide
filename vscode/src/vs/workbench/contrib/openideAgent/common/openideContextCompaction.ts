@@ -153,3 +153,18 @@ export function compactionSavingsRatio(beforeTokens: number, compactedMessages: 
 	}
 	return Math.max(0, 1 - estimateConversationTokens(compactedMessages) / beforeTokens);
 }
+
+/** Emergency projection for short histories dominated by a giant result or attachment. */
+export function buildEmergencyCompaction(messages: readonly IChatMessage[], tokenBudget: number): IChatMessage[] | undefined {
+	const budget = Math.floor(tokenBudget);
+	if (budget < 512 || !messages.length) { return undefined; }
+	const lastUser = messages.findLast(message => message.role === 'user');
+	const userCap = Math.floor(budget * 4 * 0.45);
+	const userText = lastUser?.content ?? 'Continue the current request using the preserved history.';
+	const request: IChatMessage = { role: 'user', messageId: lastUser?.messageId,
+		content: userText.length > userCap ? `${userText.slice(0, userCap)}\n[Request excerpt: remaining content is preserved in the run journal. Do not assume omitted instructions.]` : userText };
+	let summary = buildDeterministicFallbackSummary(messages, Math.floor(budget * 4 * 0.4));
+	let result = [buildStructuredSummaryMessage(summary), request];
+	while (estimateConversationTokens(result) > budget && summary.length > 100) { summary = summary.slice(0, -100); result = [buildStructuredSummaryMessage(summary), request]; }
+	return estimateConversationTokens(result) <= budget ? result : undefined;
+}

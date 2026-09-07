@@ -17,10 +17,10 @@ import * as glob from '../../../../base/common/glob.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
-import { INDEXER_PROVIDERS, IProviderExtraction, IProviderSourceFile, isTestFilePath, mergeExtractions } from '../../../common/openideCodebaseMemoryProviders.js';
-import { DEFAULT_CODEBASE_MEMORY_INDEX_OPTIONS, ICodebaseMemoryIndexOptions } from '../../../common/openideCodebaseMemoryProtocol.js';
+import { INDEXER_PROVIDERS, IProviderExtraction, IProviderSourceFile, isTestFilePath, mergeExtractions } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProviders.js';
+import { DEFAULT_CODEBASE_MEMORY_INDEX_OPTIONS, ICodebaseMemoryIndexOptions } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProtocol.js';
 import { CodebaseMemoryStorage } from './openideCodebaseMemoryStorage.js';
-import { CODEBASE_NOTES_PATH, extractCodebaseNotes, isCodebaseNotesUri } from '../../../common/openideCodebaseNotes.js';
+import { extractCodebaseNotes, isCodebaseNotesUri } from '../../../../platform/openideCodebase/common/openideCodebaseNotes.js';
 
 const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|cs|c|h|cpp|hpp|cc)$/;
 const EXCLUDED_DIRS = new Set(['node_modules', '.git', '.hg', '.svn', 'dist', 'out', 'build', 'target', 'vendor', 'vendored', '.next', '.nuxt', 'coverage', '__pycache__', '.venv', 'venv', '.cache', '.idea', '.vscode-test', '.build', 'bin', 'obj']);
@@ -137,7 +137,7 @@ export class CodebaseMemoryIndexer extends Disposable {
 		if (!this.options.indexTests && isTestFilePath(relPath)) { return { ok: false, reason: 'test' }; }
 		// The shared memory is a source too: its entries become `note` nodes, which is what lets a
 		// decision about a module come back from the same query that returns the module.
-		if (relPath === CODEBASE_NOTES_PATH) { return this.options.indexNotes === false ? { ok: false, reason: 'excluded' } : { ok: true }; }
+		if (isCodebaseNotesUri(`/${relPath}`)) { return this.options.indexNotes === false ? { ok: false, reason: 'excluded' } : { ok: true }; }
 		const extOk = CODE_EXT.test(name) || name === 'package.json';
 		if (this.includePatterns.length) {
 			if (!matchesAny(this.includePatterns, relPath)) { return { ok: false, reason: 'excluded' }; }

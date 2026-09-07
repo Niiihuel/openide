@@ -1372,22 +1372,33 @@ export class CodeApplication extends Disposable {
 		//  - openideAgentHost: cliente MCP + hooks de shell + OAuth loopback (Google/Antigravity).
 		//  - openideRequest: HTTP through main. Streams SSE token by token (the native one buffers).
 		//  - openideBrowser: automation of the hidden BrowserWindow (agent browser_* + pick).
-		const openideAgentHostChannel = ProxyChannel.fromService(new OpenideAgentHostMainService(
-			this.logService,
-			this.environmentMainService,
-			// The LOGIN shell's environment, cached by `getResolvedShellEnv` itself: a provider key
-			// exported in the user's shell profile is invisible to a GUI launch otherwise, and that
-			// is precisely the case OpenIDE now resolves credentials from.
-			() => getResolvedShellEnv(this.configurationService, this.logService, this.environmentMainService.args, process.env),
-		), disposables);
-		mainProcessElectronServer.registerChannel(OPENIDE_AGENT_HOST_CHANNEL, openideAgentHostChannel);
+		const openidePtyService = accessor.get(ILocalPtyService);
+		mainProcessElectronServer.registerWindowChannel(OPENIDE_AGENT_HOST_CHANNEL, (_sender, connectionDisposables) => {
+			const service = connectionDisposables.add(new OpenideAgentHostMainService(
+				this.logService,
+				this.environmentMainService,
+				() => getResolvedShellEnv(this.configurationService, this.logService, this.environmentMainService.args, process.env),
+				openidePtyService,
+			));
+			return ProxyChannel.fromService(service, connectionDisposables, { unbufferedEvents: ['onDidRequestIdeTool', 'onDidCancelIdeTool'] });
+		});
 
 		const openideRequestService = disposables.add(new NodeRequestService('local', this.configurationService, this.environmentMainService, this.logService));
 		mainProcessElectronServer.registerChannel(OPENIDE_REQUEST_CHANNEL, new OpenideRequestChannel(openideRequestService));
 
-		const openideBrowserService = disposables.add(new OpenideBrowserAutomationMainService());
-		const openideBrowserChannel = ProxyChannel.fromService(openideBrowserService, disposables);
-		mainProcessElectronServer.registerChannel(OPENIDE_BROWSER_AUTOMATION_CHANNEL, openideBrowserChannel);
+		const openideBrowserViews = accessor.get(IBrowserViewMainService);
+		mainProcessElectronServer.registerWindowChannel(OPENIDE_BROWSER_AUTOMATION_CHANNEL, (sender, connectionDisposables) => {
+			const service = connectionDisposables.add(new OpenideBrowserAutomationMainService(sender, async () => {
+				const window = BrowserWindow.fromWebContents(sender);
+				if (!window) { return []; }
+				const views = await openideBrowserViews.getBrowserViews(window.id);
+				return views.flatMap(info => {
+					const view = openideBrowserViews.tryGetBrowserView(info.id);
+					return view ? [view.webContents] : [];
+				});
+			}));
+			return ProxyChannel.fromService(service, connectionDisposables);
+		});
 
 		// User Data Profiles
 		const userDataProfilesService = ProxyChannel.fromService(accessor.get(IUserDataProfilesMainService), disposables);

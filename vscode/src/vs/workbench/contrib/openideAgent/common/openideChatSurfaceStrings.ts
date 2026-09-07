@@ -107,6 +107,14 @@ export const OPENIDE_CHAT_SURFACE_STRINGS = {
 	'chatSurface.subagent.failed': { es: 'El especialista falló', en: 'The specialist failed' },
 
 	// ---- inline approval card
+	'chatSurface.approval.waiting': { es: 'Esperando tu aprobación', en: 'Waiting for your approval' },
+	'chatSurface.approval.review': { es: 'Acción que requiere aprobación', en: 'Action requiring approval' },
+	'chatSurface.approval.scope': { es: 'Permiso', en: 'Permission' },
+	'chatSurface.approval.scopeOnce': { es: 'Solo esta vez', en: 'Only this time' },
+	'chatSurface.approval.scopeSession': { es: 'Durante esta sesión', en: 'For this session' },
+	'chatSurface.approval.scopeAlways': { es: 'Recordar permiso', en: 'Remember permission' },
+	'chatSurface.approval.scopeCommandHint': { es: 'Se reutiliza el permiso para este comando.', en: 'Permission is reused for this command.' },
+	'chatSurface.approval.scopeToolHint': { es: 'Se aplica a otras acciones de esta herramienta. Las rutas sensibles siguen pidiendo aprobación.', en: 'Applies to other actions by this tool. Sensitive paths still require approval.' },
 	'chatSurface.approval.allow': { es: 'Permitir', en: 'Allow' },
 	'chatSurface.approval.always': { es: 'Permitir siempre', en: 'Always allow' },
 	'chatSurface.approval.deny': { es: 'Rechazar', en: 'Deny' },

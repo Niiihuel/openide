@@ -14,7 +14,7 @@ import { createDecorator } from '../../../../platform/instantiation/common/insta
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ICodebaseMemoryService } from './openideCodebaseMemoryService.js';
-import { ICodebaseMemoryEdge, ICodebaseMemoryNode, CodebaseMemoryNodeKind } from '../../../../code/common/openideCodebaseMemoryTypes.js';
+import { ICodebaseMemoryEdge, ICodebaseMemoryNode, CodebaseMemoryNodeKind } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
 
 export const IOpenideCodebaseGraphService = createDecorator<IOpenideCodebaseGraphService>('openideCodebaseGraphService');
 

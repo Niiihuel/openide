@@ -3,37 +3,24 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append, clearNode } from '../../../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, clearNode } from '../../../../../../base/browser/dom.js';
 import { IOpenideChatConfirmationContent, IOpenideChatContent } from '../../../common/chat/openideChatContent.js';
 import { ToolApprovalDecision } from '../../../common/openideAgentTypes.js';
-import { toolVisualKind } from '../../../common/chat/openideChatToolMeta.js';
+import { getOpenideToolMeta, toolVisualKind } from '../../../common/chat/openideChatToolMeta.js';
 import { IOpenideAgentService } from '../../openideAgentService.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
 import '../media/openideChatConfirmation.css';
 import { t } from '../../../common/openideStrings.js';
 
-/**
- * Tool approval. The agent is literally parked on a Promise until this resolves, so the part is
- * not decoration: with no card the run stalls forever and the transcript shows nothing at all.
- *
- * Transcribed from the webview's `.approval` block and its
- * `addChoice` wiring (:4584-4598).
- *
- * The decision strings are the SERVICE's, not ours, and getting them wrong is silent:
- * `resolveApproval` (openideAgentService.ts:1327-1333) accepts `once` | `session` | `always` and
- * maps ANYTHING else to `deny`. This card used to send `allow` for its primary button — a string
- * that is not in that set — so pressing "Permitir" told the agent the user had refused. Nothing
- * logged it; the tool simply did not run. The union below is the service's own type precisely so
- * the compiler refuses the next invented string.
- */
+/** Inline approval with a bounded review area and an explicit permission scope. */
 export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 
 	readonly domNode: HTMLElement;
 
 	private readonly _actions: HTMLElement;
 	private readonly _status: HTMLElement;
-	private _requestId: string;
-	private _decided: boolean;
+	private readonly _requestId: string;
+	private _decision: ToolApprovalDecision | undefined;
 
 	constructor(
 		content: IOpenideChatConfirmationContent,
@@ -42,84 +29,108 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 	) {
 		super();
 		this._requestId = content.requestId;
-		this._decided = !!content.decision;
+		this._decision = content.decision;
 
 		const kind = toolVisualKind(content.tool);
 		this.domNode = $(`.openide-chat-approval.tool-kind-${kind.id}`);
+		this.domNode.setAttribute('role', 'group');
+		this.domNode.setAttribute('aria-label', content.title);
+		// These controls live inside a tree. Let their native keyboard behavior run without
+		// letting the tree consume Enter, Space or the select's navigation keys.
+		for (const eventName of ['keydown', 'keyup']) {
+			this._register(addDisposableListener(this.domNode, eventName, event => {
+				if (!event.ctrlKey && !event.metaKey && !event.altKey
+					&& ['Enter', ' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Escape'].includes(event.key)) {
+					event.stopPropagation();
+				}
+			}));
+		}
 
 		const head = append(this.domNode, $('.openide-chat-approval-head'));
-		append(head, $(`span.codicon.codicon-${content.sensitive ? 'shield' : 'law'}`));
-		const title = append(head, $('span.openide-chat-approval-title'));
-		title.textContent = content.title;
-		const badge = append(head, $('span.openide-chat-approval-kind'));
-		badge.textContent = kind.label;
+		const icon = append(head, $(`span.codicon.codicon-${getOpenideToolMeta(content.tool).icon}`));
+		icon.setAttribute('aria-hidden', 'true');
+		append(head, $('span.openide-chat-approval-title')).textContent = content.title;
 
+		// Keep the decisions outside the scroll region so a long command cannot hide them.
 		const body = append(this.domNode, $('.openide-chat-approval-body'));
-		if (content.detail) {
-			const detail = append(body, $('.openide-chat-approval-description'));
-			detail.textContent = content.detail;
+		body.tabIndex = 0;
+		body.setAttribute('role', 'group');
+		body.setAttribute('aria-label', t('chatSurface.approval.review'));
+		if (content.detail && content.detail.trim() !== content.command?.trim()) {
+			append(body, $('.openide-chat-approval-description')).textContent = content.detail;
 		}
 		if (content.command) {
-			// Monospace and its own scroller: a long command must not widen the row, because the
-			// list runs with supportDynamicHeights and cannot scroll sideways.
-			const command = append(body, $('code.openide-chat-approval-cmd'));
-			command.textContent = content.command;
+			append(body, $('code.openide-chat-approval-cmd')).textContent = content.command;
 		}
 
-		this._actions = append(body, $('.openide-chat-approval-actions'));
-		this._status = append(body, $('.openide-chat-approval-status'));
+		this._actions = append(this.domNode, $('.openide-chat-approval-actions'));
+		this._status = append(this.domNode, $('.openide-chat-approval-status'));
+		this._status.setAttribute('role', 'status');
+		this._status.setAttribute('aria-live', 'polite');
+		this._status.tabIndex = -1;
 
 		this._renderActions(content);
 		this._renderDecision(content.decision, false);
 	}
 
 	private _renderActions(content: IOpenideChatConfirmationContent): void {
-		this._actions.textContent = '';
-		const choice = (label: string, icon: string, decision: ToolApprovalDecision, extraClass: string) => {
-			const button = append(this._actions, $(`button.openide-chat-abtn${extraClass}`)) as HTMLButtonElement;
+		const scopeLabel = append(this._actions, $('label.openide-chat-approval-scope'));
+		const scope = append(scopeLabel, $('select.openide-chat-approval-scope-select')) as HTMLSelectElement;
+		scope.setAttribute('aria-label', t('chatSurface.approval.scope'));
+		const option = (label: string, decision: ToolApprovalDecision) => {
+			const item = append(scope, $('option')) as HTMLOptionElement;
+			item.value = decision;
+			item.textContent = label;
+		};
+		option(t('chatSurface.approval.scopeOnce'), 'once');
+		option(t('chatSurface.approval.scopeSession'), 'session');
+		if (!content.sensitive) {
+			option(t('chatSurface.approval.scopeAlways'), 'always');
+		}
+		const buttons = append(this._actions, $('.openide-chat-approval-buttons'));
+		const choice = (label: string, decision: () => ToolApprovalDecision, extraClass: string) => {
+			const button = append(buttons, $(`button.openide-chat-abtn${extraClass}`)) as HTMLButtonElement;
 			button.type = 'button';
-			append(button, $(`span.codicon.codicon-${icon}`));
-			const text = append(button, $('span'));
-			text.textContent = label;
+			button.textContent = label;
 			this._register(this._onClick(button, decision));
 		};
-
-		choice(t('chatSurface.approval.allow'), 'check', 'once', '.primary');
-		// "This session" was missing entirely: without it the only way to stop being asked about a
-		// command you are running in a loop was to allow it FOREVER, in the persisted allowlist.
-		choice(t('chat.approval.session'), 'history', 'session', '');
-		// A sensitive path never offers "always": the whole point of marking it sensitive is that
-		// the answer must be given again next time.
-		if (!content.sensitive) {
-			choice(t('chatSurface.approval.always'), 'shield', 'always', '');
-		}
-		choice(t('chatSurface.approval.deny'), 'close', 'deny', '.deny');
+		choice(t('chatSurface.approval.deny'), () => 'deny', '.deny');
+		choice(t('chatSurface.approval.allow'), () => {
+			// Narrow the DOM value explicitly: unsupported values cannot widen a grant.
+			return scope.value === 'session' ? 'session' : scope.value === 'always' && !content.sensitive ? 'always' : 'once';
+		}, '.primary');
+		const hint = append(this._actions, $('.openide-chat-approval-scope-hint'));
+		hint.hidden = true;
+		hint.setAttribute('aria-live', 'polite');
+		this._register(addDisposableListener(scope, 'change', () => {
+			const remembered = scope.value === 'session' || scope.value === 'always';
+			const description = remembered
+				? content.risk === 'exec' && content.command
+					? t('chatSurface.approval.scopeCommandHint')
+					: t('chatSurface.approval.scopeToolHint')
+				: '';
+			hint.hidden = !remembered;
+			hint.textContent = description;
+			scope.setAttribute('aria-description', description);
+			this._onDidChangeHeight.fire();
+		}));
 	}
 
-	private _onClick(button: HTMLButtonElement, decision: ToolApprovalDecision) {
+	private _onClick(button: HTMLButtonElement, decision: () => ToolApprovalDecision) {
 		const listener = () => {
-			if (this._decided) { return; }
-			this._decided = true;
-			this._agentService.resolveApproval(this._requestId, decision);
-			this._renderDecision(decision);
+			if (this._decision) { return; }
+			const answer = decision();
+			this._decision = answer;
+			const hadFocus = this._actions.contains(this.domNode.ownerDocument.activeElement);
+			this._agentService.resolveApproval(this._requestId, answer);
+			this._renderDecision(answer);
+			if (hadFocus) { this._status.focus(); }
 		};
 		button.addEventListener('click', listener);
 		return { dispose: () => button.removeEventListener('click', listener) };
 	}
 
-	/**
-	 * An answered card keeps the record and drops the offer.
-	 *
-	 * The buttons used to stay, greyed out. Three dimmed buttons under a question that has already
-	 * been answered read as a control that stopped working, and one of them still looked like the
-	 * primary action. What has to survive is WHAT was authorised, and that is the status line — so
-	 * that is what is left, with the glyph of the decision in front of it.
-	 *
-	 * `notify` is false only for the first paint, which happens while the part is being built and
-	 * has nobody to tell yet. Every later call has to announce the new height: the row is measured
-	 * and cached by the list, and without this the answered card kept the height of the unanswered
-	 * one and clipped its own answer.
-	 */
+	/** Keep the authorization in the transcript and notify the list when the card shrinks. */
 	private _renderDecision(decision: IOpenideChatConfirmationContent['decision'], notify = true): void {
 		this.domNode.classList.toggle('decided', !!decision);
 		this._actions.classList.toggle('hidden', !!decision);
@@ -129,7 +140,8 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 			return;
 		}
 		const denied = decision === 'deny';
-		append(this._status, $(`span.codicon.codicon-${denied ? 'close' : 'check'}`));
+		const icon = append(this._status, $(`span.codicon.codicon-${denied ? 'close' : 'check'}`));
+		icon.setAttribute('aria-hidden', 'true');
 		const text = append(this._status, $('span'));
 		text.textContent = denied
 			? t('chatSurface.approval.denied')
@@ -143,13 +155,11 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 	}
 
 	hasSameContent(other: IOpenideChatContent): boolean {
-		if (other.kind !== 'confirmation') { return false; }
-		const next = other as IOpenideChatConfirmationContent;
-		if (next.requestId !== this._requestId) { return false; }
-		// Only the decision can change on an existing request, and it is applied in place so the
-		// card does not blink out and back while the run continues.
-		this._decided = !!next.decision;
-		this._renderDecision(next.decision);
+		if (other.kind !== 'confirmation' || other.requestId !== this._requestId) { return false; }
+		// A pending transcript snapshot can arrive between the click and the resolved event.
+		// Keep the local answer latched so that snapshot cannot reopen this request.
+		this._decision = other.decision ?? this._decision;
+		this._renderDecision(this._decision);
 		return true;
 	}
 }

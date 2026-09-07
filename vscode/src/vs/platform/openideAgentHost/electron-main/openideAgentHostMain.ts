@@ -21,14 +21,26 @@
  *  so the workbench re-registers (never ghost tools NOR stale tools in the prompt).
  *--------------------------------------------------------------------------------------------*/
 
+import { OpenideMemoryOwner } from '../node/openideMemoryOwner.js';
+import { IOpenideMemoryRequest } from '../../openideCodebase/common/openideMemoryRecord.js';
 import { ChildProcess, spawn } from 'child_process';
 import { accessSync, constants as fsConstants, createWriteStream, statSync, truncateSync, WriteStream } from 'fs';
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { delimiter, isAbsolute, join, resolve as resolvePath } from 'path';
-import { app, dialog } from 'electron';
+import { dialog } from 'electron';
+import { validateOpenideWorkspacePath } from '../node/openideWorkspacePaths.js';
+import { IOpenideRunJournalEvent } from '../common/openideRunJournal.js';
+import { IPtyService } from '../../terminal/common/terminal.js';
+import { OpenideAgentTerminalOwner } from '../node/openideAgentTerminalOwner.js';
+import { IOpenideAgentTerminalRegistration, IOpenideProcessIsolationRequest } from '../common/openideProcessIsolation.js';
+import { OpenideRunJournalOwner } from '../node/openideRunJournalOwner.js';
+import { OpenideProcessIsolation } from '../node/openideProcessIsolation.js';
+import { OpenideSubagentWorktrees } from '../node/openideSubagentWorktrees.js';
+import { OpenideRestoreLocks } from '../node/openideRestoreLocks.js';
 import { lookup } from 'dns/promises';
 import { createHash } from 'crypto';
+import { Disposable, toDisposable } from '../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { isWindows } from '../../../base/common/platform.js';
 import { IEnvironmentMainService } from '../../environment/electron-main/environmentMainService.js';
@@ -36,7 +48,7 @@ import { ILogService } from '../../log/common/log.js';
 import { OpenideWebFetchRequest, OpenideWebFetchResponse, validatePublicWebUrl, isPrivateWebAddress, WEB_DEFAULT_MAX_RESPONSE_BYTES, WEB_MAX_REDIRECTS } from '../common/openideWebResearch.js';
 import { clampSeconds, HookExecRequest, HookExecResult, HOOK_INPUT_MAX_BYTES, HOOK_TIMEOUT_DEFAULT_SECONDS, HOOK_TIMEOUT_MAX_SECONDS, HOOK_TIMEOUT_MIN_SECONDS, IOpenideAgentHostService, MCP_CALL_TIMEOUT_DEFAULT_SECONDS, MCP_CALL_TIMEOUT_MAX_SECONDS, MCP_CALL_TIMEOUT_MIN_SECONDS, MCP_CONNECT_TIMEOUT_DEFAULT_SECONDS, MCP_MAX_JSONRPC_MESSAGE_BYTES, MCP_MAX_STDERR_LOG_BYTES, consumeMcpJsonLines, McpConnectResult, McpServerConfig, McpServerState, McpServerStatus, McpServerToolsEvent, isMcpToolAllowed, McpRequestBudget, McpToolInfo, McpToolResult, redactSecrets, sanitizeMcpStdioEnvironment, shlexSplit, validateMcpServerConfig } from '../common/openideAgentHost.js';
 import { getOpenideOauthPage } from '../common/openideOauthPage.js';
-import { IIdeServerInfo, IIdeServerStartOptions, IIdeToolRequest, IIdeToolResult, IIdeToolSchema } from '../common/openideIdeServer.js';
+import { IIdeDiscoveryStatus, IIdeServerInfo, IIdeServerStartOptions, IIdeToolRequest, IIdeToolResult, IIdeToolSchema } from '../common/openideIdeServer.js';
 import { ICredentialSourcesSnapshot, IExternalCredentialScan, OPENIDE_CREDENTIAL_SOURCES } from '../common/openideCredentialSources.js';
 import { OpenideIdeServerMain } from './openideIdeServerMain.js';
 
@@ -475,23 +487,57 @@ interface IServerEntry {
 	toolsRefreshGeneration: number;
 }
 
-export class OpenideAgentHostMainService implements IOpenideAgentHostService {
+
+export class OpenideAgentHostMainService extends Disposable implements IOpenideAgentHostService {
+
+	private readonly memoryOwner = this._register(new OpenideMemoryOwner(this.environmentMainService.userDataPath));
+	memoryRequest(request: IOpenideMemoryRequest) { return this.memoryOwner.request(request); }
+	setMemoryDirtyResources(paths: readonly string[]) { return this.memoryOwner.setDirty(paths); }
+
+	private readonly restoreLocks = this._register(new OpenideRestoreLocks());
+
+	validateWorkspacePath(request: { path: string; roots: readonly string[]; mutation?: boolean }): Promise<void> { return validateOpenideWorkspacePath(request); }
+	private readonly runJournal = this._register(new OpenideRunJournalOwner(this.environmentMainService.userDataPath));
+	private readonly processIsolation = new OpenideProcessIsolation();
+	private readonly subagentWorktrees = new OpenideSubagentWorktrees();
+	private readonly agentTerminals = new OpenideAgentTerminalOwner(this.ptyService, this.subagentWorktrees);
+
+	async setRestoreWorkspace(roots: readonly string[], workspaceId = 'empty'): Promise<void> {
+		await this.runJournal.setWorkspace(workspaceId, roots);
+		await this.restoreLocks.setWorkspace(roots);
+		await this.memoryOwner.setWorkspace(roots);
+	}
+	openRunJournal(sessionId: string) { return this.runJournal.open(sessionId); }
+	appendRunJournal(sessionId: string, event: IOpenideRunJournalEvent) { return this.runJournal.append(sessionId, event); }
+	async closeRunJournal(sessionId: string): Promise<void> { this.runJournal.close(sessionId); }
+	registerAgentTerminal(request: IOpenideAgentTerminalRegistration) { return this.agentTerminals.register(request); }
+	shutdownAgentTerminals(conversationId: string) { return this.agentTerminals.shutdown(conversationId); }
+	processIsolationStatus() { return this.processIsolation.status(); }
+	prepareIsolatedProcess(request: IOpenideProcessIsolationRequest) { return this.processIsolation.prepare(request); }
+	createSubagentWorktree(runId: string, workspaceRoot: string) { return this.subagentWorktrees.create(runId, workspaceRoot); }
+	applySubagentWorktree(runId: string) { return this.subagentWorktrees.apply(runId); }
+	discardSubagentWorktree(runId: string) { return this.subagentWorktrees.discard(runId); }
+	recoverableSubagentWorktrees(workspaceRoot: string) { return this.subagentWorktrees.recoverable(workspaceRoot); }
+	recoverSubagentWorktree(runId: string, workspaceRoot: string) { return this.subagentWorktrees.recover(runId, workspaceRoot); }
+	acquireRestoreLocks(resources: readonly string[]): Promise<string | undefined> { return this.restoreLocks.acquire(resources); }
+	async releaseRestoreLocks(lease: string): Promise<void> { this.restoreLocks.release(lease); }
 
 	private readonly servers = new Map<string, IServerEntry>();
 	private readonly ownerTokens = new Map<string, { token: string; heartbeatAt: number }>();
 	private readonly serverReservations = new Map<string, string>();
 	private serverKey(clientId: string, serverId: string): string { return `${clientId}\0${serverId}`; }
 	private authorizeOwner(clientId: string, token: string): boolean {
+		if (this._store.isDisposed) { return false; }
 		const owner = this.ownerTokens.get(clientId);
 		if (!owner) { if (this.ownerTokens.size >= MAX_MCP_OWNERS || clientId.length > 128 || token.length > 128) { return false; } this.ownerTokens.set(clientId, { token, heartbeatAt: Date.now() }); return true; }
 		if (owner.token !== token) { return false; }
 		owner.heartbeatAt = Date.now(); return true;
 	}
 
-	private readonly _onDidChangeMcpServerStatus = new Emitter<McpServerStatus>();
+	private readonly _onDidChangeMcpServerStatus = this._register(new Emitter<McpServerStatus>());
 	readonly onDidChangeMcpServerStatus: Event<McpServerStatus> = this._onDidChangeMcpServerStatus.event;
 
-	private readonly _onDidChangeMcpServerTools = new Emitter<McpServerToolsEvent>();
+	private readonly _onDidChangeMcpServerTools = this._register(new Emitter<McpServerToolsEvent>());
 	readonly onDidChangeMcpServerTools: Event<McpServerToolsEvent> = this._onDidChangeMcpServerTools.event;
 
 	/**
@@ -499,10 +545,12 @@ export class OpenideAgentHostMainService implements IOpenideAgentHostService {
 	 * Composed rather than merged — it shares this channel and this process lifetime, and
 	 * nothing else. Its events are re-exported below so the workbench sees one service.
 	 */
-	private readonly ideServer = new OpenideIdeServerMain(this.logService);
+	private readonly ideServer = this._register(new OpenideIdeServerMain(this.logService));
 
 	readonly onDidRequestIdeTool: Event<IIdeToolRequest> = this.ideServer.onDidRequestTool;
+	readonly onDidCancelIdeTool: Event<string> = this.ideServer.onDidCancelTool;
 	readonly onDidChangeIdeConnections: Event<number> = this.ideServer.onDidChangeConnections;
+	readonly onDidChangeIdeDiscovery: Event<IIdeDiscoveryStatus> = this.ideServer.onDidChangeDiscovery;
 
 	ideServerStart(options: IIdeServerStartOptions, extraTools: readonly IIdeToolSchema[]): Promise<IIdeServerInfo> {
 		return this.ideServer.start(options, extraTools);
@@ -616,17 +664,17 @@ export class OpenideAgentHostMainService implements IOpenideAgentHostService {
 		 * imported so this service keeps its two dependencies; app.ts owns the resolver.
 		 */
 		private readonly resolveShellEnv?: () => Promise<Readonly<Record<string, string | undefined>>>,
+		private readonly ptyService?: IPtyService,
 	) {
+		super();
 		// keepalive: detecta servers stdio COLGADOS (los muertos ya disparan 'exit')
 		const keepalive = setInterval(() => this.keepaliveTick(), KEEPALIVE_INTERVAL_MS);
 		(keepalive as unknown as { unref?: () => void }).unref?.();
-		// no zombies: on app close every still-alive MCP process tree is torn down
-		app.once('will-quit', () => {
+		this._register(toDisposable(() => {
 			clearInterval(keepalive);
-			// The lockfile has to go with the window, or the next CLI dials a dead port.
-			this.ideServer.stop();
 			this.disposeAll();
-		});
+			void (async () => { try { await this.agentTerminals.dispose(); } finally { await this.subagentWorktrees.dispose(); } })().catch(error => this.logService.error(error));
+		}));
 	}
 
 	private statusOf(id: string, entry: IServerEntry): McpServerStatus {
@@ -770,7 +818,7 @@ export class OpenideAgentHostMainService implements IOpenideAgentHostService {
 		if (!this.servers.has(key) && !this.serverReservations.has(key) && (existingForOwner + ownerReserved >= MAX_MCP_SERVERS_PER_OWNER || this.servers.size + this.serverReservations.size >= MAX_MCP_SERVERS_GLOBAL)) { throw new Error('límite de servers MCP alcanzado'); }
 		this.serverReservations.set(key, clientId);
 		const approval = await dialog.showMessageBox({ type: 'warning', buttons: ['Conectar una vez', 'Cancelar'], defaultId: 1, cancelId: 1, noLink: true, title: 'OpenIDE — Conectar servidor MCP', message: config.command ? 'Un servidor MCP solicita ejecutar un proceso local.' : 'Un servidor MCP solicita contactar un endpoint de red.', detail: config.command ? `${config.command.slice(0, 2_048)} ${(config.args ?? []).join(' ').slice(0, 2_048)}` : String(config.url).slice(0, 4_096) });
-		if (approval.response !== 0) { this.serverReservations.delete(key); throw new Error('conexión MCP rechazada por el usuario'); }
+		if (this._store.isDisposed || approval.response !== 0) { this.serverReservations.delete(key); throw new Error('conexión MCP rechazada por el usuario'); }
 		// accumulated failures are preserved across reconnection (only a successful connect clears
 		// them): that way the workbench's backoff retries really end up parked
 		const previous = this.servers.get(key);
@@ -779,6 +827,7 @@ export class OpenideAgentHostMainService implements IOpenideAgentHostService {
 			this.serverReservations.delete(key); throw new Error(`"${id}": reintento demasiado temprano; esperá ${Math.ceil((previous.retryAfter - Date.now()) / 1000)}s`);
 		}
 		await this.mcpDisconnect(clientId, ownerToken, id); // reconexión limpia del mismo owner
+		if (this._store.isDisposed) { throw new Error('MCP owner disconnected.'); }
 		const entry: IServerEntry = {
 			config,
 			clientId,
@@ -1030,7 +1079,7 @@ export class OpenideAgentHostMainService implements IOpenideAgentHostService {
 		let approval;
 		try { approval = await dialog.showMessageBox({ type: 'warning', buttons: ['Permitir una vez', 'Cancelar'], defaultId: 1, cancelId: 1, noLink: true, title: 'OpenIDE — Ejecutar hook', message: 'Un hook solicita ejecutar un proceso con el entorno completo del usuario.', detail: req.command.slice(0, 4_096) }); }
 		finally { this.pendingHookApprovals--; }
-		if (approval.response !== 0) { return { exitCode: null, stdout: '', stderr: 'hook rechazado por el usuario', timedOut: false }; }
+		if (this._store.isDisposed || approval.response !== 0) { return { exitCode: null, stdout: '', stderr: 'hook rechazado por el usuario', timedOut: false }; }
 		const argv = shlexSplit(commandText).map(expandTilde);
 		if (!argv.length || argv.length > 256 || argv.some(arg => arg.includes('\0') || Buffer.byteLength(arg, 'utf8') > 16_384)) {
 			return { exitCode: null, stdout: '', stderr: 'comando de hook vacío', timedOut: false };
@@ -1142,7 +1191,7 @@ export class OpenideAgentHostMainService implements IOpenideAgentHostService {
 			server.listen(listenPort, '127.0.0.1', () => {
 				const address = server.address();
 				const port = typeof address === 'object' && address ? address.port : 0;
-				if (!port) {
+				if (!port || this._store.isDisposed) {
 					try { server.close(); } catch { /* best effort */ }
 					reject(new Error('No se pudo abrir el puerto del loopback OAuth.'));
 					return;
@@ -1196,8 +1245,11 @@ export class OpenideAgentHostMainService implements IOpenideAgentHostService {
 		for (const proc of this.activeHooks) { killProcessTree(proc); }
 		this.activeHooks.clear();
 		for (const id of [...this.oauthLoopbacks.keys()]) {
+			this.oauthLoopbacks.get(id)?.waiter?.({ timedOut: true });
 			this.closeLoopback(id);
 		}
+		this.ownerTokens.clear();
+		this.serverReservations.clear();
 		for (const [id, entry] of this.servers) {
 			if (entry.toolsRefreshTimer) {
 				clearTimeout(entry.toolsRefreshTimer);
@@ -1210,5 +1262,6 @@ export class OpenideAgentHostMainService implements IOpenideAgentHostService {
 			try { connection?.close(); } catch { /* shutdown: best effort */ }
 			this.logService.trace(`[openide-mcp] ${id}: desconectado por shutdown`);
 		}
+		this.servers.clear();
 	}
 }

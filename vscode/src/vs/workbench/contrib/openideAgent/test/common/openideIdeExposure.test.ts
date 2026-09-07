@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { OPENIDE_CAPABILITY_INSTRUCTIONS, openideCapabilityHelp } from '../../../../../platform/openideAgentHost/common/openideCapabilityCatalog.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import {
 	externalToolName,
@@ -85,7 +86,7 @@ suite('OpenIDE — which tools an external agent sees', () => {
 		const external = externalToolDescription('browser_click', original);
 		assert.ok(external.endsWith(original));
 		assert.ok(external.length > original.length);
-		assert.ok(/OPEN inside OpenIDE|the user is actually looking at/.test(external));
+		assert.ok(/live OpenIDE browser/.test(external));
 	});
 
 	test('the recorder tells an external agent it MEASURES, not just that it records', () => {
@@ -93,15 +94,15 @@ suite('OpenIDE — which tools an external agent sees', () => {
 		// video" it would take the tape and squint at it; the findings are the reason it is better
 		// than a screenshot, and an agent only uses what the description promises.
 		const external = externalToolDescription('browser_record_stop', 'Stops the recording.');
-		assert.ok(/MEASURES/.test(external), external);
-		assert.ok(/millisecond to look at/.test(external));
-		assert.ok(/place to look, not a verdict/.test(external));
+		assert.ok(/findings/.test(external), external);
+		assert.ok(/timestamps/.test(external));
+		assert.ok(/visual confirmation/.test(external));
 	});
 
 	test('browser_check_visual says what it answers that a screenshot cannot', () => {
 		const external = externalToolDescription('browser_check_visual', 'Measures the page.');
-		assert.ok(/WCAG AA/.test(external), external);
-		assert.ok(/ALONGSIDE browser_screenshot/.test(external));
+		assert.ok(/contrast/.test(external), external);
+		assert.ok(/alongside a screenshot/.test(external));
 		// It must not fall through to the generic browser blurb, which says nothing about measuring.
 		assert.ok(!/not a fresh instance/.test(external));
 	});
@@ -109,7 +110,7 @@ suite('OpenIDE — which tools an external agent sees', () => {
 	test('plan_save warns that it blocks and that it comes back edited', () => {
 		const external = externalToolDescription('plan_save', 'Guarda el plan.');
 		assert.ok(/BLOCKING/.test(external));
-		assert.ok(/AFTER their edits/.test(external));
+		assert.ok(/returned edited plan/.test(external));
 	});
 
 	test('a tool with no extra context is left unchanged', () => {
@@ -136,8 +137,8 @@ suite('OpenIDE — which tools an external agent sees', () => {
 		// behaviour is bought in the description or it is not bought at all.
 		const external = externalToolDescription('memory', 'Memoria persistente.');
 		assert.ok(/MEMORY\.md/.test(external));
-		assert.ok(/other CLIs|harness/.test(external));
-		assert.ok(/openide_memory_read/.test(external));
+		assert.ok(/Shared canonical notes/.test(external));
+		assert.ok(/Search before saving/.test(external));
 	});
 
 	test('the name round-trips faithfully', () => {
@@ -145,4 +146,15 @@ suite('OpenIDE — which tools an external agent sees', () => {
 			assert.equal(internalToolName(externalToolName(name)), name);
 		}
 	});
+	test('orientation fits client budgets and help only names registered capabilities', () => {
+		assert.ok(new TextEncoder().encode(OPENIDE_CAPABILITY_INSTRUCTIONS).length < 1500);
+		for (const name of ['browser_record_start', 'browser_click', 'browser_check_visual', 'memory_save', 'plan_save', 'project_map_query']) {
+			assert.ok(new TextEncoder().encode(externalToolDescription(name, 'Native operation description.')).length < 2048);
+		}
+		const help = JSON.stringify(openideCapabilityHelp(['openide_memory_get'], 'memory'));
+		assert.ok(help.includes('openide_memory_get'));
+		assert.ok(!help.includes('openide_browser_click'));
+		assert.ok(help.includes('runtime prerequisites'));
+	});
+
 });

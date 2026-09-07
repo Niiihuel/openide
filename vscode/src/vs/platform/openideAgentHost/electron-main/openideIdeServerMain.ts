@@ -49,12 +49,14 @@ import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable, toDisposable } from '../../../base/common/lifecycle.js';
 import { ILogService } from '../../log/common/log.js';
 import {
-	IDE_AUTH_HEADER, IDE_AUTH_TOKEN_BYTES, IDE_AUTH_TOKEN_RE, IDE_COMPAT_TOOLS, IDE_PORT_MAX, IDE_PORT_MIN,
+	IDE_AUTH_HEADER, IDE_AUTH_TOKEN_BYTES, IDE_COMPAT_TOOLS, IDE_PORT_MAX, IDE_PORT_MIN,
 	IDE_PROTOCOL_VERSION, IDE_RPC_INTERNAL_ERROR, IDE_RPC_INVALID_PARAMS, IDE_RPC_METHOD_NOT_FOUND,
 	IDE_NOTIFY_CONNECTED, IdeRpcId, IIdeLockFile, IIdeServerInfo, IIdeServerStartOptions,
 	IIdeToolRequest, IIdeToolResult, IIdeToolSchema, ideRpcError, ideRpcNotification, ideRpcResult,
-	parseIdeRpc,
+	parseIdeRpc, IIdeDiscoveryStatus, jsonText,
 } from '../common/openideIdeServer.js';
+
+import { OPENIDE_CAPABILITY_INSTRUCTIONS, openideCapabilityHelp } from '../common/openideCapabilityCatalog.js';
 
 /** How long a non-blocking tool may take before the call is failed. */
 const TOOL_TIMEOUT_MS = 30_000;
@@ -97,12 +99,19 @@ interface IConnection {
 	agentPid?: number;
 }
 
+const CAPABILITY_TOOL: IIdeToolSchema = {
+	name: 'openide_capabilities',
+	description: 'Discover OpenIDE capabilities by intent: browser and visual checks, architecture and impact, shared Markdown memory, editable plan review, or editor diagnostics. Returns registered tools and prerequisites; does not execute them.',
+	inputSchema: { type: 'object', properties: { family: { type: 'string', enum: ['browser', 'map', 'memory', 'plans', 'editor'] } }, additionalProperties: false },
+	annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+};
+
 const COMPAT_BLOCKING_TOOLS = new Set(IDE_COMPAT_TOOLS.filter(t => t.blocking).map(t => t.name));
 
 function listedTools(extra: readonly IIdeToolSchema[]): unknown[] {
-	return [...IDE_COMPAT_TOOLS, ...extra]
+	return [...IDE_COMPAT_TOOLS, CAPABILITY_TOOL, ...extra]
 		.filter(tool => !tool.hidden)
-		.map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema }));
+		.map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, ...(tool.annotations ? { annotations: tool.annotations } : {}) }));
 }
 
 /** Length-safe constant-time comparison: `timingSafeEqual` throws on a length mismatch. */
@@ -121,6 +130,9 @@ export class OpenideIdeServerMain extends Disposable {
 	/** A CLI called a tool; the workbench answers through `respondTool`. */
 	readonly onDidRequestTool: Event<IIdeToolRequest> = this._onDidRequestTool.event;
 
+	private readonly _onDidCancelTool = this._register(new Emitter<string>());
+	readonly onDidCancelTool: Event<string> = this._onDidCancelTool.event;
+
 	private readonly _onDidChangeConnections = this._register(new Emitter<number>());
 	/** Live client count — the dock paints "1 agent connected" from this. */
 	readonly onDidChangeConnections: Event<number> = this._onDidChangeConnections.event;
@@ -130,12 +142,19 @@ export class OpenideIdeServerMain extends Disposable {
 	private info: IIdeServerInfo | undefined;
 	private pingTimer: ReturnType<typeof setInterval> | undefined;
 
+	private readonly _onDidChangeDiscovery = this._register(new Emitter<IIdeDiscoveryStatus>());
+	readonly onDidChangeDiscovery = this._onDidChangeDiscovery.event;
+	private discovery: IIdeDiscoveryStatus = { toolCount: 0 };
+
 	private readonly connections = new Map<string, IConnection>();
 	private readonly pending = new Map<string, IPendingTool>();
 	/** Tools contributed by the workbench on top of the compat catalogue (Tier 2). */
 	private extraTools: readonly IIdeToolSchema[] = [];
 
 	private counter = 0;
+	private readonly generation = randomBytes(16).toString('hex');
+	private starting: Promise<IIdeServerInfo> | undefined;
+	private stopped = false;
 
 	/** Per-session MCP config files written for CLIs that take a path; removed on stop. */
 	private readonly sessionConfigs = new Set<string>();
@@ -154,20 +173,35 @@ export class OpenideIdeServerMain extends Disposable {
 	 * the running server rather than opening a second port, because two lockfiles for one window
 	 * is how a CLI ends up talking to a dead listener.
 	 */
-	async start(options: IIdeServerStartOptions, extraTools: readonly IIdeToolSchema[] = []): Promise<IIdeServerInfo> {
+	start(options: IIdeServerStartOptions, extraTools: readonly IIdeToolSchema[] = []): Promise<IIdeServerInfo> {
+		if (this._store.isDisposed) { return Promise.reject(new Error('IDE owner disconnected.')); }
 		this.extraTools = extraTools;
 		if (this.info) {
-			return this.info;
+			return Promise.resolve(this.info);
 		}
-		const [ws, http] = await Promise.all([import('ws'), import('http')]);
-		// A caller-supplied token is honoured only if it is well formed: a malformed one would be
-		// accepted here and then rejected on every connection, which looks like a network fault.
-		const authToken = options.authToken && IDE_AUTH_TOKEN_RE.test(options.authToken)
-			? options.authToken
-			: randomBytes(IDE_AUTH_TOKEN_BYTES).toString('hex');
+		if (!this.starting) {
+			this.stopped = false;
+			this.starting = this.startServer(options).finally(() => { this.starting = undefined; });
+		}
+		return this.starting;
+	}
 
-		const server = http.createServer((req, res) => this.handleHttp(req, res, authToken));
+	private async startServer(options: IIdeServerStartOptions): Promise<IIdeServerInfo> {
+		const [ws, http] = await Promise.all([import('ws'), import('http')]);
+		// A capability belongs to this connection generation, including when roots are identical.
+		const authToken = randomBytes(IDE_AUTH_TOKEN_BYTES).toString('hex');
+
+		const server = http.createServer((req, res) => {
+			void this.handleHttp(req, res, authToken).catch(error => {
+				if (!res.destroyed) { res.writeHead(400).end(); }
+				this.logService.trace('[openide-ide] HTTP request aborted', error);
+			});
+		});
 		const port = await this.listen(server, options.preferredPort);
+		if (this.stopped) {
+			server.close();
+			throw new Error('IDE owner disconnected during startup.');
+		}
 
 		const wss = new ws.WebSocketServer({
 			server,
@@ -189,7 +223,14 @@ export class OpenideIdeServerMain extends Disposable {
 		// extension may already be publishing one for this same window. Two locks with the same
 		// ideName for one workspace make `--ide` a coin flip, so it is opt-in: the HTTP door needs
 		// no lockfile, and that is the door every CLI can use.
-		const lockPath = options.publishLockfile ? this.writeLockFile(options, port, authToken) : undefined;
+		let lockPath: string | undefined;
+		try {
+			lockPath = options.publishLockfile ? this.writeLockFile(options, port, authToken) : undefined;
+		} catch (error) {
+			wss.close();
+			server.close();
+			throw error;
+		}
 
 		this.httpServer = server;
 		this.wss = wss;
@@ -292,7 +333,7 @@ export class OpenideIdeServerMain extends Disposable {
 			// Not POSIX, or not ours: not a reason to refuse the launch.
 		}
 		const safe = sessionId.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64) || 'session';
-		const path = join(dir, `${safe}.json`);
+		const path = join(dir, `${this.generation}-${safe}.json`);
 		try { unlinkSync(path); } catch { /* first write for this session */ }
 		const fd = openSync(path, 'wx', 0o600);
 		try {
@@ -445,10 +486,13 @@ export class OpenideIdeServerMain extends Disposable {
 				if (connection && info?.name) {
 					connection.clientName = String(info.name);
 				}
+				this.discovery = { ...this.discovery, initializedAt: Date.now() };
+				this._onDidChangeDiscovery.fire(this.discovery);
 				return {
 					protocolVersion: IDE_PROTOCOL_VERSION,
 					capabilities: { logging: {}, prompts: { listChanged: true }, tools: { listChanged: true } },
 					serverInfo: SERVER_INFO,
+					instructions: OPENIDE_CAPABILITY_INSTRUCTIONS,
 				};
 			}
 			case 'ping':
@@ -458,6 +502,8 @@ export class OpenideIdeServerMain extends Disposable {
 			case 'resources/list':
 				return { resources: [] };
 			case 'tools/list':
+				this.discovery = { ...this.discovery, toolsListedAt: Date.now(), toolCount: listedTools(this.extraTools).length };
+				this._onDidChangeDiscovery.fire(this.discovery);
 				return { tools: listedTools(this.extraTools) };
 			case 'tools/call': {
 				// The live CLI also sends `_meta.progressToken`. We never report progress, and the
@@ -466,6 +512,13 @@ export class OpenideIdeServerMain extends Disposable {
 				const name = typeof call?.name === 'string' ? call.name : '';
 				if (!name) {
 					throw Object.assign(new Error('missing tool name'), { code: IDE_RPC_INVALID_PARAMS });
+				}
+				if (name === CAPABILITY_TOOL.name) {
+					const args = call?.arguments as { family?: string } | undefined;
+					if (args?.family !== undefined && !['browser', 'map', 'memory', 'plans', 'editor'].includes(args.family)) {
+						throw Object.assign(new Error('unknown capability family'), { code: IDE_RPC_INVALID_PARAMS });
+					}
+					return jsonText(openideCapabilityHelp([...IDE_COMPAT_TOOLS, ...this.extraTools].filter(tool => !tool.hidden).map(tool => tool.name), args?.family));
 				}
 				return await this.callTool(connectionId, name, call?.arguments ?? {}, rpcId);
 			}
@@ -476,7 +529,7 @@ export class OpenideIdeServerMain extends Disposable {
 
 	/** Parks the call, hands it to the renderer, and guarantees it is settled exactly once. */
 	private callTool(connectionId: string, tool: string, args: unknown, rpcId: IdeRpcId | null): Promise<IIdeToolResult> {
-		const requestId = `tool-${++this.counter}`;
+		const requestId = `${this.generation}-tool-${++this.counter}`;
 		// Tier 2 declares its own blocking tools, and `plan_save` is one: it does not answer until
 		// a person has read the plan. Reading only the compat set here would give a human review
 		// the 30s budget meant for a tool that just reads a file.
@@ -485,6 +538,7 @@ export class OpenideIdeServerMain extends Disposable {
 		return new Promise<IIdeToolResult>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.pending.delete(requestId);
+				this._onDidCancelTool.fire(requestId);
 				reject(new Error(`tool timed out: ${tool}`));
 			}, timeoutMs);
 			this.pending.set(requestId, { resolve, reject, connectionId, rpcId, timer });
@@ -514,6 +568,7 @@ export class OpenideIdeServerMain extends Disposable {
 			}
 			this.pending.delete(id);
 			clearTimeout(pending.timer);
+			this._onDidCancelTool.fire(id);
 			if (respond) {
 				this.send(pending.connectionId, ideRpcError(pending.rpcId, { code: IDE_RPC_INTERNAL_ERROR, message: 'Internal error', data: reason }));
 			}
@@ -562,7 +617,7 @@ export class OpenideIdeServerMain extends Disposable {
 		}
 		const header = req.headers['authorization'];
 		const bearer = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : '';
-		if (!bearer || !secretEquals(bearer, authToken)) {
+		if (this.stopped || this.info?.authToken !== authToken || !bearer || !secretEquals(bearer, authToken)) {
 			res.writeHead(401, { 'WWW-Authenticate': 'Bearer' }).end();
 			return;
 		}
@@ -590,30 +645,38 @@ export class OpenideIdeServerMain extends Disposable {
 			return;
 		}
 		const { request } = parsed;
-		// HTTP has no persistent identity, so calls arrive under one shared connection id.
-		const connectionId = 'http';
+		// A lost HTTP response cancels only its own work, even when JSON-RPC IDs repeat.
+		const connectionId = `http-${++this.counter}`;
 		if (request.id === undefined || request.id === null) {
 			res.writeHead(202).end();
 			return;
 		}
+		const onClose = () => this.failPending(pending => pending.connectionId === connectionId, 'client disconnected', false);
+		res.once('close', onClose);
 		try {
+			if (res.destroyed) { return; }
 			const result = await this.dispatch(connectionId, request.method, request.params, request.id);
+			if (res.destroyed) { return; }
 			const frame = result === undefined
 				? ideRpcError(request.id, { code: IDE_RPC_METHOD_NOT_FOUND, message: 'Method not found', data: request.method })
 				: ideRpcResult(request.id, result);
 			res.writeHead(200, { 'Content-Type': 'application/json' }).end(frame);
 		} catch (error) {
+			if (res.destroyed) { return; }
 			res.writeHead(200, { 'Content-Type': 'application/json' }).end(ideRpcError(request.id, {
 				code: IDE_RPC_INTERNAL_ERROR,
 				message: 'Internal error',
 				data: error instanceof Error ? error.message : String(error),
 			}));
+		} finally {
+			res.removeListener('close', onClose);
 		}
 	}
 
 	// ---- Teardown -----------------------------------------------------------------------------
 
 	stop(): void {
+		this.stopped = true;
 		if (this.pingTimer) {
 			clearInterval(this.pingTimer);
 			this.pingTimer = undefined;
@@ -625,6 +688,8 @@ export class OpenideIdeServerMain extends Disposable {
 			try { connection.socket.close(); } catch { /* already gone */ }
 		}
 		this.connections.clear();
+		this.discovery = { toolCount: 0 };
+		this._onDidChangeDiscovery.fire(this.discovery);
 		this.wss?.close();
 		this.wss = undefined;
 		this.httpServer?.close();

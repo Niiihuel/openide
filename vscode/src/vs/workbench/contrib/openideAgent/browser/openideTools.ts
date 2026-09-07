@@ -6,20 +6,25 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — registry de herramientas del agente. Lectura (read/list/search/find) = 'safe';
  *  writes (write/edit) = 'write'; terminal (run_command) = 'exec'. The approval gate is applied
- *  by the service (OpenideApprovalManager) BEFORE invoking 'write'/'exec' tools.
+ *  at registry dispatch by OpenideToolExecutor for every caller, including nested tools.
  *--------------------------------------------------------------------------------------------*/
 
 import { timeout } from '../../../../base/common/async.js';
-import { VSBuffer } from '../../../../base/common/buffer.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
-import { relativePath } from '../../../../base/common/resources.js';
+import { extUriBiasedIgnorePathCase, relativePath } from '../../../../base/common/resources.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
-import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../platform/files/common/files.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { openidePreparedProcessCommand } from '../../../../platform/openideAgentHost/common/openideProcessIsolation.js';
+import { IOpenideAgentHostService } from '../../../../platform/openideAgentHost/common/openideAgentHost.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IMarker, IMarkerService, MarkerSeverity } from '../../../../platform/markers/common/markers.js';
+import { IModelService } from '../../../../editor/common/services/model.js';
+import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
+import { OpenideWorkspaceAccess } from './openideWorkspaceAccess.js';
 import { ITextModelService } from '../../../../editor/common/services/resolverService.js';
 import { ICommandDetectionCapability, TerminalCapability } from '../../../../platform/terminal/common/capabilities/capabilities.js';
 import { TerminalLocation } from '../../../../platform/terminal/common/terminal.js';
@@ -28,6 +33,7 @@ import { ISearchService, resultIsMatch } from '../../../services/search/common/s
 import { QueryBuilder } from '../../../services/search/common/queryBuilder.js';
 import { ITerminalInstance, ITerminalService } from '../../terminal/browser/terminal.js';
 import { IAgentLocation, IBackgroundTerminalEvent, IFileEditEvent, IToolDefinition, ToolRisk } from '../common/openideAgentTypes.js';
+import { IOpenideToolExecution, OpenideToolExecutor, IOpenideExecutableTool, IOpenideToolExecutionResult } from '../common/openideToolExecutor.js';
 import { resolvePathInsideWorkspace } from '../common/openideWorkspacePath.js';
 
 /** Leaves the pty output as plain text: strips OSC (including shell integration 633/133),
@@ -108,6 +114,7 @@ export interface IToolApprovalInfo {
 }
 
 export interface IAgentToolContext {
+	readonly execution?: IOpenideToolExecution;
 	readonly messageId?: string;
 	readonly workspaceRoot?: URI;
 	/**
@@ -131,6 +138,7 @@ export interface IAgentToolContext {
  * interactive session open on it.
  */
 interface IConversationShell {
+	workspaceKey?: string;
 	terminal?: ITerminalInstance;
 	interactive?: {
 		readonly term: ITerminalInstance;
@@ -146,6 +154,7 @@ interface IConversationShell {
 const SHARED_SHELL = '';
 
 export interface IAgentTool {
+	readonly capability?: 'memory';
 	readonly def: IToolDefinition;
 	readonly risk: ToolRisk;
 	approvalInfo?(args: any): IToolApprovalInfo;
@@ -157,6 +166,14 @@ export interface IAgentTool {
 export class OpenideToolRegistry extends Disposable {
 
 	private readonly tools = new Map<string, IAgentTool>();
+	private executor = new OpenideToolExecutor();
+
+	setExecutor(executor: OpenideToolExecutor): void { this.executor = executor; }
+
+	async prepareSpecial(tool: IOpenideExecutableTool, argumentsJson: string, token: CancellationToken, execution: IOpenideToolExecution): Promise<string | undefined> {
+		return (await this.executor.prepare(tool, argumentsJson, token, execution)).error;
+	}
+	private readonly workspaceAccess: OpenideWorkspaceAccess;
 	/**
 	 * Hard TTL: if shell integration does not emit finish, the interactive session expires on its
 	 * own.
@@ -171,7 +188,9 @@ export class OpenideToolRegistry extends Disposable {
 	 * answering whichever prompt happened to be open.
 	 */
 	private readonly shells = new Map<string, IConversationShell>();
-	private readonly bgTerminals = new Map<string, { term: ITerminalInstance; command: string; persistent: boolean }>();
+	private readonly ownedTerminals = new Set<ITerminalInstance>();
+	private shellOwnerDisposed = false;
+	private readonly bgTerminals = new Map<string, { term: ITerminalInstance; command: string; persistent: boolean; scopeKey: string }>();
 
 	private readonly _onDidEdit = this._register(new Emitter<IFileEditEvent>());
 	readonly onDidEdit: Event<IFileEditEvent> = this._onDidEdit.event;
@@ -191,8 +210,13 @@ export class OpenideToolRegistry extends Disposable {
 		private readonly terminalService: ITerminalService,
 		private readonly markerService: IMarkerService,
 		private readonly textModelService: ITextModelService,
+		modelService: IModelService,
+		textFileService: ITextFileService,
+		private readonly host: IOpenideAgentHostService,
+		private readonly configurationService: IConfigurationService,
 	) {
 		super();
+		this.workspaceAccess = this._register(new OpenideWorkspaceAccess(fileService, modelService, textFileService, (resource, root, mutation) => this.validateResource(resource, root, mutation)));
 		this.register(this.readFileTool());
 		this.register(this.listFilesTool());
 		this.register(this.searchTextTool());
@@ -365,8 +389,15 @@ export class OpenideToolRegistry extends Disposable {
 	}
 
 	/** Same call, marked as coming from an external agent. */
-	async invokeExternal(name: string, argumentsJson: string, token: CancellationToken): Promise<string> {
-		return this.run(name, argumentsJson, token, { external: true });
+	async invokeExternal(name: string, argumentsJson: string, token: CancellationToken, context: IAgentToolContext = {}): Promise<string> {
+		return this.run(name, argumentsJson, token, { ...context, external: true });
+	}
+
+	/** Typed dispatch preserves guard, cancellation and exception failures for MCP. */
+	async invokeExternalResult(name: string, argumentsJson: string, token: CancellationToken, context: IAgentToolContext = {}): Promise<IOpenideToolExecutionResult> {
+		const tool = this.tools.get(name);
+		if (!tool) { return { output: `Error: unknown tool "${name}".`, isError: true }; }
+		return this.executor.executeResult(tool, argumentsJson, token, context.execution, args => tool.invoke(args, token, { ...context, external: true }));
 	}
 
 	private async run(name: string, argumentsJson: string, token: CancellationToken, context: IAgentToolContext): Promise<string> {
@@ -374,13 +405,7 @@ export class OpenideToolRegistry extends Disposable {
 		if (!tool) {
 			return `Error: unknown tool "${name}".`;
 		}
-		let args: any = {};
-		try { args = JSON.parse(argumentsJson || '{}'); } catch { return `Error: invalid JSON arguments for ${name}.`; }
-		try {
-			return await tool.invoke(args, token, context);
-		} catch (e) {
-			return `Error ejecutando ${name}: ${e instanceof Error ? e.message : String(e)}`;
-		}
+		return this.executor.execute(tool, argumentsJson, token, context.execution, args => tool.invoke(args, token, context));
 	}
 
 	// ---- helpers ----
@@ -389,10 +414,10 @@ export class OpenideToolRegistry extends Disposable {
 		return resolvePathInsideWorkspace(p, workspaceRoot ? [workspaceRoot] : this.folders());
 	}
 
-	private relPath(uri: URI): string {
-		const folder = this.contextService.getWorkspace().folders[0];
-		if (folder) {
-			const rel = relativePath(folder.uri, uri);
+	private relPath(uri: URI, workspaceRoot?: URI): string {
+		const root = workspaceRoot ?? this.folders().find(folder => extUriBiasedIgnorePathCase.isEqualOrParent(uri, folder));
+		if (root) {
+			const rel = relativePath(root, uri);
 			if (rel) {
 				return rel;
 			}
@@ -400,8 +425,18 @@ export class OpenideToolRegistry extends Disposable {
 		return uri.path;
 	}
 
-	private folders(): URI[] {
-		return this.contextService.getWorkspace().folders.map(f => f.uri);
+	private folders(workspaceRoot?: URI): URI[] {
+		return workspaceRoot ? [workspaceRoot] : this.contextService.getWorkspace().folders.map(f => f.uri);
+	}
+
+	private async validateResource(resource: URI, workspaceRoot?: URI, mutation?: boolean): Promise<void> {
+		const roots = this.folders(workspaceRoot);
+		if (resource.scheme !== 'file' || roots.some(root => root.scheme !== 'file')) { throw new Error('Native workspace tools require local file resources.'); }
+		await this.host.validateWorkspacePath({ path: resource.fsPath, roots: roots.map(root => root.fsPath), mutation });
+	}
+
+	private observationOwner(context?: IAgentToolContext): string {
+		return context?.execution?.runId ?? context?.conversationId ?? context?.messageId ?? 'unscoped';
 	}
 
 	/** LSP/linter diagnostics for a file, formatted for the model. It opens a reference to the text
@@ -421,7 +456,7 @@ export class OpenideToolRegistry extends Disposable {
 		}
 	}
 
-	private formatMarkers(markers: IMarker[], includePath: boolean, cap: number): string {
+	private formatMarkers(markers: IMarker[], includePath: boolean, cap: number, workspaceRoot?: URI): string {
 		const relevant = markers
 			.filter(m => m.severity === MarkerSeverity.Error || m.severity === MarkerSeverity.Warning)
 			.sort((a, b) => (b.severity - a.severity) || a.startLineNumber - b.startLineNumber)
@@ -430,7 +465,7 @@ export class OpenideToolRegistry extends Disposable {
 			return '';
 		}
 		const lines = relevant.map(m =>
-			`${m.severity === MarkerSeverity.Error ? 'error' : 'warning'}${includePath ? ' ' + this.relPath(m.resource) : ''} L${m.startLineNumber}:${m.startColumn} — ${m.message}${m.source ? ` [${m.source}]` : ''}`
+			`${m.severity === MarkerSeverity.Error ? 'error' : 'warning'}${includePath ? ' ' + this.relPath(m.resource, workspaceRoot) : ''} L${m.startLineNumber}:${m.startColumn} — ${m.message}${m.source ? ` [${m.source}]` : ''}`
 		);
 		return lines.join('\n');
 	}
@@ -462,7 +497,7 @@ export class OpenideToolRegistry extends Disposable {
 			return undefined;
 		}
 		try {
-			const text = (await this.fileService.readFile(uri)).value.toString();
+			const text = (await this.workspaceAccess.read(uri, 'attachments')).text;
 			return text.length > capChars ? text.slice(0, capChars) + '\n…(truncado)' : text;
 		} catch {
 			return undefined;
@@ -483,7 +518,7 @@ export class OpenideToolRegistry extends Disposable {
 			},
 			def: {
 				name: 'read_file',
-				description: 'Reads a whole file, or a line range, from the workspace. Accepts a path relative to the first open folder, or an absolute path inside any open folder.',
+				description: 'Reads editor-visible text (including unsaved changes), or disk when closed, inside the assigned workspace. Returns an observation_id for later edits; save or discard dirty buffers before editing. Accepts relative or in-workspace absolute paths.',
 				parameters: {
 					type: 'object',
 					properties: {
@@ -497,8 +532,8 @@ export class OpenideToolRegistry extends Disposable {
 			invoke: async (args, _token, context) => {
 				const uri = this.resolvePath(String(args.path ?? ''), context?.workspaceRoot);
 				if (!uri) { return 'Error: the path is empty, outside the workspace, or no folder is open.'; }
-				const content = await this.fileService.readFile(uri);
-				const text = content.value.toString();
+				const observation = await this.workspaceAccess.read(uri, this.observationOwner(context), context?.workspaceRoot);
+				const text = observation.text;
 				const requestedStart = Number(args.start_line);
 				const requestedEnd = Number(args.end_line);
 				const hasStart = Number.isFinite(requestedStart) && requestedStart > 0;
@@ -512,7 +547,7 @@ export class OpenideToolRegistry extends Disposable {
 					if (start > lines.length) { return `Error: start_line (${start}) exceeds the ${lines.length} lines in the file.`; }
 					selected = lines.slice(start - 1, Math.min(end, lines.length)).join('\n');
 				}
-				return selected.length > 60000 ? selected.slice(0, 60000) + '\n…(truncado)' : selected;
+				return `[observation_id: ${observation.id}; source: ${observation.source}; unsaved: ${observation.dirty}]\n` + (selected.length > 60000 ? selected.slice(0, 60000) + '\n…(truncado)' : selected);
 			},
 		};
 	}
@@ -528,6 +563,7 @@ export class OpenideToolRegistry extends Disposable {
 			invoke: async (args, _token, context) => {
 				const uri = this.resolvePath(String(args.path ?? '.') || '.', context?.workspaceRoot);
 				if (!uri) { return 'Error: no folder is open.'; }
+				await this.validateResource(uri, context?.workspaceRoot);
 				const stat = await this.fileService.resolve(uri);
 				if (!stat.children) { return '(not a directory, or empty)'; }
 				return stat.children
@@ -543,7 +579,7 @@ export class OpenideToolRegistry extends Disposable {
 			risk: 'safe',
 			def: {
 				name: 'search_text',
-				description: 'Searches text across workspace files (like grep). Returns the matching files and lines.',
+				description: 'Searches text inside the assigned workspace using current open-editor text and disk for other files. Returns matching files and lines. Read a file with read_file before editing it.',
 				parameters: {
 					type: 'object',
 					properties: {
@@ -553,18 +589,20 @@ export class OpenideToolRegistry extends Disposable {
 					required: ['query'],
 				},
 			},
-			invoke: async (args, token) => {
+			invoke: async (args, token, context) => {
 				const pattern = String(args.query ?? '').trim();
 				if (!pattern) { return 'Error: empty query.'; }
-				const folders = this.folders();
+				const folders = this.folders(context?.workspaceRoot);
 				if (!folders.length) { return 'Error: no folder is open.'; }
+				await Promise.all(folders.map(root => this.validateResource(root, context?.workspaceRoot)));
 				const qb = this.instantiationService.createInstance(QueryBuilder);
-				const query = qb.text({ pattern, isRegExp: !!args.isRegExp }, folders, { maxResults: 200 });
+				const query = qb.text({ pattern, isRegExp: !!args.isRegExp }, folders, { maxResults: 200, ignoreSymlinks: true });
 				const result = await this.searchService.textSearch(query, token);
 				const lines: string[] = [];
-				for (const fm of result.results) {
+				for (const fm of result.results.filter(match => folders.some(root => extUriBiasedIgnorePathCase.isEqualOrParent(match.resource, root)))) {
+					try { await this.validateResource(fm.resource, context?.workspaceRoot); } catch { continue; }
 					const matches = (fm.results ?? []).filter(resultIsMatch);
-					lines.push(this.relPath(fm.resource) + (matches.length ? `  (${matches.length})` : ''));
+					lines.push(this.relPath(fm.resource, context?.workspaceRoot) + (matches.length ? `  (${matches.length})` : ''));
 					for (const m of matches.slice(0, 5)) {
 						lines.push('   ' + m.previewText.replace(/\n+$/, '').slice(0, 200));
 					}
@@ -583,15 +621,21 @@ export class OpenideToolRegistry extends Disposable {
 				description: 'Finds files by name or glob in the workspace (e.g. "*.ts", "src/**/index.*").',
 				parameters: { type: 'object', properties: { pattern: { type: 'string', description: 'Name pattern or glob' } }, required: ['pattern'] },
 			},
-			invoke: async (args, token) => {
+			invoke: async (args, token, context) => {
 				const pattern = String(args.pattern ?? '').trim();
 				if (!pattern) { return 'Error: empty pattern.'; }
-				const folders = this.folders();
+				const folders = this.folders(context?.workspaceRoot);
 				if (!folders.length) { return 'Error: no folder is open.'; }
+				await Promise.all(folders.map(root => this.validateResource(root, context?.workspaceRoot)));
 				const qb = this.instantiationService.createInstance(QueryBuilder);
-				const query = qb.file(folders, { filePattern: pattern, maxResults: 200 });
+				const query = qb.file(folders, { filePattern: pattern, maxResults: 200, ignoreSymlinks: true });
 				const result = await this.searchService.fileSearch(query, token);
-				const out = result.results.map(m => this.relPath(m.resource)).sort();
+				const out: string[] = [];
+				for (const match of result.results.filter(match => folders.some(root => extUriBiasedIgnorePathCase.isEqualOrParent(match.resource, root)))) {
+					try { await this.validateResource(match.resource, context?.workspaceRoot); } catch { continue; }
+					out.push(this.relPath(match.resource, context?.workspaceRoot));
+				}
+				out.sort();
 				return out.length ? out.join('\n') : '(sin resultados)';
 			},
 		};
@@ -609,15 +653,22 @@ export class OpenideToolRegistry extends Disposable {
 				description: 'Reads the current diagnostics (LSP and linter errors and warnings) for the workspace or for one specific file. Use it to check the state of the code after a series of edits.',
 				parameters: { type: 'object', properties: { path: { type: 'string', description: 'One specific file (optional; without path = the whole workspace)' } } },
 			},
-			invoke: async (args) => {
+			invoke: async (args, _token, context) => {
 				const p = String(args.path ?? '').trim();
 				if (p) {
-					const uri = this.resolvePath(p);
+					const uri = this.resolvePath(p, context?.workspaceRoot);
 					if (!uri) { return 'Error: the path is outside the workspace, or no folder is open.'; }
+					await this.validateResource(uri, context?.workspaceRoot);
 					const out = await this.collectDiagnostics(uri, 600);
 					return out || '(no errors or warnings)';
 				}
-				const out = this.formatMarkers(this.markerService.read({}), true, 40);
+				await Promise.all(this.folders(context?.workspaceRoot).map(root => this.validateResource(root, context?.workspaceRoot)));
+				const markers: IMarker[] = [];
+				for (const marker of this.markerService.read({}).filter(marker => this.folders(context?.workspaceRoot).some(root => extUriBiasedIgnorePathCase.isEqualOrParent(marker.resource, root)))) {
+					try { await this.validateResource(marker.resource, context?.workspaceRoot); } catch { continue; }
+					markers.push(marker);
+				}
+				const out = this.formatMarkers(markers, true, 40, context?.workspaceRoot);
 				return out || '(no errors or warnings)';
 			},
 		};
@@ -631,32 +682,30 @@ export class OpenideToolRegistry extends Disposable {
 			agentLocation: args => ({ kind: 'file', path: String(args.path ?? ''), line: 1, activity: 'write' }),
 			def: {
 				name: 'write_file',
-				description: 'Creates or overwrites a file with the given content. Creates the intermediate folders if needed.',
+				description: 'Creates a new file or replaces a previously read file. Existing files require a current read_file observation from this run. Unsaved editor changes must be saved or discarded first.',
 				parameters: {
 					type: 'object',
 					properties: {
 						path: { type: 'string', description: 'File path' },
 						content: { type: 'string', description: 'The complete file content' },
+						expected_observation: { type: 'string', description: 'observation_id from read_file; defaults to this run’s latest read of this path' },
 					},
 					required: ['path', 'content'],
 				},
 			},
 			approvalInfo: (args) => ({ title: 'Escribir archivo', detail: String(args.path ?? ''), path: String(args.path ?? '') }),
-			invoke: async (args, _token, context) => {
-				const uri = this.resolvePath(String(args.path ?? ''));
+			invoke: async (args, token, context) => {
+				const uri = this.resolvePath(String(args.path ?? ''), context?.workspaceRoot);
 				if (!uri) { return 'Error: the path is empty, outside the workspace, or no folder is open.'; }
 				const content = String(args.content ?? '');
-				let oldContent = '';
-				let created = true;
-				try { oldContent = (await this.fileService.readFile(uri)).value.toString(); created = false; } catch (error) {
-					if (toFileOperationResult(error as Error) !== FileOperationResult.FILE_NOT_FOUND) { throw error; }
-				}
+				const result = await this.workspaceAccess.write(uri, this.observationOwner(context), content, args.expected_observation, context?.workspaceRoot, token);
+				const oldContent = result.before;
+				const created = oldContent === undefined;
 				if (!created && oldContent === content) {
-					return `OK: ${this.relPath(uri)} already had the requested content (no change).`;
+					return `OK: ${this.relPath(uri, context?.workspaceRoot)} already had the requested content (no change).`;
 				}
-				await this.fileService.writeFile(uri, VSBuffer.fromString(content));
-				this._onDidEdit.fire({ messageId: context?.messageId, path: this.relPath(uri), operation: created ? 'create' : 'modify', beforeContent: created ? undefined : oldContent, afterContent: content });
-				return `OK: escrito ${this.relPath(uri)} (${content.length} chars).` + await this.diagnosticsSuffix(uri);
+				this._onDidEdit.fire({ messageId: context?.messageId, path: this.relPath(uri, context?.workspaceRoot), operation: created ? 'create' : 'modify', beforeContent: created ? undefined : oldContent, afterContent: content });
+				return `OK: escrito ${this.relPath(uri, context?.workspaceRoot)} (${content.length} chars).` + await this.diagnosticsSuffix(uri);
 			},
 		};
 	}
@@ -724,25 +773,27 @@ export class OpenideToolRegistry extends Disposable {
 			agentLocation: args => ({ kind: 'file', path: String(args.path ?? ''), activity: 'edit' }),
 			def: {
 				name: 'edit_file',
-				description: 'Replaces one exact occurrence of text in a file. old_string must appear EXACTLY once (include unique context).',
+				description: 'Edits a previously read file. Requires a current read_file observation from this run; old_string must occur once. Unsaved editor changes must be saved or discarded first.',
 				parameters: {
 					type: 'object',
 					properties: {
 						path: { type: 'string', description: 'File path' },
 						old_string: { type: 'string', description: 'Texto exacto a reemplazar' },
 						new_string: { type: 'string', description: 'Texto nuevo' },
+						expected_observation: { type: 'string', description: 'observation_id from read_file; defaults to this run’s latest read of this path' },
 					},
 					required: ['path', 'old_string', 'new_string'],
 				},
 			},
 			approvalInfo: (args) => ({ title: 'Editar archivo', detail: String(args.path ?? ''), path: String(args.path ?? '') }),
-			invoke: async (args, _token, context) => {
-				const uri = this.resolvePath(String(args.path ?? ''));
+			invoke: async (args, token, context) => {
+				const uri = this.resolvePath(String(args.path ?? ''), context?.workspaceRoot);
 				if (!uri) { return 'Error: the path is empty, outside the workspace, or no folder is open.'; }
 				const oldStr = String(args.old_string ?? '');
 				const newStr = String(args.new_string ?? '');
 				if (!oldStr) { return 'Error: empty old_string (use write_file to create).'; }
-				const current = (await this.fileService.readFile(uri)).value.toString();
+				const observation = await this.workspaceAccess.requireCurrent(uri, this.observationOwner(context), args.expected_observation, context?.workspaceRoot);
+				const current = observation.text;
 				const count = current.split(oldStr).length - 1;
 				if (count > 1) { return `Error: old_string appears ${count} times; add context to make it unique.`; }
 				let updated: string;
@@ -757,11 +808,11 @@ export class OpenideToolRegistry extends Disposable {
 					note = ' (match aproximado por whitespace)';
 				}
 				if (current === updated) {
-					return `OK: ${this.relPath(uri)} ended up with no effective change${note}.`;
+					return `OK: ${this.relPath(uri, context?.workspaceRoot)} ended up with no effective change${note}.`;
 				}
-				await this.fileService.writeFile(uri, VSBuffer.fromString(updated));
-				this._onDidEdit.fire({ messageId: context?.messageId, path: this.relPath(uri), operation: 'modify', beforeContent: current, afterContent: updated });
-				return `OK: editado ${this.relPath(uri)}${note}.` + await this.diagnosticsSuffix(uri);
+				await this.workspaceAccess.write(uri, this.observationOwner(context), updated, observation.id, context?.workspaceRoot, token);
+				this._onDidEdit.fire({ messageId: context?.messageId, path: this.relPath(uri, context?.workspaceRoot), operation: 'modify', beforeContent: current, afterContent: updated });
+				return `OK: editado ${this.relPath(uri, context?.workspaceRoot)}${note}.` + await this.diagnosticsSuffix(uri);
 			},
 		};
 	}
@@ -772,18 +823,16 @@ export class OpenideToolRegistry extends Disposable {
 			agentLocation: args => ({ kind: 'file', path: String(args.path ?? ''), activity: 'delete' }),
 			def: {
 				name: 'delete_file',
-				description: 'Deletes a file from the workspace and records the operation for per-message isolated rollback.',
-				parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+				description: 'Deletes a previously read file inside the assigned workspace. Requires a current read_file observation and a saved editor buffer. Records the deletion for isolated rollback.',
+				parameters: { type: 'object', properties: { path: { type: 'string' }, expected_observation: { type: 'string', description: 'Current read_file observation_id (optional if already read in this run)' } }, required: ['path'] },
 			},
 			approvalInfo: args => ({ title: 'Eliminar archivo', detail: String(args.path ?? ''), path: String(args.path ?? '') }),
-			invoke: async (args, _token, context) => {
-				const uri = this.resolvePath(String(args.path ?? ''));
+			invoke: async (args, token, context) => {
+				const uri = this.resolvePath(String(args.path ?? ''), context?.workspaceRoot);
 				if (!uri) { return 'Error: empty path, or outside the workspace.'; }
-				let before: string;
-				try { before = (await this.fileService.readFile(uri)).value.toString(); } catch { return `Error: no existe ${this.relPath(uri)}.`; }
-				await this.fileService.del(uri);
-				this._onDidEdit.fire({ messageId: context?.messageId, path: this.relPath(uri), operation: 'delete', beforeContent: before });
-				return `OK: eliminado ${this.relPath(uri)}.`;
+				const before = await this.workspaceAccess.remove(uri, this.observationOwner(context), args.expected_observation, context?.workspaceRoot, token);
+				this._onDidEdit.fire({ messageId: context?.messageId, path: this.relPath(uri, context?.workspaceRoot), operation: 'delete', beforeContent: before });
+				return `OK: eliminado ${this.relPath(uri, context?.workspaceRoot)}.`;
 			},
 		};
 	}
@@ -794,20 +843,17 @@ export class OpenideToolRegistry extends Disposable {
 			agentLocation: args => ({ kind: 'file', path: String(args.to ?? ''), activity: 'write' }),
 			def: {
 				name: 'rename_file',
-				description: 'Renames or moves a file inside the workspace and records the operation for per-message isolated rollback.',
-				parameters: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] },
+				description: 'Moves a previously read file inside the assigned workspace to a new destination. Requires a current read_file observation and a saved editor buffer. Never overwrites the destination; records the move for isolated rollback.',
+				parameters: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' }, expected_observation: { type: 'string', description: 'Current read_file observation_id for from (optional if already read in this run)' } }, required: ['from', 'to'] },
 			},
 			approvalInfo: args => ({ title: 'Mover archivo', detail: `${String(args.from ?? '')} → ${String(args.to ?? '')}`, path: String(args.to ?? '') }),
-			invoke: async (args, _token, context) => {
-				const from = this.resolvePath(String(args.from ?? ''));
-				const to = this.resolvePath(String(args.to ?? ''));
+			invoke: async (args, token, context) => {
+				const from = this.resolvePath(String(args.from ?? ''), context?.workspaceRoot);
+				const to = this.resolvePath(String(args.to ?? ''), context?.workspaceRoot);
 				if (!from || !to) { return 'Error: source or destination path is empty, or outside the workspace.'; }
-				if (await this.fileService.exists(to)) { return `Error: el destino ya existe: ${this.relPath(to)}.`; }
-				let content: string;
-				try { content = (await this.fileService.readFile(from)).value.toString(); } catch { return `Error: no existe ${this.relPath(from)}.`; }
-				await this.fileService.move(from, to, false);
-				this._onDidEdit.fire({ messageId: context?.messageId, path: this.relPath(to), originalPath: this.relPath(from), operation: 'rename', beforeContent: content, afterContent: content });
-				return `OK: movido ${this.relPath(from)} → ${this.relPath(to)}.`;
+				const content = await this.workspaceAccess.rename(from, to, this.observationOwner(context), args.expected_observation, context?.workspaceRoot, token);
+				this._onDidEdit.fire({ messageId: context?.messageId, path: this.relPath(to, context?.workspaceRoot), originalPath: this.relPath(from, context?.workspaceRoot), operation: 'rename', beforeContent: content, afterContent: content });
+				return `OK: movido ${this.relPath(from, context?.workspaceRoot)} → ${this.relPath(to, context?.workspaceRoot)}.`;
 			},
 		};
 	}
@@ -848,18 +894,18 @@ export class OpenideToolRegistry extends Disposable {
 				// background_persistent always goes to the dock (visible, no auto-dispose), even when the
 				// command is not "tray-worthy". background:true is only for servers/watchers.
 				if (args.background_persistent) {
-					return this.startBackgroundCommand(command, true);
+					return this.startBackgroundCommand(command, true, context, token);
 				}
 				if (args.background) {
 					if (isBackgroundTrayWorthy(command)) {
-						return this.startBackgroundCommand(command, false);
+						return this.startBackgroundCommand(command, false, context, token);
 					}
 					// background:true misused (a quick read) → foreground with capture
 				}
 				const timeoutSec = Math.min(600, Math.max(5, Number(args.timeoutSeconds) || 120));
 				// The conversation's own shell: two conversations working at the same time must not send
 				// their commands to one pty.
-				const finished = await this.runShellCaptured(command, token, timeoutSec * 1000, context?.conversationId ?? SHARED_SHELL);
+				const finished = await this.runShellCaptured(command, token, timeoutSec * 1000, context?.conversationId ?? SHARED_SHELL, context?.workspaceRoot);
 				if (token.isCancellationRequested) { return '(cancelado — el proceso fue terminado)'; }
 				if (finished === 'no-shell-integration') {
 					return '(command sent to the terminal, but shell integration is unavailable → its output could not be captured)';
@@ -994,20 +1040,24 @@ export class OpenideToolRegistry extends Disposable {
 	 *  KILLED — the hung process dies with it and the next call creates a fresh one. Otherwise
 	 *  every following command queues behind the hung one and "the console freezes"
 	 *  (y el pty host termina unresponsive). */
-	async runShellCaptured(command: string, token: CancellationToken, timeoutMs = 120000, shell: string = SHARED_SHELL): Promise<ShellCaptureResult | 'no-shell-integration' | undefined> {
+	async runShellCaptured(command: string, token: CancellationToken, timeoutMs = 120000, shell: string = SHARED_SHELL, workspaceRoot?: URI): Promise<ShellCaptureResult | 'no-shell-integration' | undefined> {
+		const scope = await this.prepareShellCommand(command, workspaceRoot);
+		if (token.isCancellationRequested) { return undefined; }
 		const owner = this.shell(shell);
 		// Previous interactive session (or a TTL that just killed it): do not reuse that pty.
 		if (this.hasInteractiveSession(shell)) {
 			this.clearInteractiveSession(shell, owner.interactive!.term, { killPty: true });
 		}
-		const term = await this.getAgentTerminal(shell);
+		const term = await this.getAgentTerminal(shell, scope.root, scope.key);
 		await term.processReady;
+		await this.registerNativeTerminal(term, shell, scope.root);
 		const cd = await this.waitForCommandDetection(term);
+		if (token.isCancellationRequested || this.shellOwnerDisposed) { term.dispose(); return undefined; }
 		if (!cd) {
 			// Without SI there is no reliable capture. We send the command and DETACH the shared
 			// terminal (the next getAgentTerminal creates a fresh one) so nothing queues behind it.
 			// No dispose: that would kill the process instantly.
-			term.sendText(command, true);
+			term.sendText(scope.command, true);
 			if (owner.terminal === term) {
 				owner.terminal = undefined;
 			}
@@ -1041,7 +1091,8 @@ export class OpenideToolRegistry extends Disposable {
 			if (plain) { lastDataTime = Date.now(); accumulatedOutput += plain; this._onDidShellData.fire({ conversationId: shell, data: plain }); }
 		});
 		try {
-			term.sendText(command, true);
+			if (token.isCancellationRequested || this.shellOwnerDisposed) { finishedListener.dispose(); term.dispose(); return undefined; }
+			term.sendText(scope.command, true);
 			// awaiting-input detection: minimum runtime + there was output + subsequent silence
 			// (prompt y/N / password). No mata la terminal: terminal_send escribe al pty vivo.
 			const startTime = Date.now();
@@ -1057,7 +1108,9 @@ export class OpenideToolRegistry extends Disposable {
 					}
 				}, 1000);
 			});
-			const result = await Promise.race([finishedP, awaitingInputP, timeout(timeoutMs).then(() => undefined), cancelledP]);
+			const deadline = timeout(timeoutMs);
+			const result = await Promise.race([finishedP, awaitingInputP, deadline.then(() => undefined), cancelledP]);
+			deadline.cancel();
 			awaitingResolved = true;
 			if (awaitingInterval) { clearInterval(awaitingInterval); awaitingInterval = undefined; }
 			// Timeout / cancel: matar la terminal colgada.
@@ -1144,6 +1197,7 @@ export class OpenideToolRegistry extends Disposable {
 		const term = session.term;
 		const cd = await this.waitForCommandDetection(term);
 		// TOCTOU: el comando pudo terminar durante el await → no escribir a shell libre.
+		if (token.isCancellationRequested || this.shellOwnerDisposed) { this.clearInteractiveSession(shell, term, { killPty: true }); return undefined; }
 		if (!this.sessionStillOwns(shell, term)) {
 			return undefined;
 		}
@@ -1160,7 +1214,7 @@ export class OpenideToolRegistry extends Disposable {
 			if (plain) { outputBuffer += plain; lastDataTime = Date.now(); this._onDidShellData.fire({ conversationId: shell, data: plain }); }
 		});
 		// Revalidate once more right before touching the pty.
-		if (!this.sessionStillOwns(shell, term)) {
+		if (token.isCancellationRequested || !this.sessionStillOwns(shell, term)) {
 			dataListener.dispose();
 			return undefined;
 		}
@@ -1183,7 +1237,7 @@ export class OpenideToolRegistry extends Disposable {
 					this.clearInteractiveSession(shell, term);
 					finish({ output: outputBuffer.slice(-4000), exitCode: cmd.exitCode });
 				});
-				const tokenListener = token.onCancellationRequested(() => finish(undefined));
+				const tokenListener = token.onCancellationRequested(() => { this.clearInteractiveSession(shell, term, { killPty: true }); finish(undefined); });
 				const interval = setInterval(() => {
 					// Otro prompt: silencio tras haber recibido data nueva post-send.
 					if (shouldDetectAwaitingInput({
@@ -1234,13 +1288,57 @@ export class OpenideToolRegistry extends Disposable {
 		return true;
 	}
 
-	private async getAgentTerminal(shell: string = SHARED_SHELL): Promise<ITerminalInstance> {
+	override dispose(): void {
+		this.shellOwnerDisposed = true;
+		for (const [key, owner] of this.shells) { if (owner.interactive) { this.clearInteractiveSession(key, owner.interactive.term, { killPty: true }); } }
+		for (const terminal of this.ownedTerminals) { terminal.dispose(); }
+		this.ownedTerminals.clear();
+		this.shells.clear();
+		this.bgTerminals.clear();
+		super.dispose();
+	}
+
+	private async registerNativeTerminal(terminal: ITerminalInstance, conversationId: string, root?: URI): Promise<void> {
+		if (this.shellOwnerDisposed || !root || root.scheme !== 'file' || terminal.persistentProcessId === undefined || terminal.processId === undefined) { terminal.dispose(); throw new Error('A local, owned PTY is required before an agent command can run.'); }
+		try { await this.host.registerAgentTerminal({ terminalId: terminal.persistentProcessId, processId: terminal.processId, conversationId, workspaceRoot: root.fsPath }); }
+		catch (error) { terminal.dispose(); throw error; }
+	}
+
+	private ownTerminal(terminal: ITerminalInstance): void {
+		if (this.shellOwnerDisposed) { terminal.dispose(); throw new Error('The agent terminal owner has disconnected.'); }
+		this.ownedTerminals.add(terminal);
+		this._register(terminal.onExit(() => this.ownedTerminals.delete(terminal)));
+	}
+
+	private async prepareShellCommand(command: string, workspaceRoot?: URI): Promise<{ command: string; root?: URI; key: string }> {
+		if (this.shellOwnerDisposed) { throw new Error('The agent terminal owner has disconnected.'); }
+		const root = workspaceRoot ?? this.contextService.getWorkspace().folders[0]?.uri;
+		const mode = this.configurationService.getValue<string>('openide.agent.processIsolation') ?? 'off';
+		const network = this.configurationService.getValue<string>('openide.agent.processIsolationNetwork') ?? 'deny';
+		const key = `${root?.toString() ?? ''}:${mode}:${network}`;
+		if (mode === 'off') {
+			await this.host.prepareIsolatedProcess({ mode: 'off', network: 'deny', executable: 'bash', args: [], cwd: root?.fsPath ?? '', workspaceRoot: root?.fsPath ?? '' });
+			return { command, root, key };
+		}
+		if (mode !== 'required' || (network !== 'allow' && network !== 'deny') || !root || root.scheme !== 'file') { throw new Error('Required process isolation needs a local workspace and a valid network policy.'); }
+		const prepared = await this.host.prepareIsolatedProcess({ mode, network, executable: 'bash', args: ['--noprofile', '--norc', '-c', command], cwd: root.fsPath, workspaceRoot: root.fsPath });
+		if (prepared.status.state !== 'confined') { throw new Error('Required process isolation did not produce a confined command.'); }
+		return { command: openidePreparedProcessCommand(prepared), root, key };
+	}
+
+	private async getAgentTerminal(shell: string = SHARED_SHELL, workspaceRoot?: URI, workspaceKey?: string): Promise<ITerminalInstance> {
 		const owner = this.shell(shell);
+		if (workspaceKey !== undefined && owner.workspaceKey !== workspaceKey) {
+			owner.terminal?.dispose();
+			owner.terminal = undefined;
+		}
 		if (owner.terminal && !owner.terminal.isDisposed) {
 			return owner.terminal;
 		}
-		const term = await this.terminalService.createTerminal({ config: { name: 'OpenIDE Agent' } });
+		const term = await this.terminalService.createTerminal({ config: { name: 'OpenIDE Agent', cwd: workspaceRoot, isTransient: true } });
+		this.ownTerminal(term);
 		owner.terminal = term;
+		owner.workspaceKey = workspaceKey;
 		return term;
 	}
 
@@ -1248,12 +1346,15 @@ export class OpenideToolRegistry extends Disposable {
 	 *  Before starting, it KILLS any previous terminal for the SAME command (restarting the dev
 	 *  server replaces the old one instead of stacking) and purges finished ones — so they do not pile up
 	 *  10 terminales fantasma tras varios intentos. */
-	private async startBackgroundCommand(command: string, persistent = false): Promise<string> {
+	private async startBackgroundCommand(command: string, persistent = false, context?: IAgentToolContext, token: CancellationToken = CancellationToken.None): Promise<string> {
+		if (token.isCancellationRequested) { return 'Cancelled before launch.'; }
+		const scope = await this.prepareShellCommand(command, context?.workspaceRoot);
+		const scopeKey = `${context?.conversationId ?? SHARED_SHELL}:${scope.key}`;
 		for (const [oldId, entry] of [...this.bgTerminals]) {
 			// Purgar disposed. Mismo comando no-persistent se reemplaza.
 			// Live persistent ones for the same command: replaced only if the new one is also
 			// persistent (re-levantar dev server en dock); si no, se dejan.
-			const sameCmd = entry.command === command;
+			const sameCmd = entry.command === command && entry.scopeKey === scopeKey;
 			const shouldReplace = sameCmd && (!entry.persistent || persistent);
 			if (entry.term.isDisposed || shouldReplace) {
 				if (!entry.term.isDisposed) {
@@ -1266,17 +1367,22 @@ export class OpenideToolRegistry extends Disposable {
 		const term = await this.terminalService.createTerminal({
 			config: {
 				name: command.slice(0, 40),
+				cwd: scope.root,
 				// persistent: visible in the dock from the start. Normal background: hidden until reveal.
 				hideFromUser: !persistent,
-				// forcePersist helps the dock session survive layout reloads.
-				forcePersist: persistent || undefined,
+				// Persistence means across turns, never beyond the owning renderer.
+				isTransient: true,
 			},
 			location: TerminalLocation.Panel,
 		});
+		this.ownTerminal(term);
 		await term.processReady;
+		await this.registerNativeTerminal(term, context?.conversationId ?? SHARED_SHELL, scope.root);
 		const cd = await this.waitForCommandDetection(term);
-		const id = this.trackBackgroundTerminal(term, command, undefined, cd, persistent);
-		term.sendText(command, true);
+		if (token.isCancellationRequested || this.shellOwnerDisposed) { term.dispose(); return 'Cancelled before launch.'; }
+		const id = this.trackBackgroundTerminal(term, command, undefined, cd, persistent, scopeKey);
+		if (token.isCancellationRequested || this.shellOwnerDisposed) { term.dispose(); return 'Cancelled before launch.'; }
+		term.sendText(scope.command, true);
 		if (!cd && !persistent) {
 			// Without shell integration there is no onCommandFinished: leave an exit queued so the
 			// terminal closes by itself when the command ends and the tray does not stay alive.
@@ -1294,9 +1400,9 @@ export class OpenideToolRegistry extends Disposable {
 	}
 
 	/** Registers an already-live terminal as "background" and wires its output events. */
-	private trackBackgroundTerminal(term: ITerminalInstance, command: string, finished?: Promise<{ output: string; exitCode: number | undefined }>, commandDetection?: ICommandDetectionCapability, persistent = false): string {
+	private trackBackgroundTerminal(term: ITerminalInstance, command: string, finished?: Promise<{ output: string; exitCode: number | undefined }>, commandDetection?: ICommandDetectionCapability, persistent = false, scopeKey = SHARED_SHELL): string {
 		const id = generateUuid();
-		this.bgTerminals.set(id, { term, command, persistent });
+		this.bgTerminals.set(id, { term, command, persistent, scopeKey });
 		if (isBackgroundTrayWorthy(command) || persistent) {
 			this._onDidChangeBackgroundTerminal.fire({ id, command, status: 'running' });
 		}

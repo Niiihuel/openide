@@ -52,88 +52,176 @@ suite('OpenIDE ChatConfirmationPart', () => {
 
 	const buttons = (part: OpenideChatConfirmationPart) =>
 		[...part.domNode.querySelectorAll('button.openide-chat-abtn')] as HTMLButtonElement[];
-	const labels = (part: OpenideChatConfirmationPart) => buttons(part).map(b => b.textContent?.trim());
+	const scope = (part: OpenideChatConfirmationPart) =>
+		part.domNode.querySelector('select') as HTMLSelectElement;
 	const status = (part: OpenideChatConfirmationPart) =>
 		part.domNode.querySelector('.openide-chat-approval-status')?.textContent ?? '';
-	/**
-	 * An answered card HIDES its offer rather than greying it out — see `_renderDecision`. These
-	 * asserts used to read `buttons(part).every(b => b.disabled)`, which is the contract from
-	 * before that redesign and had been failing ever since: the buttons are still in the DOM and
-	 * were never given the `disabled` property, because what stops a second answer is the
-	 * `_decided` guard in `_onClick`, not the button's state.
-	 */
 	const offerHidden = (part: OpenideChatConfirmationPart) =>
 		part.domNode.querySelector('.openide-chat-approval-actions')?.classList.contains('hidden') === true;
 
-	test('says what it is about to run', () => {
+	test('keeps the reviewed action separate from the reachable decision controls', () => {
 		const { part } = create();
-		assert.strictEqual(part.domNode.querySelector('.openide-chat-approval-title')?.textContent, 'Ejecutar comando');
-		assert.strictEqual(part.domNode.querySelector('.openide-chat-approval-description')?.textContent, 'en el workspace');
-		// The command is the one thing the user is actually judging.
-		assert.strictEqual(part.domNode.querySelector('.openide-chat-approval-cmd')?.textContent, 'rm -rf build');
+		assert.deepStrictEqual({
+			title: part.domNode.querySelector('.openide-chat-approval-head .openide-chat-approval-title')?.textContent,
+			detail: part.domNode.querySelector('.openide-chat-approval-description')?.textContent,
+			command: part.domNode.querySelector('.openide-chat-approval-cmd')?.textContent,
+			bodyTabIndex: (part.domNode.querySelector('.openide-chat-approval-body') as HTMLElement).tabIndex,
+			actionsInsideScroller: !!part.domNode.querySelector('.openide-chat-approval-body .openide-chat-approval-actions'),
+			buttons: buttons(part).map(button => button.textContent),
+		}, {
+			title: 'Ejecutar comando', detail: 'en el workspace', command: 'rm -rf build',
+			bodyTabIndex: 0, actionsInsideScroller: false,
+			buttons: [t('chatSurface.approval.deny'), t('chatSurface.approval.allow')],
+		});
 	});
 
-	test('offers the four decisions the service understands', () => {
-		const { part } = create();
-		assert.deepStrictEqual(labels(part), [t('chatSurface.approval.allow'), t('chat.approval.session'), t('chatSurface.approval.always'), t('chatSurface.approval.deny')]);
-	});
-
-	test('a sensitive path never offers "always"', () => {
-		// The whole point of marking a path sensitive is that the answer is given again next time.
-		const { part } = create({ sensitive: true });
-		assert.deepStrictEqual(labels(part), [t('chatSurface.approval.allow'), t('chat.approval.session'), t('chatSurface.approval.deny')]);
-	});
-
-	/**
-	 * The decision strings are the service's vocabulary, and a wrong one fails SILENTLY.
-	 *
-	 * `resolveApproval` accepts `once` | `session` | `always` and maps anything else to `deny`. The
-	 * primary button used to send `allow`, so "Allow" told the agent the user had refused — no
-	 * error, no log, the tool just never ran. This is the assert that caught it.
-	 */
-	test('each button resolves the run with a decision the service accepts', () => {
-		const accepted = ['once', 'session', 'always'];
-		for (const [index, decision] of [[0, 'once'], [1, 'session'], [2, 'always'], [3, 'deny']] as const) {
-			const { part, resolved } = create();
-			buttons(part)[index].click();
-			assert.deepStrictEqual(resolved, [{ id: 'req-1', decision }], `button ${index}`);
-			if (index < 3) {
-				assert.ok(accepted.includes(resolved[0].decision), `${resolved[0].decision} would turn into deny`);
-			}
+	test('the compact heading identifies the same tool as its execution card', () => {
+		for (const [tool, icon] of [['run_command', 'terminal'], ['write_file', 'file'], ['browser_set_style', 'paintcan']]) {
+			const { part } = create({ tool });
+			const head = part.domNode.querySelector('.openide-chat-approval-head');
+			assert.deepStrictEqual({
+				text: head?.textContent,
+				icon: head?.querySelector('.codicon')?.className,
+				bodyTitle: part.domNode.querySelector('.openide-chat-approval-body .openide-chat-approval-title'),
+				scopeLabel: scope(part).getAttribute('aria-label'),
+			}, {
+				text: 'Ejecutar comando', icon: `codicon codicon-${icon}`, bodyTitle: null,
+				scopeLabel: t('chatSurface.approval.scope'),
+			});
 		}
+	});
+
+	test('a command repeated in the approval detail is only shown once', () => {
+		const { part } = create({ detail: '  npm run dev  ', command: 'npm run dev' });
+		assert.deepStrictEqual({
+			detail: part.domNode.querySelector('.openide-chat-approval-description'),
+			command: part.domNode.querySelector('.openide-chat-approval-cmd')?.textContent,
+		}, { detail: null, command: 'npm run dev' });
+	});
+
+	test('defaults to one action and offers session and persistent scopes explicitly', () => {
+		const { part, resolved } = create();
+		assert.deepStrictEqual({ selected: scope(part).value, scopes: [...scope(part).options].map(option => option.value), resolved }, {
+			selected: 'once', scopes: ['once', 'session', 'always'], resolved: [],
+		});
+	});
+
+	test('a sensitive path never offers persistent permission', () => {
+		const { part } = create({ sensitive: true });
+		assert.deepStrictEqual([...scope(part).options].map(option => option.value), ['once', 'session']);
+	});
+
+	test('changing scope alone does not authorize the tool', () => {
+		const { part, resolved } = create();
+		scope(part).value = 'always';
+		scope(part).dispatchEvent(new Event('change'));
+		assert.deepStrictEqual(resolved, []);
+	});
+
+	test('remembered scope explains the actual command or tool grant and announces height changes', () => {
+		for (const [overrides, label] of [
+			[{}, t('chatSurface.approval.scopeCommandHint')],
+			[{ risk: 'write', tool: 'write_file', command: undefined }, t('chatSurface.approval.scopeToolHint')],
+			[{ command: undefined }, t('chatSurface.approval.scopeToolHint')],
+		] as const) {
+			const { part } = create(overrides);
+			const hint = part.domNode.querySelector('.openide-chat-approval-scope-hint') as HTMLElement;
+			let changes = 0;
+			store.add(part.onDidChangeHeight(() => changes++));
+			for (const selected of ['session', 'always', 'once']) {
+				scope(part).value = selected;
+				scope(part).dispatchEvent(new Event('change'));
+				assert.deepStrictEqual({ hidden: hint.hidden, text: hint.textContent, description: scope(part).getAttribute('aria-description') }, {
+					hidden: selected === 'once', text: selected === 'once' ? '' : label, description: selected === 'once' ? '' : label,
+				});
+			}
+			assert.strictEqual(changes, 3);
+		}
+	});
+
+	test('allow submits each scope using the service decision vocabulary', () => {
+		for (const decision of ['once', 'session', 'always']) {
+			const { part, resolved } = create();
+			scope(part).value = decision;
+			buttons(part)[1].click();
+			assert.deepStrictEqual(resolved, [{ id: 'req-1', decision }]);
+		}
+	});
+
+	test('deny remains denial regardless of the selected scope', () => {
+		const { part, resolved } = create();
+		scope(part).value = 'always';
+		buttons(part)[0].click();
+		assert.deepStrictEqual(resolved, [{ id: 'req-1', decision: 'deny' }]);
 	});
 
 	test('answering twice cannot resolve the same request twice', () => {
-		// `resolveApproval` settles a promise; a second call for one request is a protocol error.
 		const { part, resolved } = create();
+		buttons(part)[1].click();
 		buttons(part)[0].click();
-		buttons(part)[3].click();
 		assert.deepStrictEqual(resolved, [{ id: 'req-1', decision: 'once' }]);
 	});
 
-	test('the answered card stays on screen, without its offer, saying what was decided', () => {
-		// Removing it would erase the only record of what the user authorised.
-		const { part } = create();
-		buttons(part)[2].click();
-		assert.strictEqual(part.domNode.classList.contains('decided'), true);
-		assert.strictEqual(offerHidden(part), true);
-		assert.strictEqual(status(part), t('chatSurface.approval.allowedAlways'));
+	test('an old pending snapshot cannot reopen an answered request', () => {
+		const { part, resolved } = create();
+		buttons(part)[1].click();
+		part.hasSameContent(content());
+		buttons(part)[0].click();
+		assert.deepStrictEqual({ resolved, offerHidden: offerHidden(part), status: status(part) }, {
+			resolved: [{ id: 'req-1', decision: 'once' }], offerHidden: true, status: t('chatSurface.approval.allowed'),
+		});
 	});
 
-	test('each decision reads back differently, including "this session"', () => {
-		for (const [index, label] of [[0, t('chatSurface.approval.allowed')], [1, t('chat.approval.allowedSession')], [2, t('chatSurface.approval.allowedAlways')], [3, t('chatSurface.approval.denied')]] as const) {
+	test('each decision leaves a distinct accessible record in the transcript', () => {
+		for (const [decision, label] of [['once', t('chatSurface.approval.allowed')], ['session', t('chat.approval.allowedSession')], ['always', t('chatSurface.approval.allowedAlways')], ['deny', t('chatSurface.approval.denied')]] as const) {
 			const { part } = create();
-			buttons(part)[index].click();
-			assert.strictEqual(status(part), label);
+			scope(part).value = decision;
+			buttons(part)[decision === 'deny' ? 0 : 1].click();
+			assert.deepStrictEqual({ status: status(part), hidden: offerHidden(part), live: part.domNode.querySelector('[role="status"]')?.getAttribute('aria-live') }, {
+				status: label, hidden: true, live: 'polite',
+			});
 		}
 	});
 
-	test('a decision that arrives from the model applies in place', () => {
-		// The card must not blink out and back while the run continues, so the same part absorbs it.
+	test('a resolved event updates the card in place and announces its new height', () => {
 		const { part } = create();
+		let changes = 0;
+		store.add(part.onDidChangeHeight(() => changes++));
 		assert.strictEqual(part.hasSameContent(content({ decision: 'once' })), true);
-		assert.strictEqual(status(part), t('chatSurface.approval.allowed'));
-		assert.strictEqual(offerHidden(part), true);
+		assert.deepStrictEqual({ status: status(part), offerHidden: offerHidden(part), changes }, {
+			status: t('chatSurface.approval.allowed'), offerHidden: true, changes: 1,
+		});
+	});
+
+	test('native button and select keys do not reach the transcript tree', () => {
+		const { part, resolved } = create();
+		const parent = document.createElement('div');
+		parent.append(part.domNode);
+		let bubbled = 0;
+		parent.addEventListener('keydown', () => bubbled++);
+		parent.addEventListener('keyup', () => bubbled++);
+		for (const target of [scope(part), ...buttons(part)]) {
+			for (const key of ['Enter', ' ', 'ArrowDown', 'ArrowUp', 'Escape']) {
+				for (const type of ['keydown', 'keyup']) {
+					const event = new KeyboardEvent(type, { key, bubbles: true, cancelable: true });
+					target.dispatchEvent(event);
+					assert.strictEqual(event.defaultPrevented, false, `${type} ${key} must keep native behavior`);
+				}
+			}
+		}
+		assert.deepStrictEqual({ bubbled, resolved }, { bubbled: 0, resolved: [] });
+	});
+
+	test('workbench shortcuts remain available while approval controls have focus', () => {
+		const { part } = create();
+		const parent = document.createElement('div');
+		parent.append(part.domNode);
+		let bubbled = 0;
+		parent.addEventListener('keydown', () => bubbled++);
+		for (const modifiers of [{ ctrlKey: true }, { metaKey: true }]) {
+			scope(part).dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, ...modifiers }));
+		}
+		assert.strictEqual(bubbled, 2);
 	});
 
 	test('a different request is a different card', () => {
@@ -141,10 +229,10 @@ suite('OpenIDE ChatConfirmationPart', () => {
 		assert.strictEqual(part.hasSameContent(content({ requestId: 'req-2' })), false);
 	});
 
-	test('a card with no command still renders its head', () => {
+	test('a card without a command still presents its action', () => {
 		const { part } = create({ command: undefined, detail: undefined });
-		assert.strictEqual(part.domNode.querySelector('.openide-chat-approval-cmd'), null);
-		assert.strictEqual(part.domNode.querySelector('.openide-chat-approval-title')?.textContent, 'Ejecutar comando');
-		assert.deepStrictEqual(labels(part), [t('chatSurface.approval.allow'), t('chat.approval.session'), t('chatSurface.approval.always'), t('chatSurface.approval.deny')]);
+		assert.deepStrictEqual({ command: part.domNode.querySelector('.openide-chat-approval-cmd'), title: part.domNode.querySelector('.openide-chat-approval-title')?.textContent }, {
+			command: null, title: 'Ejecutar comando',
+		});
 	});
 });

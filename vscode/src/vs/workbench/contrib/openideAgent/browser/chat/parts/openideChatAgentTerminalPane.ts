@@ -13,8 +13,10 @@ import { IPathService } from '../../../../../services/path/common/pathService.js
 import { ITerminalInstance, ITerminalService } from '../../../../terminal/browser/terminal.js';
 import { buildOpenideCliLaunch, getOpenideCli, IOpenideCliDefinition, OpenideCliSessionEvent, OpenideCliSessionStatus, reduceOpenideCliStatus, OPENIDE_HOSTED_CLI_ENV_RESET } from '../../../common/openideAgentCliCatalog.js';
 import { t } from '../../../common/openideStrings.js';
+import { OPENIDE_CLI_HOOK_OWNER } from '../../../common/openideCliHookOwner.js';
 import { buildSnippetContext, IComposerSnippet, snippetRange } from '../../../common/chat/openideChatSnippet.js';
 import { IOpenideAgentService } from '../../openideAgentService.js';
+import { IOpenideCliChangesService, OpenideCliChangesService } from '../../openideCliChangesService.js';
 import { IOpenideIdeServerService, OpenideIdeServerService } from '../../openideIdeServerService.js';
 import { IChatSessionMeta } from '../../openideChatSessions.js';
 
@@ -79,6 +81,8 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 
 	private readonly _terminals = new Map<string, IHostedTerminal>();
 	private _shown: string | undefined;
+	private integrationLabel: HTMLElement | undefined;
+	private discoveryLabel: HTMLElement | undefined;
 	private _dimension: { readonly width: number; readonly height: number } | undefined;
 
 	private readonly _onDidChangeStatus = this._register(new Emitter<IOpenideCliStatusChange>());
@@ -105,12 +109,14 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		parent: HTMLElement,
 		@ITerminalService private readonly terminalService: ITerminalService,
 		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
+		@IOpenideCliChangesService private readonly cliChanges: OpenideCliChangesService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
 		@IOpenideIdeServerService private readonly ideServer: OpenideIdeServerService,
 	) {
 		super();
 		this.domNode = append(parent, $('.openide-chat-agent-terminal.hidden'));
+		this._register(this.ideServer.onDidChangeIntegration(() => this.renderIntegrationStatus()));
 		this._register(toDisposable(() => {
 			for (const hosted of this._terminals.values()) {
 				this._disposeHosted(hosted);
@@ -158,6 +164,7 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		// has (browser, diagrams, project map) without either side fighting over the other.
 		const mcpEndpoint = await this.ideServer.mcpEndpointFor(session.id, cli);
 		const launch = buildOpenideCliLaunch(cli, executable, session.providerSessionId, mcpEndpoint);
+		await this.cliChanges.prepareSession({ id: session.id, cliId: cli.id, cwd: session.cwd ?? '', title: session.title });
 		const instance = await this.terminalService.createTerminal({
 			cwd: session.cwd,
 			location: TerminalLocation.Panel,
@@ -175,7 +182,7 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 				// whichever lockfile in ~/.claude/ide happens to match its cwd — with two OpenIDE
 				// windows on the same repo, the wrong one is a coin flip. Empty when the IDE
 				// server is off or has no folder to publish, which simply means no IDE tools.
-				env: { ...OPENIDE_HOSTED_CLI_ENV_RESET, OPENIDE_SESSION_ID: session.id, ...this.ideServer.launchEnvironment(), ...launch.env },
+				env: { ...OPENIDE_HOSTED_CLI_ENV_RESET, OPENIDE_SESSION_ID: session.id, OPENIDE_HOOK_OWNER: OPENIDE_CLI_HOOK_OWNER, ...this.ideServer.launchEnvironment(), ...launch.env },
 			},
 		});
 		const store = new DisposableStore();
@@ -202,6 +209,7 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		}));
 		store.add(instance.onExit(exit => {
 			hosted.exited = true;
+			this.cliChanges.noteExited(session.id);
 			const code = typeof exit === 'number' ? exit : exit?.code;
 			// A resumed session that dies within seconds did not fail: it never started. The
 			// common cause is the CLI refusing to attach to a conversation another process still
@@ -300,7 +308,7 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		this.domNode.style.height = `${height}px`;
 		const hosted = this._shown ? this._terminals.get(this._shown) : undefined;
 		if (hosted && !hosted.exited && width > 0 && height > 0) {
-			hosted.instance.layout({ width, height });
+			hosted.instance.layout({ width, height: Math.max(0, height - 32) });
 		}
 	}
 
@@ -311,13 +319,30 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 
 	private _attach(hosted: IHostedTerminal): void {
 		clearNode(this.domNode);
+		const details = append(this.domNode, $<HTMLDetailsElement>('details.openide-cli-tools'));
+		const summary = append(details, $('summary', { 'aria-label': t('cli.tools.help') }));
+		this.integrationLabel = append(summary, $('span'));
+		this.discoveryLabel = append(details, $('p'));
+		append(details, $('p', undefined, t('cli.tools.guidance')));
+		this.renderIntegrationStatus();
 		const host = append(this.domNode, $('.openide-chat-agent-terminal-host'));
 		hosted.instance.attachToElement(host);
 		hosted.instance.setVisible(true);
 		if (this._dimension) {
-			hosted.instance.layout(this._dimension);
+			hosted.instance.layout({ width: this._dimension.width, height: Math.max(0, this._dimension.height - 32) });
 		}
 		hosted.instance.focus(true);
+	}
+
+	private renderIntegrationStatus(): void {
+		if (!this._shown || !this.integrationLabel) { return; }
+		const state = this.ideServer.integrationState(this._shown);
+		this.integrationLabel.textContent = t(`cli.tools.${state}`);
+		const discovery = this.ideServer.discoveryStatus;
+		if (this.discoveryLabel) {
+			this.discoveryLabel.textContent = discovery.toolsListedAt ? t('cli.tools.windowListed', discovery.toolCount)
+				: discovery.initializedAt ? t('cli.tools.windowInitialized') : '';
+		}
 	}
 
 	private _detachShown(): void {
@@ -327,6 +352,8 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 			hosted.instance.detachFromElement();
 		}
 		clearNode(this.domNode);
+		this.integrationLabel = undefined;
+		this.discoveryLabel = undefined;
 	}
 
 	/**
@@ -455,5 +482,6 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		hosted.store.dispose();
 		hosted.instance.detachFromElement();
 		hosted.instance.dispose();
+		this.cliChanges.noteExited(hosted.sessionId);
 	}
 }

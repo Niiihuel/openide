@@ -7,7 +7,7 @@
 // that has no `strict` export, so that form throws at evaluation and the whole file is skipped.
 // The strict variants are spelled out below instead.
 import assert from 'assert';
-import { ALIAS_URI_PREFIX, isInternalSpecifier, PACKAGE_URI_PREFIX, resolveInternalImport } from '../../../../../code/common/openideCodebaseImports.js';
+import { ALIAS_URI_PREFIX, isInternalSpecifier, PACKAGE_URI_PREFIX, resolveInternalImport } from '../../../../../platform/openideCodebase/common/openideCodebaseImports.js';
 
 /**
  * The Project Map showed "208 files · 0 relationships · 1 modules" on perfectly working
