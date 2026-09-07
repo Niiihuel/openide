@@ -5,19 +5,19 @@
   "platform": "win32",
   "architecture": "x64",
   "target": "user",
-  "productVersion": "1.2.0",
-  "buildVersion": "0dab5fdc1e01fe9f0876c9ab198ba8cd28e353be",
+  "productVersion": "1.3.0",
+  "buildVersion": "e934a59622e927a18808af0b0ec231d871bdabbb",
   "codeOssVersion": "1.136.1",
-  "publishedAt": "2026-09-05T03:32:32.000Z",
+  "publishedAt": "2026-09-07T21:22:20.000Z",
   "minimumUpdaterVersion": 1,
   "artifact": {
-    "url": "https://github.com/Niiihuel/openide/releases/download/v1.2.0/OpenIDEUserSetup-x64-1.2.0.exe",
-    "size": 173057221,
-    "sha256": "62642283eaa1c0ec368cebdcf302cb89121c0f4b20260504865fc96a55e9123e"
+    "url": "https://github.com/Niiihuel/openide/releases/download/v1.3.0/OpenIDEUserSetup-x64-1.3.0.exe",
+    "size": 173100035,
+    "sha256": "584498fc860ac93befeaccac231981757597c1a15ce0859d88f01e419546b701"
   },
-  "releaseNotesUrl": "https://github.com/Niiihuel/openide/releases/tag/v1.2.0",
+  "releaseNotesUrl": "https://github.com/Niiihuel/openide/releases/tag/v1.3.0",
   "rollout": {
     "percentage": 100,
-    "seed": "1.2.0-stable"
+    "seed": "1.3.0-stable"
   }
 }
