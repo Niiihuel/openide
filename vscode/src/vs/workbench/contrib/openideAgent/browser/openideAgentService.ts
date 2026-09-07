@@ -3008,10 +3008,24 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				const emit = (event: AgentLoopEvent) => {
 					if (!captureToken.isCancellationRequested && conversationId && event.type === 'info') { this._onDidChangeMemoryCapture.fire({ conversationId, event }); }
 				};
-				return new OpenideMemoryCheckpoint(captureMemory, captureSession, state.message ?? captureMessage, async transcript => {
-					const response = await this.streamWithRetry(adapter, { credential, baseUrl, model, extraHeaders: entry.extraHeaders, cloudCodeMetadata: entry.cloudCodeMetadata, system: MEMORY_CHECKPOINT_SYSTEM, messages: [{ role: 'user', content: transcript.slice(0, Math.max(1000, Math.min(14000, (contextLimit - 1500) * 4))) }], maxTokens: 1000 }, () => {}, captureToken, emit);
-					return response.message.content ?? '';
-				}, emit, undefined, id || undefined);
+				return {
+					capture: async (messages: readonly IChatMessage[], token: CancellationToken, reason: string) => {
+						if (token.isCancellationRequested) { return; }
+						// Background work outlives the turn's lease. Give each conversation's
+						// capture queue its own journal instead of appending to a closed run.
+						await this.withRunJournal(`memory-capture:${captureSession}`, async journal => {
+							if (token.isCancellationRequested) { return; }
+							await appendOpenideJournal(journal, 'run/start', { messages: [], purpose: 'memory-capture', checkpointId: id });
+							const checkpoint = new OpenideMemoryCheckpoint(captureMemory, captureSession, state.message ?? captureMessage, async transcript => {
+								const response = await this.streamWithRetry(adapter, { credential, baseUrl, model, extraHeaders: entry.extraHeaders, cloudCodeMetadata: entry.cloudCodeMetadata, system: MEMORY_CHECKPOINT_SYSTEM, messages: [{ role: 'user', content: transcript.slice(0, Math.max(1000, Math.min(14000, (contextLimit - 1500) * 4))) }], maxTokens: 1000 }, () => {}, captureToken, emit, journal);
+								await appendOpenideJournal(journal, 'model/result', { message: response.message });
+								return response.message.content ?? '';
+							}, emit, journal, id || undefined);
+							await checkpoint.capture(messages, token, reason);
+							await appendOpenideJournal(journal, 'run/end', { messages: [], purpose: 'memory-capture', cancelled: token.isCancellationRequested });
+						});
+					},
+				};
 			};
 			const capturePending = await this.memoryCaptures.resume(captureMemory, captureSession, captureFactory);
 			if (capturePending) { onEvent({ type: 'info', severity: 'info', message: t('memory.captureBarrier') }); }

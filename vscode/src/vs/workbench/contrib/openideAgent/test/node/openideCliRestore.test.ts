@@ -51,6 +51,9 @@ suite('OpenIDE CLI snapshot restore (real Git and filesystem)', () => {
 		blockedLease = false;
 		beforeWrite = beforeRename = undefined;
 		await git('init', '-q');
+		// Pin fixture bytes instead of inheriting the runner's Git line-ending policy.
+		await git('config', 'core.autocrlf', 'false');
+		await git('config', 'core.eol', 'native');
 		await git('config', 'user.name', 'Restore Fixture');
 		await git('config', 'user.email', 'restore@example.invalid');
 		await write('file.txt', 'committed\n');
@@ -91,7 +94,7 @@ suite('OpenIDE CLI snapshot restore (real Git and filesystem)', () => {
 		session = { id: 'fixture', cliId: 'claude', cwd, title: 'Fixture' };
 	});
 
-	teardown(async () => { await rm(cwd, { recursive: true, force: true }); });
+	teardown(async () => { await rm(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
 
 	async function begin(hooked = true, prepare = true) {
 		if (prepare) { await service.prepareSession(session); }
@@ -127,6 +130,13 @@ suite('OpenIDE CLI snapshot restore (real Git and filesystem)', () => {
 		await write('file.txt', 'later user work\n');
 		assert.strictEqual((await service.rollback(session.id, 'file.txt', true)).status, 'conflict');
 		assert.strictEqual(await read('file.txt'), 'later user work\n');
+	});
+
+	test('does not restore Git-normalized bytes when the original working-tree bytes are unknown', async () => {
+		await git('config', 'core.autocrlf', 'true');
+		await begin(); await write('file.txt', 'CLI\n'); await finish();
+		assert.strictEqual((await service.rollback(session.id, 'file.txt', true)).status, 'unavailable');
+		assert.strictEqual(await read('file.txt'), 'CLI\n');
 	});
 
 	test('captures existing untracked content instead of treating it as a creation', async () => {

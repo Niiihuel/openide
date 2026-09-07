@@ -58,17 +58,24 @@ const server = http.createServer(async (request, response) => {
 		const clean = prompt?.includes('CLEAN_RUNTIME_FIXTURE');
 		const pty = prompt?.includes('PTY_RUNTIME_FIXTURE');
 		if (!dirty && !clean && !pty) { reply(response, undefined, 'Fixture session'); return; }
-		const run = pty ? 'pty' : dirty ? 'dirty' : 'clean';
+		const memory = input.messages.some(message => message.role === 'system' && typeof message.content === 'string' && message.content.startsWith('You maintain project memory.'));
+		const nativeRun = pty ? 'pty' : dirty ? 'dirty' : 'clean';
+		const run = memory ? `${nativeRun}:memory` : nativeRun;
 		const marker = pty ? 'PTY_RUNTIME_FIXTURE' : dirty ? 'DIRTY_RUNTIME_FIXTURE' : 'CLEAN_RUNTIME_FIXTURE';
 		requests.push({ run, input });
 		const records = journalRecords();
 		const durableAttempts = records.filter(record => {
 			if (record.event.kind !== 'model/request' || record.event.payload.phase !== 'attempt') { return false; }
 			const user = record.event.payload.request.messages.findLast(message => message.role === 'user');
-			return user?.content.includes(marker);
+			return user?.content.includes(marker) && String(record.event.payload.request.system).startsWith('You maintain project memory.') === memory;
 		});
 		assert.equal(durableAttempts.length, requests.filter(request => request.run === run).length, 'Each journal request must be on disk before its HTTP dispatch');
 		const tools = input.tools?.map(tool => tool.function.name) ?? [];
+		if (memory) {
+			assert.equal(tools.length, 0, 'Memory extraction must not execute workspace tools');
+			reply(response, undefined, JSON.stringify({ notes: [], reason: 'Disposable fixture work contains no durable project knowledge.' }));
+			return;
+		}
 		if (pty) {
 			assert.ok(tools.includes('run_command'));
 			const result = input.messages.findLast(message => message.role === 'tool' && message.tool_call_id === 'pty-shell');
@@ -200,6 +207,13 @@ try {
 			assert.ok(records.some(record => record.event.kind === 'tool/result' && record.event.payload.callId === callId));
 		}
 		assert.ok(records.some(record => record.event.kind === 'run/end' && record.event.payload.messages.some(message => message.content === 'CLEAN_RUNTIME_CONFIRMED')));
+	});
+	await check('background memory extraction checkpoints its own model request before dispatch', async () => {
+		await until(() => requests.some(request => request.run === 'clean:memory') && journalRecords().some(record => record.event.kind === 'memory/checkpoint' && record.event.payload.status === 'no_durable_change'), 'durable background memory capture');
+		const records = journalRecords();
+		const captureRun = records.find(record => record.event.kind === 'run/start' && record.event.payload.purpose === 'memory-capture')?.event.runId;
+		assert.ok(captureRun);
+		assert.ok(records.some(record => record.event.runId === captureRun && record.event.kind === 'model/request' && record.event.payload.phase === 'attempt'));
 	});
 	await check('dirty editor content is read and a subsequent model write is refused', async () => {
 		await page.keyboard.press('Control+KeyP');
