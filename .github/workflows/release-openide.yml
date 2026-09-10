@@ -67,7 +67,7 @@ jobs:
       # `fakeroot is not recognized`. It describes the matrix row, so it belongs to the whole job.
       OS_NAME: ${{ matrix.platform == 'win32' && 'windows' || matrix.platform == 'darwin' && 'osx' || 'linux' }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         # The checkout token is written into `.git/config` and this job uploads artifacts: without
         # this a credential can travel inside one. Nothing here pushes, so it is not needed.
         with: { persist-credentials: false }
@@ -316,7 +316,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { persist-credentials: false }
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with: { node-version-file: .nvmrc, package-manager-cache: false }
