@@ -18,7 +18,7 @@ jobs:
       - name: Validate tag input
         run: '[[ "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
       # Check out the release's scripts, trusted key and metadata without storing credentials.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { ref: '${{ inputs.tag }}', persist-credentials: false }
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with: { node-version-file: .nvmrc, package-manager-cache: false }
