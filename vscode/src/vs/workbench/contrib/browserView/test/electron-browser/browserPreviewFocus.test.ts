@@ -4,7 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { $ } from '../../../../../base/browser/dom.js';
+import { $, getActiveWindow } from '../../../../../base/browser/dom.js';
+import { DeferredPromise } from '../../../../../base/common/async.js';
 import { Event } from '../../../../../base/common/event.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { toDisposable } from '../../../../../base/common/lifecycle.js';
@@ -21,6 +22,37 @@ import { BrowserViewWorkbenchService } from '../../electron-browser/browserViewW
 
 suite('Browser preview focus', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('companion preview uses its scoped editor and rejects a closed presentation', async () => {
+		const instantiation = workbenchInstantiationService(undefined, store);
+		instantiation.stub(INativeWorkbenchEnvironmentService, { userHome: URI.file('/test-home') });
+		instantiation.stub(IWorkspaceTrustManagementService, 'getTrustedUris', () => []);
+		instantiation.stub(IWorkspaceTrustEnablementService, { isWorkspaceTrustEnabled: () => true });
+		let primaryOpens = 0;
+		let companionOpens = 0;
+		instantiation.stub(IEditorService, new class extends mock<IEditorService>() {
+			override async openEditor() { primaryOpens++; return undefined; }
+		});
+		const target = new class extends mock<IEditorService>() {
+			override async openEditor() { companionOpens++; return undefined; }
+		};
+		const channel: IChannel = { listen: () => Event.None, call: async <T>(command: string) => (command === 'getBrowserViews' ? [] : undefined) as T };
+		instantiation.stub(IMainProcessService, new class extends mock<IMainProcessService>() { override getChannel(): IChannel { return channel; } });
+		const service = store.add(instantiation.createInstance(BrowserViewWorkbenchService));
+		const input = store.add(service.getOrCreatePreview('http://localhost:3000'));
+		const targetWindowId = getActiveWindow().vscodeWindowId + 100;
+		const registration = store.add(service.registerPreviewEditorTarget(targetWindowId, async () => target));
+		assert.strictEqual(await service.openPreview(undefined, undefined, { targetWindowId }), input);
+		registration.dispose();
+		await assert.rejects(service.openPreview(undefined, undefined, { targetWindowId }), /preview window has closed/);
+		const pending = new DeferredPromise<IEditorService>();
+		const closing = store.add(service.registerPreviewEditorTarget(targetWindowId, () => pending.p));
+		const lateOpen = service.openPreview(undefined, undefined, { targetWindowId });
+		closing.dispose();
+		await pending.complete(target);
+		await lateOpen;
+		assert.deepStrictEqual({ primaryOpens, companionOpens }, { primaryOpens: 0, companionOpens: 1 });
+	});
 
 	for (const preserveFocus of [true, false]) {
 		test(preserveFocus ? 'automation keeps the draft selection while navigating and following' : 'manual preview opening still focuses the editor', async () => {

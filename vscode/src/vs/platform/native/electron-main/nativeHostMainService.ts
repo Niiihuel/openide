@@ -892,6 +892,11 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 
 	//#region Screenshots
 
+	async exportCanvasDocument(_windowId: number | undefined, html: string, format: 'pdf' | 'pptx', title: string): Promise<VSBuffer> {
+		const { exportCanvasDocument } = await import('./openideCanvasExport.js');
+		return exportCanvasDocument(html, format, title);
+	}
+
 	async getScreenshot(windowId: number | undefined, rect?: IRectangle, options?: INativeHostOptions): Promise<VSBuffer | undefined> {
 		const window = this.windowById(options?.targetWindowId, windowId);
 		const captured = await window?.win?.webContents.capturePage(rect);
@@ -1115,7 +1120,8 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 	}
 
 	async closeWindow(windowId: number | undefined, options?: INativeHostOptions): Promise<void> {
-		const window = this.windowById(options?.targetWindowId, windowId);
+		// A delayed auxiliary close must not close the calling IDE after its target has gone.
+		const window = this.windowById(options?.targetWindowId, options?.targetWindowId === undefined ? windowId : undefined);
 		return window?.win?.close();
 	}
 

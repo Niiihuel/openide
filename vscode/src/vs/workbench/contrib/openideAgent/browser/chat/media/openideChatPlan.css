@@ -94,7 +94,7 @@
 	margin: 6px 0 0;
 	padding: 10px 12px;
 	border: 1px solid var(--oi-border-soft);
-	border-radius: var(--oi-radius-lg);
+	border-radius: var(--oi-radius-group);
 	background: var(--oi-tint-2);
 }
 
@@ -161,18 +161,18 @@
 .openide-chat-plan-wrap .openide-chat-plan-card .openide-chat-plan-ghost {
 	flex: 0 1 auto;
 	min-width: 0;
-	height: 24px;
+	height: 28px;
 	padding: 0 8px;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	border: none;
-	border-radius: var(--oi-radius-md);
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	font-family: inherit;
 	font-size: 12.5px;
-	line-height: 24px;
+	line-height: 28px;
 	cursor: pointer;
 }
 
@@ -197,7 +197,7 @@
 	padding: 0 8px;
 	white-space: nowrap;
 	border: 1px solid var(--vscode-button-border, transparent);
-	border-radius: var(--oi-radius-md);
+	border-radius: var(--oi-radius-control);
 	background: var(--vscode-button-background);
 	color: var(--vscode-button-foreground);
 	font-family: inherit;
@@ -233,9 +233,7 @@
 	gap: 6px;
 }
 
-/* `.openide-chat-plan-spinner` and its keyframes live in `browser/media/openideChat.css`: the plan
-   editor's toolbar shows the same running control and does not load this sheet, and two copies of
-   a spinner are two things to keep in step. */
+/* The Build ring is the shared OPENIDE_SPINNER_CSS used by native loading indicators too. */
 
 /* Rejected: the row keeps its place and its alignment, with a status word where the buttons were. */
 .openide-chat-plan-wrap .openide-chat-plan-card .openide-chat-plan-status {
@@ -254,7 +252,7 @@
 	min-width: 0;
 	margin: 0 -5px;
 	padding: 3px 5px;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	font-size: 12.5px;
 	color: var(--vscode-descriptionForeground);
 	cursor: pointer;

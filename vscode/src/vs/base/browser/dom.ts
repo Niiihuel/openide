@@ -27,6 +27,8 @@ export interface IRegisteredCodeWindow {
 
 //# region Multi-Window Support Utilities
 
+let lastInteractedDocument: Document | undefined;
+
 export const {
 	registerWindow,
 	getWindow,
@@ -45,6 +47,14 @@ export const {
 	ensureCodeWindow(mainWindow, 1);
 	const mainWindowRegistration = { window: mainWindow, disposables: new DisposableStore() };
 	windows.set(mainWindow.vscodeWindowId, mainWindowRegistration);
+	function trackInput(window: CodeWindow, disposables: DisposableStore): void {
+		const active = () => { lastInteractedDocument = window.document; };
+		for (const type of ['pointerdown', 'keydown', 'focusin']) {
+			window.addEventListener(type, active, true);
+			disposables.add(toDisposable(() => window.removeEventListener(type, active, true)));
+		}
+	}
+	trackInput(mainWindow, mainWindowRegistration.disposables);
 
 	const onDidRegisterWindow = new event.Emitter<IRegisteredCodeWindow>();
 	const onDidUnregisterWindow = new event.Emitter<CodeWindow>();
@@ -74,9 +84,11 @@ export const {
 				disposables: disposables.add(new DisposableStore())
 			};
 			windows.set(window.vscodeWindowId, registeredWindow);
+			trackInput(window, disposables);
 
 			disposables.add(toDisposable(() => {
 				windows.delete(window.vscodeWindowId);
+				if (lastInteractedDocument === window.document) { lastInteractedDocument = undefined; }
 				onDidUnregisterWindow.fire(window);
 			}));
 
@@ -1058,7 +1070,10 @@ export function getActiveDocument(): Document {
 	}
 
 	const documents = Array.from(getWindows()).map(({ window }) => window.document);
-	const focusedDoc = documents.find(doc => doc.hasFocus());
+	// Chromium can report both an opener and its auxiliary document as focused.
+	// Actual input disambiguates them, so commands and dialogs stay in their source window.
+	const focusedDocuments = documents.filter(doc => doc.hasFocus());
+	const focusedDoc = focusedDocuments.length > 1 && lastInteractedDocument && focusedDocuments.includes(lastInteractedDocument) ? lastInteractedDocument : focusedDocuments[0];
 	if (focusedDoc) {
 		return focusedDoc;
 	}

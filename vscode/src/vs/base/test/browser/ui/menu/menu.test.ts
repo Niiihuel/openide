@@ -6,8 +6,9 @@
 import assert from 'assert';
 import sinon from 'sinon';
 import { $, append, EventType, getWindow } from '../../../../browser/dom.js';
-import { getMenuWidgetCSS, Menu, unthemedMenuStyles } from '../../../../browser/ui/menu/menu.js';
-import { Action, SubmenuAction } from '../../../../common/actions.js';
+import { ActionViewItem } from '../../../../browser/ui/actionbar/actionViewItems.js';
+import { BaseMenuActionViewItem, getMenuWidgetCSS, Menu, unthemedMenuStyles } from '../../../../browser/ui/menu/menu.js';
+import { Action, Separator, SubmenuAction } from '../../../../common/actions.js';
 import { toDisposable } from '../../../../common/lifecycle.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../common/utils.js';
 
@@ -16,6 +17,59 @@ suite('Menu', () => {
 
 	teardown(() => {
 		sinon.restore();
+	});
+
+	test('custom menu item keeps its icon separate from text and refreshes icon classes', () => {
+		const host = append(document.body, $('div'));
+		disposables.add(toDisposable(() => host.remove()));
+		const action = disposables.add(new Action('review', 'Review changes', 'codicon codicon-diff'));
+		const fallback = disposables.add(new Action('plain', 'Plain item'));
+		let calls = 0;
+		disposables.add(new Menu(host, [action, fallback], {
+			actionViewItemProvider: (item, options) => {
+				calls++;
+				return item === action ? new BaseMenuActionViewItem(undefined, item, options, unthemedMenuStyles) : undefined;
+			}
+		}, unthemedMenuStyles));
+		const label = host.querySelector<HTMLElement>('.action-label.codicon')!;
+		assert.strictEqual(calls, 2);
+		assert.strictEqual(label.textContent, 'Review changes');
+		assert.strictEqual(label.style.getPropertyValue('--menu-item-icon-content'), 'var(--vscode-icon-diff-content)');
+		action.class = 'codicon codicon-files';
+		assert.strictEqual(label.classList.contains('codicon-diff'), false);
+		assert.strictEqual(label.classList.contains('codicon-files'), true);
+		assert.strictEqual(host.querySelectorAll('.action-menu-item').length, 2, 'undefined provider uses the default item');
+	});
+
+	test('toolbar overflow uses menu rows and preserves submenus and separators', async () => {
+		const host = append(document.body, $('div'));
+		disposables.add(toDisposable(() => host.remove()));
+		let runs = 0;
+		const action = disposables.add(new Action('browser.action', 'Browser Action', 'codicon codicon-globe', true, async () => { runs++; }));
+		const child = disposables.add(new Action('browser.child', 'Child Action'));
+		const rejectedItems: sinon.SinonSpy[] = [];
+		const menu = disposables.add(new Menu(host, [action, new Separator(), new SubmenuAction('submenu', 'Browser Tools', [child])], {
+			actionViewItemProvider: item => {
+				const toolbarItem = new ActionViewItem(undefined, item, { icon: true, label: false });
+				rejectedItems.push(sinon.spy(toolbarItem, 'dispose'));
+				return toolbarItem;
+			}
+		}, unthemedMenuStyles));
+		const items = Array.from(host.querySelectorAll<HTMLElement>('.action-menu-item:not(.separator)'));
+		assert.deepStrictEqual({
+			labels: items.map(item => item.textContent?.trim()),
+			positions: items.map(item => item.getAttribute('aria-posinset')),
+			sizes: items.map(item => item.getAttribute('aria-setsize')),
+			submenu: items[1].getAttribute('aria-haspopup'),
+			separators: host.querySelectorAll('.action-label.separator').length,
+			disposed: rejectedItems.map(spy => spy.callCount),
+		}, {
+			labels: ['Browser Action', 'Browser Tools'], positions: ['1', '2'], sizes: ['2', '2'],
+			submenu: 'true', separators: 1, disposed: [1],
+		});
+		menu.trigger(0);
+		await Promise.resolve();
+		assert.strictEqual(runs, 1);
 	});
 
 	// A menu positioned under a resting pointer can receive synthetic pointer events,

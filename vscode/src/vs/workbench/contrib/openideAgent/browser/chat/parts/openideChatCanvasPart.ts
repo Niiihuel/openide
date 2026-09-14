@@ -46,7 +46,7 @@ export class OpenideChatCanvasPart extends OpenideChatContentPart {
 		super();
 
 		this._content = content;
-		this.domNode = $(`div.${OPENIDE_CHAT_CANVAS_CLASS}`);
+		this.domNode = $(`div.${OPENIDE_CHAT_CANVAS_CLASS}.oi-card`);
 
 		const head = append(this.domNode, $('div.openide-chat-canvas-head'));
 		append(head, $('span.codicon.codicon-layout'));
@@ -57,7 +57,7 @@ export class OpenideChatCanvasPart extends OpenideChatContentPart {
 		// The line already prints the path; the hover is only there for when it is elided.
 		this._register(setupChatTooltip(hoverService, this._path, () => this._content.resource ?? '', { aria: false }));
 
-		const open = append(this.domNode, $('button.openide-chat-canvas-open')) as HTMLButtonElement;
+		const open = append(this.domNode, $('button.openide-chat-canvas-open.oi-btn')) as HTMLButtonElement;
 		open.type = 'button';
 		open.textContent = 'Abrir';
 		this._register(addDisposableListener(open, 'click', () => this._open()));

@@ -70,7 +70,9 @@ export class QuickInputController extends Disposable {
 	private ui: QuickInputUI | undefined;
 	private dimension?: dom.IDimension;
 	private titleBarOffset?: number;
+	private modalBackdrop: HTMLElement | undefined;
 	private overlayLayoutCorrection: QuickInputOverlayLayoutCorrection | undefined;
+	private readonly anchorResizeListener = this._register(new MutableDisposable());
 	private enabled = true;
 	private readonly onDidAcceptEmitter = this._register(new Emitter<void>());
 	private readonly onDidCustomEmitter = this._register(new Emitter<void>());
@@ -472,6 +474,7 @@ export class QuickInputController extends Disposable {
 		if (this.ui) {
 			this._container = container;
 			dom.append(this._container, this.ui.container);
+			if (this.modalBackdrop?.isConnected) { this.ui.container.before(this.modalBackdrop); }
 			this.dndController?.reparentUI(this._container);
 		}
 	}
@@ -570,6 +573,7 @@ export class QuickInputController extends Disposable {
 			input.contextKey = options.contextKey;
 			input.anchor = options.anchor;
 			input.anchorPosition = options.anchorPosition;
+			input.modal = options.modal;
 			input.busy = true;
 			Promise.all([picks, options.activeItem])
 				.then(([items, _activeItem]) => {
@@ -705,8 +709,14 @@ export class QuickInputController extends Disposable {
 		oldController?.didHide();
 
 		// Anchored controllers always render in the window that owns their anchor element.
+		this.anchorResizeListener.clear();
 		if (dom.isHTMLElement(controller.anchor)) {
 			const anchorWindow = dom.getWindow(controller.anchor);
+			// An auxiliary host can resize without becoming the active layout container.
+			this.anchorResizeListener.value = dom.addDisposableListener(anchorWindow, 'resize', () => {
+				this.overlayLayoutCorrection = undefined;
+				this.updateLayout();
+			});
 			if (dom.getWindow(this._container) !== anchorWindow) {
 				this.reparentUI(this.layoutService.getContainer(anchorWindow));
 			}
@@ -751,6 +761,13 @@ export class QuickInputController extends Disposable {
 
 		this.overlayLayoutCorrection = undefined;
 		ui.container.classList.toggle(QUICK_INPUT_OVERLAY_CLASS, controller.anchorPosition === 'overlay');
+		this.modalBackdrop?.remove();
+		// Anchored inputs (including the browser address bar) remain part of their surface.
+		if (controller.modal ?? !controller.anchor) {
+			this.modalBackdrop ??= $('.quick-input-backdrop');
+			this.modalBackdrop.setAttribute('aria-hidden', 'true');
+			ui.container.before(this.modalBackdrop);
+		}
 		ui.container.style.display = '';
 		this.updateLayout();
 		this.dndController?.setEnabled(!controller.anchor);
@@ -822,11 +839,13 @@ export class QuickInputController extends Disposable {
 	}
 
 	hide(reason?: QuickInputHideReason) {
+		this.modalBackdrop?.remove();
 		const controller = this.controller;
 		if (!controller) {
 			return;
 		}
 		controller.willHide(reason);
+		this.anchorResizeListener.clear();
 
 		const container = this.ui?.container;
 		const focusChanged = container && !dom.isAncestorOfActiveElement(container);
@@ -871,6 +890,7 @@ export class QuickInputController extends Disposable {
 	}
 
 	override dispose(): void {
+		this.modalBackdrop?.remove();
 		this.completeCloseAnimation();
 		super.dispose();
 	}
@@ -1006,7 +1026,9 @@ export class QuickInputController extends Disposable {
 				style.height = '';
 			}
 
-			if (overlayAnchor) {
+			// A custom widget has no filter input to align. Measuring its hidden filter
+			// returns a zero rect and shifts/doubles the whole overlay.
+			if (overlayAnchor && this.controller?.type !== QuickInputType.QuickWidget) {
 				this.alignOverlayInput(overlayAnchor);
 			}
 			this.ui.inputBox.layout();

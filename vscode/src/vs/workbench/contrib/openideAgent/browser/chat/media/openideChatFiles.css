@@ -29,7 +29,7 @@
 	min-height: 20px;
 	padding: 1px 2px;
 	margin: 0 -1px;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	cursor: pointer;
 	font-size: var(--oi-file-row-size);
 	color: var(--vscode-foreground);
@@ -93,7 +93,7 @@
 	font-size: 10px;
 	line-height: 1;
 	padding: 2px 6px;
-	border-radius: var(--oi-radius-lg);
+	border-radius: var(--oi-radius-group);
 	background: var(--oi-border-soft);
 	color: var(--vscode-descriptionForeground);
 }
@@ -103,6 +103,13 @@
    the reason +12 and −8 line up in a column of rows. */
 .openide-chat-diff-added,
 .openide-chat-diff-removed {
+
+	flex: 0 0 auto;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: var(--oi-file-row-size);
+	font-variant-numeric: tabular-nums;
+}
+
 /* The git status letter, where a row describes a file by its state rather than by ±N: Source
    Control's vocabulary (A/M/D/R/U) in Source Control's colours, so the Agent Changes rows read
    like the neighbouring view's. Lives in the primitive, not in the view, so a card that ever
@@ -120,11 +127,6 @@
 .openide-chat-file-status.modified { color: var(--vscode-gitDecoration-modifiedResourceForeground); }
 .openide-chat-file-status.deleted { color: var(--vscode-gitDecoration-deletedResourceForeground); }
 .openide-chat-file-status.renamed { color: var(--vscode-gitDecoration-renamedResourceForeground); }
-	flex: 0 0 auto;
-	font-family: var(--vscode-editor-font-family, monospace);
-	font-size: var(--oi-file-row-size);
-	font-variant-numeric: tabular-nums;
-}
 
 .openide-chat-diff-added {
 	color: var(--openide-green);
@@ -157,7 +159,7 @@
 	align-items: center;
 	justify-content: center;
 	border: none;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	padding: 0;
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
@@ -168,18 +170,8 @@
 	font-size: 12px;
 }
 
-.openide-chat-file-action:hover {
-	background: var(--oi-border-soft);
-	color: var(--vscode-foreground);
-}
-
-.openide-chat-file-action-reject:hover {
-	color: var(--openide-red);
-}
-
-.openide-chat-file-action-accept:hover {
-	color: var(--openide-green);
-}
+.openide-chat-file-action-reject { --oi-action-hover-foreground: var(--openide-red); }
+.openide-chat-file-action-accept { --oi-action-hover-foreground: var(--openide-green); }
 
 /* ---- The edit card in the transcript ---- */
 
@@ -268,89 +260,26 @@
 
 /* ---- The changed-files tray ---- */
 
-/* Cursor's tray over the composer: a 28px head ("⌄ 2 archivos" left, Undo/Keep/Revisar right) and
-   one 24px row per file. Compact, no interior hairlines — what separates head from rows is the
-   type, not a border. */
-/* Tucked UNDER the composer card and narrower than it, like the webview's #filesStack. The width
-   itself is NOT set here: it belongs to `.openide-chat-tray-host` (openideChatComposer.css), which
-   owns the 740-against-760 relationship for every tray that ever stacks under the card. This one
-   fills its host — it used to carry a hardcoded `margin: 0 16px` instead, which is what left it
-   both narrower than the card and off its centre once the host shrink-wrapped.
-   Only `-10px` survives, so the card overlaps the tray's lower edge and the two read as one
-   stacked unit; the card already wins the paint order (composer z-index 2, this 0). Inside a
-   `.openide-chat-block` the host strips this border, shadow and background and clamps the bottom
-   padding to 4px (openideChatComposer.css) — the tray is then a band of the block, not a card. */
-.openide-chat-files-tray {
-	position: relative;
-	z-index: 0;
-	display: flex;
-	flex-direction: column;
-	gap: 0;
-	width: 100%;
-	box-sizing: border-box;
-	margin: 0 0 -10px;
-	padding: 2px 8px 14px;
-	border: 1px solid var(--oi-border);
-	border-radius: var(--oi-radius-md);
-	background: var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
-	box-shadow: var(--oi-shadow-sm);
-}
-
-.openide-chat-files-tray.hidden,
-.openide-chat-files-tray .hidden {
-	display: none !important;
-}
-
-.openide-chat-files-head {
-	display: flex;
-	align-items: center;
-	gap: 4px;
-	min-height: 28px;
-	padding: 0 2px;
-}
-
-/* The tray's own toggle is `foreground`/500, not the dimmer `descriptionForeground` of the generic
-   dock toggle: it is a heading, not a hint. */
-/* `nowrap` + `flex: 0 0 auto`: without it the count broke across two lines ("3" over "archivos") as
-   soon as the row got tight, which doubled the head's height and shoved the actions off centre.
-   The label is a handful of glyphs — it is never the right thing to sacrifice for space. */
-.openide-chat-files-toggle {
-	display: inline-flex;
-	align-items: center;
-	gap: 5px;
-	flex: 0 0 auto;
-	min-width: 0;
-	white-space: nowrap;
-	padding: 0;
-	border: none;
-	background: transparent;
-	color: var(--vscode-foreground);
-	font-family: inherit;
-	font-size: 12.5px;
-	font-weight: 500;
-	cursor: pointer;
-}
-
-.openide-chat-files-toggle .codicon {
-	flex: 0 0 auto;
-	font-size: 13px;
-	color: var(--vscode-descriptionForeground);
-}
-
+/* Shell geometry and icons are shared by openideChatTray.css. */
 .openide-chat-files-count {
 	font-variant-numeric: tabular-nums;
 }
 
-.openide-chat-files-spacer {
-	flex: 1;
-	min-width: 4px;
+/* Size the summary from its label so the actions only wrap when they cannot fit. */
+.openide-chat-native .openide-chat-files-toggle {
+	flex: 1 1 auto;
+	min-width: max-content;
 }
 
 .openide-chat-files-actions {
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
-	flex: 0 0 auto;
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: 100%;
+	margin-left: auto;
+	justify-content: flex-end;
 }
 
 /* Ghost: text only at rest, a tint on hover. Same 22px box as Revisar beside it, because two
@@ -362,7 +291,7 @@
 	height: 22px;
 	padding: 0 8px;
 	border: none;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	font: inherit;
@@ -402,7 +331,7 @@
 	height: 22px;
 	padding: 0 4px 0 8px;
 	border: 1px solid transparent;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--oi-text, var(--vscode-foreground));
 	font-family: inherit;
@@ -446,7 +375,7 @@
 	height: 22px;
 	padding: 0 8px;
 	border: none;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: var(--oi-tint-2);
 	color: var(--vscode-foreground);
 	font-family: inherit;
@@ -480,10 +409,6 @@
 .openide-chat-files-tray .openide-chat-diff-added,
 .openide-chat-files-tray .openide-chat-diff-removed {
 	font-size: 11.5px;
-}
-
-.openide-chat-files-row:hover {
-	background: var(--oi-tint-1);
 }
 
 /* The keybinding hint is the first thing to go in a narrow dock; the button itself must stay.

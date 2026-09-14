@@ -25,7 +25,7 @@ import { NotebookEditorInput } from '../../contrib/notebook/common/notebookEdito
 import { TerminalEditorInput } from '../../contrib/terminal/browser/terminalEditorInput.js';
 import { WebviewInput } from '../../contrib/webviewPanel/browser/webviewEditorInput.js';
 import { columnToEditorGroup, EditorGroupColumn, editorGroupToColumn } from '../../services/editor/common/editorGroupColumn.js';
-import { GroupDirection, IEditorGroup, IEditorGroupsService, preferredSideBySideGroupDirection } from '../../services/editor/common/editorGroupsService.js';
+import { GroupDirection, GroupsOrder, IEditorGroup, IEditorGroupsService, preferredSideBySideGroupDirection } from '../../services/editor/common/editorGroupsService.js';
 import { IEditorsChangeEvent, IEditorService, SIDE_GROUP } from '../../services/editor/common/editorService.js';
 import { extHostNamedCustomer, IExtHostContext } from '../../services/extensions/common/extHostCustomers.js';
 
@@ -510,18 +510,26 @@ export class MainThreadEditorTabs implements MainThreadEditorTabsShape {
 	 * Builds the model from scratch based on the current state of the editor service.
 	 */
 	private _createTabsModel(): void {
-		if (this._editorGroupsService.groups.length === 0) {
+		const groups = this._editorGroupsService.groups;
+		if (groups.length === 0) {
 			return; // skip this invalid state, it may happen when the entire editor area is transitioning to other state ("editor working sets")
 		}
+
+		// A modal editor can own focus while its group is outside the public tab model.
+		// Keep the most recently active regular group selected in that snapshot.
+		const focusedGroup = this._editorGroupsService.activeGroup;
+		const activeGroup = groups.find(group => group.id === focusedGroup.id)
+			?? this._editorGroupsService.getGroups(GroupsOrder.MOST_RECENTLY_ACTIVE).find(group => groups.includes(group))
+			?? groups[0];
 
 		this._tabGroupModel = [];
 		this._groupLookup.clear();
 		this._tabInfoLookup.clear();
 		let tabs: IEditorTabDto[] = [];
-		for (const group of this._editorGroupsService.groups) {
+		for (const group of groups) {
 			const currentTabGroupModel: IEditorTabGroupDto = {
 				groupId: group.id,
-				isActive: group.id === this._editorGroupsService.activeGroup.id,
+				isActive: group.id === activeGroup.id,
 				viewColumn: editorGroupToColumn(this._editorGroupsService, group),
 				tabs: []
 			};

@@ -106,4 +106,16 @@ else
   fi
 fi
 
+# Ship the independent codebase engine beside app resources, using this job's Rust target.
+if [[ -n "${VSCODE_CLI_TARGET}" ]]; then
+  if [[ "${OS_NAME}" == "osx" ]]; then
+    CODEBASE_NATIVE_OUTPUT="../../VSCode-darwin-${VSCODE_ARCH}/${NAME_SHORT}.app/Contents/Resources/app/native/bin"
+  elif [[ "${OS_NAME}" == "windows" ]]; then
+    CODEBASE_NATIVE_OUTPUT="../../VSCode-win32-${VSCODE_ARCH}/resources/app/native/bin"
+  else
+    CODEBASE_NATIVE_OUTPUT="../../VSCode-linux-${VSCODE_ARCH}/resources/app/native/bin"
+  fi
+  node ../../dev/build-codebase-native.mjs --target="${VSCODE_CLI_TARGET}" --output="${CODEBASE_NATIVE_OUTPUT}"
+fi
+
 cd ..

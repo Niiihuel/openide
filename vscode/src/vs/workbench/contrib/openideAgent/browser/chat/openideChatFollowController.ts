@@ -11,7 +11,7 @@ import { IOpenideAgentService } from '../openideAgentService.js';
 /** Follows the latest activity of the visible conversation while Zen is enabled. */
 export class OpenideChatFollowController extends Disposable {
 	private visibleId: string | undefined;
-	private pending: IAgentLocation | undefined;
+	private pending: { location: IAgentLocation; targetWindowId?: number } | undefined;
 	private active: CancellationTokenSource | undefined;
 	private draining = false;
 
@@ -26,9 +26,9 @@ export class OpenideChatFollowController extends Disposable {
 		this.visibleId = id;
 	}
 
-	follow(conversationId: string, location: IAgentLocation): void {
+	follow(conversationId: string, location: IAgentLocation, targetWindowId?: number): void {
 		if (this._store.isDisposed || !this.agent.isPlanFollowEnabled() || conversationId !== this.visibleId) { return; }
-		this.pending = location;
+		this.pending = { location, targetWindowId };
 		// New activity interrupts the old highlight, and replaces any queued location.
 		this.active?.cancel();
 		void this.drain();
@@ -39,11 +39,11 @@ export class OpenideChatFollowController extends Disposable {
 		this.draining = true;
 		try {
 			while (this.pending && !this._store.isDisposed && this.agent.isPlanFollowEnabled()) {
-				const location = this.pending;
+				const { location, targetWindowId } = this.pending;
 				this.pending = undefined;
 				const cancellation = this.active = new CancellationTokenSource();
 				try {
-					await this.agent.followAgentLocation(location, cancellation.token);
+					await this.agent.followAgentLocation(location, cancellation.token, targetWindowId);
 				} catch {
 					// A deleted file or closed editor must not prevent following the next activity.
 				} finally {

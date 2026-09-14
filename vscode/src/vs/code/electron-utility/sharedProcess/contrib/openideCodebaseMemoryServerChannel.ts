@@ -16,6 +16,7 @@ import { IServerChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { CodebaseMemoryChannel } from './openideCodebaseMemoryChannel.js';
 import { IProviderExtraction } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProviders.js';
+import { validateCodebaseQueryRequest } from '../../../../platform/openideCodebase/common/openideCodebaseQueryEngine.js';
 import { ICodebaseMemoryIndexOptions } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProtocol.js';
 
 export class CodebaseMemoryServerChannel extends Disposable implements IServerChannel<string> {
@@ -48,6 +49,7 @@ export class CodebaseMemoryServerChannel extends Disposable implements IServerCh
 			case 'rebuildFull': return await this.service.rebuildFull(this.sessionKey(ctx, arg), token) as T;
 			case 'indexIncremental': return await this.service.indexIncremental(this.sessionKey(ctx, arg), Array.isArray(args[1]) ? args[1] : [], token) as T;
 			case 'getVersion': return await this.service.getVersion(this.sessionKey(ctx, arg)) as T;
+			case 'query': { const key = this.sessionKey(ctx, arg); validateCodebaseQueryRequest(args[1]); return await this.service.query(key, args[1], token) as T; }
 			case 'getSnapshot': return await this.service.getSnapshot(this.sessionKey(ctx, arg)) as T;
 			case 'getFileNodes': return await this.service.getFileNodes(this.sessionKey(ctx, arg), String(args[1] ?? '')) as T;
 			case 'clear': await this.service.clear(this.sessionKey(ctx, arg)); return undefined as T;

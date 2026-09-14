@@ -189,3 +189,15 @@
 .monaco-workbench .part.sidebar .monaco-action-bar .action-item.disabled .action-label.extension-status-label:before, .monaco-workbench .part.auxiliarybar .monaco-action-bar .action-item.disabled .action-label.extension-status-label:before {
     padding-right: calc(var(--vscode-workbench-sidebar-font-size) * 0.307692)
 }
+/* Extension actions use the existing split-button implementation with shared secondary/primary
+ * variants. Scoped variables preserve its seam, disabled state and action dispatch. */
+.monaco-workbench.openide-visual .extensions-viewlet {
+	--vscode-extensionButton-background: var(--oi-control);
+	--vscode-extensionButton-foreground: var(--oi-text);
+	--vscode-extensionButton-hoverBackground: var(--oi-hover);
+	--vscode-extensionButton-border: var(--oi-border-overlay);
+	--vscode-extensionButton-separator: var(--oi-border-overlay);
+	--vscode-extensionButton-prominentBackground: var(--oi-primary);
+	--vscode-extensionButton-prominentForeground: var(--oi-primary-foreground);
+	--vscode-extensionButton-prominentHoverBackground: var(--oi-primary-hover);
+}

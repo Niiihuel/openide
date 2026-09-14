@@ -16,6 +16,88 @@ import { createFileChange } from '../../common/openideMessageChanges.js';
 suite('OpenIDE ChatSessions change sets', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
+	test('Changes retain exact ownership across switching, interleaved edits and restart', () => {
+		const storage = new TestStorageService();
+		try {
+			const sessions = new OpenideChatSessions(storage);
+			const a = sessions.createBackground('A', [{ role: 'user', content: 'A' }]);
+			const b = sessions.createBackground('B', [{ role: 'user', content: 'B' }]);
+			sessions.saveChangeSet(a, { messageId: 'a1', timestamp: 1, state: 'finalized', files: [createFileChange('file:///shared.ts', 'modify', 'initial', 'A')] });
+			sessions.saveChangeSet(b, { messageId: 'b1', timestamp: 2, state: 'finalized', files: [createFileChange('file:///shared.ts', 'modify', 'A', 'B')] });
+			sessions.saveChangeSet(a, { messageId: 'a2', timestamp: 3, state: 'finalized', files: [createFileChange('file:///shared.ts', 'modify', 'B', 'A again')] });
+			assert.deepStrictEqual(sessions.changesOf(a).map(f => [f.before, f.after]), [['initial', 'A'], ['B', 'A again']]);
+			assert.deepStrictEqual(sessions.changesOf(b).map(f => [f.before, f.after]), [['A', 'B']]);
+			const restored = new OpenideChatSessions(storage);
+			assert.deepStrictEqual(restored.changesOf(a), sessions.changesOf(a));
+			assert.deepStrictEqual(restored.changesOf(b), sessions.changesOf(b));
+			assert.deepStrictEqual(restored.changesOf('missing'), []);
+			const before = restored.changesOf(a);
+			restored.rename(a, 'Renamed');
+			assert.strictEqual(restored.changesOf(a), before, 'metadata never recomputes receipts');
+			restored.removeChangeSets(a, ['a2']);
+			assert.strictEqual(restored.changesOf(a).length, 1);
+		} finally { storage.dispose(); }
+	});
+
+	test('contiguous receipts combine without including unrelated paths or unavailable history', () => {
+		const storage = new TestStorageService();
+		try {
+			const sessions = new OpenideChatSessions(storage);
+			const id = sessions.create();
+			sessions.saveChangeSet(id, { messageId: '1', timestamp: 1, state: 'finalized', files: [createFileChange('file:///a.ts', 'create', undefined, 'one')] });
+			sessions.saveChangeSet(id, { messageId: '2', timestamp: 2, state: 'open', files: [createFileChange('file:///a.ts', 'modify', 'one', 'two')] });
+			assert.deepStrictEqual(sessions.changesOf(id).map(f => [f.before, f.after]), [['', 'two']]);
+			sessions.saveChangeSet(id, { messageId: '3', timestamp: 3, state: 'finalized', files: [createFileChange('file:///a.ts', 'delete', 'two', undefined)] });
+			assert.deepStrictEqual(sessions.changesOf(id), []);
+		} finally { storage.dispose(); }
+	});
+
+	test('message revisions ignore metadata and track in-place streaming saves', () => {
+		const storage = new TestStorageService();
+		const sessions = new OpenideChatSessions(storage);
+		const child = sessions.createBackground('Explore', [{ role: 'assistant', content: 'First' }]);
+		const unrelated = sessions.createBackground('Other', []);
+		assert.strictEqual(sessions.messageVersionOf(child), 0);
+		sessions.rename(child, 'Custom title');
+		sessions.save(unrelated, [{ role: 'user', content: 'Unrelated' }], false);
+		assert.strictEqual(sessions.messageVersionOf(child), 0);
+		const messages = sessions.messagesOf(child);
+		messages[0].content += ' chunk';
+		sessions.save(child, messages, false);
+		assert.strictEqual(sessions.messageVersionOf(child), 1);
+		sessions.save(child, messages, false);
+		assert.strictEqual(sessions.messageVersionOf(child), 2);
+		assert.strictEqual(sessions.messageVersionOf('missing'), undefined);
+		storage.dispose();
+	});
+
+	test('specialist identity, owning conversation and name survive transcript updates and reload', () => {
+		const storage = new TestStorageService();
+		const sessions = new OpenideChatSessions(storage);
+		const parent = sessions.create();
+		const messages = [{ role: 'user' as const, content: 'A very long detailed task prompt' }];
+		const child = sessions.createBackground('Explore', messages, 'run-1', parent);
+		sessions.save(child, [...messages, { role: 'assistant', content: 'Done' }], false);
+		const restored = new OpenideChatSessions(storage);
+		assert.strictEqual(restored.metaOf(child)?.subagentRunId, 'run-1');
+		assert.strictEqual(restored.metaOf(child)?.parentSessionId, parent);
+		assert.strictEqual(restored.metaOf(child)?.title, 'A very long detailed task prompt');
+		storage.dispose();
+	});
+
+	test('restored generic subagent names use the task while custom names survive', () => {
+		const storage = new TestStorageService();
+		const sessions = new OpenideChatSessions(storage);
+		const parent = sessions.create();
+		const child = sessions.createBackground('Explore', [], 'run-1', parent);
+		sessions.linkSubagentParent(child, parent, 'Check the Spanish landing. Report broken links.', 'Explore');
+		assert.strictEqual(sessions.metaOf(child)?.title, 'Check the Spanish landing.');
+		sessions.rename(child, 'My review');
+		sessions.linkSubagentParent(child, parent, 'Changed task', 'Explore');
+		assert.strictEqual(sessions.metaOf(child)?.title, 'My review');
+		storage.dispose();
+	});
+
 	test('persists messageId association across service restart', () => {
 		const storage = new TestStorageService();
 		const first = new OpenideChatSessions(storage);
@@ -115,6 +197,71 @@ suite('OpenIDE ChatSessions — VS Code session semantics', () => {
 		assert.strictEqual(sessions.listAll()[0].title, 'Mi investigación');
 		sessions.rename(id, '');
 		assert.strictEqual(sessions.listAll()[0].title, 'primer mensaje');
+		storage.dispose();
+	});
+
+	test('pins and custom titles survive reload without changing activity order', () => {
+		const { storage, sessions } = make();
+		const id = sessions.create();
+		sessions.save(id, [user('Original title')], false);
+		const before = sessions.metaOf(id)!.updatedAt;
+		sessions.rename(id, 'Pinned investigation');
+		sessions.setPinned(id, true);
+		const restored = new OpenideChatSessions(storage);
+		assert.strictEqual(restored.metaOf(id)?.pinned, true);
+		assert.strictEqual(restored.metaOf(id)?.title, 'Pinned investigation');
+		assert.strictEqual(restored.metaOf(id)?.updatedAt, before);
+		restored.save(id, [user('Different automatic title')], false);
+		assert.strictEqual(restored.metaOf(id)?.title, 'Pinned investigation');
+		restored.setPinned(id, false);
+		assert.strictEqual(new OpenideChatSessions(storage).metaOf(id)?.pinned, false);
+		storage.dispose();
+	});
+
+	test('a pinned empty conversation survives tab closure and history pruning', () => {
+		const { storage, sessions } = make();
+		const pinned = sessions.create();
+		sessions.setPinned(pinned, true);
+		sessions.closeTab(pinned);
+		assert.strictEqual(sessions.metaOf(pinned)?.empty, false);
+		for (let index = 0; index < 205; index++) {
+			sessions.createBackground(`Recent ${index}`, [user(`Task ${index}`)]);
+		}
+		assert.strictEqual(sessions.listAll().length, 200);
+		assert.strictEqual(new OpenideChatSessions(storage).metaOf(pinned)?.pinned, true);
+		storage.dispose();
+	});
+
+	test('renaming a CLI preserves provider identity and clearing restores its agent label', () => {
+		const { storage, sessions } = make();
+		const id = sessions.createCli('codex', 'Codex', '/work/project', 'provider-session');
+		sessions.rename(id, 'Investigate routing');
+		let restored = new OpenideChatSessions(storage);
+		assert.strictEqual(restored.metaOf(id)?.title, 'Investigate routing');
+		assert.strictEqual(restored.metaOf(id)?.providerSessionId, 'provider-session');
+		assert.strictEqual(restored.metaOf(id)?.cwd, '/work/project');
+		restored.rename(id, '');
+		restored = new OpenideChatSessions(storage);
+		assert.strictEqual(restored.metaOf(id)?.title, 'Codex');
+		storage.dispose();
+	});
+
+	test('background status transitions persist unread once and activation clears it', () => {
+		const { storage, sessions } = make();
+		const first = sessions.create();
+		sessions.save(first, [user('Background work')], false);
+		sessions.create();
+		assert.strictEqual(sessions.setStatus(first, 'in-progress'), true);
+		assert.ok(!sessions.metaOf(first)?.unread);
+		assert.strictEqual(sessions.setStatus(first, 'completed'), true);
+		assert.strictEqual(sessions.setStatus(first, 'completed'), false);
+		const restored = new OpenideChatSessions(storage);
+		assert.strictEqual(restored.metaOf(first)?.unread, true);
+		restored.activate(first);
+		assert.strictEqual(restored.metaOf(first)?.unread, false);
+		assert.strictEqual(restored.setStatus(first, 'failed'), true);
+		assert.strictEqual(restored.metaOf(first)?.hasError, true);
+		assert.strictEqual(restored.metaOf(first)?.unread, false);
 		storage.dispose();
 	});
 

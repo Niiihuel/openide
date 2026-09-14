@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { OpenideChatConfirmationPart } from '../../browser/chat/parts/openideChatConfirmationPart.js';
 import { IOpenideAgentService } from '../../browser/openideAgentService.js';
@@ -37,23 +38,46 @@ suite('OpenIDE ChatConfirmationPart', () => {
 		} as IOpenideChatConfirmationContent;
 	}
 
+	const menus = new WeakMap<OpenideChatConfirmationPart, HTMLElement>();
 	function create(overrides: Partial<IOpenideChatConfirmationContent> = {}) {
 		const resolved: { id: string; decision: string }[] = [];
 		const agentService = {
 			resolveApproval: (id: string, decision: string) => { resolved.push({ id, decision }); },
 		} as unknown as IOpenideAgentService;
+		const menu = document.createElement('div');
+		const contextView = {
+			showContextView(delegate: Parameters<IContextViewService['showContextView']>[0]) {
+				const rendered = delegate.render(menu);
+				return { close() { rendered?.dispose(); menu.replaceChildren(); delegate.onHide?.(); } };
+			},
+		} as unknown as IContextViewService;
 		const part = store.add(new OpenideChatConfirmationPart(
 			content(overrides),
 			{} as IOpenideChatContentPartContext,
 			agentService,
+			contextView,
 		));
+		menus.set(part, menu);
 		return { part, resolved };
 	}
 
 	const buttons = (part: OpenideChatConfirmationPart) =>
 		[...part.domNode.querySelectorAll('button.openide-chat-abtn')] as HTMLButtonElement[];
 	const scope = (part: OpenideChatConfirmationPart) =>
-		part.domNode.querySelector('select') as HTMLSelectElement;
+		part.domNode.querySelector('.openide-chat-approval-scope-trigger') as HTMLButtonElement;
+	const scopeRows = (part: OpenideChatConfirmationPart) => {
+		if (scope(part).getAttribute('aria-expanded') !== 'true') { scope(part).click(); }
+		return [...menus.get(part)!.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+	};
+	const labels: Record<string, string> = { once: t('chatSurface.approval.scopeOnce'), session: t('chatSurface.approval.scopeSession'), always: t('chatSurface.approval.scopeAlways') };
+	const chooseScope = (part: OpenideChatConfirmationPart, decision: string) => {
+		if (decision === 'deny') { return; }
+		const row = scopeRows(part).find(row => row.textContent === labels[decision]);
+		assert.ok(row, `scope ${decision} must be offered`);
+		row.click();
+		assert.strictEqual(scope(part).getAttribute('aria-expanded'), 'false');
+	};
+
 	const status = (part: OpenideChatConfirmationPart) =>
 		part.domNode.querySelector('.openide-chat-approval-status')?.textContent ?? '';
 	const offerHidden = (part: OpenideChatConfirmationPart) =>
@@ -101,20 +125,20 @@ suite('OpenIDE ChatConfirmationPart', () => {
 
 	test('defaults to one action and offers session and persistent scopes explicitly', () => {
 		const { part, resolved } = create();
-		assert.deepStrictEqual({ selected: scope(part).value, scopes: [...scope(part).options].map(option => option.value), resolved }, {
-			selected: 'once', scopes: ['once', 'session', 'always'], resolved: [],
+		assert.deepStrictEqual({ selected: scope(part).textContent, scopes: scopeRows(part).map(row => row.textContent), resolved }, {
+			selected: labels.once, scopes: [labels.once, labels.session, labels.always], resolved: [],
 		});
 	});
 
 	test('a sensitive path never offers persistent permission', () => {
 		const { part } = create({ sensitive: true });
-		assert.deepStrictEqual([...scope(part).options].map(option => option.value), ['once', 'session']);
+		assert.deepStrictEqual(scopeRows(part).map(row => row.textContent), [labels.once, labels.session]);
 	});
 
 	test('changing scope alone does not authorize the tool', () => {
 		const { part, resolved } = create();
-		scope(part).value = 'always';
-		scope(part).dispatchEvent(new Event('change'));
+		chooseScope(part, 'always');
+
 		assert.deepStrictEqual(resolved, []);
 	});
 
@@ -129,8 +153,8 @@ suite('OpenIDE ChatConfirmationPart', () => {
 			let changes = 0;
 			store.add(part.onDidChangeHeight(() => changes++));
 			for (const selected of ['session', 'always', 'once']) {
-				scope(part).value = selected;
-				scope(part).dispatchEvent(new Event('change'));
+				chooseScope(part, selected);
+
 				assert.deepStrictEqual({ hidden: hint.hidden, text: hint.textContent, description: scope(part).getAttribute('aria-description') }, {
 					hidden: selected === 'once', text: selected === 'once' ? '' : label, description: selected === 'once' ? '' : label,
 				});
@@ -142,7 +166,7 @@ suite('OpenIDE ChatConfirmationPart', () => {
 	test('allow submits each scope using the service decision vocabulary', () => {
 		for (const decision of ['once', 'session', 'always']) {
 			const { part, resolved } = create();
-			scope(part).value = decision;
+			chooseScope(part, decision);
 			buttons(part)[1].click();
 			assert.deepStrictEqual(resolved, [{ id: 'req-1', decision }]);
 		}
@@ -150,7 +174,7 @@ suite('OpenIDE ChatConfirmationPart', () => {
 
 	test('deny remains denial regardless of the selected scope', () => {
 		const { part, resolved } = create();
-		scope(part).value = 'always';
+		chooseScope(part, 'always');
 		buttons(part)[0].click();
 		assert.deepStrictEqual(resolved, [{ id: 'req-1', decision: 'deny' }]);
 	});
@@ -175,7 +199,7 @@ suite('OpenIDE ChatConfirmationPart', () => {
 	test('each decision leaves a distinct accessible record in the transcript', () => {
 		for (const [decision, label] of [['once', t('chatSurface.approval.allowed')], ['session', t('chat.approval.allowedSession')], ['always', t('chatSurface.approval.allowedAlways')], ['deny', t('chatSurface.approval.denied')]] as const) {
 			const { part } = create();
-			scope(part).value = decision;
+			chooseScope(part, decision);
 			buttons(part)[decision === 'deny' ? 0 : 1].click();
 			assert.deepStrictEqual({ status: status(part), hidden: offerHidden(part), live: part.domNode.querySelector('[role="status"]')?.getAttribute('aria-live') }, {
 				status: label, hidden: true, live: 'polite',
@@ -193,7 +217,18 @@ suite('OpenIDE ChatConfirmationPart', () => {
 		});
 	});
 
-	test('native button and select keys do not reach the transcript tree', () => {
+	test('a resolution closes an open scope menu and prevents reopening it', () => {
+		const { part, resolved } = create();
+		scopeRows(part);
+		assert.strictEqual(scope(part).getAttribute('aria-expanded'), 'true');
+		part.hasSameContent(content({ decision: 'deny' }));
+		assert.strictEqual(scope(part).getAttribute('aria-expanded'), 'false');
+		scope(part).click();
+		assert.strictEqual(menus.get(part)!.childElementCount, 0);
+		assert.deepStrictEqual(resolved, []);
+	});
+
+	test('button and scope keys do not reach the transcript tree', () => {
 		const { part, resolved } = create();
 		const parent = document.createElement('div');
 		parent.append(part.domNode);

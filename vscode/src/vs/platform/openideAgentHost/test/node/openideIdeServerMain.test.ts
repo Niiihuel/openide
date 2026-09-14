@@ -15,8 +15,8 @@ suite('OpenIDE IDE server ownership', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 	const options = { ideName: 'test', workspaceFolders: [tmpdir()], lockRootDir: tmpdir() };
 	function server() { return store.add(new OpenideIdeServerMain(new NullLogService())); }
-	async function call(info: IIdeServerInfo, method = 'tools/call') {
-		const response = await fetch(`http://127.0.0.1:${info.port}/mcp`, {
+	async function call(info: IIdeServerInfo, method = 'tools/call', sessionId?: string) {
+		const response = await fetch(`http://127.0.0.1:${info.port}/mcp${sessionId ? `?openideSession=${encodeURIComponent(sessionId)}` : ''}`, {
 			method: 'POST', headers: { Authorization: `Bearer ${info.authToken}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: { name: 'getWorkspaceFolders', arguments: {} } }),
 		});
@@ -33,6 +33,19 @@ suite('OpenIDE IDE server ownership', () => {
 		store.add(b.onDidRequestTool(request => { received.push('B'); b.respondTool(request.requestId, { content: [{ type: 'text', text: 'B' }] }); }));
 		await call(bi); a.dispose(); await call(bi);
 		assert.deepStrictEqual(received, ['B', 'B']);
+	});
+
+	test('injected endpoints keep each CLI presentation outside the model arguments', async () => {
+		const owner = server(); const info = await owner.start(options);
+		const received: (string | undefined)[] = [];
+		store.add(owner.onDidRequestTool(request => {
+			received.push(request.sessionId);
+			owner.respondTool(request.requestId, { content: [{ type: 'text', text: 'ok' }] });
+		}));
+		await call(info, 'tools/call', 'agent/session A');
+		await call(info, 'tools/call', 'ide-session');
+		await call(info);
+		assert.deepStrictEqual(received, ['agent/session A', 'ide-session', undefined]);
 	});
 
 	test('concurrent starts by one owner create one endpoint', async () => {
@@ -120,6 +133,12 @@ suite('OpenIDE IDE server ownership', () => {
 		assert.deepStrictEqual(observations.map(status => [!!status.initializedAt, !!status.toolsListedAt]), [[true, false], [true, true]]);
 		owner.stop();
 		assert.deepStrictEqual(observations.at(-1), { toolCount: 0 });
+	});
+
+	test('HTTP clients can discover empty resource templates without an unsupported-method error', async () => {
+		const owner = server();
+		const info = await owner.start(options);
+		assert.deepStrictEqual((await call(info, 'resources/templates/list')).result, { resourceTemplates: [] });
 	});
 
 });

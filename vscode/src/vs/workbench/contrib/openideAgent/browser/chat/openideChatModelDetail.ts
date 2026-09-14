@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { createOpenideElement } from '../openideDom.js';
 import { clearNode, getWindow } from '../../../../../base/browser/dom.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { IOpenidePickerGroup, IOpenidePickerModel } from '../openideAgentService.js';
@@ -20,12 +21,12 @@ export interface IDetailAnchor {
 }
 
 function detailRow(document: Document, key: string, value: string): HTMLElement {
-	const row = document.createElement('div');
+	const row = createOpenideElement(document, 'div');
 	row.className = 'openide-mp-detail-row';
-	const keyElement = document.createElement('span');
+	const keyElement = createOpenideElement(document, 'span');
 	keyElement.className = 'openide-mp-detail-key';
 	keyElement.textContent = key;
-	const valueElement = document.createElement('span');
+	const valueElement = createOpenideElement(document, 'span');
 	valueElement.className = 'openide-mp-detail-val';
 	valueElement.textContent = value;
 	row.append(keyElement, valueElement);
@@ -82,7 +83,7 @@ export class OpenideChatModelDetail extends Disposable {
 	private _show(host: HTMLElement, anchor: IDetailAnchor, group: IOpenidePickerGroup, model: IOpenidePickerModel): void {
 		const document = host.ownerDocument;
 		if (!this._element) {
-			this._element = document.createElement('div');
+			this._element = createOpenideElement(document, 'div');
 			this._element.className = 'openide-mp-detail';
 			// Inside `.monaco-workbench` and NOT on `document.body`: the theme publishes every
 			// `--vscode-*` custom property on that element (workbenchThemeService scopes the
@@ -95,12 +96,12 @@ export class OpenideChatModelDetail extends Disposable {
 		clearNode(element);
 		// The exact id the provider is called with lives in the header: it is the one thing the
 		// row's friendly name hides, and the panel replaced the native tooltip that used to carry it.
-		const head = document.createElement('div');
+		const head = createOpenideElement(document, 'div');
 		head.className = 'openide-mp-detail-head';
-		const name = document.createElement('div');
+		const name = createOpenideElement(document, 'div');
 		name.className = 'openide-mp-detail-name';
 		name.textContent = model.name;
-		const id = document.createElement('div');
+		const id = createOpenideElement(document, 'div');
 		id.className = 'openide-mp-detail-id';
 		id.textContent = `${group.label} · ${model.id}`;
 		head.append(name, id);

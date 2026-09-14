@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { applyOpenideSurfaceCss } from '../../openideAgent/browser/openideSurfaceStyle.js';
+import './media/openideWorkbench.css';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
@@ -70,6 +72,7 @@ export class ModernUIContribution extends Disposable implements IWorkbenchContri
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 	) {
 		super();
+		applyOpenideSurfaceCss();
 
 		// Global metrics first: `paneHeaders` changes layout, so it has to be in place before the
 		// parts measure themselves.
@@ -86,6 +89,7 @@ export class ModernUIContribution extends Disposable implements IWorkbenchContri
 	}
 
 	private applyTo(container: HTMLElement): void {
+		container.classList.add('openide-visual');
 		container.classList.add(MODERN_UI_CLASS);
 		container.classList.add(MODERN_UI_TABS_CLASS);
 		container.classList.add(MODERN_UI_NOTIFICATIONS_DIALOGS_CLASS);

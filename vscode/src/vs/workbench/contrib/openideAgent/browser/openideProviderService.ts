@@ -22,7 +22,7 @@ import { ISecretStorageService } from '../../../../platform/secrets/common/secre
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IJSONEditingService } from '../../../services/configuration/common/jsonEditing.js';
 import { IHostService } from '../../../services/host/browser/host.js';
-import { ILLMProvider } from '../common/openideAgentTypes.js';
+import { IFastModeCapability, ILLMProvider } from '../common/openideAgentTypes.js';
 import { formatContextTokens, formatCostPerMillion, humanizeModelId } from '../common/openideModelDisplay.js';
 import { IOpenideNativeServices } from '../common/openideNativeServices.js';
 import { IOpenidePickerGroup, IOpenidePickerModel } from '../common/openidePickerModels.js';
@@ -54,6 +54,9 @@ export interface IOpenideProviderService {
 	setActiveProvider(providerId: string): Promise<void>;
 	getModel(): string;
 	setModel(model: string): Promise<void>;
+	getFastModeCapability(providerId?: string, model?: string): IFastModeCapability;
+	getFastMode(providerId?: string, model?: string): boolean;
+	setFastMode(enabled: boolean, providerId?: string, model?: string): Promise<void>;
 	getReasoningEfforts(): Readonly<Record<string, string>>;
 	getReasoningEffort(providerId?: string, model?: string): string;
 	setReasoningEffort(effort: string, providerId?: string, model?: string): Promise<void>;
@@ -339,6 +342,39 @@ export class OpenideProviderService extends Disposable implements IOpenideProvid
 		// stored as an entry it would pin the map at one row per model the user ever looked at.
 		if (effort) { efforts[key] = effort; } else { delete efforts[key]; }
 		this.storageService.store(OpenideProviderService.STORAGE_EFFORT_BY_MODEL, JSON.stringify(efforts), StorageScope.APPLICATION, StorageTarget.MACHINE);
+		this._onDidChange.fire();
+	}
+
+	private static readonly STORAGE_FAST_MODE = 'openide.agent.fastModeByModel';
+
+	getFastModeCapability(providerId?: string, model?: string): IFastModeCapability {
+		const id = providerId ?? this.getActiveProviderId();
+		const entry = this.findProvider(id);
+		const target = model || this.modelForProvider(id) || entry?.defaultModel || '';
+		return entry && target ? this.protocols.get(entry.protocol)?.getFastModeCapability?.(target, id, entry.baseUrl) ?? { supported: false } : { supported: false };
+	}
+
+	private fastModes(): Record<string, boolean> {
+		try {
+			const value: unknown = JSON.parse(this.storageService.get(OpenideProviderService.STORAGE_FAST_MODE, StorageScope.APPLICATION) || '{}');
+			if (value && typeof value === 'object' && !Array.isArray(value)) {
+				return Object.fromEntries(Object.entries(value).filter(([, enabled]) => enabled === true));
+			}
+		} catch { /* Invalid storage must never opt a user into a paid tier. */ }
+		return {};
+	}
+
+	getFastMode(providerId?: string, model?: string): boolean {
+		const key = this.effortTarget(providerId, model);
+		return !!key && this.getFastModeCapability(providerId, model).supported && this.fastModes()[key] === true;
+	}
+
+	async setFastMode(enabled: boolean, providerId?: string, model?: string): Promise<void> {
+		const key = this.effortTarget(providerId, model);
+		if (!key || (enabled && !this.getFastModeCapability(providerId, model).supported)) { return; }
+		const modes = this.fastModes();
+		if (enabled) { modes[key] = true; } else { delete modes[key]; }
+		this.storageService.store(OpenideProviderService.STORAGE_FAST_MODE, JSON.stringify(modes), StorageScope.APPLICATION, StorageTarget.MACHINE);
 		this._onDidChange.fire();
 	}
 

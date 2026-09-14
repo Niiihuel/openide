@@ -3,10 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { BaseMenuActionViewItem } from '../../../../base/browser/ui/menu/menu.js';
+import { defaultMenuStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import './media/editortabscontrol.css';
 import { localize } from '../../../../nls.js';
 import { DataTransfers } from '../../../../base/browser/dnd.js';
 import { $, Dimension, getActiveWindow, getWindow, isMouseEvent, setVisibility } from '../../../../base/browser/dom.js';
+import { isAuxiliaryWindow } from '../../../../base/browser/window.js';
 import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
 import { ActionsOrientation, IActionViewItem, prepareActions } from '../../../../base/browser/ui/actionbar/actionbar.js';
 import { IAction, ActionRunner, toAction } from '../../../../base/common/actions.js';
@@ -272,8 +275,15 @@ export abstract class EditorTabsControl extends Themable implements IEditorTabsC
 			class: ThemeIcon.asClassName(Codicon.add),
 			run: () => { }
 		});
-		const dropdown = this._register(new DropdownMenuActionViewItem(addTabAction, { getActions }, this.contextMenuService, {
+		const dropdown = this._register(new DropdownMenuActionViewItem(addTabAction, { getActions }, {
+			showContextMenu: delegate => this.contextMenuService.showContextMenu(isAuxiliaryWindow(getWindow(container))
+				? { ...delegate, domForShadowRoot: container, useWindowContainerForShadowRoot: true, onHide: cancelled => { delegate.onHide?.(cancelled); if (cancelled) { dropdown.focus(); } } }
+				: delegate)
+		}, {
 			classNames: ThemeIcon.asClassNameArray(Codicon.add),
+			actionViewItemProvider: action => action.class ? new BaseMenuActionViewItem(undefined, action, {
+				icon: true, label: true, keybinding: this.getKeybinding(action)?.getLabel()
+			}, defaultMenuStyles) : undefined,
 			keybindingProvider: action => this.getKeybinding(action)
 		}));
 		const toolbar = this._register(this.instantiationService.createInstance(WorkbenchToolBar, container, {
@@ -477,7 +487,8 @@ export abstract class EditorTabsControl extends Themable implements IEditorTabsC
 	}
 
 	protected clearEditorActionsToolbar(): void {
-		if (!this.editorActionsEnabled) {
+		// Moving the last docked editor may dispose its toolbar as tab options change.
+		if (!this.editorActionsEnabled || !this.editorActionsToolbar) {
 			return;
 		}
 

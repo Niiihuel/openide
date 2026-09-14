@@ -8,6 +8,9 @@
  *  channel and keeps only bounded caches/snapshots for the UI and the agent.
  *--------------------------------------------------------------------------------------------*/
 
+import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { CancellationError } from '../../../../base/common/errors.js';
+import { executeCodebaseSnapshotQuery } from '../../../../platform/openideCodebase/common/openideCodebaseQueryEngine.js';
 import { joinPath } from '../../../../base/common/resources.js';
 import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { raceTimeout } from '../../../../base/common/async.js';
@@ -18,7 +21,7 @@ import { createDecorator } from '../../../../platform/instantiation/common/insta
 import { IOpenideNativeServices } from '../common/openideNativeServices.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
-import { ICodebaseMemoryChannel, ICodebaseMemoryIndexOptions, ICodebaseMemorySnapshotDto, ICodebaseIndexProgress, ICodebaseMemoryChange } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProtocol.js';
+import { ICodebaseMemoryChannel, ICodebaseMemoryIndexOptions, ICodebaseMemorySnapshotDto, ICodebaseIndexProgress, ICodebaseMemoryChange, ICodebaseQueryRequest } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProtocol.js';
 import { ICodebaseIndexVersion, ICodebaseMemoryNode } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
 import { CODEBASE_NOTES_ENABLED_SETTING, CODEBASE_NOTES_LINKING_SETTING, noteLinkingFromSetting } from '../../../../platform/openideCodebase/common/openideCodebaseNotes.js';
 import { t } from '../common/openideStrings.js';
@@ -35,6 +38,7 @@ export interface ICodebaseMemoryService {
 	rebuildFull(): Promise<IIndexProgressResult>;
 	indexIncremental(changes: ICodebaseMemoryChange[]): Promise<IIndexProgressResult>;
 	getVersion(): Promise<ICodebaseIndexVersion | undefined>;
+	query(request: ICodebaseQueryRequest, token?: CancellationToken): Promise<unknown>;
 	getSnapshot(): Promise<ICodebaseMemorySnapshotDto | undefined>;
 	getFileNodes(uri: string): Promise<ICodebaseMemoryNode[]>;
 	addLanguageServerExtraction(uri: string, extraction: import('../../../../platform/openideCodebase/common/openideCodebaseMemoryProviders.js').IProviderExtraction): Promise<void>;
@@ -107,7 +111,7 @@ export class CodebaseMemoryService extends Disposable implements ICodebaseMemory
 		// Indexing options live in the renderer's config (the shared process does not know the
 		// schema defaults). Changes that alter the file set force a rebuild.
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
-			const affectsFileSet = ['openide.memory.exclude', 'openide.memory.include', 'openide.memory.indexTests', 'openide.memory.enableRegexFallback', 'openide.memory.persistIndex', CODEBASE_NOTES_ENABLED_SETTING, CODEBASE_NOTES_LINKING_SETTING].some(key => e.affectsConfiguration(key));
+			const affectsFileSet = ['openide.memory.exclude', 'openide.memory.include', 'openide.memory.indexTests', 'openide.memory.enableRegexFallback', 'openide.memory.enableTreeSitter', 'openide.memory.persistIndex', CODEBASE_NOTES_ENABLED_SETTING, CODEBASE_NOTES_LINKING_SETTING].some(key => e.affectsConfiguration(key));
 			if (!affectsFileSet) { return; }
 			this.invalidateSnapshot();
 			this._onDidChange.fire({ version: 0, workspaceKey: this.workspaceFolders.join('|'), builtAt: Date.now(), staleCount: 0, nodeCount: 0, edgeCount: 0 });
@@ -135,6 +139,7 @@ export class CodebaseMemoryService extends Disposable implements ICodebaseMemory
 			include: list('openide.memory.include'),
 			indexTests: this.configurationService.getValue('openide.memory.indexTests') !== false,
 			enableRegexFallback: this.configurationService.getValue('openide.memory.enableRegexFallback') !== false,
+			enableTreeSitter: this.configurationService.getValue('openide.memory.enableTreeSitter') === true,
 			persistIndex: this.configurationService.getValue('openide.memory.persistIndex') !== false,
 			// The IDE's own storage, so the index never sits in the user's repo.
 			storageRoot: joinPath(this.environmentService.userRoamingDataHome, 'openideAgent', 'memory-indexes').toString(),
@@ -181,6 +186,19 @@ export class CodebaseMemoryService extends Disposable implements ICodebaseMemory
 	async getFileNodes(uri: string): Promise<ICodebaseMemoryNode[]> { return this.remote.getFileNodes(await this.key(), uri); }
 	async addLanguageServerExtraction(uri: string, extraction: import('../../../../platform/openideCodebase/common/openideCodebaseMemoryProviders.js').IProviderExtraction): Promise<void> { await this.remote.addLanguageServerExtraction(await this.key(), uri, extraction); }
 	async clear(): Promise<void> { this.invalidateSnapshot();  await this.remote.clear(await this.key()); this._onDidChange.fire({ version: 0, workspaceKey: await this.key(), builtAt: Date.now(), staleCount: 0, nodeCount: 0, edgeCount: 0 }); }
+
+	async query(request: ICodebaseQueryRequest, token: CancellationToken = CancellationToken.None): Promise<unknown> {
+		while (true) {
+			if (token.isCancellationRequested) { throw new CancellationError(); }
+			if (!this.workspaceTrust.isWorkspaceTrusted()) { return executeCodebaseSnapshotQuery(undefined, request); }
+			const generation = this.snapshotGeneration;
+			const key = await this.key();
+			if (generation !== this.snapshotGeneration) { continue; }
+			const result = await this.remote.query(key, request, token);
+			if (token.isCancellationRequested) { throw new CancellationError(); }
+			if (generation === this.snapshotGeneration) { return result; }
+		}
+	}
 
 	private invalidateSnapshot(): void {
 		this.snapshotGeneration++;

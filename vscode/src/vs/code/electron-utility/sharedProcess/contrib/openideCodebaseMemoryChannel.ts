@@ -8,7 +8,8 @@
  *  isolated runtime per workspaceKey; the index and the storage are never shared by accident.
  *--------------------------------------------------------------------------------------------*/
 
-import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
+import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
+import { CancellationError } from '../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
@@ -17,20 +18,28 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { CodebaseMemoryIndexer, IIndexProgress } from './openideCodebaseMemoryIndexer.js';
 import { CodebaseMemoryStorage } from './openideCodebaseMemoryStorage.js';
 import { ICodebaseIndexVersion, ICodebaseMemoryEdge, ICodebaseMemoryNode } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryTypes.js';
-import { CODEBASE_MEMORY_MAX_CHANGE_BYTES, CODEBASE_MEMORY_MAX_CHANGES, CODEBASE_MEMORY_MAX_EXTRACTION_EDGES, CODEBASE_MEMORY_MAX_EXTRACTION_NODES, DEFAULT_CODEBASE_MEMORY_INDEX_OPTIONS, ICodebaseMemoryChange, ICodebaseMemoryChannel, ICodebaseMemoryIndexOptions, ICodebaseMemorySnapshotDto, ICodebaseIndexProgress } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProtocol.js';
+import { CODEBASE_MEMORY_MAX_CHANGE_BYTES, CODEBASE_MEMORY_MAX_CHANGES, CODEBASE_MEMORY_MAX_EXTRACTION_EDGES, CODEBASE_MEMORY_MAX_EXTRACTION_NODES, DEFAULT_CODEBASE_MEMORY_INDEX_OPTIONS, ICodebaseMemoryChange, ICodebaseMemoryChannel, ICodebaseMemoryIndexOptions, ICodebaseQueryRequest, ICodebaseMemorySnapshotDto, ICodebaseIndexProgress } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProtocol.js';
 import { deduplicateEdges, deduplicateNodes, IProviderExtraction, mergeExtractions } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProviders.js';
+import { projectCodebaseGoals } from '../../../../platform/openideCodebase/common/openideCodebaseGoals.js';
 import { DEFAULT_NOTE_LINKING, notesWorkspaceRoot, linkCodebaseNotes, NoteLinkingMode } from '../../../../platform/openideCodebase/common/openideCodebaseNotes.js';
 
 /** Accepted values, so a bad one over IPC falls back instead of disabling linking silently. */
 const NOTE_LINKING_MODES: readonly NoteLinkingMode[] = ['explicit', 'identifiers', 'off'];
-import { detectCommunities, ICommunityGraphEdge } from '../../../../platform/openideCodebase/common/openideCodebaseCommunities.js';
+import { detectCommunities, finalizeCodebaseCommunities, ICommunityGraphEdge } from '../../../../platform/openideCodebase/common/openideCodebaseCommunities.js';
 import { ALIAS_URI_PREFIX, isInternalSpecifier, PACKAGE_URI_PREFIX, resolveInternalImport } from '../../../../platform/openideCodebase/common/openideCodebaseImports.js';
 
+import { NativeGraphRuntime } from '../../../../platform/openideCodebase/node/openideNativeGraph.js';
+import { CodebaseQueryEngine, executeCodebaseQuery, validateCodebaseQueryRequest } from '../../../../platform/openideCodebase/common/openideCodebaseQueryEngine.js';
+
 interface IRuntime {
+	readonly nativeGraph: NativeGraphRuntime;
+	snapshot?: ICodebaseMemorySnapshotDto;
+	fallbackQuery?: { snapshot: ICodebaseMemorySnapshotDto | undefined; request: ICodebaseQueryRequest; engine: CodebaseQueryEngine };
 	readonly folders: readonly URI[];
 	readonly storage: CodebaseMemoryStorage;
 	readonly indexer: CodebaseMemoryIndexer;
 	trusted: boolean;
+	trustCancellation: CancellationTokenSource;
 	/** Kept on the runtime because getSnapshot links notes on READ, outside the indexer. */
 	noteLinking: NoteLinkingMode;
 	mutationQueue: Promise<void>;
@@ -135,7 +144,7 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 			}
 			const storage = new CodebaseMemoryStorage(this.fileService, indexRoot);
 			const indexer = new CodebaseMemoryIndexer(this.fileService, folders, storage);
-			const runtime: IRuntime = { folders, storage, indexer, trusted, noteLinking: DEFAULT_NOTE_LINKING, mutationQueue: Promise.resolve() };
+			const runtime: IRuntime = { folders, storage, indexer, nativeGraph: new NativeGraphRuntime(indexer.native), trusted, trustCancellation: new CancellationTokenSource(), noteLinking: DEFAULT_NOTE_LINKING, mutationQueue: Promise.resolve() };
 			indexer.onProgress(progress => this._onProgress.fire({ workspaceKey: key, progress: this.toProtocolProgress(progress) }));
 			this.runtimes.set(key, runtime);
 			// The options are applied BEFORE load(): persistIndex=false has to prevent reading the
@@ -155,10 +164,12 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 			include: Array.isArray(options.include) ? options.include.filter(value => typeof value === 'string' && value.trim()).slice(0, 200) : [],
 			indexTests: options.indexTests !== false,
 			enableRegexFallback: options.enableRegexFallback !== false,
+			enableTreeSitter: options.enableTreeSitter === true,
 			persistIndex: options.persistIndex !== false,
 			indexNotes: options.indexNotes !== false,
 			noteLinking: NOTE_LINKING_MODES.includes(options.noteLinking) ? options.noteLinking : DEFAULT_NOTE_LINKING,
 		};
+		runtime.snapshot = undefined; runtime.fallbackQuery?.engine.dispose(); runtime.fallbackQuery = undefined;
 		runtime.noteLinking = sanitized.noteLinking;
 		runtime.indexer.setOptions(sanitized);
 		await runtime.storage.setPersist(sanitized.persistIndex);
@@ -191,6 +202,16 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 	async setTrusted(key: string, trusted: boolean): Promise<void> {
 		const runtime = this.rawRuntime(key);
 		runtime.trusted = trusted;
+		if (trusted && runtime.trustCancellation.token.isCancellationRequested) { runtime.trustCancellation.dispose(); runtime.trustCancellation = new CancellationTokenSource(); }
+		if (!trusted) { runtime.trustCancellation.cancel(); }
+		if (!trusted) { runtime.nativeGraph.reset(); runtime.snapshot = undefined; runtime.fallbackQuery?.engine.dispose(); runtime.fallbackQuery = undefined; }
+	}
+
+	private cancellation(runtime: IRuntime, parent = CancellationToken.None): { token: CancellationToken; dispose(): void } {
+		const cts = new CancellationTokenSource(parent);
+		const listener = runtime.trustCancellation.token.onCancellationRequested(() => cts.cancel());
+		if (parent.isCancellationRequested || runtime.trustCancellation.token.isCancellationRequested) { cts.cancel(); }
+		return { token: cts.token, dispose: () => { listener.dispose(); cts.dispose(); } };
 	}
 
 	async addLanguageServerExtraction(key: string, uriString: string, extraction: IProviderExtraction): Promise<void> {
@@ -246,12 +267,12 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 
 	private async rebuildFullUnsafe(key: string, token?: import('../../../../base/common/cancellation.js').CancellationToken): Promise<ICodebaseIndexProgress> {
 		const runtime = this.runtime(key);
-		const cts = new CancellationTokenSource(token);
+		const cts = this.cancellation(runtime, token);
 		try {
 			const previousCommunities = runtime.storage.getCommunities();
 			const result = await runtime.indexer.rebuildFull(cts.token);
 			if (result.phase === 'cancelled') { return this.toProtocolProgress(result); }
-			await this.finalizeGraph(runtime, previousCommunities);
+			await this.finalizeGraph(runtime, previousCommunities, cts.token);
 			await runtime.storage.flush();
 			const version = runtime.storage.getVersion();
 			if (version) { this._onDidChange.fire({ workspaceKey: key, version }); }
@@ -269,21 +290,34 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 	 * applies it while concatenating. That way the incremental path — which never comes through here —
 	 * keeps serving snapshots consistent with the aliases already known.
 	 */
-	private async finalizeGraph(runtime: IRuntime, previous: ReturnType<CodebaseMemoryStorage['getCommunities']>): Promise<void> {
+	private async finalizeGraph(runtime: IRuntime, previous: ReturnType<CodebaseMemoryStorage['getCommunities']>, token = CancellationToken.None): Promise<void> {
 		const manifest = runtime.storage.getManifest();
 		if (!manifest) { return; }
 		const fileUris = Object.keys(manifest.files);
-		const knownUris = new Set(fileUris);
 		const payloads = new Map<string, { nodes: readonly ICodebaseMemoryNode[]; edges: readonly ICodebaseMemoryEdge[] }>();
+		for (const uri of fileUris) {
+			const payload = await runtime.storage.readFile(uri);
+			if (payload) { payloads.set(uri, payload); }
+		}
+		if (!runtime.trusted) { throw new Error('Codebase memory trust revoked.'); }
+		const native = await runtime.nativeGraph.finalize(fileUris, payloads, token);
+		if (!runtime.trusted) { runtime.nativeGraph.reset(); throw new Error('Codebase memory trust revoked.'); }
+		if (native) {
+			const detected = finalizeCodebaseCommunities(native.groups, new Map(Object.entries(native.degreeByUri)), uri => uri.split('/').pop() ?? uri, previous);
+			runtime.storage.setNodeAliases(native.aliases);
+			runtime.storage.setCommunities(labelCommunities(detected));
+			runtime.storage.markGraphFinalized();
+			return;
+		}
+		const knownUris = new Set(fileUris);
 		const uriByNodeId = new Map<string, string>();
 		const fileNodeIdByUri = new Map<string, string>();
 		// Unresolved import nodes: synthetic id → { importer, specifier }.
 		const pendingImports = new Map<string, { importer: string; specifier: string }>();
 
 		for (const uri of fileUris) {
-			const payload = await runtime.storage.readFile(uri);
+			const payload = payloads.get(uri);
 			if (!payload) { continue; }
-			payloads.set(uri, payload);
 			for (const node of payload.nodes) {
 				// A synthetic node (an aliased import, an external package) has a GLOBAL id: the same
 				// `@/lib/db` shows up in the payload of every importer. Mapping them to the payload's uri
@@ -346,10 +380,10 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 	 * Hanging it off the READ means an index already broken on disk repairs itself when opened,
 	 * without reindexing; and the incremental path — which never finalized — is covered by the same check.
 	 */
-	private async ensureGraphFinalized(runtime: IRuntime): Promise<void> {
+	private async ensureGraphFinalized(runtime: IRuntime, token = CancellationToken.None): Promise<void> {
 		// Called inside the workspace queue shared by writes, finalization and snapshot reads.
 		if (!runtime.storage.getVersion() || runtime.storage.isGraphFinalized()) { return; }
-		await this.finalizeGraph(runtime, runtime.storage.getCommunities());
+		await this.finalizeGraph(runtime, runtime.storage.getCommunities(), token);
 		await runtime.storage.flush();
 	}
 
@@ -364,7 +398,7 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 		if (changes.length > CODEBASE_MEMORY_MAX_CHANGES) { throw new Error('Demasiados cambios en un lote IPC.'); }
 		if (changes.some(change => change.content !== undefined && VSBuffer.fromString(change.content).byteLength > CODEBASE_MEMORY_MAX_CHANGE_BYTES)) { throw new Error('Archivo demasiado grande para actualización IPC.'); }
 		const runtime = this.runtime(key);
-		const cts = new CancellationTokenSource(token);
+		const cts = this.cancellation(runtime, token);
 		try {
 			const mapped = changes.filter(change => this.isAuthorized(runtime, URI.parse(change.uri))).map(change => ({ uri: URI.parse(change.uri), content: change.content, deleted: change.deleted }));
 			const result = await runtime.indexer.indexIncremental(mapped, cts.token);
@@ -385,12 +419,13 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 		return operation;
 	}
 
-	private async getSnapshotUnsafe(key: string): Promise<ICodebaseMemorySnapshotDto | undefined> {
+	private async getSnapshotUnsafe(key: string, token = CancellationToken.None): Promise<ICodebaseMemorySnapshotDto | undefined> {
 		const runtime = this.runtime(key);
-		await this.ensureGraphFinalized(runtime);
+		await this.ensureGraphFinalized(runtime, token);
 		const storage = runtime.storage;
 		const manifest = storage.getManifest();
 		if (!manifest) { return undefined; }
+		if (runtime.snapshot?.version === manifest.version) { return runtime.snapshot; }
 		const rawNodes: ICodebaseMemoryNode[] = [];
 		const rawEdges: ICodebaseMemoryEdge[] = [];
 		const dirtyUris: string[] = [];
@@ -430,8 +465,40 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 		// Notes are wired to what they mention HERE and not at index time, for the same reason the
 		// alias table is applied here: a note's target may live in a file that was reindexed after
 		// the note was. Computed on read, the link can never be stale; stored, it would be.
-		const edges = deduplicateEdges([...aliasedEdges, ...linkCodebaseNotes(nodes, runtime.noteLinking)].filter(edge => edge.source !== edge.target));
-		return { version: manifest.version, nodes, edges, dirtyUris, communities: storage.getCommunities() };
+		const goals = projectCodebaseGoals(nodes);
+		const edges = deduplicateEdges([...aliasedEdges, ...linkCodebaseNotes(nodes, runtime.noteLinking), ...goals.edges].filter(edge => edge.source !== edge.target));
+		return runtime.snapshot = { version: manifest.version, nodes: goals.nodes, edges, dirtyUris, communities: storage.getCommunities() };
+	}
+
+	async query(key: string, request: ICodebaseQueryRequest, token = CancellationToken.None): Promise<unknown> {
+		validateCodebaseQueryRequest(request);
+		const runtime = this.runtime(key);
+		const cancellation = this.cancellation(runtime, token);
+		token = cancellation.token;
+		const operation = runtime.mutationQueue.then(async () => {
+			if (token.isCancellationRequested) { throw new CancellationError(); }
+			this.runtime(key);
+			const snapshot = await this.getSnapshotUnsafe(key, token);
+			this.runtime(key);
+			const result = snapshot ? await runtime.nativeGraph.querySnapshot(snapshot, request.method, { arguments: request.arguments, maxTraversalDepth: request.maxTraversalDepth }, request.includeHeuristic, token) : undefined;
+			if (token.isCancellationRequested) { throw new CancellationError(); }
+			this.runtime(key);
+			if (result !== undefined) { runtime.fallbackQuery?.engine.dispose(); runtime.fallbackQuery = undefined; return result; }
+			let fallback = runtime.fallbackQuery;
+			if (!fallback || fallback.snapshot !== snapshot || fallback.request.includeHeuristic !== request.includeHeuristic) {
+				fallback?.engine.dispose();
+				const state = { request };
+				const engine = new CodebaseQueryEngine({ onDidChange: Event.None, getSnapshot: async () => snapshot }, {
+					onDidChangeConfiguration: Event.None,
+					getValue: <T>(name?: unknown) => (name === 'openide.memory.showHeuristicRelations' ? state.request.includeHeuristic : state.request.maxTraversalDepth) as T,
+				});
+				fallback = runtime.fallbackQuery = { snapshot, get request() { return state.request; }, set request(value) { state.request = value; }, engine };
+			}
+			fallback.request = request;
+			return executeCodebaseQuery(fallback.engine, request);
+		}).finally(() => cancellation.dispose());
+		runtime.mutationQueue = operation.then(() => undefined, () => undefined);
+		return operation;
 	}
 
 	async getFileNodes(key: string, uri: string): Promise<ICodebaseMemoryNode[]> {
@@ -442,6 +509,7 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 	async clear(key: string): Promise<void> {
 		const runtime = this.runtime(key);
 		const mutation = runtime.mutationQueue.then(async () => {
+			runtime.nativeGraph.reset(); runtime.snapshot = undefined; runtime.fallbackQuery?.engine.dispose(); runtime.fallbackQuery = undefined;
 			runtime.indexer.clearExternalExtractions();
 			await runtime.storage.clear();
 		});
@@ -454,6 +522,8 @@ export class CodebaseMemoryChannel extends Disposable implements ICodebaseMemory
 	override dispose(): void {
 		for (const runtime of this.runtimes.values()) {
 			if (runtime.flushTimer) { clearTimeout(runtime.flushTimer); runtime.flushTimer = undefined; }
+			runtime.trustCancellation.cancel(); runtime.trustCancellation.dispose();
+			runtime.fallbackQuery?.engine.dispose();
 			runtime.indexer.dispose();
 		}
 		this.runtimes.clear();

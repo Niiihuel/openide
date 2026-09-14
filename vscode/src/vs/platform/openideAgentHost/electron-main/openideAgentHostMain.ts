@@ -21,6 +21,10 @@
  *  so the workbench re-registers (never ghost tools NOR stale tools in the prompt).
  *--------------------------------------------------------------------------------------------*/
 
+import { OpenideCodexGoalOwner } from '../node/openideCodexGoalOwner.js';
+import { IOpenideCodexGoalPrepare } from '../common/openideCodexGoal.js';
+import { OpenideGoalOwner } from '../node/openideGoalOwner.js';
+import { IOpenideGoalCreate, IOpenideGoalUpdate, IOpenideGoalVerification } from '../common/openideGoal.js';
 import { OpenideMemoryOwner } from '../node/openideMemoryOwner.js';
 import { IOpenideMemoryRequest } from '../../openideCodebase/common/openideMemoryRecord.js';
 import { ChildProcess, spawn } from 'child_process';
@@ -497,13 +501,37 @@ export class OpenideAgentHostMainService extends Disposable implements IOpenideA
 	private readonly restoreLocks = this._register(new OpenideRestoreLocks());
 
 	validateWorkspacePath(request: { path: string; roots: readonly string[]; mutation?: boolean }): Promise<void> { return validateOpenideWorkspacePath(request); }
+	private readonly goals = this._register(new OpenideGoalOwner(this.environmentMainService.userDataPath));
+	goalGet(sessionId: string) { return this.goals.get(sessionId); }
+	goalCreate(request: IOpenideGoalCreate) { return this.goals.create(request); }
+	goalUpdate(sessionId: string, request: IOpenideGoalUpdate) { return this.goals.update(sessionId, request); }
+	goalVerify(sessionId: string, request: IOpenideGoalVerification) { return this.goals.verify(sessionId, request); }
 	private readonly runJournal = this._register(new OpenideRunJournalOwner(this.environmentMainService.userDataPath));
 	private readonly processIsolation = new OpenideProcessIsolation();
 	private readonly subagentWorktrees = new OpenideSubagentWorktrees();
+	private readonly codexGoals = this._register(new OpenideCodexGoalOwner(async () => ({ ...process.env, ...await this.resolveShellEnv?.() })));
+	readonly onDidChangeCodexGoal = this.codexGoals.onDidChange;
+	codexGoalPrepare(input: IOpenideCodexGoalPrepare) {
+		const args = [...input.configurationArgs];
+		let instructions: string | undefined;
+		const profileIndex = args.indexOf('--profile');
+		if (profileIndex !== -1) {
+			instructions = this.ideServer.codexContextInstructions(args[profileIndex + 1], input.executable, input.cwd);
+			if (instructions === undefined) { throw new Error('The Codex context profile is not owned by this window and workspace.'); }
+			args.splice(profileIndex, 2);
+		}
+		return this.codexGoals.prepare({ ...input, configurationArgs: args }, instructions);
+	}
+	codexGoalRun(sessionId: string, runId: string, prompt: string) { return this.codexGoals.run(sessionId, runId, prompt); }
+	codexGoalInterrupt(sessionId: string, runId: string) { return this.codexGoals.interrupt(sessionId, runId); }
+	async codexGoalRespond(sessionId: string, approvalId: string, accepted: boolean): Promise<void> { this.codexGoals.respond(sessionId, approvalId, accepted); }
+	codexGoalDispose(sessionId: string) { return this.codexGoals.close(sessionId); }
 	private readonly agentTerminals = new OpenideAgentTerminalOwner(this.ptyService, this.subagentWorktrees);
 
 	async setRestoreWorkspace(roots: readonly string[], workspaceId = 'empty'): Promise<void> {
+		await this.codexGoals.setWorkspace(roots);
 		await this.runJournal.setWorkspace(workspaceId, roots);
+		await this.goals.setWorkspace(workspaceId, roots);
 		await this.restoreLocks.setWorkspace(roots);
 		await this.memoryOwner.setWorkspace(roots);
 	}
@@ -570,6 +598,10 @@ export class OpenideAgentHostMainService extends Disposable implements IOpenideA
 
 	async ideSetExtraTools(tools: readonly IIdeToolSchema[]): Promise<void> {
 		this.ideServer.setExtraTools(tools);
+	}
+
+	idePrepareCodexContext(executable: string, cwd: string | undefined, serverName: string): Promise<string> {
+		return this.ideServer.prepareCodexContext(executable, cwd, serverName);
 	}
 
 	ideRegisterInCli(executable: string, args: readonly string[]): Promise<string> {

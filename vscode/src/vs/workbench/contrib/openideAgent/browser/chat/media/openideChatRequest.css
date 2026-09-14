@@ -74,7 +74,7 @@
 	height: 18px;
 	max-width: min(260px, 100%);
 	padding: 0 6px;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: var(--vscode-chat-slashCommandBackground, #26477866);
 	color: var(--vscode-chat-slashCommandForeground, #85b6ff);
 	font: 12px/1 var(--vscode-editor-font-family, monospace);
@@ -136,7 +136,7 @@
 	height: 24px;
 	padding: 0;
 	border: none;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	cursor: pointer;
@@ -144,7 +144,7 @@
 
 .openide-chat-request-action:hover {
 	color: var(--vscode-foreground);
-	background: var(--vscode-toolbar-hoverBackground);
+	background: var(--oi-hover);
 }
 
 .openide-chat-request-action .openide-chat-rewind-icon {

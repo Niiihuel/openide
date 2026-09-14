@@ -159,12 +159,12 @@
 	font-weight: normal;
 }
 
-/* OpenIDE: todos los campos de búsqueda mantienen la misma marca que Quick Open, incluso
-   sin foco. Search conserva FindInput, toggles, historial y altura flexible. */
-.monaco-workbench .search-view .search-widget .monaco-inputbox,
-.monaco-workbench .search-view .query-details .file-types > .monaco-inputbox {
-	border-color: var(--vscode-focusBorder) !important;
-	border-radius: var(--vscode-cornerRadius-medium);
+/* OpenIDE: compound search fields use the shared control border; validation colors remain native.
+   Search keeps FindInput, toggles, history and flexible height. */
+.monaco-workbench .search-view .search-widget .monaco-inputbox:not(.info):not(.warning):not(.error),
+.monaco-workbench .search-view .query-details .file-types > .monaco-inputbox:not(.info):not(.warning):not(.error) {
+	border-color: var(--oi-border, var(--vscode-input-border, transparent)) !important;
+	border-radius: var(--oi-radius-control, var(--vscode-cornerRadius-small));
 	outline: 0 !important;
 }
 
@@ -575,4 +575,14 @@
 }
 .monaco-workbench .search-container .part.sidebar .find-filter-button, .monaco-workbench .search-container .part.auxiliarybar .find-filter-button {
     margin-left: calc(var(--vscode-workbench-sidebar-font-size) * 0.153846)
+}
+
+/* Compound fields participate in the same hover/focus border without changing editor metrics. */
+.monaco-workbench.openide-visual .search-view :is(.search-widget, .query-details .file-types) .monaco-inputbox:not(.info):not(.warning):not(.error):hover:not(:focus-within) {
+	border-color: var(--vscode-contrastActiveBorder, var(--oi-border-hover)) !important;
+}
+
+/* Focus is distinct from hover on the existing border, without an additional pointer ring. */
+.monaco-workbench.openide-visual .search-view :is(.search-widget, .query-details .file-types) .monaco-inputbox:not(.info):not(.warning):not(.error):focus-within {
+	border-color: var(--vscode-contrastActiveBorder, var(--oi-focus, var(--vscode-focusBorder))) !important;
 }

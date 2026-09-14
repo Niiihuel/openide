@@ -3,8 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IHoverWidget } from '../../../../../base/browser/ui/hover/hover.js';
 import { HoverPosition } from '../../../../../base/browser/ui/hover/hoverWidget.js';
-import { DisposableStore, IDisposable } from '../../../../../base/common/lifecycle.js';
+import { DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { onDidChangeOpenideLanguage } from '../../common/openideStrings.js';
 
@@ -81,7 +82,7 @@ export function setupChatTooltip(hoverService: IHoverService, element: HTMLEleme
 	}
 	// An empty string is how the hover service is told there is nothing to show (`_createHover`
 	// returns early on it), which is what makes a text factory able to decline per hover.
-	const appearance = { showPointer: true, compact: true };
+	const appearance = OPENIDE_CHAT_HOVER_APPEARANCE;
 	if (options?.atMouse) {
 		// This overload owns the position: it derives the target from the mouse event, so passing
 		// one would be a second opinion about where the tip goes.
@@ -106,4 +107,22 @@ export function setupChatTooltip(hoverService: IHoverService, element: HTMLEleme
  */
 export function isOpenideChatTextClipped(element: HTMLElement): boolean {
 	return element.scrollWidth > element.clientWidth + 1;
+}
+
+export const OPENIDE_CHAT_HOVER_APPEARANCE = { showPointer: false, compact: true };
+
+/** Immediate previews share the dock tooltip's appearance while tracking keyboard or pointer selection. */
+export function showChatTooltip(hoverService: IHoverService, target: HTMLElement, content: string | HTMLElement, position = HoverPosition.ABOVE): IHoverWidget | undefined {
+	return hoverService.showInstantHover({ target, content, position: { hoverPosition: position }, appearance: OPENIDE_CHAT_HOVER_APPEARANCE, persistence: { hideOnHover: false } });
+}
+
+/** Fade only the clipped edge, with resize/content changes sharing the same measurement. */
+export function setupOverflowFade(element: HTMLElement): IDisposable {
+	const update = () => element.classList.toggle('openide-text-overflowing', isOpenideChatTextClipped(element));
+	const resize = new ResizeObserver(update);
+	const content = new MutationObserver(update);
+	resize.observe(element);
+	content.observe(element, { childList: true, characterData: true, subtree: true });
+	update();
+	return toDisposable(() => { resize.disconnect(); content.disconnect(); element.classList.remove('openide-text-overflowing'); });
 }

@@ -8,7 +8,7 @@
 	position: relative;
 	overflow: hidden;
 	outline: none;
-	background: var(--vscode-editor-background);
+	background: var(--oi-canvas, var(--vscode-editor-background));
 	color: var(--vscode-foreground);
 	font-family: var(--vscode-font-family);
 	font-size: 13px;
@@ -40,7 +40,7 @@
 
 /* ---- prose: the chat's markdown, at the document scale of the settings page ---- */
 .openide-plan-prose { margin: 0; }
-.openide-plan-prose h1 { font-size: 25px; font-weight: 600; margin: 0 0 16px; line-height: 32px; letter-spacing: -0.01em; }
+.openide-plan-prose h1 { font-size: 25px; font-weight: 500; margin: 0 0 16px; line-height: 32px; letter-spacing: -0.01em; }
 .openide-plan-prose h2 { font-size: 17px; font-weight: 600; margin: 30px 0 12px; padding-bottom: 13px; border-bottom: 1px solid var(--oi-border); letter-spacing: -0.005em; }
 .openide-plan-prose h3 { font-size: 14px; font-weight: 620; margin: 18px 0 8px; }
 .openide-plan-prose h4, .openide-plan-prose h5, .openide-plan-prose h6 { font-size: 13px; font-weight: 620; margin: 14px 0 6px; }
@@ -93,6 +93,7 @@
 .openide-plan-follow-spacer { flex: 1; }
 .openide-plan-follow .codicon { font-size: 13px; }
 .openide-plan-follow-toggle {
+	min-height: 29px;
 	border: none;
 	background: transparent;
 	color: inherit;
@@ -119,10 +120,11 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 5px;
+	min-height: 29px;
 	padding: 3px 10px;
-	border: 1px solid var(--oi-border-strong);
-	border-radius: var(--oi-radius-md);
-	background: var(--vscode-button-secondaryBackground, var(--oi-tint-2));
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-control);
+	background: transparent;
 	color: var(--vscode-foreground);
 	font-family: inherit;
 	font-size: 12px;
@@ -136,10 +138,15 @@
 	align-items: flex-start;
 	gap: 10px;
 	padding: 7px 4px;
-	border-radius: var(--oi-radius-md);
+	border-radius: var(--oi-radius-row);
 }
 .openide-plan-task:hover { background: var(--oi-tint-1); }
 .openide-plan-task-circle {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
 	flex: 0 0 auto;
 	margin-top: 1px;
 	background: none;
@@ -150,7 +157,7 @@
 }
 .openide-plan-task.done .openide-plan-task-circle { color: var(--openide-green); }
 .openide-plan-task-circle .codicon { font-size: 16px; display: inline-block; }
-.openide-plan-task-text { flex: 1; line-height: 1.55; font-size: 13px; }
+.openide-plan-task-text { flex: 1; padding-top: 5px; line-height: 1.55; font-size: 13px; }
 .openide-plan-task.done .openide-plan-task-text { color: var(--vscode-descriptionForeground); text-decoration: line-through; }
 .openide-plan-task-input {
 	flex: 1;
@@ -161,10 +168,12 @@
 	font-family: inherit;
 	font-size: 13px;
 	line-height: 1.55;
-	padding: 0;
+	padding: 5px 0;
 }
 .openide-plan-task-input::placeholder { color: var(--vscode-descriptionForeground); }
 .openide-plan-task-del {
+	width: 30px;
+	height: 30px;
 	flex: 0 0 auto;
 	background: none;
 	border: none;
@@ -174,17 +183,18 @@
 	opacity: 0;
 	border-radius: var(--oi-radius-sm);
 }
-.openide-plan-task:hover .openide-plan-task-del { opacity: 0.8; }
+.openide-plan-task:hover .openide-plan-task-del,
+.openide-plan-task:focus-within .openide-plan-task-del { opacity: 0.8; }
 .openide-plan-task-del:hover { opacity: 1; background: var(--oi-border-soft); }
 .openide-plan-task-del .codicon { font-size: 13px; }
 
 /* Change pulse. Deliberately NOT animating the strike-through: it would need the real line width
    and breaks on two-line texts. The focus goes to the circle, plus a background wash that places
    the row on screen. */
-.openide-plan-task.tk-just-done, .openide-plan-task.tk-just-undone, .openide-plan-task.tk-just-added { animation: openide-plan-wash 900ms ease-out; }
-.openide-plan-task.tk-just-done .openide-plan-task-circle .codicon { animation: openide-plan-pop 480ms cubic-bezier(.34, 1.56, .64, 1); }
-.openide-plan-task.tk-just-undone .openide-plan-task-circle .codicon { animation: openide-plan-pop-out 380ms ease-out; }
-.openide-plan-task.tk-just-added { animation: openide-plan-wash 900ms ease-out, openide-plan-slide 320ms cubic-bezier(.22, .61, .36, 1); }
+.openide-plan-task.tk-just-done, .openide-plan-task.tk-just-undone, .openide-plan-task.tk-just-added { animation: openide-plan-wash var(--oi-motion-morph, 260ms) var(--oi-ease-out, ease-out); }
+.openide-plan-task.tk-just-done .openide-plan-task-circle .codicon { animation: openide-plan-pop var(--oi-motion-morph, 260ms) var(--oi-ease-out, ease-out); }
+.openide-plan-task.tk-just-undone .openide-plan-task-circle .codicon { animation: openide-plan-pop-out var(--oi-motion-exit, 120ms) var(--oi-ease-out, ease-out); }
+.openide-plan-task.tk-just-added { animation: openide-plan-wash var(--oi-motion-morph, 260ms) var(--oi-ease-out, ease-out), openide-plan-slide var(--oi-motion-enter, 180ms) var(--oi-ease-out, ease-out); }
 @keyframes openide-plan-wash {
 	0% { background: color-mix(in srgb, var(--openide-green) 22%, transparent); }
 	100% { background: transparent; }
@@ -232,3 +242,6 @@
 	.openide-plan-sk-line { animation: none; }
 	.openide-plan-caret { animation: none; }
 }
+
+.openide-plan button:focus-visible,
+.openide-plan-task-input:focus-visible { outline: 2px solid var(--oi-focus, var(--vscode-focusBorder)); outline-offset: 2px; }

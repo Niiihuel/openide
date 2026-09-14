@@ -3,7 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append, getWindow } from '../../../../../base/browser/dom.js';
+import { t } from './../../common/openideStrings.js';
+import { $, addDisposableListener, append, getWindow } from '../../../../../base/browser/dom.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
+import { setupChatTooltip } from './openideChatHover.js';
 import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { IOpenideChatLiveStatus } from '../../common/chat/openideChatLiveStatus.js';
@@ -69,6 +72,8 @@ export class OpenideChatStatusLine extends Disposable {
 	readonly domNode: HTMLElement;
 
 	private readonly _label: HTMLElement;
+	private readonly _disclosure: HTMLButtonElement;
+	private _toggleActivity: (() => void) | undefined;
 
 	/** What the label reads right now. Empty means the line is not showing anything yet. */
 	private _shown = '';
@@ -91,16 +96,29 @@ export class OpenideChatStatusLine extends Disposable {
 	 */
 	private readonly _later: RunOnceScheduler;
 
-	constructor(container: HTMLElement, timing?: IOpenideChatStatusLineTiming) {
+	constructor(container: HTMLElement, timing?: IOpenideChatStatusLineTiming, hoverService?: IHoverService) {
 		super();
 		this._stepMinMs = timing?.stepMinMs ?? OPENIDE_CHAT_STEP_MIN_MS;
 		this._idleGraceMs = timing?.idleGraceMs ?? OPENIDE_CHAT_IDLE_GRACE_MS;
-		this.domNode = append(container, $('.openide-chat-response-working.hidden'));
+		this.domNode = append(container, $('.openide-chat-response-working.hidden', { role: 'status', 'aria-live': 'polite' }));
 		// The text lives in a child: the shimmer clips a gradient to it (`background-clip: text`),
 		// and a flex row owns no text of its own to clip against.
 		this._label = append(this.domNode, $(`span.openide-chat-response-working-label.${OPENIDE_CHAT_SHIMMER_CLASS}`));
+		this._disclosure = append(this.domNode, $<HTMLButtonElement>('button.openide-chat-status-disclosure.hidden', { type: 'button', 'aria-label': t('openide.activity.details') }));
+		append(this._disclosure, $('span.codicon.codicon-chevron-down', { 'aria-hidden': 'true' }));
+		if (hoverService) { this._register(setupChatTooltip(hoverService, this._disclosure, () => t('openide.activity.details'))); }
+		this._register(addDisposableListener(this._disclosure, 'click', () => this._toggleActivity?.()));
 		this._later = this._register(new RunOnceScheduler(() => this._swap(), 0));
 		this._register({ dispose: () => { this._disposed = true; this._animation?.cancel(); } });
+	}
+
+	/** The renderer supplies the existing activity owner; no duplicate records are kept here. */
+	setDisclosure(toggle: (() => void) | undefined, expanded = false): void {
+		this._toggleActivity = toggle;
+		this._disclosure.classList.toggle('hidden', !toggle);
+		this._disclosure.setAttribute('aria-expanded', String(expanded));
+		this._disclosure.firstElementChild?.classList.toggle('codicon-chevron-up', expanded);
+		this._disclosure.firstElementChild?.classList.toggle('codicon-chevron-down', !expanded);
 	}
 
 	/**
@@ -127,6 +145,7 @@ export class OpenideChatStatusLine extends Disposable {
 	 * never saw — the line comes back for a new turn, not for the previous one's last word.
 	 */
 	hide(): void {
+		this.setDisclosure(undefined);
 		this.domNode.classList.add('hidden');
 		this._animation?.cancel();
 		this._animation = undefined;

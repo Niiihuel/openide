@@ -20,7 +20,7 @@ suite('OpenIDE Codex discovery', () => {
 			async resolveProxy() { return undefined; }, async lookupAuthorization() { return undefined; },
 			async lookupKerberosAuthorization() { return undefined; }, async loadCertificates() { return []; },
 		};
-		return { provider: new CodexProvider(service), calls };
+		return { provider: new CodexProvider(service), calls, setBody: (value: string) => { body = value; } };
 	}
 	const credential = { kind: 'oauth' as const, token: 'test-token' };
 
@@ -48,4 +48,40 @@ suite('OpenIDE Codex discovery', () => {
 		await provider.streamChat({ credential, model: 'gpt-6-astra', effort: 'max', messages: [] }, () => {}, CancellationToken.None);
 		assert.strictEqual(JSON.parse(calls[0].data!).reasoning.effort, 'max');
 	});
+	test('priority capability comes from visible live model tiers and is isolated by provider and endpoint', async () => {
+		const { provider, setBody } = setup(JSON.stringify({ models: [
+			{ slug: 'fast-model', service_tiers: [{ id: 'priority' }] },
+			{ slug: 'standard-model', service_tiers: [] },
+			{ slug: 'hidden', visibility: 'hide', service_tiers: [{ id: 'priority' }] },
+		] }));
+		assert.strictEqual(provider.getFastModeCapability('fast-model', 'account').supported, false);
+		assert.strictEqual(provider.getFastModeCapability('gpt-6-astra', 'account').supported, false);
+		await provider.listModels({ credential, providerId: 'account' }, CancellationToken.None);
+		assert.deepStrictEqual(provider.getFastModeCapability('fast-model', 'account'), { supported: true, serviceTier: 'priority' });
+		assert.strictEqual(provider.getFastModeCapability('standard-model', 'account').supported, false);
+		assert.strictEqual(provider.getFastModeCapability('hidden', 'account').supported, false);
+		assert.strictEqual(provider.getFastModeCapability('fast-model', 'other').supported, false);
+		assert.strictEqual(provider.getFastModeCapability('fast-model', 'account', 'https://other.test').supported, false);
+		setBody('{}');
+		await assert.rejects(() => provider.listModels({ credential, providerId: 'account' }, CancellationToken.None));
+		assert.strictEqual(provider.getFastModeCapability('fast-model', 'account').supported, false);
+	});
+
+	test('transmits priority only for an explicit supported request and clears capability on account reset', async () => {
+		const { provider, calls, setBody } = setup(JSON.stringify({ models: [{ slug: 'fast-model', service_tiers: [{ id: 'priority' }] }] }));
+		await provider.listModels({ credential, providerId: 'account' }, CancellationToken.None);
+		setBody('data: {"type":"response.completed","response":{}}\n\n');
+		const request = { credential, providerId: 'account', model: 'fast-model', messages: [] };
+		await provider.streamChat(request, () => {}, CancellationToken.None);
+		assert.strictEqual(JSON.parse(calls.at(-1)!.data!).service_tier, undefined);
+		await provider.streamChat({ ...request, serviceTier: 'priority' }, () => {}, CancellationToken.None);
+		assert.strictEqual(JSON.parse(calls.at(-1)!.data!).service_tier, 'priority');
+		await provider.streamChat(request, () => {}, CancellationToken.None);
+		assert.strictEqual(JSON.parse(calls.at(-1)!.data!).service_tier, undefined);
+		await provider.streamChat({ ...request, model: 'unknown', serviceTier: 'priority' }, () => {}, CancellationToken.None);
+		assert.strictEqual(JSON.parse(calls.at(-1)!.data!).service_tier, undefined);
+		provider.resetSessionState();
+		assert.strictEqual(provider.getFastModeCapability('fast-model', 'account').supported, false);
+	});
+
 });

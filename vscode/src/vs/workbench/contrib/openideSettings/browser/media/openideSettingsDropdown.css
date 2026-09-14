@@ -17,16 +17,18 @@
 	padding: 0 8px 0 10px;
 	box-sizing: border-box;
 	border: 1px solid var(--oi-border-soft);
-	border-radius: var(--oi-radius-md);
-	background: var(--oi-raised);
+	border-radius: var(--oi-radius-control, var(--oi-radius-md));
+	background: var(--oi-control, var(--oi-raised));
 	color: var(--vscode-foreground);
 	font: inherit;
 	font-size: var(--oi-text-md);
 	text-align: left;
 	cursor: pointer;
+	transition: background-color var(--oi-motion-exit, 120ms) var(--oi-ease-out, ease), border-color var(--oi-motion-exit, 120ms) var(--oi-ease-out, ease);
 }
-.openide-settings-dropdown:hover {
-	border-color: var(--oi-border);
+.openide-settings-dropdown:not(:disabled):hover {
+	border-color: var(--oi-border-hover, var(--oi-border));
+	background: var(--oi-hover);
 }
 .openide-settings-dropdown:focus-visible {
 	outline: 1px solid var(--vscode-focusBorder);
@@ -43,24 +45,16 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-/* Two 10px chevrons stacked into one 16px-tall mark: the codicon set has no chevron-up-down, and
-   the fold/unfold pair carries a bar through the middle. */
 .openide-settings-dropdown-chevron {
 	flex: 0 0 auto;
 	display: inline-flex;
-	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	width: 12px;
+	width: 16px;
 	height: 16px;
-	color: var(--vscode-descriptionForeground);
+	color: var(--oi-text-muted);
 }
-.monaco-workbench .openide-settings-dropdown .openide-settings-dropdown-chevron .codicon[class*="codicon-"] {
-	font-size: 10px;
-	line-height: 7px;
-	height: 7px;
-	color: inherit;
-}
+.openide-settings-dropdown-chevron .codicon { font-size: 16px; }
 
 /* The list stays compact whatever the enum descriptions say: Cursor's is a short column under the
    pill, and a menu that grows to the description's length walks across half the page. The detail
@@ -71,4 +65,8 @@
 }
 .openide-menu.openide-menu-settings-dropdown .openide-menu-detail {
 	max-width: 50%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-settings-dropdown { transition: none; }
 }

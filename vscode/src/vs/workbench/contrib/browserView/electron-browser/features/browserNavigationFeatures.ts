@@ -78,7 +78,7 @@ class BrowserNavigationBar extends Disposable {
 				WorkbenchHoverDelegate,
 				'element',
 				undefined,
-				{ position: { hoverPosition: HoverPosition.ABOVE } }
+				{ position: { hoverPosition: HoverPosition.BELOW }, appearance: { showPointer: true } }
 			)
 		);
 
@@ -86,7 +86,7 @@ class BrowserNavigationBar extends Disposable {
 			[IContextKeyService, scopedContextKeyService]
 		));
 
-		const navContainer = $('.browser-nav-toolbar');
+		const navContainer = $('.browser-nav-toolbar.oi-dock-toolbar');
 		this._navToolbar = this._register(scopedInstantiationService.createInstance(
 			MenuWorkbenchToolBar,
 			navContainer,
@@ -121,7 +121,7 @@ class BrowserNavigationBar extends Disposable {
 		};
 		this._urlBar = this._register(instantiationService.createInstance(BrowserUrlBarWidget, urlBarHost));
 
-		const actionsContainer = $('.browser-actions-toolbar');
+		const actionsContainer = $('.browser-actions-toolbar.oi-dock-toolbar');
 		const actionsToolbar = this._register(scopedInstantiationService.createInstance(
 			MenuWorkbenchToolBar,
 			actionsContainer,

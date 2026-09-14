@@ -12,16 +12,6 @@
  *  workbench overlay, outside the chat's own subtree.
  *--------------------------------------------------------------------------------------------*/
 
-/* Width of the trailing strip: three 20px buttons plus the two 2px gaps between them. Declared as
-   a variable because the title's reserve below has to be the SAME number — if the two ever drift
-   apart the icons start covering the text again. */
-.openide-chat-history-menu {
-	--openide-history-actions-width: 64px;
-	/* Air between the title's ellipsis and the first icon; the webview spends it as the strip's
-	   `padding-left`, which cannot work here because the strip is out of flow. */
-	--openide-history-actions-gap: 6px;
-}
-
 /* ---- Rows ---------------------------------------------------------------------------------
 
    The row's height is a constant the content cannot influence, and the action strip is positioned
@@ -86,7 +76,7 @@
 	align-items: center;
 	justify-content: center;
 	border: none;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: inherit;
 	cursor: pointer;
@@ -94,7 +84,7 @@
 }
 
 .openide-chat-history-menu .openide-menu-row-action:hover {
-	background: var(--vscode-toolbar-hoverBackground);
+	background: var(--oi-hover);
 }
 
 /* 13px is the webview's own size for these three icons (`.menu-row-action .codicon`,

@@ -466,6 +466,11 @@ export class PtyService extends Disposable implements IPtyService {
 		}
 	}
 	@traceRpc
+	async getProcessId(id: number): Promise<number | undefined> {
+		const pid = this._ptys.get(id)?.pid;
+		return pid !== undefined && pid > 0 ? pid : undefined;
+	}
+	@traceRpc
 	async getInitialCwd(id: number): Promise<string> {
 		return this._throwIfNoPty(id).getInitialCwd();
 	}

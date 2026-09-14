@@ -122,33 +122,12 @@ class StatusbarPart extends Part implements IStatusbarEntryContainer {
 
 	static get HEIGHT() { return FONT.statusBarSize22; }
 
-	/**
-	 * Vertical padding reserved around the main status bar under the floating panels
-	 * layout so its items remain centered. The part grows by this amount and
-	 * the matching padding is applied in `floatingPanels.css`.
-	 */
-
-	/**
-	 * Vertical padding reserved around the main status bar under the floating panels
-	 * experiment so its items remain centered. The part grows by this amount and
-	 * the matching padding is applied in `floatingPanels.css`.
-	 */
-	static readonly FLOATING_BOTTOM_PADDING = 6;
-	static readonly COMPACT_DENSITY_FLOATING_BOTTOM_PADDING = 4;
-
 	//#region IView
-
-	private get floatingBottomPadding(): number {
-		if (this.getId() !== Parts.STATUSBAR_PART || !this.layoutService.isFloatingPanelsEnabled()) {
-			return 0;
-		}
-		return this.layoutService.isModernUICompact() ? StatusbarPart.COMPACT_DENSITY_FLOATING_BOTTOM_PADDING : StatusbarPart.FLOATING_BOTTOM_PADDING;
-	}
 
 	readonly minimumWidth: number = 0;
 	readonly maximumWidth: number = Number.POSITIVE_INFINITY;
-	get minimumHeight(): number { return FONT.statusBarSize22 + this.floatingBottomPadding; }
-	get maximumHeight(): number { return FONT.statusBarSize22 + this.floatingBottomPadding; }
+	get minimumHeight(): number { return StatusbarPart.HEIGHT; }
+	get maximumHeight(): number { return StatusbarPart.HEIGHT; }
 
 	//#endregion
 
@@ -239,12 +218,10 @@ class StatusbarPart extends Part implements IStatusbarEntryContainer {
 		// Workbench state changes
 		this._register(this.contextService.onDidChangeWorkbenchState(() => this.updateStyles()));
 
-		// Floating panels changes the reserved bottom padding (and therefore the
-		// part height) for the main status bar only: signal the grid that the size
-		// constraint changed.
+		// The bottom rail has the same height in main and auxiliary windows.
+		// Floating panels only change its appearance, not the grid size constraint.
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
-			if (this.getId() === Parts.STATUSBAR_PART && (e.affectsConfiguration(LayoutSettings.MODERN_UI) || e.affectsConfiguration(LayoutSettings.MODERN_UI_DENSITY))) {
-				this._onDidChange.fire(undefined);
+			if (this.getId() === Parts.STATUSBAR_PART && e.affectsConfiguration(LayoutSettings.MODERN_UI)) {
 				if (this.element) {
 					this.updateStyles();
 				}

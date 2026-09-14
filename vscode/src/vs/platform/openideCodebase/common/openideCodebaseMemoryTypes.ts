@@ -22,11 +22,13 @@ export type CodebaseMemoryNodeKind =
 	/**
 	 * A fact a HUMAN or an agent wrote down, from `.openide/MEMORY.md`.
 	 *
-	 * The only kind in this list that is not read off the code. It is here rather than in a store
+	 * Written knowledge rather than a code extraction. It is here rather than in a store
 	 * of its own so that a decision about a module comes back from the SAME query that returns the
 	 * module: memory that has to be read separately, in full, every session is memory nobody reads.
 	 */
-	| 'note';
+	| 'note'
+	/** Derived projections of goal documents, never authority to execute or verify work. */
+	| 'goal' | 'goalEvidence';
 
 /** Relaciones tipadas. Compatible con MemoryEdgeType legacy. */
 export type CodebaseMemoryRelationType =
@@ -38,7 +40,7 @@ export type CodebaseMemoryRelationType =
 	| 'TESTS' | 'TESTED_BY'
 	| 'ROUTES_TO' | 'CONFIGURES' | 'RELATED_TO'
 	/** A note is about this entity. Only ever emitted from an unambiguous, explicit mention. */
-	| 'ANNOTATES';
+	| 'ANNOTATES' | 'HAS_EVIDENCE';
 
 /** Where a node or relation came from. It decides the confidence level. */
 export type CodebaseMemoryProvider =
@@ -123,6 +125,8 @@ export interface ICodebaseMemorySnapshot {
 
 /** An indexed file with its hash and metadata. */
 export interface ICodebaseIndexedFile {
+	/** Extraction identity is separate from the content hash used by memory provenance. */
+	readonly extractionMode?: 'treeSitter' | 'regex' | 'text';
 	readonly uri: string;
 	readonly hash: string;
 	readonly language: string;

@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IOpenideChatCanvasContent, IOpenideChatContent, IOpenideChatPlanContent, IOpenideChatSubagentContent, OpenideChatSubagentStatus } from './openideChatContent.js';
+import { IOpenideChatCanvasContent, IOpenideChatContent, IOpenideChatNoticeContent, IOpenideChatPlanContent, IOpenideChatSubagentContent, OpenideChatSubagentStatus } from './openideChatContent.js';
+import { advanceOpenideChatResponseItem, createOpenideChatResponseItem, isOpenideChatResponseItem } from './openideChatItem.js';
 import { ISubagentRun } from '../openideSubagentTypes.js';
 import { IOpenideChatReducerStep } from './openideChatReducer.js';
 import {
@@ -31,7 +32,14 @@ import {
  * `AgentLoopEvent` in, one step out", and widening it to a union of two unrelated event families
  * would make every caller pattern-match on which kind it holds.
  */
+/** An answer accepted by the service that owns the pending request. */
+export type IOpenideChatInputResolution =
+	| { readonly kind: 'accountChoice'; readonly requestId: string; readonly decision: string }
+	| { readonly kind: 'modeSuggestion'; readonly requestId: string; readonly accepted: boolean };
+
 export type IOpenideChatSurfaceEvent =
+	| { readonly type: 'inputResolved'; readonly resolution: IOpenideChatInputResolution }
+	| { readonly type: 'memoryCapture'; readonly message: string; readonly messageId?: string }
 	/** The plan being written. `done` closes the skeleton without leaving anything behind. */
 	| { readonly type: 'planDraft'; readonly path: string; readonly title: string; readonly done: boolean }
 	/** `plan_save` closed: the reviewable card, in the place the draft was holding. */
@@ -59,8 +67,13 @@ export function applyOpenideChatSurfaceEvent(
 	ev: IOpenideChatSurfaceEvent,
 	options?: { readonly now?: number },
 ): IOpenideChatReducerStep {
+	if (ev.type === 'memoryCapture') {
+		const next = applyMemoryCapture(state, ev.message, ev.messageId);
+		return { state: next, items: next.items, sessionEffects: [] };
+	}
 	const draft = createOpenideChatDraft(state, options?.now ?? Date.now());
 	switch (ev.type) {
+		case 'inputResolved': applyInputResolution(draft, ev.resolution); break;
 		case 'planDraft': applyPlanDraft(draft, ev.path, ev.title, ev.done); break;
 		case 'planCard': applyPlanCard(draft, ev.path, ev.title, ev.markdown, ev.external === true); break;
 		case 'canvasCard': applyCanvasCard(draft, ev.path, ev.title, ev.created); break;
@@ -68,6 +81,41 @@ export function applyOpenideChatSurfaceEvent(
 	}
 	const next = commitOpenideChatDraft(state, draft);
 	return { state: next, items: next.items, sessionEffects: draft.effects };
+}
+
+/** Keep the receipt inside its originating reply, so later work follows it chronologically. */
+function applyMemoryCapture(state: IOpenideChatReducerState, message: string, messageId?: string): IOpenideChatReducerState {
+	const notice: IOpenideChatNoticeContent = { kind: 'notice', severity: 'info', source: 'memoryCapture', message };
+	for (let index = state.items.length - 1; index >= 0; index--) {
+		const item = state.items[index];
+		if (!isOpenideChatResponseItem(item) || (messageId !== undefined && item.requestId !== messageId)) { continue; }
+		const noticeIndex = item.content.findIndex(content => content.kind === 'notice' && content.source === 'memoryCapture');
+		if (noticeIndex < 0) { continue; }
+		const previous = item.content[noticeIndex] as IOpenideChatNoticeContent;
+		if (previous.message === message) { return state; }
+		const content = [...item.content]; content[noticeIndex] = notice;
+		const items = [...state.items]; items[index] = advanceOpenideChatResponseItem(item, { content });
+		return { ...state, items };
+	}
+	// A save in the active reply is a timeline event. Close only prose/group cursors; running
+	// tool IDs must survive so their eventual results still resolve the correct cards.
+	const active = state.items[state.activeIndex];
+	if (active && isOpenideChatResponseItem(active) && !active.isComplete && (messageId === undefined || active.requestId === messageId)) {
+		const draft = createOpenideChatDraft(state, Date.now());
+		interruptProse(draft);
+		pushOpenideChatContent(draft, notice);
+		return commitOpenideChatDraft(state, draft);
+	}
+	for (let index = state.items.length - 1; index >= 0; index--) {
+		const item = state.items[index];
+		if (!isOpenideChatResponseItem(item) || item.requestId !== (messageId ?? state.requestId)) { continue; }
+		const items = [...state.items];
+		items[index] = advanceOpenideChatResponseItem(item, { content: [...item.content, notice] });
+		return { ...state, items };
+	}
+	const seq = state.seq + 1;
+	const item = createOpenideChatResponseItem({ id: `memory_capture_${seq}`, requestId: messageId ?? state.requestId, content: [notice], isComplete: true });
+	return { ...state, seq, items: [...state.items, item] };
 }
 
 /**
@@ -186,4 +234,17 @@ function applyCanvasCard(draft: IOpenideChatDraft, path: string, title: string, 
 	// A second write APPENDS a second card, exactly as the webview does (`renderCanvasCard` always
 	// builds a new node). Two writes of one canvas are two things that happened, not one.
 	pushOpenideChatContent(draft, content satisfies IOpenideChatContent);
+}
+
+/** Answer by request id, never by whichever card happens to be last. */
+function applyInputResolution(draft: IOpenideChatDraft, resolution: IOpenideChatInputResolution): void {
+	for (let index = 0; index < draft.content.length; index++) {
+		const content = draft.content[index];
+		if (!('requestId' in content) || content.requestId !== resolution.requestId) { continue; }
+		if (content.kind === 'accountChoice' && resolution.kind === 'accountChoice' && content.decision === undefined) {
+			setOpenideChatContentAt(draft, index, { ...content, decision: resolution.decision });
+		} else if (content.kind === 'modeSuggestion' && resolution.kind === 'modeSuggestion' && content.accepted === undefined) {
+			setOpenideChatContentAt(draft, index, { ...content, accepted: resolution.accepted });
+		}
+	}
 }

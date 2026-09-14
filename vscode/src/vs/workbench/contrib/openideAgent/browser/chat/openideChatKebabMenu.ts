@@ -32,6 +32,7 @@ export interface IOpenideChatKebabActions {
 	remove(): void;
 	removeAll(): void;
 	openProjectMap(): void;
+	openAgentWindow(): void;
 }
 
 /**
@@ -48,6 +49,7 @@ const ITEMS: readonly IKebabItem[] = [
 	{ icon: 'trash', label: 'chat.menu.delete', run: actions => actions.remove() },
 	{ icon: 'clear-all', label: 'chat.menu.deleteAll', run: actions => actions.removeAll() },
 	{ separator: true },
+	{ icon: 'link-external', label: 'agentWindow.open', run: actions => actions.openAgentWindow() },
 	{ icon: 'type-hierarchy', label: 'chat.menu.projectMap', run: actions => actions.openProjectMap() },
 ];
 

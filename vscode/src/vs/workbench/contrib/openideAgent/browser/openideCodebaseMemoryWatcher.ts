@@ -15,6 +15,8 @@ import { URI } from '../../../../base/common/uri.js';
 import { IFileService, FileChangeType, FileOperationError, FileOperationResult } from '../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { isCodebaseDesignDocument } from '../../../../platform/openideCodebase/common/openideCodebaseDesigns.js';
+import { isCodebaseGoalDocument } from '../../../../platform/openideCodebase/common/openideCodebaseGoals.js';
 import { isCodebaseNotesUri } from '../../../../platform/openideCodebase/common/openideCodebaseNotes.js';
 import { ICodebaseMemoryService } from './openideCodebaseMemoryService.js';
 import { IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
@@ -91,7 +93,7 @@ export class OpenideCodebaseMemoryWatcher extends Disposable {
 		// user is watching: an agent writes a fact and the next query has to see it. Without this
 		// the note would sit unindexed until the next full rebuild, which is the difference
 		// between shared memory and a file nobody reads.
-		if (isCodebaseNotesUri(path)) { return true; }
+		if (isCodebaseNotesUri(path) || isCodebaseGoalDocument(uri.toString()) || isCodebaseDesignDocument(uri.toString())) { return true; }
 		const baseOk = !['/node_modules/', '/.git/', '/dist/', '/out/', '/build/', '/target/', '/vendor/', '/coverage/', '/.venv/', '/venv/', '/bin/', '/obj/', '/.openide/memory-indexes/'].some(excluded => path.includes(excluded)) && (/\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|cs|c|h|cpp|hpp|cc)$/.test(path) || path.endsWith('/package.json'));
 		if (!baseOk) { return false; }
 		// Cheap prefilter using the user's settings: the shared process revalidates anyway

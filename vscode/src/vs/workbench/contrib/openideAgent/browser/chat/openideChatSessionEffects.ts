@@ -26,6 +26,7 @@ import { OpenideChatFollowController } from './openideChatFollowController.js';
 
 /** The conversation an event belongs to. Passed per call: a run outlives the active tab. */
 export interface IOpenideChatEffectTarget {
+	readonly targetWindowId?: number;
 	readonly conversationId: string;
 	/** Live array of the run, so `saveConversation` persists what the engine actually appended. */
 	readonly messages: IChatMessage[];
@@ -96,7 +97,7 @@ export class OpenideChatSessionEffects extends Disposable {
 	private applyOne(target: IOpenideChatEffectTarget, effect: IOpenideChatSessionEffect): void {
 		switch (effect.type) {
 			case 'followLocation':
-				this._follow.follow(target.conversationId, effect.location);
+				this._follow.follow(target.conversationId, effect.location, target.targetWindowId);
 				return;
 			case 'usage':
 				this.applyUsage(target.conversationId, effect.usage);
@@ -108,7 +109,7 @@ export class OpenideChatSessionEffects extends Disposable {
 				this.sessions.save(target.conversationId, target.messages, false);
 				return;
 			case 'subagentSessionStart':
-				this.startMirror(effect.runId, effect.title, effect.prompt);
+				this.startMirror(effect.runId, effect.title, effect.prompt, target.conversationId, effect.inLoop);
 				return;
 			case 'subagentSessionMessage':
 				this.appendMirrorMessage(effect.runId, effect.message, effect.mergeText);
@@ -117,7 +118,7 @@ export class OpenideChatSessionEffects extends Disposable {
 				this.saveMirror(effect.runId, effect.isError);
 				return;
 			case 'subagentSessionEnd':
-				this.endMirror(effect.runId);
+				this.endMirror(effect.runId, effect.cancelled ? 'cancelled' : effect.isError ? 'failed' : 'completed');
 				return;
 			case 'modeHandoff':
 			case 'runComplete':
@@ -166,15 +167,21 @@ export class OpenideChatSessionEffects extends Disposable {
 		return recovered;
 	}
 
-	private startMirror(runId: string, title: string, prompt: string): void {
+	private startMirror(runId: string, title: string, prompt: string, parentSessionId: string, inLoop = false): void {
 		// `mirrorSessionOf` and not `_mirrors.has`: after a reload the Map is empty but the session
 		// exists, and re-creating it would fork the specialist's history into a second tab.
 		if (this.mirrorSessionOf(runId)) {
 			return; // subagentStart is re-emitted on reconnect; a second session would fork the history
 		}
 		const messages: IChatMessage[] = [{ role: 'user', content: prompt }];
-		const sessionId = this.sessions.createBackground(title, messages, runId);
+		const sessionId = this.sessions.createBackground(title, messages, runId, parentSessionId);
+
 		this._mirrors.set(runId, { sessionId, messages });
+		if (inLoop) {
+			// Durable runs own their lifecycle; in-loop specialists keep it with their mirror.
+			this.sessions.rename(sessionId, title);
+			this.sessions.setSubagentStatus(sessionId, 'running');
+		}
 	}
 
 	private appendMirrorMessage(runId: string, message: IChatMessage, mergeText: boolean): void {
@@ -199,11 +206,12 @@ export class OpenideChatSessionEffects extends Disposable {
 		}
 	}
 
-	private endMirror(runId: string): void {
+	private endMirror(runId: string, status: 'completed' | 'failed' | 'cancelled'): void {
 		const mirror = this._mirrors.get(runId);
 		if (!mirror) {
 			return;
 		}
+		this.sessions.setSubagentStatus(mirror.sessionId, status);
 		// Transient tab: the specialist's strip entry closes when its run ends, but never while the
 		// user is reading it — the session itself stays reachable from the Agents panel either way.
 		if (this._visibleId !== mirror.sessionId) {

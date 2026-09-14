@@ -14,7 +14,7 @@ import { Disposable, DisposableStore, MutableDisposable } from '../../../../../b
 import { isLinux, isMacintosh } from '../../../../../base/common/platform.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
-import { defaultButtonStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
+import { openideButtonStyles, openideSecondaryButtonStyles } from '../../../openideAgent/browser/openideControlStyles.js';
 import { IBrowserViewCertificateError, IBrowserViewLoadError } from '../../../../../platform/browserView/common/browserView.js';
 import { IBrowserViewModel } from '../../common/browserView.js';
 import {
@@ -355,7 +355,7 @@ class BrowserEditorErrorFeatures extends BrowserEditorContribution {
 		const buttonBar = new ButtonBar(actionContainer);
 		this._certActionButton.value = buttonBar;
 
-		const primaryButton = buttonBar.addButton({ ...defaultButtonStyles });
+		const primaryButton = buttonBar.addButton({ ...openideButtonStyles });
 		primaryButton.label = canGoBack
 			? localize('browser.certGoBack', "Go Back")
 			: localize('browser.certCloseTab', "Close Tab");
@@ -367,7 +367,7 @@ class BrowserEditorErrorFeatures extends BrowserEditorContribution {
 			}
 		});
 
-		const secondaryButton = buttonBar.addButton({ ...defaultButtonStyles, secondary: true });
+		const secondaryButton = buttonBar.addButton({ ...openideSecondaryButtonStyles, secondary: true });
 		secondaryButton.label = localize('browser.certProceed', "Proceed anyway (unsafe)");
 		secondaryButton.onDidClick(() => {
 			this.editor.model?.trustCertificate(certError.host, certError.fingerprint);

@@ -41,7 +41,7 @@ const INDEX_MAX_SKILLS = 30;
 /** Valid name per the spec: kebab-case, 1-64 chars, no -- and no leading/trailing -. */
 const NAME_RE = /^[a-z0-9](?:[a-z0-9]|-(?!-)){0,62}[a-z0-9]$|^[a-z0-9]$/;
 
-const BUILTIN_CANVAS_SKILL = `---
+export const BUILTIN_CANVAS_SKILL = `---
 name: openide-canvas
 description: Create, edit or debug HTML/CSS visual artifacts and interactive .canvas.tsx wireframes in OpenIDE. You MUST load it before canvas_write or before touching .canvas.tsx; use it for wireframes, comparing options, architecture, audits, charts and standalone tables.
 ---
@@ -52,15 +52,21 @@ A Canvas is a live HTML/CSS visual document that opens next to the chat. Prefer 
 
 ## Visual principle
 
+Choose the artifact first. For editable designs, call canvas_templates then canvas_create; inspect with canvas_inspect and patch using stable IDs and expectedRevision. These tools are also available to connected CLIs. Templates include whiteboard (positioned shapes and freehand), animation (0–60 second keyframes) and scene3d (box, sphere, cylinder or bounded OBJ mesh). Import PNG/JPEG/passive SVG images, OBJ meshes or DTCG/Tokens Studio color JSON with canvas_import. Importing tokens merges project colors; never substitute an unrelated brand. Use setAdvanced for frame, keyframes, object3d and sourcePath (workspace implementation file). Use canvas_export format html/pdf/pptx/svg/obj; PDF and PPTX are static, PowerPoint preserves editable text/shapes but rasterizes image, path and 3D objects. SVG preserves motion keyframes. Do not claim GLB, video export, remote Figma synchronization or arbitrary font loading. Use canvas_write for free-form analytical TSX.
+
+Wireframe mode communicates structure; mockup mode uses the project's design tokens and meaningful product copy. Do not force a branded prototype to use the editor's colors. Implement real local interactions for every visible control, and use Play mode to test both successful and invalid form states. Export with canvas_export or prepare a revision-specific brief with canvas_handoff; submit the brief through Plan/GOAL for implementation review.
+
+The following conventions apply to analytical TSX and low-fidelity wireframes. Structured mockups use their own project tokens and content.
+
 Generate visual HTML/CSS, not ASCII art or TUI. To represent an interface or a structure use semantic wireframes: boxes, lines, hierarchy and short labels. The goal is to communicate structure and decisions, not to copy specific final content.
 
-- Use Wireframe, WireframeBox, WireframeLine and WireframeText for mockups.
+- Use Wireframe, WireframeBox, WireframeLine and WireframeText for low-fidelity wireframes.
 - Keep content generic: Navigation, Title, Form, Primary action; do not invent long product copy.
 - Use Choice whenever there are alternatives the user has to select.
 - Do not draw interfaces with │ ─ ┌ ┐ [ ] characters or monospace blocks.
 - Neutral palette, native to the host: never hardcode neon, purple, gradients or loud shadows.
 
-## Mandatory workflow
+## Mandatory workflow for analytical TSX
 
 1. To edit an existing one, call canvas_list and canvas_read; preserve whatever does not change.
 2. Create or update the real file with canvas_write; never paste TSX as a substitute.
@@ -112,7 +118,7 @@ On selection, OpenIDE puts label into the chat composer as visible, editable tex
 </Wireframe>
 \`\`\`
 
-Before delivering, check hierarchy, reasonable responsiveness, absence of TUI/neon and that every Choice has a clear ID/label. Treat the canvas_write TypeScript check as authoritative. In the final answer include an absolute link to the .canvas.tsx and tell the user they can open it next to the chat.
+Before delivering, check hierarchy, reasonable responsiveness, absence of TUI/neon and that every Choice has a clear ID/label. The canvas_write check validates syntax and SDK imports, not full TypeScript semantics or runtime behavior. Test the rendered interaction before delivery. In the final answer include an absolute link to the .canvas.tsx and tell the user they can open it next to the chat.
 `;
 
 export class OpenideAgentSkills {

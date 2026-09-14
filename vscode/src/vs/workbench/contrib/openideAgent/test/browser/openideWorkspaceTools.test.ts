@@ -91,8 +91,10 @@ suite('OpenIDE tool bodies respect the assigned workspace', () => {
 	test('registry dispatch validates arguments and nested permissions before effects and binds observations to the run', async () => {
 		const { files, lease, registry } = await fixture();
 		let approvals = 0;
+		const owners: { messageId?: string; runId?: string }[] = [];
+		store.add(registry.onDidEdit(event => owners.push({ messageId: event.messageId, runId: event.runId })));
 		const execution: IOpenideToolExecution = { runId: 'run-a', origin: 'native', authorize: async () => { approvals++; return true; } };
-		const invoke = (name: string, args: object, run = execution) => registry.invoke(name, JSON.stringify(args), CancellationToken.None, { workspaceRoot: lease, conversationId: 'same-conversation', execution: run });
+		const invoke = (name: string, args: object, run = execution) => registry.invoke(name, JSON.stringify(args), CancellationToken.None, { workspaceRoot: lease, conversationId: 'same-conversation', messageId: 'message-a', execution: run });
 		assert.match(await invoke('write_file', { path: 'a.txt' }), /invalid arguments/);
 		assert.strictEqual(approvals, 0);
 		assert.match(await invoke('write_file', { path: 'a.txt', content: 'blind replacement' }), /Read this file/);
@@ -106,5 +108,6 @@ suite('OpenIDE tool bodies respect the assigned workspace', () => {
 		assert.strictEqual((await files.readFile(URI.joinPath(lease, 'a.txt'))).value.toString(), 'lease original');
 		assert.match(await invoke('write_file', { path: 'a.txt', content: 'observed replacement' }), /^OK:/);
 		assert.strictEqual((await files.readFile(URI.joinPath(lease, 'a.txt'))).value.toString(), 'observed replacement');
+		assert.deepStrictEqual(owners, [{ messageId: 'message-a', runId: 'run-a' }]);
 	});
 });

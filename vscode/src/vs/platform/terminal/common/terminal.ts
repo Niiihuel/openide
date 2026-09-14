@@ -350,6 +350,8 @@ export interface IPtyService {
 	sendSignal(id: number, signal: string): Promise<void>;
 	resize(id: number, cols: number, rows: number, pixelWidth?: number, pixelHeight?: number): Promise<void>;
 	clearBuffer(id: number): Promise<void>;
+	/** Returns the live backend PID, including transient terminals; never trusts a renderer PID. */
+	getProcessId(id: number): Promise<number | undefined>;
 	getInitialCwd(id: number): Promise<string>;
 	getCwd(id: number): Promise<string>;
 	acknowledgeDataEvent(id: number, charCount: number): Promise<void>;

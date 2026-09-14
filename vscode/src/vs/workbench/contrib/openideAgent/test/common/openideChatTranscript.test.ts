@@ -54,6 +54,13 @@ suite('OpenIDE chat transcript restore', () => {
 		return item;
 	}
 
+	test('restore does not substitute replay time for elapsed work', () => {
+		const items = build([{ role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Hi' }]);
+		const response = items.find(item => item.kind === 'response');
+		assert.ok(response?.kind === 'response');
+		assert.deepStrictEqual([response.startedAt, response.completedAt], [undefined, undefined]);
+	});
+
 	test('a saved conversation comes back as finished rows, never as a spinning turn', () => {
 		const items = build([
 			{ role: 'user', content: 'hola', messageId: 'm1' },
@@ -271,6 +278,18 @@ suite('OpenIDE chat transcript restore', () => {
 		assert.strictEqual(card.model, 'grok-4.6');
 		assert.strictEqual(card.status, 'completed');
 		assert.strictEqual(card.timeline.length, 1);
+	});
+
+	test('adjacent durable workers restore their execution parent instead of separate tool-call parents', () => {
+		const second = { ...storedRun, runId: 'run_10', parentRunId: 'nested-parent' };
+		const items = build([
+			{ role: 'user', content: 'delegate', messageId: 'm1' },
+			{ role: 'assistant', content: '', toolCalls: ['c1', 'c2'].map(id => ({ id, name: 'delegate_to_subagent', argumentsJson: '{}' })) },
+			{ role: 'tool', toolCallId: 'c1', content: 'runId=run_9' },
+			{ role: 'tool', toolCallId: 'c2', content: 'runId=run_10' },
+		], new Map([['run_9', storedRun], ['run_10', second]]));
+		const cards = contentOf(items, 1) as IOpenideChatSubagentContent[];
+		assert.deepStrictEqual(cards.map(card => [card.runId, card.parentId]), [['run_9', storedRun.parentRunId], ['run_10', 'nested-parent']]);
 	});
 
 	test('a specialist whose run the store no longer has still restores as a row', () => {

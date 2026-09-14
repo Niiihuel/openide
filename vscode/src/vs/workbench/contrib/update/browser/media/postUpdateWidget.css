@@ -23,9 +23,9 @@
 	position: relative;
 	display: flex;
 	flex-direction: column;
-	min-width: 320px;
-	max-width: 420px;
-	border-radius: var(--oi-radius-lg, 8px);
+	min-width: min(320px, calc(100vw - 24px));
+	max-width: min(420px, calc(100vw - 24px));
+	border-radius: var(--oi-radius-popover, 14px);
 	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
 	font-family: var(--oi-font, var(--vscode-font-family));
 	font-size: var(--oi-text-sm, 12px);
@@ -34,16 +34,7 @@
 
 /* Banner ------------------------------------------------------------------------------------ */
 
-/*
- * The default banner is DERIVED, not painted: a wash of the product's accent over the surface the
- * rest of the IDE is already using, with the product mark set large and faint on the right.
- *
- * What it replaces was a hardcoded indigo-and-lime gradient copied from VS Code's Copilot banner
- * -- five fixed hex colours that belonged to another product's palette, sat wrong on every light
- * theme, and were the loudest thing this IDE ever put on screen. Deriving it means the banner
- * follows the user's theme the way every other OpenIDE surface does, and a note that wants its own
- * art still overrides the whole thing with `bannerImageUrl`.
- */
+/* Release artwork can replace this neutral product banner. */
 .post-update-widget .banner {
 	position: relative;
 	aspect-ratio: 16 / 5;
@@ -51,13 +42,8 @@
 	background-position: center;
 	background-size: cover;
 	background-repeat: no-repeat;
-	background-color: var(--oi-raised, var(--vscode-editorWidget-background));
-	/* The wash is the PRODUCT'S accent -- the same colour as the buttons -- at two low mixes, so
-	   the banner belongs to whatever theme is loaded instead of introducing a hue of its own. It
-	   was a fixed green, which sat next to amber buttons and followed no theme anywhere. */
-	background-image:
-		radial-gradient(ellipse 70% 120% at 18% 110%, color-mix(in srgb, var(--vscode-button-background, #eeb266) 26%, transparent), transparent 70%),
-		radial-gradient(ellipse 80% 130% at 88% -20%, color-mix(in srgb, var(--vscode-button-background, #eeb266) 14%, transparent), transparent 70%);
+	background-color: var(--oi-control, var(--vscode-editorWidget-background));
+
 	border-bottom: 1px solid var(--oi-border-soft, rgba(128, 128, 128, 0.14));
 }
 
@@ -115,14 +101,14 @@
 	position: absolute;
 	top: 8px;
 	right: 8px;
-	width: 22px;
-	height: 22px;
+	width: 30px;
+	height: 30px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	padding: 0;
 	border: none;
-	border-radius: var(--oi-radius-sm, 4px);
+	border-radius: var(--oi-radius-control, 9px);
 	/* The close button sits on the banner, which is art and not a themed surface: without a ground
 	   of its own the glyph disappears into whatever the wash happens to be under it. */
 	background: color-mix(in srgb, var(--oi-overlay, var(--vscode-editorWidget-background)) 70%, transparent);
@@ -136,8 +122,8 @@
 }
 
 .post-update-widget .banner-close:focus-visible {
-	outline: 1px solid var(--oi-focus, var(--vscode-focusBorder));
-	outline-offset: 1px;
+	outline: 2px solid var(--oi-focus, var(--vscode-focusBorder));
+	outline-offset: 2px;
 }
 
 /* Body -------------------------------------------------------------------------------------- */
@@ -154,11 +140,11 @@
 	align-self: flex-start;
 	padding: 2px 8px;
 	border: 1px solid var(--oi-border, rgba(128, 128, 128, 0.24));
-	border-radius: var(--oi-radius-sm, 4px);
+	border-radius: var(--oi-radius-circle, 999px);
 	background-color: var(--oi-tint-2, rgba(128, 128, 128, 0.08));
 	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
 	font-size: var(--oi-text-xs, 11px);
-	font-weight: 600;
+	font-weight: 500;
 	line-height: 1.4;
 	letter-spacing: 0.02em;
 	text-transform: none;
@@ -166,7 +152,7 @@
 
 .post-update-widget .title {
 	font-size: 16px;
-	font-weight: 600;
+	font-weight: 500;
 	line-height: 1.3;
 	letter-spacing: -0.015em;
 	color: var(--oi-text, var(--vscode-foreground));
@@ -226,6 +212,7 @@
 
 .post-update-widget .button-bar {
 	display: flex;
+	flex-wrap: wrap;
 	justify-content: flex-end;
 	align-items: center;
 	gap: 8px;
@@ -238,7 +225,7 @@
 	justify-content: center;
 	min-height: 30px;
 	padding: 6px 14px;
-	border-radius: var(--oi-radius-md, 6px);
+	border-radius: var(--oi-radius-control, 9px);
 	font-family: inherit;
 	font-size: var(--oi-text-sm, 12px);
 	font-weight: 550;
@@ -247,8 +234,8 @@
 }
 
 .post-update-widget .button-bar button:focus-visible {
-	outline: 1px solid var(--oi-focus, var(--vscode-focusBorder));
-	outline-offset: 1px;
+	outline: 2px solid var(--oi-focus, var(--vscode-focusBorder));
+	outline-offset: 2px;
 }
 
 .post-update-widget .update-button-secondary {

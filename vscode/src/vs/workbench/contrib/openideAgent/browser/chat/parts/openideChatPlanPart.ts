@@ -280,6 +280,12 @@ export class OpenideChatPlanPart extends OpenideChatContentPart {
 			render: (container, store) => {
 				const content = createMenuContent(container.ownerDocument);
 				container.appendChild(content);
+				const goal = createMenuRow(container.ownerDocument, { icon: 'target', label: t('goal.fromPlan') });
+				store.add(addDisposableListener(goal, 'click', () => {
+					this._more.close();
+					void this._commandService.executeCommand('openide.agent.createGoalFromPlan', { planPath: this._content.planId, objective: this._content.title || parseOpenideChatPlan(this._content.body.value).title }).catch(error => this._notificationService.error(error));
+				}));
+				content.appendChild(goal);
 				const reject = createMenuRow(container.ownerDocument, { icon: 'close', label: t('chat.plan.reject') });
 				store.add(addDisposableListener(reject, 'click', () => { this._more.close(); this._reject(); }));
 				content.appendChild(reject);

@@ -61,6 +61,9 @@ export interface IOpenideChatResponseItem extends IOpenideChatItemBase {
 	readonly version: number;
 	readonly isCanceled?: boolean;
 	readonly errorMessage?: string;
+	/** Live event timestamps; omitted for restored transcripts without timing data. */
+	readonly startedAt?: number;
+	readonly completedAt?: number;
 }
 
 export type IOpenideChatItem = IOpenideChatRequestItem | IOpenideChatResponseItem;
@@ -126,6 +129,9 @@ export interface IOpenideChatResponseUpdate {
 	readonly isComplete?: boolean;
 	readonly isCanceled?: boolean;
 	readonly errorMessage?: string;
+	/** Live event timestamps; omitted for restored transcripts without timing data. */
+	readonly startedAt?: number;
+	readonly completedAt?: number;
 }
 
 /**
@@ -145,5 +151,7 @@ export function advanceOpenideChatResponseItem(item: IOpenideChatResponseItem, u
 		isComplete,
 		isCanceled: update.isCanceled ?? item.isCanceled,
 		errorMessage: update.errorMessage ?? item.errorMessage,
+		startedAt: update.startedAt ?? item.startedAt,
+		completedAt: update.completedAt ?? item.completedAt,
 	};
 }

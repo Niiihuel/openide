@@ -157,4 +157,20 @@ suite('OpenIDE — which tools an external agent sees', () => {
 		assert.ok(help.includes('runtime prerequisites'));
 	});
 
+	test('intent guidance only recommends entry points present in the exposed inventory', () => {
+		const help = openideCapabilityHelp(['openide_memory_get', 'openide_browser_screenshot']) as {
+			families: { id: string; intents: readonly string[]; entryTools: string[] }[];
+		};
+		assert.deepStrictEqual(help.families.map(({ id, entryTools }) => ({ id, entryTools })), [
+			{ id: 'canvas', entryTools: [] },
+			{ id: 'browser', entryTools: ['openide_browser_screenshot'] },
+			{ id: 'map', entryTools: [] },
+			{ id: 'memory', entryTools: ['openide_memory_get'] },
+			{ id: 'plans', entryTools: [] },
+			{ id: 'goals', entryTools: [] },
+			{ id: 'editor', entryTools: [] },
+		]);
+		assert.ok(help.families.every(family => family.intents.length > 0));
+	});
+
 });

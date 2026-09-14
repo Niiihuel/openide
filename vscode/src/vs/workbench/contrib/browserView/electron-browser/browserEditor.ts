@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { applyOpenideSurfaceCss } from '../../openideAgent/browser/openideSurfaceStyle.js';
 import './media/browser.css';
 import { localize, localize2 } from '../../../../nls.js';
 import { $, Dimension, IDomPosition } from '../../../../base/browser/dom.js';
@@ -472,6 +473,7 @@ export class BrowserEditor extends EditorPane {
 	}
 
 	protected override createEditor(parent: HTMLElement): void {
+		applyOpenideSurfaceCss();
 		// Create scoped context key service for this editor instance
 		const contextKeyService = this._register(this.contextKeyService.createScoped(parent));
 

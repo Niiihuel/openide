@@ -27,7 +27,7 @@ import './media/openideSettingsIcons.css';
 export type OpenideSettingsTint = 'blue' | 'violet' | 'green' | 'orange' | 'teal' | 'gray';
 
 interface IOpenideSettingsIcon {
-	readonly icon: BootstrapIconName;
+	readonly icon: BootstrapIconName | { readonly codicon: string };
 	readonly tint: OpenideSettingsTint;
 }
 
@@ -57,6 +57,7 @@ const ICONS: ReadonlyMap<string, IOpenideSettingsIcon> = new Map<string, IOpenid
 	// Core workbench areas (upstream TOC ids)
 	['editor', { icon: 'pencil', tint: 'blue' }],
 	['workbench', { icon: 'layout-sidebar', tint: 'violet' }],
+	['workbench/profile', { icon: { codicon: 'account' }, tint: 'gray' }],
 	['workbench/language', { icon: 'translate', tint: 'teal' }],
 	['window', { icon: 'window', tint: 'teal' }],
 	['features', { icon: 'sliders2', tint: 'green' }],
@@ -146,6 +147,7 @@ export function appendOpenideSettingsIcon(parent: HTMLElement, id: string, large
 	const chip = append(parent, $(`span.openide-settings-navicon.tint-${icon.tint}${large ? '.large' : ''}`, { 'aria-hidden': 'true' }));
 	// Flat glyphs read best near the codicon's own 16px; the boxed-chip era used 13px because
 	// the glyph sat inside a tinted square that needed breathing room.
-	appendBootstrapIcon(chip, icon.icon, large ? 20 : 16);
+	if (typeof icon.icon === 'string') { appendBootstrapIcon(chip, icon.icon, large ? 20 : 16); }
+	else { const glyph = append(chip, $('span.codicon.codicon-' + icon.icon.codicon)); glyph.style.fontSize = large ? '20px' : '16px'; }
 	return chip;
 }

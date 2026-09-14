@@ -276,12 +276,12 @@
 	border-radius: var(--vscode-cornerRadius-medium);
 }
 
-.quick-input-list .monaco-list-row:hover .quick-input-list-entry {
+.quick-input-list .monaco-list-row:hover .quick-input-list-entry:not(.quick-input-list-separator-as-item) {
 	background-color: var(--vscode-list-hoverBackground);
 }
 
-.quick-input-list .monaco-list-row.focused .quick-input-list-entry,
-.quick-input-list .monaco-list-row.passive-focused .quick-input-list-entry {
+.quick-input-list .monaco-list-row.focused .quick-input-list-entry:not(.quick-input-list-separator-as-item),
+.quick-input-list .monaco-list-row.passive-focused .quick-input-list-entry:not(.quick-input-list-separator-as-item) {
 	background-color: var(--vscode-quickInputList-focusBackground);
 }
 

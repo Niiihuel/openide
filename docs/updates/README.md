@@ -1,7 +1,15 @@
 # Update notes
 
-Each file in this folder is the card OpenIDE shows **once**, the first time it
-starts after a new version is installed (`PostUpdateWidgetContribution`).
+Each release file in this folder supplies the existing OpenIDE highlights card
+(`PostUpdateWidgetContribution`). Open it at any time with **Help → OpenIDE:
+What's New**, also available in the command palette (`openide.update.whatsNew`).
+
+Automatic display follows the OpenIDE product version, including patch releases,
+and waits for the window to receive focus without moving keyboard focus. A fresh
+install establishes a baseline. Successful display consumes the version; a failed
+fetch leaves it pending for the next focused startup or focus event. The
+`update.showPostInstallInfo` setting and metered connections suppress automatic
+display but do not disable the explicit command.
 
 ## How the IDE finds it
 
@@ -16,8 +24,8 @@ The version uses `_` instead of `.`, and a trailing `.0` is trimmed:
 `1.0.1` → `v1_0_1_update.md`, `1.1.0` → `v1_1_update.md`.
 
 **If the file does not exist, nothing happens**: the fetch 404s, `getUpdateInfo`
-returns `undefined`, and no card is shown. A version without a note simply does
-not say hello. That is why the release pipeline does not have to generate
+returns `undefined`, and no card is shown. The automatic check may retry on a
+later focus event or launch; the explicit command reports that highlights are unavailable. That is why the release pipeline does not have to generate
 anything here — these are written by hand when there is something to tell.
 
 ## Format
@@ -74,3 +82,17 @@ Three things worth knowing about the video before using it:
 
 The parser lives in `update/common/updateInfoParser.ts` and also accepts a plain
 JSON wrapper or single-line frontmatter.
+
+## Validation
+
+`postUpdateWidget.test.ts` covers patch versions without commit metadata, first
+install, repeated launches, focus, failed requests, disabled automatic display and
+metered connections. The real workbench smoke is:
+
+```sh
+./result-fhs/bin/openide-build -c 'node dev/run-virtual-gui.mjs dev/test-update-card-runtime.mjs'
+```
+
+It opens the public command, verifies the release card and dismissal, and checks
+the production subagent control under the full chat CSS cascade in an isolated
+display. Screenshots and results are written under `.build/update-card-runtime/`.

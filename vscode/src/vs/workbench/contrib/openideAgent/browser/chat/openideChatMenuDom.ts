@@ -10,7 +10,7 @@ import { Disposable, DisposableStore, toDisposable } from '../../../../../base/c
 import { IContextViewService, IOpenContextView } from '../../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { setupChatTooltip } from './openideChatHover.js';
-import { MENU_ENTER_CLASS } from './openideComposerMenu.js';
+import { MENU_ENTER_CLASS, updateMenuPlacement } from './openideComposerMenu.js';
 import './media/openideChatMenus.css';
 
 /**
@@ -23,7 +23,7 @@ import './media/openideChatMenus.css';
  */
 
 /** Gap between the header's bottom edge and the popover — the webview's `calc(100% + 4px)`. */
-const MENU_GAP = 4;
+const MENU_GAP = 8;
 
 export function menuIcon(name: string): HTMLElement {
 	return $(`span.codicon.codicon-${name}`);
@@ -48,15 +48,17 @@ export function menuEmpty(label: string): HTMLElement {
 /**
  * A row is a `<button>` so it is reachable by keyboard without re-implementing focus handling.
  * `icon` is a codicon name, or a ready-made node when the row carries a brand mark instead of a
- * glyph (the session-kind picker hands it a provider icon).
+ * glyph (the session-kind picker hands it a provider icon). Omit it for a text-only action.
  *
  * Every row ends in a `.openide-menu-check` that CSS reveals only while the row carries
  * `.openide-menu-active` (the map switcher adds it after building the row), and pins to the trailing
  * edge with `order` however many children a caller appends after the label.
  */
-export function menuRow(icon: string | HTMLElement, label: string): { readonly row: HTMLButtonElement; readonly labelElement: HTMLElement } {
+export function menuRow(icon: string | HTMLElement | undefined, label: string): { readonly row: HTMLButtonElement; readonly labelElement: HTMLElement } {
 	const row = $<HTMLButtonElement>('button.openide-menu-row', { type: 'button' });
-	append(append(row, $('span.openide-menu-row-icon')), typeof icon === 'string' ? menuIcon(icon) : icon);
+	if (icon !== undefined) {
+		append(append(row, $('span.openide-menu-row-icon')), typeof icon === 'string' ? menuIcon(icon) : icon);
+	}
 	const labelElement = append(row, $('span.openide-menu-label'));
 	labelElement.textContent = label;
 	append(append(row, $('span.openide-menu-check')), menuIcon('check'));
@@ -70,7 +72,7 @@ export function menuRow(icon: string | HTMLElement, label: string): { readonly r
  * callers that mount rows in a regular pane pass it.
  */
 export function menuRowAction(icon: string, tooltip: string, hover?: { readonly hoverService: IHoverService; readonly store: DisposableStore }): HTMLButtonElement {
-	const button = $<HTMLButtonElement>('button.openide-menu-row-action', { type: 'button' });
+	const button = $<HTMLButtonElement>('button.openide-menu-row-action.oi-dock-action', { type: 'button' });
 	if (hover) {
 		hover.store.add(setupChatTooltip(hover.hoverService, button, () => tooltip));
 	} else {
@@ -89,9 +91,9 @@ function headerAnchor(header: HTMLElement, insetLeft: number, insetRight: number
 	const rect = getDomNodePagePosition(header);
 	return {
 		x: rect.left + insetLeft,
-		y: rect.top,
+		y: rect.top - MENU_GAP,
 		width: Math.max(0, rect.width - insetLeft - insetRight),
-		height: rect.height + MENU_GAP,
+		height: rect.height + MENU_GAP * 2,
 	};
 }
 
@@ -103,7 +105,7 @@ function headerAnchor(header: HTMLElement, insetLeft: number, insetRight: number
  */
 function triggerAnchor(trigger: HTMLElement): IAnchor {
 	const rect = getDomNodePagePosition(trigger);
-	return { x: rect.left, y: rect.top, width: rect.width, height: rect.height + MENU_GAP };
+	return { x: rect.left, y: rect.top - MENU_GAP, width: rect.width, height: rect.height + MENU_GAP * 2 };
 }
 
 export interface IOpenideChatMenuLayout {
@@ -154,20 +156,29 @@ export abstract class OpenideChatMenuPopover extends Disposable {
 			this._contextView.close();
 			return;
 		}
+		const preferredPosition = this.menuLayout.position ?? AnchorPosition.BELOW;
+		const anchor = this.menuLayout.anchorTo === 'trigger' ? trigger : header;
+		let position = preferredPosition;
 		this._contextView = this.contextViewService.showContextView({
 			// Recomputed rather than captured: the view pane resizes while the popover is open.
-			getAnchor: () => this.menuLayout.anchorTo === 'trigger'
-				? triggerAnchor(trigger)
-				: headerAnchor(header, this.menuLayout.insetLeft, this.menuLayout.insetRight),
+			getAnchor: () => {
+				if (this._container) { position = updateMenuPlacement(this._container, anchor, preferredPosition); }
+				return this.menuLayout.anchorTo === 'trigger'
+					? triggerAnchor(trigger)
+					: headerAnchor(header, this.menuLayout.insetLeft, this.menuLayout.insetRight);
+			},
 			anchorAlignment: this.menuLayout.alignment,
-			anchorPosition: this.menuLayout.position ?? AnchorPosition.BELOW,
-			render: container => this.renderContainer(container, header),
+			get anchorPosition() { return position; },
+			render: container => {
+				updateMenuPlacement(container, anchor, preferredPosition);
+				return this.renderContainer(container, header);
+			},
 			// Focused from here and not from `render`: the context view positions the popover after
 			// rendering it, and focusing a node still parked at 0,0 makes the container jump.
 			focus: () => this.initialFocus()?.focus(),
 			onDOMEvent: (event: Event) => this.onDOMEvent(event, trigger),
 			onHide: () => { this._contextView = undefined; this._container = undefined; },
-		});
+		}, anchor.closest<HTMLElement>('.monaco-workbench') ?? anchor.ownerDocument.body);
 		// After showContextView returned, never inside `render`: the context view measures and places
 		// the menu synchronously in that call, and a fixed-position view (aux windows) reads its own
 		// rect — which the animation's translate would shift. Nothing has painted yet at this point.
@@ -209,7 +220,11 @@ export abstract class OpenideChatMenuPopover extends Disposable {
 		this.renderContent(content, store);
 		// `show()` resets the view's className but not its inline style, so the width would leak
 		// into whatever popover opens next.
-		store.add(toDisposable(() => { container.style.width = ''; }));
+		store.add(toDisposable(() => {
+			container.style.width = '';
+			container.style.removeProperty('--openide-menu-anchor-width');
+			container.style.removeProperty('--openide-menu-available-height');
+		}));
 		return store;
 	}
 

@@ -14,25 +14,8 @@ export const OPENIDE_CHAT_DELEGATION_CLASS = 'openide-chat-delegation';
 type DelegationStatus = IOpenideChatDelegationContent['status'];
 
 /**
- * The header of a delegation: "Delegation · 3 agents", with the group's status.
- *
- * Ported from the webview's delegation summary and its
- * `.delegation-summary*` styles (:679-690), but reduced to the head — and that reduction is the
- * whole design decision here, so it is worth writing down.
- *
- * In the webview a delegation is a BOX: `.delegation-group` holds a `.delegation-children` host and
- * every subagent card is appended INSIDE it (`orderedDelegationInsert`, :3537-3544). The native
- * transcript cannot nest: the list is flat, one row per content, and the reducer pushes the
- * envelope and then each `subagent` as siblings (openideChatReducerTools.ts:38-50). So this part
- * OPENS the group instead of containing it — the cards that follow are its members, in order,
- * exactly as they were inside the box.
- *
- * Two things the webview head had are therefore gone, both because the content model does not carry
- * them, not because they were dropped: the expandable "Resultado" body (it came from the
- * `delegate_task` tool result, which the reducer does not keep on this content) and the
- * Review-vs-Delegation wording with its shield icon (it came from the tool NAME, likewise absent).
- * The token and tool totals are gone for the same reason — they were summed over the child cards
- * the box owned, and this row owns nothing.
+ * Pending legacy delegation. Once its children arrive, ActivityGroups supplies the compact
+ * avatar summary and retains this envelope as hidden metadata inside the disclosure.
  */
 export class OpenideChatDelegationPart extends OpenideChatContentPart {
 

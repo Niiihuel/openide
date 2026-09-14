@@ -9,6 +9,7 @@
  *  at registry dispatch by OpenideToolExecutor for every caller, including nested tools.
  *--------------------------------------------------------------------------------------------*/
 
+import { mainWindow } from '../../../../base/browser/window.js';
 import { timeout } from '../../../../base/common/async.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
@@ -34,6 +35,7 @@ import { QueryBuilder } from '../../../services/search/common/queryBuilder.js';
 import { ITerminalInstance, ITerminalService } from '../../terminal/browser/terminal.js';
 import { IAgentLocation, IBackgroundTerminalEvent, IFileEditEvent, IToolDefinition, ToolRisk } from '../common/openideAgentTypes.js';
 import { IOpenideToolExecution, OpenideToolExecutor, IOpenideExecutableTool, IOpenideToolExecutionResult } from '../common/openideToolExecutor.js';
+import { openideGoalPendingBackgroundReason } from '../common/openideGoalPendingWork.js';
 import { resolvePathInsideWorkspace } from '../common/openideWorkspacePath.js';
 
 /** Leaves the pty output as plain text: strips OSC (including shell integration 633/133),
@@ -114,6 +116,9 @@ export interface IToolApprovalInfo {
 }
 
 export interface IAgentToolContext {
+	readonly targetWindowId?: number;
+	/** Internal receipt observer; never accepted from model arguments. */
+	readonly onCommandResult?: (result: ShellCaptureResult) => void;
 	readonly execution?: IOpenideToolExecution;
 	readonly messageId?: string;
 	readonly workspaceRoot?: URI;
@@ -190,7 +195,7 @@ export class OpenideToolRegistry extends Disposable {
 	private readonly shells = new Map<string, IConversationShell>();
 	private readonly ownedTerminals = new Set<ITerminalInstance>();
 	private shellOwnerDisposed = false;
-	private readonly bgTerminals = new Map<string, { term: ITerminalInstance; command: string; persistent: boolean; scopeKey: string }>();
+	private readonly bgTerminals = new Map<string, { term: ITerminalInstance; command: string; persistent: boolean; scopeKey: string; conversationId: string; running: boolean }>();
 
 	private readonly _onDidEdit = this._register(new Emitter<IFileEditEvent>());
 	readonly onDidEdit: Event<IFileEditEvent> = this._onDidEdit.event;
@@ -704,7 +709,7 @@ export class OpenideToolRegistry extends Disposable {
 				if (!created && oldContent === content) {
 					return `OK: ${this.relPath(uri, context?.workspaceRoot)} already had the requested content (no change).`;
 				}
-				this._onDidEdit.fire({ messageId: context?.messageId, path: this.relPath(uri, context?.workspaceRoot), operation: created ? 'create' : 'modify', beforeContent: created ? undefined : oldContent, afterContent: content });
+				this._onDidEdit.fire({ messageId: context?.messageId, runId: context?.execution?.runId, path: this.relPath(uri, context?.workspaceRoot), operation: created ? 'create' : 'modify', beforeContent: created ? undefined : oldContent, afterContent: content });
 				return `OK: escrito ${this.relPath(uri, context?.workspaceRoot)} (${content.length} chars).` + await this.diagnosticsSuffix(uri);
 			},
 		};
@@ -811,7 +816,7 @@ export class OpenideToolRegistry extends Disposable {
 					return `OK: ${this.relPath(uri, context?.workspaceRoot)} ended up with no effective change${note}.`;
 				}
 				await this.workspaceAccess.write(uri, this.observationOwner(context), updated, observation.id, context?.workspaceRoot, token);
-				this._onDidEdit.fire({ messageId: context?.messageId, path: this.relPath(uri, context?.workspaceRoot), operation: 'modify', beforeContent: current, afterContent: updated });
+				this._onDidEdit.fire({ messageId: context?.messageId, runId: context?.execution?.runId, path: this.relPath(uri, context?.workspaceRoot), operation: 'modify', beforeContent: current, afterContent: updated });
 				return `OK: editado ${this.relPath(uri, context?.workspaceRoot)}${note}.` + await this.diagnosticsSuffix(uri);
 			},
 		};
@@ -831,7 +836,7 @@ export class OpenideToolRegistry extends Disposable {
 				const uri = this.resolvePath(String(args.path ?? ''), context?.workspaceRoot);
 				if (!uri) { return 'Error: empty path, or outside the workspace.'; }
 				const before = await this.workspaceAccess.remove(uri, this.observationOwner(context), args.expected_observation, context?.workspaceRoot, token);
-				this._onDidEdit.fire({ messageId: context?.messageId, path: this.relPath(uri, context?.workspaceRoot), operation: 'delete', beforeContent: before });
+				this._onDidEdit.fire({ messageId: context?.messageId, runId: context?.execution?.runId, path: this.relPath(uri, context?.workspaceRoot), operation: 'delete', beforeContent: before });
 				return `OK: eliminado ${this.relPath(uri, context?.workspaceRoot)}.`;
 			},
 		};
@@ -852,7 +857,7 @@ export class OpenideToolRegistry extends Disposable {
 				const to = this.resolvePath(String(args.to ?? ''), context?.workspaceRoot);
 				if (!from || !to) { return 'Error: source or destination path is empty, or outside the workspace.'; }
 				const content = await this.workspaceAccess.rename(from, to, this.observationOwner(context), args.expected_observation, context?.workspaceRoot, token);
-				this._onDidEdit.fire({ messageId: context?.messageId, path: this.relPath(to, context?.workspaceRoot), originalPath: this.relPath(from, context?.workspaceRoot), operation: 'rename', beforeContent: content, afterContent: content });
+				this._onDidEdit.fire({ messageId: context?.messageId, runId: context?.execution?.runId, path: this.relPath(to, context?.workspaceRoot), originalPath: this.relPath(from, context?.workspaceRoot), operation: 'rename', beforeContent: content, afterContent: content });
 				return `OK: movido ${this.relPath(from, context?.workspaceRoot)} → ${this.relPath(to, context?.workspaceRoot)}.`;
 			},
 		};
@@ -906,6 +911,7 @@ export class OpenideToolRegistry extends Disposable {
 				// The conversation's own shell: two conversations working at the same time must not send
 				// their commands to one pty.
 				const finished = await this.runShellCaptured(command, token, timeoutSec * 1000, context?.conversationId ?? SHARED_SHELL, context?.workspaceRoot);
+				if (finished && typeof finished === 'object') { context?.onCommandResult?.(finished); }
 				if (token.isCancellationRequested) { return '(cancelado — el proceso fue terminado)'; }
 				if (finished === 'no-shell-integration') {
 					return '(command sent to the terminal, but shell integration is unavailable → its output could not be captured)';
@@ -1049,6 +1055,8 @@ export class OpenideToolRegistry extends Disposable {
 			this.clearInteractiveSession(shell, owner.interactive!.term, { killPty: true });
 		}
 		const term = await this.getAgentTerminal(shell, scope.root, scope.key);
+		// Keep the native terminal tabs and activity list on the same command title.
+		await term.rename(command.replace(/\s+/g, ' ').trim());
 		await term.processReady;
 		await this.registerNativeTerminal(term, shell, scope.root);
 		const cd = await this.waitForCommandDetection(term);
@@ -1335,7 +1343,7 @@ export class OpenideToolRegistry extends Disposable {
 		if (owner.terminal && !owner.terminal.isDisposed) {
 			return owner.terminal;
 		}
-		const term = await this.terminalService.createTerminal({ config: { name: 'OpenIDE Agent', cwd: workspaceRoot, isTransient: true } });
+		const term = await this.terminalService.createTerminal({ config: { cwd: workspaceRoot, isTransient: true } });
 		this.ownTerminal(term);
 		owner.terminal = term;
 		owner.workspaceKey = workspaceKey;
@@ -1348,6 +1356,7 @@ export class OpenideToolRegistry extends Disposable {
 	 *  10 terminales fantasma tras varios intentos. */
 	private async startBackgroundCommand(command: string, persistent = false, context?: IAgentToolContext, token: CancellationToken = CancellationToken.None): Promise<string> {
 		if (token.isCancellationRequested) { return 'Cancelled before launch.'; }
+		const revealInIde = persistent && (context?.targetWindowId === undefined || context.targetWindowId === mainWindow.vscodeWindowId);
 		const scope = await this.prepareShellCommand(command, context?.workspaceRoot);
 		const scopeKey = `${context?.conversationId ?? SHARED_SHELL}:${scope.key}`;
 		for (const [oldId, entry] of [...this.bgTerminals]) {
@@ -1366,10 +1375,10 @@ export class OpenideToolRegistry extends Disposable {
 		}
 		const term = await this.terminalService.createTerminal({
 			config: {
-				name: command.slice(0, 40),
+				name: command.replace(/\s+/g, ' ').trim(),
 				cwd: scope.root,
 				// persistent: visible in the dock from the start. Normal background: hidden until reveal.
-				hideFromUser: !persistent,
+				hideFromUser: !revealInIde,
 				// Persistence means across turns, never beyond the owning renderer.
 				isTransient: true,
 			},
@@ -1380,7 +1389,7 @@ export class OpenideToolRegistry extends Disposable {
 		await this.registerNativeTerminal(term, context?.conversationId ?? SHARED_SHELL, scope.root);
 		const cd = await this.waitForCommandDetection(term);
 		if (token.isCancellationRequested || this.shellOwnerDisposed) { term.dispose(); return 'Cancelled before launch.'; }
-		const id = this.trackBackgroundTerminal(term, command, undefined, cd, persistent, scopeKey);
+		const id = this.trackBackgroundTerminal(term, command, undefined, cd, persistent, scopeKey, context?.conversationId ?? SHARED_SHELL);
 		if (token.isCancellationRequested || this.shellOwnerDisposed) { term.dispose(); return 'Cancelled before launch.'; }
 		term.sendText(scope.command, true);
 		if (!cd && !persistent) {
@@ -1389,7 +1398,7 @@ export class OpenideToolRegistry extends Disposable {
 			// For persistent ones we do NOT force exit: the user controls it from the dock.
 			term.sendText('exit', true);
 		}
-		if (persistent) {
+		if (revealInIde) {
 			// Make sure it ends up visible and active in the panel (in case hideFromUser was false
 			// but the group had not shown it yet).
 			await this.terminalService.showBackgroundTerminal(term);
@@ -1400,9 +1409,9 @@ export class OpenideToolRegistry extends Disposable {
 	}
 
 	/** Registers an already-live terminal as "background" and wires its output events. */
-	private trackBackgroundTerminal(term: ITerminalInstance, command: string, finished?: Promise<{ output: string; exitCode: number | undefined }>, commandDetection?: ICommandDetectionCapability, persistent = false, scopeKey = SHARED_SHELL): string {
+	private trackBackgroundTerminal(term: ITerminalInstance, command: string, finished?: Promise<{ output: string; exitCode: number | undefined }>, commandDetection?: ICommandDetectionCapability, persistent = false, scopeKey = SHARED_SHELL, conversationId = SHARED_SHELL): string {
 		const id = generateUuid();
-		this.bgTerminals.set(id, { term, command, persistent, scopeKey });
+		this.bgTerminals.set(id, { term, command, persistent, scopeKey, conversationId, running: true });
 		if (isBackgroundTrayWorthy(command) || persistent) {
 			this._onDidChangeBackgroundTerminal.fire({ id, command, status: 'running' });
 		}
@@ -1416,6 +1425,7 @@ export class OpenideToolRegistry extends Disposable {
 		const markExited = (exitCode: number | undefined) => {
 			if (done) { return; }
 			done = true;
+			const entry = this.bgTerminals.get(id); if (entry) { entry.running = false; }
 			cleanup();
 			// persistent: the terminal stays alive in the dock and the id keeps resolving reveal/kill.
 			// No-persistent: dispose + sacar del mapa.
@@ -1449,6 +1459,11 @@ export class OpenideToolRegistry extends Disposable {
 			}
 			return id;
 		}
+
+	/** A persistent dock can remain visible after its command exits; only live owned work blocks completion. */
+	getGoalPendingBackgroundReason(sessionId: string): string | undefined {
+		return openideGoalPendingBackgroundReason(sessionId, [...this.bgTerminals.values()].map(entry => ({ conversationId: entry.conversationId, command: entry.command, running: entry.running, disposed: entry.term.isDisposed })));
+	}
 
 	/** Reveals and focuses a background terminal in the IDE panel (click on the chat widget). */
 	async revealBackgroundTerminal(id: string): Promise<void> {

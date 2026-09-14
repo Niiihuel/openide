@@ -14,23 +14,25 @@ import { DEFAULT_EDITOR_ASSOCIATION, isEditorInput, IUntypedEditorInput } from '
 import { EditorInput } from '../../../../common/editor/editorInput.js';
 import { IJSONEditingService } from '../../../configuration/common/jsonEditing.js';
 import { TestJSONEditingService } from '../../../configuration/test/common/testServices.js';
-import { IEditorService, MODAL_GROUP, PreferredGroup } from '../../../editor/common/editorService.js';
+import { IEditorService, MODAL_GROUP, PreferredGroup, SIDE_GROUP } from '../../../editor/common/editorService.js';
 import { IEditorGroupsService, IModalEditorPart } from '../../../editor/common/editorGroupsService.js';
 import { PreferencesService } from '../../browser/preferencesService.js';
 import { IPreferencesService, ISettingsEditorOptions } from '../../common/preferences.js';
 import { IRemoteAgentService } from '../../../remote/common/remoteAgentService.js';
 import { TestRemoteAgentService, ITestInstantiationService, workbenchInstantiationService, TestEditorService, TestEditorGroupsService, TestEditorGroupView } from '../../../../test/browser/workbenchTestServices.js';
-import { IEditorOptions } from '../../../../../platform/editor/common/editor.js';
+import { IEditorOptions, IModalEditorOptions, isModalEditorOptionsProvider } from '../../../../../platform/editor/common/editor.js';
 import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
 
 suite('PreferencesService', () => {
 	let lastOpenEditorOptions: IEditorOptions | undefined;
 	let lastOpenEditorGroup: PreferredGroup | undefined;
+	let lastPresentation: IModalEditorOptions | undefined;
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
 	function createTestObject(editorGroupsService?: IEditorGroupsService, configurationService?: TestConfigurationService): PreferencesService {
 		lastOpenEditorOptions = undefined;
 		lastOpenEditorGroup = undefined;
+		lastPresentation = undefined;
 
 		const testInstantiationService: ITestInstantiationService = workbenchInstantiationService(
 			configurationService ? { configurationService: () => configurationService } : {},
@@ -41,6 +43,7 @@ suite('PreferencesService', () => {
 			override async openEditor(editor: EditorInput | IUntypedEditorInput, optionsOrGroup?: IEditorOptions | PreferredGroup, group?: PreferredGroup): Promise<undefined> {
 				lastOpenEditorOptions = optionsOrGroup as IEditorOptions;
 				lastOpenEditorGroup = group;
+				lastPresentation = isModalEditorOptionsProvider(editor) ? editor.getModalEditorOptions() : undefined;
 				// openEditor takes ownership of the input
 				if (isEditorInput(editor)) {
 					editor.dispose();
@@ -99,4 +102,20 @@ suite('PreferencesService', () => {
 
 		assert.strictEqual(lastOpenEditorGroup, MODAL_GROUP);
 	});
+	test('default settings uses the full-window presentation without changing modal preferences', async () => {
+		const configurationService = new TestConfigurationService({ workbench: { editor: { useModal: 'off' } } });
+		const service = createTestObject(undefined, configurationService);
+		await service.openSettings({ jsonEditor: false });
+		assert.deepStrictEqual({ group: lastOpenEditorGroup, presentation: lastPresentation, preference: configurationService.getValue('workbench.editor.useModal') }, {
+			group: MODAL_GROUP, presentation: { fullWindow: true }, preference: 'off'
+		});
+	});
+
+	test('explicit side settings keeps the side destination when modal editors are enabled', async () => {
+		const configurationService = new TestConfigurationService({ workbench: { editor: { useModal: 'all' } } });
+		const service = createTestObject(undefined, configurationService);
+		await service.openSettings({ jsonEditor: false, openToSide: true });
+		assert.strictEqual(lastOpenEditorGroup, SIDE_GROUP);
+	});
+
 });

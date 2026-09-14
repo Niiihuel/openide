@@ -11,6 +11,7 @@ import { encodeBase64 } from '../../../../base/common/buffer.js';
 import { FileAccess } from '../../../../base/common/network.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IProviderBrand, OPENIDE_PROVIDER_BRANDS, ProviderBrandAsset, ProviderBrandPaint, resolveProviderBrand } from '../common/openideProviderBranding.js';
+import { createOpenideElement } from './openideDom.js';
 import './media/openideProviderIcon.css';
 
 const ICON_ROOT = 'vs/workbench/contrib/openideAgent/browser/media/providerIcons/';
@@ -36,7 +37,7 @@ function showProviderMonogram(element: HTMLElement, brand: IProviderBrand): void
 	element.style.webkitMaskImage = '';
 	element.style.maskImage = '';
 	element.style.backgroundImage = '';
-	element.style.removeProperty('--oi-brand-tint');
+	element.style.removeProperty('--oi-provider-icon-tint');
 	element.textContent = brand.initials;
 }
 
@@ -55,7 +56,7 @@ function showProviderMark(element: HTMLElement, brand: IProviderBrand, uri: stri
 		element.classList.add('logo-image');
 		element.style.webkitMaskImage = '';
 		element.style.maskImage = '';
-		element.style.removeProperty('--oi-brand-tint');
+		element.style.removeProperty('--oi-provider-icon-tint');
 		element.style.backgroundImage = value;
 		return;
 	}
@@ -65,9 +66,9 @@ function showProviderMark(element: HTMLElement, brand: IProviderBrand, uri: stri
 	element.style.webkitMaskImage = value;
 	element.style.maskImage = value;
 	if (brand.paint?.tint) {
-		element.style.setProperty('--oi-brand-tint', brand.paint.tint);
+		element.style.setProperty('--oi-provider-icon-tint', brand.paint.tint);
 	} else {
-		element.style.removeProperty('--oi-brand-tint');
+		element.style.removeProperty('--oi-provider-icon-tint');
 	}
 }
 
@@ -89,7 +90,7 @@ function loadProviderMask(element: HTMLElement, brand: IProviderBrand, uri: stri
 	}
 	const load = { state: 'loading' as const, targets: new Map<HTMLElement, IProviderBrand>([[element, brand]]) };
 	nativeIconLoads.set(uri, load);
-	const image = element.ownerDocument.createElement('img');
+	const image = createOpenideElement(element.ownerDocument, 'img');
 	image.addEventListener('load', () => {
 		nativeIconLoads.set(uri, { state: 'ready', targets: new Map() });
 		for (const [target, targetBrand] of load.targets) {
@@ -119,7 +120,7 @@ export function applyProviderIcon(element: HTMLElement, providerId: string, labe
 }
 
 export function createProviderIcon(document: Document, providerId: string, label = '', className = ''): HTMLElement {
-	const element = document.createElement('span');
+	const element = createOpenideElement(document, 'span');
 	if (className) {
 		element.className = className;
 	}

@@ -4,6 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { IBrowserViewWorkbenchService } from '../../../browserView/common/browserView.js';
+import { IContextMenuDelegate } from '../../../../../base/browser/contextmenu.js';
+import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
@@ -33,6 +36,10 @@ suite('OpenIDE ChatMarkdownPart', () => {
 	function create(text: string, isComplete = false) {
 		const instantiationService = workbenchInstantiationService(undefined, store);
 		const opened: string[] = [];
+		const previews: string[] = [];
+		let menu: IContextMenuDelegate | undefined;
+		instantiationService.stub(IBrowserViewWorkbenchService, { openPreview: async (url: string) => { previews.push(url); } } as unknown as IBrowserViewWorkbenchService);
+		instantiationService.stub(IContextMenuService, { showContextMenu: (value: IContextMenuDelegate) => { menu = value; } } as IContextMenuService);
 		instantiationService.stub(IOpenerService, {
 			open: (target: URI | string) => { opened.push(String(target)); return Promise.resolve(true); },
 		} as unknown as IOpenerService);
@@ -41,7 +48,7 @@ suite('OpenIDE ChatMarkdownPart', () => {
 		const renderer = instantiationService.createInstance(OpenideChatMarkdownRenderer);
 		const element = { isComplete } as IOpenideChatItem;
 		const part = store.add(new OpenideChatMarkdownPart(markdown(text), { element } as IOpenideChatContentPartContext, renderer));
-		return { part, element, opened, clipboard };
+		return { part, element, opened, previews, clipboard, renderer, menu: () => menu };
 	}
 
 	test('a delta keeps the blocks that did not change and swaps the one that did', () => {
@@ -102,13 +109,42 @@ suite('OpenIDE ChatMarkdownPart', () => {
 		assert.strictEqual(part.domNode.children[0], fence, 'the fence was never rebuilt');
 	});
 
-	test('links open through the opener, from the part\'s own root', () => {
-		const { part, opened } = create('See [the docs](https://example.com/docs).');
-		const anchor = part.domNode.querySelector('a');
-		assert.ok(anchor);
-		anchor.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
-		assert.strictEqual(opened.length, 1);
-		assert.ok(opened[0].startsWith('https://example.com/docs'), opened[0]);
+	test('web links open in the native browser exactly once from both rendering paths', () => {
+		const fixture = create('See [the docs](https://example.com/docs).');
+		const full = store.add(fixture.renderer.render(new MarkdownString('[docs](https://example.com/docs)')));
+		for (const root of [fixture.part.domNode, full.element]) {
+			const anchor = root.querySelector('a')!;
+			anchor.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+			anchor.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, keyCode: 13 }));
+		}
+		assert.deepStrictEqual(fixture.previews, Array(4).fill('https://example.com/docs'));
+		assert.deepStrictEqual(fixture.opened, []);
+	});
+
+	test('GitHub icons survive streaming without decorating spoof hosts or changing the label', () => {
+		const { part, element, previews } = create('[Build](https://github.com/openide/repo/actions/runs/123) [Other](https://github.com.attacker.example)');
+		const first = part.domNode.querySelector('a')!;
+		assert.strictEqual(first.textContent, 'Build');
+		assert.strictEqual(part.domNode.querySelectorAll('.codicon-github').length, 1);
+		part.tryUpdate(markdown('[Build](https://github.com/openide/repo/actions/runs/123) [Other](https://github.com.attacker.example)\n\nMore'), element);
+		assert.strictEqual(part.domNode.querySelector('a'), first);
+		assert.strictEqual(part.domNode.querySelectorAll('.codicon-github').length, 1);
+		assert.deepStrictEqual(previews, [], 'rendering has no navigation side effect');
+	});
+
+	test('link context menu offers native, external and copy actions without implicit navigation', async () => {
+		const fixture = create('[Build](https://github.com/openide/repo)');
+		fixture.part.domNode.querySelector('.codicon-github')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+		const actions = fixture.menu()!.getActions();
+		assert.deepStrictEqual(actions.map(action => action.id), ['chat.link.browser', 'chat.link.external', 'vs.actions.separator', 'chat.link.copy']);
+		assert.deepStrictEqual(fixture.opened, []);
+		assert.deepStrictEqual(fixture.previews, []);
+		await actions[3].run();
+		assert.strictEqual(await fixture.clipboard.readText(), 'https://github.com/openide/repo');
+		await actions[1].run();
+		assert.deepStrictEqual(fixture.opened, ['https://github.com/openide/repo']);
+		await actions[0].run();
+		assert.deepStrictEqual(fixture.previews, ['https://github.com/openide/repo']);
 	});
 
 	test('completing the turn drops the streaming class', () => {

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, append, getTotalHeight, getWindow } from '../../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, DisposableResizeObserver, getTotalHeight, getWindow } from '../../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { KeyCode } from '../../../../../base/common/keyCodes.js';
@@ -12,7 +12,7 @@ import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { IObservable, ISettableObservable, observableValue } from '../../../../../base/common/observable.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
-import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
+import { IContextMenuService, IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IAccessibilitySignalService } from '../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
@@ -35,8 +35,9 @@ import { OPENIDE_CHAT_QUEUE_ENABLED_KEY } from '../../common/chat/openideChatCon
 
 /** What the composer says instead of queueing when `openide.chat.queue.enabled` is off. */
 const queueDisabledMessage = () => t('chat.queue.disabled');
-import { OpenideChatComposerSuggest } from './openideChatComposerSuggest.js';
+import { mentionTokenAt, OpenideChatComposerSuggest, slashTokenAt } from './openideChatComposerSuggest.js';
 import { OpenideChatComposerVoice } from './openideChatComposerVoice.js';
+import { createOpenideElement } from '../openideDom.js';
 import './media/openideChatComposer.css';
 
 /** Ceiling of the auto-growing textarea. Past it the field scrolls instead of eating the transcript. */
@@ -45,7 +46,11 @@ const PROMPT_MAX_HEIGHT = 180;
 /** How long the prompt's scrollbar stays up after the last scroll, before fading back out. */
 const PROMPT_SCROLLBAR_LINGER = 800;
 
+// Session-local routing only; window ids must not survive queue persistence and app restart.
+const submissionWindowIds = new WeakMap<IComposerQueueEntry, number>();
+
 export interface IOpenideComposerSubmit {
+	readonly targetWindowId?: number;
 	/**
 	 * Raw text for the host: `/command` first when one was picked, then what was typed, then the
 	 * pasted links one per line (`composerPayload`, the removed chat webview). Expansion of the
@@ -92,6 +97,9 @@ export class OpenideChatComposer extends Disposable {
 	private readonly _onDidRequestStop = this._register(new Emitter<void>());
 	readonly onDidRequestStop: Event<void> = this._onDidRequestStop.event;
 
+	private readonly _onDidRequestGoal = this._register(new Emitter<void>());
+	readonly onDidRequestGoal: Event<void> = this._onDidRequestGoal.event;
+
 	private readonly _onDidRequestCompact = this._register(new Emitter<void>());
 	/** A bare `/compact`: a local action on the history, never a turn (the removed chat webview). */
 	readonly onDidRequestCompact: Event<void> = this._onDidRequestCompact.event;
@@ -116,7 +124,7 @@ export class OpenideChatComposer extends Disposable {
 	/** Notices stay above the composer block and participate in the dock's measured height. */
 	readonly noticeHost: HTMLElement;
 	/** Slot for the ask_user questions card, INSIDE the block above the trays: one silhouette with
-	 *  the prompt, outlined and beam-swept by the block itself. */
+	 *  the prompt, grouped with the prompt by the block itself. */
 	get questionsHost(): HTMLElement { return this._questionsHost; }
 	/** Left slot of the footer row, for the session-type picker (harness / terminal agents). */
 	get footerHost(): HTMLElement { return this._footer.footerHost; }
@@ -138,6 +146,7 @@ export class OpenideChatComposer extends Disposable {
 	get height(): IObservable<number> { return this._height; }
 
 	private readonly _dock: HTMLElement;
+	private _layoutWidth: number | undefined;
 	private readonly _card: HTMLElement;
 	private readonly _block: HTMLElement;
 	private readonly _questionsHost: HTMLElement;
@@ -150,10 +159,37 @@ export class OpenideChatComposer extends Disposable {
 	private readonly _chips: OpenideChatComposerChips;
 	private readonly _pick: OpenideChatComposerPick;
 	private readonly _voice: OpenideChatComposerVoice;
+	private _voiceConversationId: string | undefined;
 	private readonly _controls: OpenideChatComposerControls;
 	private readonly _suggest: OpenideChatComposerSuggest;
 	private readonly _queue: OpenideChatComposerQueue;
 	private _busy = false;
+	private _ownsQueue = true;
+	private _restoringDraft = false;
+	private readonly _onDidChangeDraft = this._register(new Emitter<IOpenideComposerSubmit>());
+	readonly onDidChangeDraft = this._onDidChangeDraft.event;
+
+	get draft(): IOpenideComposerSubmit {
+		return {
+			text: this.value, inputText: this.value,
+			images: [...this._attachments.images],
+			references: this._chips.references.map(reference => reference.path),
+			referenceChips: [...this._chips.references],
+			capabilities: [...this._chips.capabilities], links: [...this._chips.links], snippets: [...this._chips.snippets],
+			pick: this._pick.pending, mode: this._controls.mode,
+			providerId: this.agentService.getActiveProviderId(), modelId: this.agentService.getModel(),
+		};
+	}
+
+	/** Applies another view's draft without emitting it back or moving keyboard focus. */
+	setSharedDraft(draft: IOpenideComposerSubmit): void {
+		this._restoringDraft = true;
+		try {
+			this._pick.clear();
+			this.restore(draft);
+			this.setMode(draft.mode);
+		} finally { this._restoringDraft = false; }
+	}
 	private _dragDepth = 0;
 
 	get domNode(): HTMLElement { return this._dock; }
@@ -176,35 +212,27 @@ export class OpenideChatComposer extends Disposable {
 		@IHoverService hoverService: IHoverService,
 		@IAccessibilitySignalService accessibilitySignalService: IAccessibilitySignalService,
 		@IFileService fileService: IFileService,
+		@IContextMenuService contextMenuService: IContextMenuService,
 	) {
 		super();
 		this._height = observableValue<number>('openideChatComposerHeight', 0);
 
 		this._dock = append(parent, $('.openide-chat-dock'));
+		// One native observation keeps the transcript in step with folds in every tray.
+		// Use the delivered size instead of forcing layout on each animation frame.
+		const dockResize = this._register(new DisposableResizeObserver('OpenideChatComposer.height', entries => {
+			const height = Math.round(entries[0].borderBoxSize[0].blockSize);
+			if (height > 0) { this._height.set(height, undefined); }
+		}, getWindow(this._dock)));
+		this._register(dockResize.observe(this._dock, { box: 'border-box' }));
 		const composer = append(this._dock, $('.openide-chat-composer'));
 		this.noticeHost = append(composer, $('.openide-chat-notice-host'));
 		// Host for the trays that stack UNDER the card (changed files today). It lives inside the
 		// composer, like the webview's #filesStack, and not as a sibling
 		// of the dock: the dock is z-index 100 and paints its fade gradient over anything below it,
 		// so a tray mounted outside was rendered dimmed under that gradient.
-		// One block for the trays (changed files, todos, terminals, queue) and the prompt card: the
-		// working beam runs around THIS, so everything stacked on the composer reads as a single
-		// outlined control while a turn is in flight (upstream draws it on `.chat-input-container`).
+		// Trays, questions and prompt share one measured composer block.
 		this._block = append(composer, $('.openide-chat-block'));
-		// The working beam, as two REAL elements rather than the block's own pseudo-elements.
-		// Each is a ring-masked window holding a square that carries a STATIC conic gradient and
-		// spins with `transform`, because a transform is composited and a gradient is not: the
-		// previous version animated a registered custom property (`--openide-chat-anim-angle`)
-		// that the conic gradient read, which forces the browser to re-rasterise the whole block
-		// every frame for as long as a turn runs. Measured on this build with the composer busy:
-		// ~21% of a core then, ~5% now, against ~1% with the beam off. Pseudo-elements cannot
-		// hold the spinning square, which is the only reason these are in the DOM.
-		for (const layer of ['comet', 'halo'] as const) {
-			append(append(this._block, $(`.openide-chat-beam.${layer}`)), $('i'));
-		}
-		// INSIDE the block, above the trays: the questions card is one more segment of the block's
-		// single silhouette, so the block's outline — and the working beam that animates over it —
-		// wrap the card and the prompt as one control (the user's explicit call).
 		this._questionsHost = append(this._block, $('.openide-chat-questions-host'));
 		this._trayHost = append(this._block, $('.openide-chat-tray-host'));
 		this._card = append(this._block, $('.openide-chat-input-card'));
@@ -217,7 +245,7 @@ export class OpenideChatComposer extends Disposable {
 		// References, capabilities and links above the attachments (the removed chat webview).
 		const chipHost = append(this._card, $('.openide-chat-chip-host'));
 		const attachStrip = append(this._card, $('.openide-chat-attach-strip'));
-		this._prompt = append(this._card, this._card.ownerDocument.createElement('textarea'));
+		this._prompt = append(this._card, createOpenideElement(this._card.ownerDocument, 'textarea'));
 		this._prompt.className = 'openide-chat-prompt';
 		this._scrollIdle = this._register(new RunOnceScheduler(() => this._prompt.classList.remove('scrolling'), PROMPT_SCROLLBAR_LINGER));
 		this._register(addDisposableListener(this._prompt, 'scroll', () => this._armScrollIndicator()));
@@ -250,8 +278,10 @@ export class OpenideChatComposer extends Disposable {
 				this._syncContent();
 			},
 		}));
-		// Under the card, with the other trays: the queue is what the user decided to say next.
-		this._queue = this._register(new OpenideChatComposerQueue(this._trayHost, storageService, hoverService));
+		// Pending requests sit behind the composer, sharing the persisted queue owner.
+		const queueHost = $('.openide-chat-queue-host');
+		composer.insertBefore(queueHost, this._block);
+		this._queue = this._register(new OpenideChatComposerQueue(queueHost, storageService, hoverService, contextMenuService));
 		this._register(this._queue.onDidChangeHeight(() => this._measure()));
 		this._register(this._queue.onDidRequestEdit(({ entry }) => this._editQueued(entry)));
 		this._register(this._queue.onDidRequestSendNow(({ entry }) => {
@@ -263,7 +293,7 @@ export class OpenideChatComposer extends Disposable {
 			pickStrip,
 			agentService,
 			hoverService,
-			() => this._measure(),
+			() => { this._measure(); this._syncContent(); },
 			// The webview focuses the prompt on every pick: the user is coming back from their app
 			// with something to say about the element they just clicked.
 			() => this._prompt.focus(),
@@ -272,16 +302,21 @@ export class OpenideChatComposer extends Disposable {
 			agentService,
 			accessibilitySignalService,
 			getWindow(parent),
-			state => this._controls.applyVoiceState(state),
+			state => { this._controls.applyVoiceState(state); this._measure(); },
 			text => this._appendTranscription(text),
 			message => this._reportVoiceFailure(message),
+			level => this._controls.applyVoiceLevel(level),
 		));
 		this._controls = this._register(new OpenideChatComposerControls(row, agentService, contextViewService, commandService, hoverService, this._voice, {
 			send: () => this._submit(),
 			stop: () => this._onDidRequestStop.fire(),
 			attach: () => this._attachments.pick(),
+			files: () => this._openSuggestion('@'),
+			tools: () => this._openSuggestion('/'),
+			goal: () => this._onDidRequestGoal.fire(),
 		}));
 
+		this._register(this._controls.onDidChangeMode(() => this._syncContent()));
 		this._register(addDisposableListener(this._prompt, 'input', () => {
 			this._autosize();
 			this._syncContent();
@@ -348,9 +383,6 @@ export class OpenideChatComposer extends Disposable {
 		this._register(this.configurationService.onDidChangeConfiguration(event => {
 			if (event.affectsConfiguration('openide.agent.voiceMode')) { this._applyVoiceMode(); }
 		}));
-		// The card, not the textarea, carries the focus ring: it is the whole control the user sees.
-		this._register(addDisposableListener(this._prompt, 'focus', () => this._card.classList.add('focused')));
-		this._register(addDisposableListener(this._prompt, 'blur', () => this._card.classList.remove('focused')));
 
 		this._autosize();
 		this._measure();
@@ -413,6 +445,7 @@ export class OpenideChatComposer extends Disposable {
 				providerId: this.agentService.getActiveProviderId(),
 				modelId: this.agentService.getModel(),
 			};
+			submissionWindowIds.set(entry, getWindow(this._dock).vscodeWindowId);
 			if (!this._queue.push(entry)) {
 				this._onDidReject.fire(queueFullMessage());
 				return;
@@ -454,6 +487,7 @@ export class OpenideChatComposer extends Disposable {
 		// Snapshot BEFORE the turn is handed over: it belongs to the target the user saw when they
 		// pressed Send, even if the picker moves while the run is being assembled.
 		this._onDidSubmit.fire({
+			targetWindowId: submissionWindowIds.get(entry) ?? getWindow(this._dock).vscodeWindowId,
 			text: payload.text,
 			displayText: displayText && displayText !== payload.text ? displayText : undefined,
 			inputText: entry.inputText,
@@ -479,6 +513,26 @@ export class OpenideChatComposer extends Disposable {
 		this._syncContent();
 		this._measure();
 		this._prompt.focus();
+	}
+
+	/** The add menu uses the same workspace/provider discovery as typing @ or /. */
+	private _openSuggestion(trigger: '@' | '/'): void {
+		const caret = this._prompt.selectionEnd;
+		const value = this._prompt.value;
+		const currentToken = trigger === '@' ? mentionTokenAt(value, caret) : slashTokenAt(value, caret);
+		if (!currentToken) {
+			const before = value.slice(0, caret);
+			// Insert after the selection instead of replacing any part of the user's draft.
+			const prefix = before.length && !/\s$/.test(before) ? ' ' : '';
+			const suffix = caret < value.length && !/\s/.test(value[caret]) ? ' ' : '';
+			this._prompt.setRangeText(prefix + trigger + suffix, caret, caret, 'end');
+			const nextCaret = caret + prefix.length + 1;
+			this._prompt.setSelectionRange(nextCaret, nextCaret);
+		}
+		this._prompt.focus();
+		this._autosize();
+		this._syncContent();
+		this._suggest.update();
 	}
 
 	private _clearInput(): void {
@@ -515,6 +569,11 @@ export class OpenideChatComposer extends Disposable {
 	 * the queue of the conversation being left stays persisted for when it comes back.
 	 */
 	setConversation(id: string | undefined): void {
+		if (id !== this._voiceConversationId) {
+			this._voiceConversationId = id;
+			// A take and its pending send belong to the conversation where capture started.
+			this._controls.cancelVoice();
+		}
 		this._queue.setConversation(id);
 	}
 
@@ -568,7 +627,7 @@ export class OpenideChatComposer extends Disposable {
 		this._prompt.value = current && !current.endsWith(' ') ? `${current} ${clean}` : `${current}${clean}`;
 		this._autosize();
 		this._syncContent();
-		this._prompt.focus();
+		if (this._voice.state === 'idle') { this._prompt.focus(); }
 	}
 
 	private _reportVoiceFailure(message: string): void {
@@ -578,16 +637,19 @@ export class OpenideChatComposer extends Disposable {
 	}
 
 	/** Flips the single slot between send and stop; two buttons would leave a dead one on screen. */
+	/** A companion has the same queue, but only the owning composer advances it. */
+	shareQueueWith(owner: OpenideChatComposer): void {
+		this._ownsQueue = false;
+		this._queue.shareWith(owner._queue);
+	}
+
 	setBusy(busy: boolean): void {
 		if (this._busy === busy) {
 			return;
 		}
 		this._busy = busy;
 		this._controls.setBusy(busy);
-		// The working border beam (upstream's `.chat-input-container.working`): the whole card says
-		// a turn is in flight, not just the stop button.
-		this._block.classList.toggle('working', busy);
-		if (!busy) {
+		if (!busy && this._ownsQueue) {
 			this._drainQueue();
 		}
 	}
@@ -611,6 +673,7 @@ export class OpenideChatComposer extends Disposable {
 		const controls = this._controls as OpenideChatComposerControls | undefined;
 		if (!controls) { return; }
 		controls.setHasContent(!!this._prompt.value.trim() || !this._attachments.isEmpty || !this._chips.isEmpty);
+		if (!this._restoringDraft) { this._onDidChangeDraft.fire(this.draft); }
 	}
 
 	/**
@@ -640,6 +703,8 @@ export class OpenideChatComposer extends Disposable {
 		this._measure();
 	}
 
+	pickAttachments(): void { this._attachments.pick(); }
+
 	focus(): void {
 		this._prompt.focus();
 	}
@@ -666,20 +731,9 @@ export class OpenideChatComposer extends Disposable {
 	 * Re-measures after a width change: the wrapped height of the text depends on the dock's width,
 	 * and a narrower dock would otherwise keep the old height.
 	 */
-	/** Upstream `ChatInputPart#_updateWorkingProgressAnimationDuration`: sub-linear in width, so the comet's travel speed stays roughly constant. */
-	private _lastAnimDurationS: number | undefined;
-	private _updateWorkingAnimationDuration(width: number): void {
-		const raw = 0.55 + 0.075 * Math.sqrt(Math.max(50, width));
-		const duration = Math.min(2.5, Math.max(1.4, raw));
-		if (this._lastAnimDurationS !== undefined && Math.abs(this._lastAnimDurationS - duration) < 0.05) {
-			return;
-		}
-		this._lastAnimDurationS = duration;
-		this._block.style.setProperty('--openide-chat-anim-duration', `${duration.toFixed(2)}s`);
-	}
-
-	layout(_width: number): void {
-		this._updateWorkingAnimationDuration(this._block.clientWidth || _width);
+	layout(width: number): void {
+		if (this._layoutWidth === width) { return; }
+		this._layoutWidth = width;
 		this._autosize();
 	}
 

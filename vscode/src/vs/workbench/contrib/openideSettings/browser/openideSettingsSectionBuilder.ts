@@ -20,8 +20,7 @@ import { $, addDisposableListener, append } from '../../../../base/browser/dom.j
 import { Button } from '../../../../base/browser/ui/button/button.js';
 import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
-import { defaultButtonStyles } from '../../../../platform/theme/browser/defaultStyles.js';
-import { openideInputBoxStyles } from '../../openideAgent/browser/openideControlStyles.js';
+import { openideButtonStyles, openideInputBoxStyles, openideSecondaryButtonStyles } from '../../openideAgent/browser/openideControlStyles.js';
 import { DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
 import { plainSettingsQuery } from './openideSettingsSearch.js';
 
@@ -493,9 +492,22 @@ export class OpenideSectionRenderer {
 		const ghost = action.ghost && !action.primary
 			? { buttonSecondaryBackground: 'transparent', buttonSecondaryHoverBackground: 'var(--oi-hover)', buttonSecondaryForeground: 'var(--oi-text)', buttonSecondaryBorder: undefined }
 			: undefined;
+		// Native buttons write colors inline. Semantic state is expressed through variables so
+		// arming a destructive action updates its appearance without recreating the widget.
+		const danger = action.danger ? {
+			buttonBackground: 'var(--oi-settings-danger-background)',
+			buttonHoverBackground: 'var(--oi-settings-danger-hover)',
+			buttonForeground: 'var(--oi-settings-danger-foreground)',
+			buttonBorder: 'var(--oi-danger)',
+			buttonSecondaryBackground: 'var(--oi-settings-danger-background)',
+			buttonSecondaryHoverBackground: 'var(--oi-settings-danger-hover)',
+			buttonSecondaryForeground: 'var(--oi-settings-danger-foreground)',
+			buttonSecondaryBorder: 'var(--oi-danger)',
+		} : undefined;
 		const button = this.store.add(new Button(parent, {
-			...defaultButtonStyles,
+			...(action.primary ? openideButtonStyles : openideSecondaryButtonStyles),
 			...ghost,
+			...danger,
 			secondary: !action.primary,
 			supportIcons: true,
 			title: action.label,
@@ -512,11 +524,12 @@ export class OpenideSectionRenderer {
 			this.store.add(button.onDidClick(() => action.run()));
 			return button;
 		}
-		let armed: any;
-		const disarm = () => { clearTimeout(armed); armed = undefined; button.label = text(action.label); button.element.classList.remove('armed'); };
+		let armed: ReturnType<typeof setTimeout> | undefined;
+		const setLabel = (label: string) => { button.label = text(label); button.setTitle(label); button.setAriaLabel(label); };
+		const disarm = () => { clearTimeout(armed); armed = undefined; setLabel(action.label); button.element.classList.remove('armed'); };
 		this.store.add(button.onDidClick(() => {
 			if (armed) { disarm(); action.run(); return; }
-			button.label = text(action.confirm!);
+			setLabel(action.confirm!);
 			button.element.classList.add('armed');
 			armed = setTimeout(disarm, CONFIRM_TIMEOUT);
 		}));

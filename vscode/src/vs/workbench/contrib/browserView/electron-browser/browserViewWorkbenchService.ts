@@ -13,7 +13,8 @@ import { Emitter, Event } from '../../../../base/common/event.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { Disposable, IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { process } from '../../../../base/parts/sandbox/electron-browser/globals.js';
-import { ACTIVE_GROUP, AUX_WINDOW_GROUP, IEditorService, PreferredGroup, SIDE_GROUP, USE_MODAL_EDITOR_SETTING, UseModalEditorMode } from '../../../services/editor/common/editorService.js';
+import { MODAL_GROUP, ACTIVE_GROUP, AUX_WINDOW_GROUP, IEditorService, PreferredGroup, SIDE_GROUP, USE_MODAL_EDITOR_SETTING, UseModalEditorMode } from '../../../services/editor/common/editorService.js';
+import { getActiveWindow } from '../../../../base/browser/dom.js';
 import { mainWindow } from '../../../../base/browser/window.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IWorkspaceTrustEnablementService, IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
@@ -71,6 +72,7 @@ export class BrowserViewWorkbenchService extends Disposable implements IBrowserV
 
 	private readonly _browserViewService: IBrowserViewService;
 	private readonly _known = new Map<string, BrowserEditorInput>();
+	private readonly _previewEditorTargets = new Map<number, (modal?: boolean) => Promise<IEditorService>>();
 	private readonly _contextualFilters = new Set<IBrowserViewContextualFilter>();
 	private readonly _openHandlers = new Set<IBrowserViewOpenHandler>();
 	private readonly _mainWindowId: number;
@@ -218,12 +220,30 @@ export class BrowserViewWorkbenchService extends Disposable implements IBrowserV
 		return this._known.get(this._previewId);
 	}
 
-	async openPreview(url?: string, initialState?: IBrowserEditorViewState, options?: { readonly preserveFocus?: boolean }): Promise<BrowserEditorInput> {
+	getOrCreatePreview(url?: string, initialState?: IBrowserEditorViewState): BrowserEditorInput {
 		const input = this.getOrCreateLazy({ id: this._previewId, ...initialState, url });
-		if (url) {
-			input.navigate(url);
+		if (url) { input.navigate(url); }
+		return input;
+	}
+
+	registerPreviewEditorTarget(windowId: number, resolve: (modal?: boolean) => Promise<IEditorService>): IDisposable {
+		this._previewEditorTargets.set(windowId, resolve);
+		return toDisposable(() => { if (this._previewEditorTargets.get(windowId) === resolve) { this._previewEditorTargets.delete(windowId); } });
+	}
+
+	async openPreview(url?: string, initialState?: IBrowserEditorViewState, options?: { readonly preserveFocus?: boolean; readonly targetWindowId?: number; readonly modal?: boolean; readonly reveal?: boolean }): Promise<BrowserEditorInput> {
+		const windowId = options?.targetWindowId ?? getActiveWindow().vscodeWindowId;
+		if (options?.targetWindowId !== undefined && windowId !== mainWindow.vscodeWindowId && !this._previewEditorTargets.has(windowId)) {
+			throw new Error('The preview window has closed');
 		}
-		await this.editorService.openEditor(input, { pinned: true, preserveFocus: options?.preserveFocus });
+		const resolve = this._previewEditorTargets.get(windowId);
+		const existing = options?.reveal ? this.getPreview() : undefined;
+		// Revealing a card or expanding it must preserve the page's live DOM and history.
+		const input = existing && existing.url === url ? existing : this.getOrCreatePreview(url, initialState);
+		const editorService = resolve ? await resolve(options?.modal) : this.editorService;
+		if (!resolve || this._previewEditorTargets.get(windowId) === resolve) {
+			await editorService.openEditor(input, { pinned: true, preserveFocus: options?.preserveFocus, modal: { targetWindowId: windowId, maximized: true } }, !resolve && options?.modal ? MODAL_GROUP : undefined);
+		}
 		return input;
 	}
 

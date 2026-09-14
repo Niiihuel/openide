@@ -1326,6 +1326,9 @@ export class TerminalService extends Disposable implements ITerminalService {
 		}
 		this._backgroundedTerminalDisposables.deleteAndDispose(instance.instanceId);
 		this._onDidDisposeInstance.fire(instance);
+		// Background terminals are part of instances too. Update lists and counts when
+		// one exits, just as foreground terminal hosts do.
+		this._onDidChangeInstances.fire();
 	}
 
 	public async showBackgroundTerminal(instance: ITerminalInstance, suppressSetActive?: boolean): Promise<void> {

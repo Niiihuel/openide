@@ -120,7 +120,7 @@
 	display: none;
 	flex: 0 0 auto;
 	padding: 2px 6px;
-	border-radius: var(--oi-radius-lg);
+	border-radius: var(--oi-radius-group);
 	background: color-mix(in srgb, var(--openide-red) 16%, transparent);
 	color: var(--openide-red);
 	font-family: var(--oi-font-mono);
@@ -144,7 +144,7 @@
 	justify-content: center;
 	padding: 0;
 	border: none;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	cursor: pointer;
@@ -160,7 +160,7 @@
 }
 
 .openide-chat-term-dots:hover {
-	background: var(--vscode-toolbar-hoverBackground);
+	background: var(--oi-hover);
 	color: var(--vscode-foreground);
 }
 
@@ -219,7 +219,7 @@
 }
 
 .openide-chat-term-fold > .openide-fold-expand:hover {
-	background: var(--vscode-toolbar-hoverBackground);
+	background: var(--oi-hover);
 }
 
 .openide-chat-term-fold > .openide-fold-expand:focus-visible {

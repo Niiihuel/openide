@@ -130,15 +130,19 @@ suite('OpenIDE ChatTerminalsTray', () => {
 	test('the toggle collapses the body and keeps the heading', () => {
 		const { tray, stub } = createTray();
 		stub.fire({ id: 'a', command: 'npm run dev', status: 'running' });
-		const body = tray.domNode.querySelector('.openide-chat-terms-body')!;
+		const body = tray.domNode.querySelector<HTMLElement>('.openide-chat-terms-body')!;
 		const toggle = tray.domNode.querySelector('.openide-chat-terms-toggle') as HTMLElement;
-		assert.strictEqual(body.classList.contains('hidden'), false);
+		assert.strictEqual(body.inert, true);
+		assert.strictEqual(toggle.getAttribute('aria-controls'), body.id);
 		toggle.click();
-		assert.strictEqual(body.classList.contains('hidden'), true);
+		assert.strictEqual(toggle.getAttribute('aria-expanded'), 'true');
+		assert.strictEqual(body.inert, false);
+		toggle.click();
+		assert.strictEqual(body.inert, true);
 		assert.strictEqual(isHidden(tray), false, 'collapsing is not closing');
 		assert.strictEqual(countText(tray), '1 Background Terminal');
 		toggle.click();
-		assert.strictEqual(body.classList.contains('hidden'), false);
+		assert.strictEqual(body.inert, false);
 	});
 
 	test('height changes are announced, because the tray sits between transcript and composer', () => {

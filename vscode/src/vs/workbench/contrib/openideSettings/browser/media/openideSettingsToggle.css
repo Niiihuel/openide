@@ -29,7 +29,7 @@
 	border-radius: 50%;
 	background: var(--vscode-foreground);
 	transform: translateX(0);
-	transition: transform 120ms ease;
+	transition: transform var(--oi-motion-exit, 120ms) var(--oi-ease-out, ease);
 }
 .openide-settings-toggle.checked .openide-settings-toggle-knob {
 	background: var(--vscode-button-foreground, var(--vscode-foreground));

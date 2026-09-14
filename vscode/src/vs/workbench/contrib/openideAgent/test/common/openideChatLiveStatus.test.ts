@@ -55,6 +55,38 @@ suite('OpenIDE chat live status', () => {
 		assert.strictEqual(openideChatLiveStatusLabel([tool('read_file', 'running')], true), undefined);
 	});
 
+	test('every blocking control shows one response wait, ahead of parallel activity', () => {
+		const pending: IOpenideChatContent[] = [
+			{ kind: 'confirmation', requestId: 'approval', tool: 'run_command', title: 'Run', risk: 'exec' },
+			{ kind: 'ask', requestId: 'ask', questions: [], isComplete: false },
+			{ kind: 'accountChoice', requestId: 'account', spentLabel: 'A', candidates: [] },
+			{ kind: 'modeSuggestion', requestId: 'mode', mode: 'plan', reason: 'Review' },
+			{ kind: 'terminal', callId: 'terminal', command: 'read', background: false, output: '', state: 'awaiting-input' },
+		];
+		for (const request of pending) {
+			const content = request.kind === 'terminal' ? [request] : [request, tool('read_file', 'running')];
+			assert.deepStrictEqual(openideChatLiveStatusLabel(content, false), { text: t('chat.working.response'), idle: false, waitingForResponse: true }, request.kind);
+			assert.strictEqual(openideChatLiveStatusLabel(content, true), undefined, 'completion/cancellation clears the wait');
+		}
+	});
+
+	test('a historical terminal prompt cannot mask newer activity', () => {
+		const terminal: IOpenideChatContent = { kind: 'terminal', callId: 'terminal', command: 'read', background: false, output: '', state: 'awaiting-input' };
+		const next = tool('read_file', 'running');
+		assert.deepStrictEqual(openideChatLiveStatusLabel([terminal, next], false), openideChatLiveStatusLabel([next], false));
+	});
+
+	test('answered and denied requests do not leave a stale wait', () => {
+		const content: IOpenideChatContent[] = [
+			{ kind: 'confirmation', requestId: 'approval', tool: 'run_command', title: 'Run', risk: 'exec', decision: 'deny' },
+			{ kind: 'ask', requestId: 'ask', questions: [], isComplete: true, answers: [] },
+			{ kind: 'accountChoice', requestId: 'account', spentLabel: 'A', candidates: [], decision: 'stop' },
+			{ kind: 'modeSuggestion', requestId: 'mode', mode: 'plan', reason: 'Review', accepted: false },
+			tool('read_file', 'running'),
+		];
+		assert.deepStrictEqual(openideChatLiveStatusLabel(content, false), openideChatLiveStatusLabel([content[content.length - 1]], false));
+	});
+
 	test('a running call is named in the present tense, by basename', () => {
 		const content = [tool('read_file', 'running', JSON.stringify({ path: 'src/vs/workbench/openideChatWidget.ts' }))];
 		assertStatus(openideChatLiveStatusLabel(content, false), 'Read openideChatWidget.ts', false);

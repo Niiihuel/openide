@@ -90,6 +90,7 @@ export class OpenideChatFileRow extends Disposable {
 	private readonly _actionStore = this._register(new DisposableStore());
 
 	private _path = '';
+	private _actionsEnabled = true;
 
 	constructor(
 		options: IOpenideChatFileRowOptions,
@@ -200,11 +201,19 @@ export class OpenideChatFileRow extends Disposable {
 		}
 	}
 
+	setActionsEnabled(enabled: boolean): void {
+		this._actionsEnabled = enabled;
+		for (const button of this._actions.querySelectorAll<HTMLButtonElement>('button')) {
+			button.disabled = !enabled;
+		}
+	}
+
 	setActions(actions: readonly IOpenideChatFileRowAction[]): void {
 		this._actionStore.clear();
 		clearNode(this._actions);
 		for (const action of actions) {
-			const button = append(this._actions, $<HTMLButtonElement>('button.openide-chat-file-action', { type: 'button' }));
+			const button = append(this._actions, $<HTMLButtonElement>('button.openide-chat-file-action.oi-dock-action', { type: 'button' }));
+			button.disabled = !this._actionsEnabled;
 			// The action store, not `this`: `setActions` rebuilds these buttons, and a hover left
 			// behind on a removed node is one leaked listener per repaint.
 			this._actionStore.add(setupChatTooltip(this._hoverService, button, action.tooltip));
@@ -217,7 +226,7 @@ export class OpenideChatFileRow extends Disposable {
 				// that also opened an editor would fight the click that just resolved the row.
 				event.preventDefault();
 				event.stopPropagation();
-				action.run();
+				if (this._actionsEnabled) { action.run(); }
 			}));
 		}
 	}

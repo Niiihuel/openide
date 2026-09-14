@@ -15,6 +15,7 @@
  *  Escape while running cancels the request and leaves the file untouched.
  *--------------------------------------------------------------------------------------------*/
 
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { $, addDisposableListener, append, EventType, getWindow } from '../../../../../base/browser/dom.js';
 import { AnchorAlignment, AnchorPosition } from '../../../../../base/browser/ui/contextview/contextview.js';
 import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
@@ -93,6 +94,7 @@ export class OpenideQuickEdit extends Disposable implements IEditorContribution,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IContextViewService contextViewService: IContextViewService,
 		@ICommandService commandService: ICommandService,
+		@IHoverService hoverService: IHoverService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
 		super();
@@ -109,6 +111,7 @@ export class OpenideQuickEdit extends Disposable implements IEditorContribution,
 		this.modelLabel = append(this.modelButton, $('span.openide-quick-edit-model-label'));
 		append(this.modelButton, $('span.codicon.codicon-chevron-down'));
 		this.picker = this._register(new OpenideChatModelPicker(agentService, contextViewService, commandService, () => this.renderModel(), {
+			hoverService,
 			// Under the chip, left-aligned to it; the context view flips it above when the room
 			// below runs out. The composer's default is ABOVE because the composer sits at the
 			// bottom of the dock — here, in the middle of a file, it sent the list to the top edge.

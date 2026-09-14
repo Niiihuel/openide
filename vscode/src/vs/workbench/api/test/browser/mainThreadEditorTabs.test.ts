@@ -94,6 +94,31 @@ suite('MainThreadEditorTabs', () => {
 		});
 	});
 
+	test('modal focus keeps a regular active group in full tab snapshots', async () => {
+		const group = (id: number) => new class extends mock<IEditorGroup>() {
+			override readonly id = id;
+			override readonly editors = [];
+		}();
+		const first = group(1), recent = group(2), modal = group(3);
+		const editorGroupsService = new class extends mock<IEditorGroupsService>() {
+			override readonly onDidAddGroup = Event.None;
+			override readonly onDidRemoveGroup = Event.None;
+			override readonly whenReady = Promise.resolve();
+			override get groups(): readonly IEditorGroup[] { return [first, recent]; }
+			override getGroups(): readonly IEditorGroup[] { return [recent, first]; }
+			override get activeGroup(): IEditorGroup { return modal; }
+		}();
+		const editorService = new class extends mock<IEditorService>() {
+			override readonly onDidEditorsChange = Event.None;
+		}();
+		const extHost = new ExtHostEditorTabs(SingleProxyRPCProtocol(new class extends mock<MainThreadEditorTabsShape>() {}));
+		disposables.add(new MainThreadEditorTabs(SingleProxyRPCProtocol(extHost), editorGroupsService,
+			new TestConfigurationService(), new NullLogService(), editorService));
+		await Promise.resolve();
+		assert.strictEqual(extHost.tabGroups.all.length, 2);
+		assert.strictEqual(extHost.tabGroups.activeTabGroup, extHost.tabGroups.all[1]);
+	});
+
 	test('updating a background tab does not make it the active tab', async () => {
 		class NamedEditorInput extends TestEditorInput {
 			private _dirty = false;

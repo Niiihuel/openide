@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { openideSecondaryButtonStyles } from '../../../openideAgent/browser/openideControlStyles.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { $ } from '../../../../../base/browser/dom.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
@@ -66,6 +67,8 @@ class FavoriteIndicator extends Disposable {
 		this.element = $('.browser-favorite-indicator-container');
 		this.element.style.display = 'none';
 		this._button = this._register(new Button(this.element, {
+			...openideSecondaryButtonStyles,
+			secondary: true,
 			supportIcons: true,
 			title: this._tooltip(),
 			small: true,

@@ -344,6 +344,19 @@ export interface IEditorOptions {
 export interface IModalEditorPartOptions {
 
 	/**
+	 * This part belongs to a docked workspace. Its expanded title omits window/size
+	 * controls, and dismissing it closes only the active editor. Explicit `close()`
+	 * still closes the whole part, including dirty-editor confirmation.
+	 */
+	readonly dockable?: boolean;
+
+	/** Optional contributed menu for the native add-tab control. Fixed when the part is created. */
+	tabsBarAddTabMenuId?: string;
+
+	/** Window whose workbench hosts the modal. Defaults to the main IDE window. */
+	readonly targetWindowId?: number;
+
+	/**
 	 * Create a new modal editor above the currently active modal instead of reusing it.
 	 * Intended for short, focused workflows launched from another modal surface.
 	 */
@@ -390,6 +403,9 @@ export interface IModalEditorPartOptions {
  * and resolved from the active editor (not from the part-level options API).
  */
 export interface IModalEditorOptions {
+
+	/** Present this editor as a full-window page below the title bar, without floating chrome. */
+	readonly fullWindow?: boolean;
 
 	/**
 	 * When true, the modal editor renders a simplified header:

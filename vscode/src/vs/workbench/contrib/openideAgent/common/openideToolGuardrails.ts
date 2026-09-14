@@ -22,11 +22,21 @@ function stableSignature(name: string, argumentsJson: string): string {
 export class OpenideToolCallGuard {
 	private readonly occurrences = new Map<string, number>();
 
-	inspect(name: string, argumentsJson: string): IToolLoopDecision {
+	private readonly observations = new Set<string>();
+
+	/** Successful writes invalidate earlier read-only observations. Keep mutation counters so
+	 * alternating writes cannot evade loop protection. */
+	recordStateChange(): void {
+		for (const signature of this.observations) { this.occurrences.delete(signature); }
+		this.observations.clear();
+	}
+
+	inspect(name: string, argumentsJson: string, observesState = false): IToolLoopDecision {
 		if (IGNORED_REPEAT_TOOLS.has(name)) {
 			return { occurrence: 1, warn: false, block: false };
 		}
 		const signature = stableSignature(name, argumentsJson);
+		if (observesState) { this.observations.add(signature); }
 		const occurrence = (this.occurrences.get(signature) ?? 0) + 1;
 		this.occurrences.set(signature, occurrence);
 		return {

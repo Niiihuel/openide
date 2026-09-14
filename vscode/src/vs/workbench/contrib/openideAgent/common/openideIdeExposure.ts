@@ -14,12 +14,9 @@
  *  OpenIDE can do. What decides is not danger, it is: does the CLI already have this?
  *
  *  ── The approval gap, stated plainly ───────────────────────────────────────────────────────
- *  A tool called through this door does NOT pass OpenIDE's approval flow (openideApproval.ts).
- *  The only gate is the CLI's own MCP permission prompt. That is acceptable for the browser
- *  family — it drives a browser against hosts already restricted by
- *  `openide.agent.browserAllowedHosts` — and NOT acceptable for anything that writes files or
- *  runs shell commands, which is why no such family appears below and why adding one has to
- *  wait for the approval bridge rather than for someone to widen the list.
+ *  Canvas calls also pass the native approval manager before execution, including external
+ *  CLI calls. Browser permissions remain limited to configured hosts. General file and shell
+ *  tools stay excluded: CLIs already provide those capabilities themselves.
  *--------------------------------------------------------------------------------------------*/
 
 /** Namespace every OpenIDE tool carries on the wire, so ours can never collide with a compat one. */
@@ -49,6 +46,8 @@ export const OPENIDE_EXTERNAL_TOOL_FAMILIES: readonly string[] = [
  */
 export const OPENIDE_EXTERNAL_TOOLS: readonly string[] = [
 	'project_map_query',
+	'canvas_templates', 'canvas_create', 'canvas_inspect', 'canvas_patch', 'canvas_export', 'canvas_handoff', 'canvas_preview', 'canvas_import',
+	'canvas_write', 'canvas_read', 'canvas_list', 'canvas_open',
 	'plan_save',
 	'memory', 'memory_search', 'memory_get', 'memory_save', 'memory_session_summary', 'memory_forget',
 ];
@@ -97,10 +96,12 @@ const NEVER_EXPOSED: readonly string[] = [
  * it a page the user is not looking at, with none of the state the user just produced by hand.
  * The one thing worth saying is the thing they cannot get elsewhere: it is THE window on screen.
  */
+// Canvas writes have an explicit native approval bridge in invokeExternalToolResult.
 const EXTERNAL_CONTEXT: readonly { readonly match: (name: string) => boolean; readonly text: string }[] = [
+	{ match: name => name.startsWith('canvas_'), text: 'Create and refine visual designs in the OpenIDE editor. Start with canvas_templates, inspect stable node IDs before patches, and include expectedRevision. Canvas mutations also pass the IDE permission gate.' },
 	{ match: name => name.startsWith('browser_record_'), text: 'Record the live OpenIDE browser: start → actions → stop. Use video for motion and multi-step flows. Inspect findings, timestamps and the contact sheet; findings need visual confirmation. Result includes flow.webm, sheet.jpg and key frames.' },
 	{ match: name => name === 'browser_check_visual', text: 'Measure defects in the live OpenIDE page (clipping, contrast, images, targets, overflow). Inspect alongside a screenshot; measurements do not replace visual judgment.' },
-	{ match: name => name.startsWith('browser_'), text: "Use the user's live OpenIDE browser, preserving login and current state. Host restrictions and client permissions apply." },
+	{ match: name => name.startsWith('browser_'), text: "Inspect the screen or preview in the user's live OpenIDE browser, preserving login and current state. Use this family for the user's screen, layout, button and browser-error requests. Other browser plugins have separate inventories. Host restrictions and client permissions apply." },
 	{ match: name => name === 'project_map_query', text: 'Query architecture, dependencies and change impact in the derived Project Map; verify stale evidence against source.' },
 	{ match: name => name === MEMORY_TOOL || name.startsWith('memory_'), text: 'Shared canonical notes: .openide/memory/notes/*.md; MEMORY.md is the compatibility overview. Search before saving; get revision/hash before updates. Save durable topics; use session_summary for handoffs. Only a successful receipt proves persistence.' },
 	{ match: name => name === 'plan_save', text: 'BLOCKING: waits for user review. Execute the returned edited plan only if approved. If discarded, run nothing.' },

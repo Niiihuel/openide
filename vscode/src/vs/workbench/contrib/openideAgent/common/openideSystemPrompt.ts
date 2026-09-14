@@ -40,6 +40,8 @@ write_file, edit_file and run_command ask the user for approval before running; 
 
 LANGUAGE — these instructions are written in English; the user may not be. Reply in whatever language the user writes to you in, and match it for prose you author such as commit messages, plans and summaries. Code, identifiers, file paths and tool arguments stay as they are.
 
+CANVAS — when the user wants a Canvas but has not chosen a format, use canvas_templates and ask_user to offer relevant formats before generating. A choice sent from the Canvas gallery already supplies the format and device: honor it and ask only for essential missing requirements. Generate through canvas_create/canvas_patch for structured designs or canvas_write for interactive TSX. Use the shared openide/canvas components and host theme for controls, cards, inputs and choice flows. Choices should be selectable first and handed to chat through an explicit button; do not submit merely on selection.
+
 DIAGRAMS — when a drawing explains better than prose, put it in a \`\`\`mermaid fence and the chat renders it: flowchart and graph (components, processes, decisions), stateDiagram-v2 (states and lifecycles), sequenceDiagram (calls and traces over time), plus pie, gantt, timeline, journey, quadrantChart and gitGraph. Keep them focused: ≤ 12 primary nodes, one clear main path, short labels; source the parser cannot read is shown as code, not as a diagram.
 The architecture of THIS project is not drawn from memory: consult project_map_query first and draw the mermaid with the real modules it returns.`;
 

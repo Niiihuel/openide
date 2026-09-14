@@ -550,6 +550,18 @@ suite('Modal Editor Group', () => {
 		});
 	});
 
+	test('explicit modal group remains the destination without closing its native part', async () => {
+		const instantiationService = workbenchInstantiationService({ contextKeyService: instantiationService => instantiationService.createInstance(MockScopableContextKeyService) }, disposables);
+		instantiationService.invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));
+		const parts = await createEditorParts(instantiationService, disposables);
+		instantiationService.stub(IEditorGroupsService, parts);
+		const modal = await parts.createModalEditorPart();
+		const input = createTestFileEditorInput(URI.file('foo/explicit'), TEST_EDITOR_INPUT_ID);
+		const [group] = await instantiationService.invokeFunction(accessor => findGroup(accessor, { editor: input }, modal.activeGroup));
+		assert.deepStrictEqual({ group: group.id, modal: parts.activeModalEditorPart }, { group: modal.activeGroup.id, modal });
+		await modal.close();
+	});
+
 	test('findGroup returns main part group when modal is active and preferredGroup is not MODAL_GROUP', async () => {
 		const instantiationService = workbenchInstantiationService({ contextKeyService: instantiationService => instantiationService.createInstance(MockScopableContextKeyService) }, disposables);
 		instantiationService.invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));

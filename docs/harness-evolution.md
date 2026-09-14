@@ -54,10 +54,15 @@ its original messages and the prepared summary. A changed projection during the
 asynchronous summary invalidates the compaction. History lost before this version
 was installed cannot be reconstructed retroactively.
 
-Current bounds: 16 MiB per record, 128 MiB and 10,000 records per session. Reaching
-a bound stops the run and requires a new session. There is no global quota,
-rotation, or full-history archive browser yet. Each append currently verifies the
-whole prefix, so long sessions have increasing IO/CPU cost. Hash chaining detects
+Records remain bounded at 16 MiB. Journals rotate at 32 MiB or 10,000 records
+per segment, preserving the sequence and hash chain across files. Legacy journals
+up to 128 MiB remain readable and continue in a new segment without rewriting
+accepted history. Only a torn tail in the final segment can be repaired; missing
+or corrupt archives fail closed. File and directory fsync precede acknowledgement.
+The workspace owner reuses a bounded cache of verified segment metadata (not
+transcripts); inode, size, mtime and ctime changes force revalidation. Recovery
+and explicit reads still verify the full history. There is no global disk quota
+or full-history archive browser yet. Hash chaining detects
 corruption; it is not an authentication mechanism against the local account.
 Conversation and tool content are retained, including sensitive text supplied in
 prompts or files, even though transport secrets are excluded.

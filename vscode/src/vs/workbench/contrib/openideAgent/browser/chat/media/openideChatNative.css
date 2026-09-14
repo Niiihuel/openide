@@ -67,38 +67,14 @@
 	outline: none;
 }
 
-/* The webview's `#jumpDown`. There it hangs off the dock at `top: -40px`; here it hangs off the
-   BOTTOM of the list host, which is the same edge — 28px of button plus 12px of gap lands the
-   circle in the same place, and it keeps floating over the transcript instead of taking a row.
-   Everything else (size, circle, inverted fill, shadow) is transcribed value for value; the
-   `.monaco-button` geometry it inherits has to be overridden because the webview had no such base. */
+/* Same neutral circular action as Send/Stop; the list owns only its floating placement. */
 .openide-chat-scroll-down.monaco-button {
 	position: absolute;
 	right: 14px;
 	bottom: 12px;
-	z-index: 10;
-	width: 28px;
-	height: 28px;
-	padding: 0;
-	border: none;
-	border-radius: 50%;
-	color: var(--vscode-editor-background);
-	background: var(--vscode-foreground);
+	/* Float above the compositor exclusion gradient, which must only shade prose. */
+	z-index: 101;
 	box-shadow: var(--oi-shadow);
-	transition: opacity 120ms ease, transform 120ms ease;
-}
-
-.openide-chat-scroll-down.monaco-button:hover {
-	color: var(--vscode-editor-background);
-	background: var(--vscode-foreground);
-	opacity: 0.85;
-}
-
-.openide-chat-scroll-down.monaco-button:active { transform: scale(0.92); }
-
-.monaco-workbench .openide-chat-native .openide-chat-list .openide-chat-scroll-down .codicon[class*="codicon-"] {
-	font-size: 14px;
-	color: inherit;
 }
 
 /* ---- Rows ---- */
@@ -190,7 +166,7 @@
 	margin: 6px 0;
 	padding: 9px 11px;
 	border: 1px solid color-mix(in srgb, var(--vscode-errorForeground) 28%, transparent);
-	border-radius: var(--oi-radius-lg);
+	border-radius: var(--oi-radius-group);
 	background: color-mix(in srgb, var(--vscode-errorForeground) 6%, transparent);
 	color: var(--vscode-errorForeground);
 	white-space: pre-wrap;
@@ -208,7 +184,7 @@
 	white-space: pre-wrap;
 }
 
-/* The shimmer recipe itself lives once, in openideChatActivity.css (`.openide-chat-shimmer`).
+/* The shimmer recipe itself lives once, in the shared surface stylesheet (`.openide-chat-shimmer`).
    There used to be a byte-identical copy here under `.openide-chat-progress-active`, applied to
    the flex ROW — where `background-clip: text` has no text of its own to clip against, so it never
    swept. The row now carries an inner label and reuses the shared class. */
@@ -218,95 +194,28 @@
 	text-overflow: ellipsis;
 }
 
-@keyframes openide-chat-shimmer-sweep {
-	0% { background-position: 120% 0; }
-	100% { background-position: -120% 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.openide-chat-shimmer { animation: none; }
-}
-
-/* ---- Notice strip ----
-   A native-only affordance: the webview answers approvals inline, so it has nowhere to say "this
-   engine cannot answer that". Rather than invent a look for it, it borrows the webview's own
-   `.flatrow` family the removed chat webview — muted for info, the amber card for a warning,
-   the red card for an error — so nothing new enters the visual language. */
-/* ---- The empty transcript of a new chat -----------------------------------------------------
-   The workbench's own empty editor, at the dock's scale: the same watermark file, one line, and
-   the two keys the composer answers to. It is an OVERLAY on the list host rather than a row in the
-   list, so an arriving first turn simply covers it — the list never has to hold a fake item and
-   the tail lock never has to scroll past one. */
-.openide-chat-empty {
-	position: absolute;
-	inset: 0;
-	z-index: 1;
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	gap: 10px;
-	padding: 24px 20px;
-	text-align: center;
-	pointer-events: none;
-	user-select: none;
-}
-/* Only the button takes clicks: the rest of the card must not eat a drag over the transcript. */
-.openide-chat-empty > * { pointer-events: none; }
-.openide-chat-empty .openide-chat-empty-sessions { pointer-events: auto; }
-.openide-chat-empty.hidden { display: none; }
-
-.openide-chat-empty-mark {
-	width: 40px;
-	height: 40px;
-	opacity: 0.55;
-	background-image: url('../../../../../browser/parts/editor/media/openide-watermark-black.png');
-	background-size: contain;
-	background-position: center;
-	background-repeat: no-repeat;
-}
-.monaco-workbench.vs-dark .openide-chat-empty-mark,
-.monaco-workbench.hc-black .openide-chat-empty-mark {
-	background-image: url('../../../../../browser/parts/editor/media/openide-watermark-white.png');
-}
-
-.openide-chat-empty-title { font-size: 14px; font-weight: 600; color: var(--vscode-foreground); }
-.openide-chat-empty-text { font-size: 12.5px; color: var(--vscode-descriptionForeground); }
-
-.openide-chat-empty-hints { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
-.openide-chat-empty-hint {
+/* The shared empty state stays outside the transcript's virtual list. */
+.openide-chat-empty { position: absolute; inset: 0; z-index: 1; }
+.openide-chat-empty-workspace {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
+	gap: var(--vscode-spacing-size8, 8px);
+	margin-bottom: var(--vscode-spacing-size12, 12px);
+	font-size: var(--oi-text-sm);
 }
-.openide-chat-empty-key {
-	flex: 0 0 auto;
-	min-width: 18px;
-	padding: 1px 5px;
-	border: 1px solid var(--oi-border);
-	border-radius: var(--oi-radius-sm);
-	background: var(--oi-tint-2, var(--vscode-toolbar-hoverBackground));
-	color: var(--vscode-foreground);
-	font-family: var(--vscode-editor-font-family, monospace);
-	font-size: 11px;
-	line-height: 15px;
+.openide-chat-empty-workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-chat-empty-hints {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--vscode-spacing-size12, 12px);
+	font-size: var(--oi-text-sm);
 }
-
-.openide-chat-empty-sessions {
-	margin-top: 6px;
-	padding: 4px 10px;
-	border: 1px solid var(--oi-border);
-	border-radius: var(--oi-radius-md);
-	background: transparent;
-	color: var(--vscode-foreground);
-	font-family: inherit;
-	font-size: 12px;
-	cursor: pointer;
+.openide-chat-empty-hint { display: flex; align-items: center; gap: var(--vscode-spacing-size8, 8px); }
+.openide-chat-empty-hint .monaco-keybinding-key {
+	background: var(--vscode-keybindingLabel-background); color: var(--vscode-keybindingLabel-foreground);
+	border-color: var(--vscode-keybindingLabel-border); border-bottom-color: var(--vscode-keybindingLabel-bottomBorder);
+	box-shadow: inset 0 -1px 0 var(--vscode-widget-shadow);
 }
-.openide-chat-empty-sessions:hover { background: var(--vscode-toolbar-hoverBackground); }
-.openide-chat-empty-sessions[hidden] { display: none; }
 
 .openide-chat-notice {
 	flex: 0 0 auto;
@@ -321,7 +230,7 @@
 .openide-chat-notice.openide-chat-notice-warning {
 	padding: 9px 11px;
 	border: 1px solid color-mix(in srgb, var(--vscode-editorWarning-foreground, #d7ba7d) 30%, transparent);
-	border-radius: var(--oi-radius-lg);
+	border-radius: var(--oi-radius-group);
 	background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #d7ba7d) 6%, transparent);
 	color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #d7ba7d));
 }
@@ -329,7 +238,7 @@
 .openide-chat-notice.openide-chat-notice-error {
 	padding: 9px 11px;
 	border: 1px solid color-mix(in srgb, var(--vscode-errorForeground) 28%, transparent);
-	border-radius: var(--oi-radius-lg);
+	border-radius: var(--oi-radius-group);
 	background: color-mix(in srgb, var(--vscode-errorForeground) 6%, transparent);
 	color: var(--vscode-errorForeground);
 }
@@ -384,8 +293,7 @@
    its title is 12px muted text, and secondary buttons align right in a `.chat-buttons-container`.
    Written here, after every part stylesheet, with the root class for specificity so the values
    in the per-part files (raised backgrounds, 8-12px radii, tinted heads) stop applying. */
-/* `.openide-chat-ask.answered` and not the bare class: while the run waits, the ask row is only
-   the "Asking questions" shimmer line and a frame around a shimmer reads as an empty card. */
+/* Pending questions use the shared status line; only their settled record paints a card. */
 .openide-chat-native .openide-chat-ask.answered,
 .openide-chat-native .openide-chat-todos-card,
 .openide-chat-native .openide-chat-term-card,
@@ -434,13 +342,12 @@
 .openide-chat-native .openide-chat-ask-free,
 .openide-chat-native .openide-chat-ask-option {
 	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-chat-requestBorder, var(--oi-border));
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 }
 .openide-chat-native .openide-chat-ask-head,
 .openide-chat-native .openide-chat-tt-title,
 .openide-chat-native .openide-chat-term-title,
 .openide-chat-native .openide-chat-suggest-title,
-.openide-chat-native .openide-chat-canvas-title,
 .openide-chat-native .openide-chat-compaction-title,
 .openide-chat-native .openide-chat-delegation-title {
 	font-size: 12px;
@@ -452,19 +359,17 @@
 /* Buttons: the workbench's secondary button, right-aligned (upstream .chat-buttons-container).
    The plan card is NOT in these lists any more: it owns its whole look in openideChatPlan.css
    (one row of actions, ghost + filled), and the shared secondary-button skin was what kept
-   turning its ghost buttons into filled ones. */
+   turning its ghost buttons into filled ones. Subagent controls also own their bare-icon
+   styling in openideChatSubagent.css and must not inherit this button skin. */
 .openide-chat-native .openide-chat-suggest-actions,
 .openide-chat-native .openide-chat-plan-actions,
-.openide-chat-native .openide-chat-canvas-head,
 .openide-chat-native .openide-chat-decision-line {
 	justify-content: flex-end;
 }
 .openide-chat-native .openide-chat-suggest-dismiss,
-.openide-chat-native .openide-chat-notice-action,
-.openide-chat-native .openide-chat-sub-action,
-.openide-chat-native .openide-chat-terms-stop {
+.openide-chat-native .openide-chat-notice-action {
 	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-button-border, transparent);
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: var(--vscode-button-secondaryBackground);
 	color: var(--vscode-button-secondaryForeground);
 	padding: 2px 10px;
@@ -472,15 +377,12 @@
 	line-height: 18px;
 }
 .openide-chat-native .openide-chat-suggest-dismiss:hover,
-.openide-chat-native .openide-chat-notice-action:hover,
-.openide-chat-native .openide-chat-sub-action:hover,
-.openide-chat-native .openide-chat-terms-stop:hover {
+.openide-chat-native .openide-chat-notice-action:hover {
 	background: var(--vscode-button-secondaryHoverBackground);
 	color: var(--vscode-button-secondaryForeground);
 }
-.openide-chat-native .openide-chat-suggest-accept,
-.openide-chat-native .openide-chat-canvas-open {
-	border-radius: var(--oi-radius-sm);
+.openide-chat-native .openide-chat-suggest-accept {
+	border-radius: var(--oi-radius-control);
 	padding: 2px 10px;
 	font-size: 12px;
 	line-height: 18px;

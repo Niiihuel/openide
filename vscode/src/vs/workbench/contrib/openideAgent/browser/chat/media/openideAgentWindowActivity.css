@@ -1,0 +1,19 @@
+/* Native context activity keeps shared section/row paint and owns only its compact composition. */
+.openide-context-activity .openide-context-activity-toggle { flex: 0 0 24px; width: 24px; height: 24px; padding: 0; color: var(--oi-secondary); }
+.openide-context-activity-count { flex-shrink: 0; color: var(--oi-secondary); font-size: 11px; }
+.openide-context-activity-toggle > .codicon { transition: transform var(--oi-motion-enter) var(--oi-ease-out); }
+.openide-context-activity-toggle[aria-expanded=false] > .codicon { transform: rotate(-90deg); }
+.openide-context-activity .openide-context-activity-entry { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.openide-context-activity .openide-context-activity-entry > .openide-agent-window-context-row { flex: 1; min-width: 0; }
+.openide-context-activity-actions { display: flex; flex-shrink: 0; opacity: 0; pointer-events: none; transition: opacity var(--oi-duration-hover) var(--oi-ease); }
+.openide-context-activity-entry:is(:hover, :focus-within) .openide-context-activity-actions { opacity: 1; pointer-events: auto; }
+.openide-context-activity .openide-context-activity-more { justify-content: flex-start; padding: 4px 8px; color: var(--oi-secondary); }
+.openide-context-activity .openide-agent-window-source-thumb { width: 20px; height: 20px; object-fit: cover; border-radius: var(--oi-radius-sm); flex-shrink: 0; }
+
+.openide-context-activity-entry { border-radius: var(--oi-navigation-row-radius); transition: background-color var(--oi-duration-hover) var(--oi-ease); }
+.openide-context-activity-entry:is(:hover, :focus-within) { background: var(--oi-hover); }
+.openide-context-activity-entry > .openide-agent-window-context-row:is(:hover, :focus) { background: transparent; }
+.openide-context-activity-actions > .oi-dock-action:hover { background: var(--oi-hover); }
+
+.openide-context-activity .openide-context-activity-actions[hidden],
+.openide-context-activity .openide-context-activity-more[hidden] { display: none; }

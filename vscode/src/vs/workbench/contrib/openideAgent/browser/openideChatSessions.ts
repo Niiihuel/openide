@@ -13,11 +13,13 @@
  *  strip and moves it to the Archived section; deleting removes it for good.
  *--------------------------------------------------------------------------------------------*/
 
+import { collectConversationChanges, IConversationFileChange } from '../common/openideConversationChanges.js';
+import { subagentTaskTitle } from '../common/openideSubagentTitle.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { IChatMessage, IContextBreakdown, IMessageChangeSet } from '../common/openideAgentTypes.js';
-import { isOpenideCliId, isOpenideCliSessionStatus, OpenideCliId, OpenideCliSessionStatus } from '../common/openideAgentCliCatalog.js';
+import { getOpenideCli, isOpenideCliId, isOpenideCliSessionStatus, OpenideCliId, OpenideCliSessionStatus } from '../common/openideAgentCliCatalog.js';
 
 /** `native` = the IDE's own harness (a transcript); `cli` = an external agent in a terminal. */
 export type OpenideChatSessionKind = 'native' | 'cli';
@@ -29,6 +31,8 @@ export interface IChatSessionMeta {
 	title: string;
 	updatedAt: number;
 	archived: boolean;
+	/** User-pinned history survives recency pruning and is grouped by the sidebar. */
+	pinned?: boolean;
 	hasError: boolean;
 	/** Born as a fork of another session (the UI marks it with the repo-forked codicon). */
 	forked: boolean;
@@ -40,6 +44,11 @@ export interface IChatSessionMeta {
 	 * offered to open a chat the window could no longer find.
 	 */
 	subagentRunId?: string;
+	subagentStartedAt?: number;
+	subagentCompletedAt?: number;
+	subagentStatus?: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+	/** Owning conversation; specialist transcripts are children, never peer sessions. */
+	parentSessionId?: string;
 	kind: OpenideChatSessionKind;
 	/** For `cli` sessions: which agent (catalog id). */
 	cliId?: OpenideCliId;
@@ -144,7 +153,12 @@ function normalizeUsage(value: unknown): IChatSessionUsage | undefined {
 
 export class OpenideChatSessions {
 
+	private readonly _onDidChange = new Emitter<void>();
+	readonly onDidChange: Event<void> = this._onDidChange.event;
+
 	private readonly sessions = new Map<string, IChatSession>();
+	private readonly reviewChanges = new Map<string, readonly IConversationFileChange[]>();
+	private readonly messageVersions = new WeakMap<IChatSession, number>();
 	/** Global session order (most recent first by updatedAt). */
 	private order: string[] = [];
 	private openTabIds: string[] = [];
@@ -162,16 +176,21 @@ export class OpenideChatSessions {
 			for (const s of p.sessions || []) {
 				if (!s || typeof s.id !== 'string') { continue; }
 				const messages = Array.isArray(s.messages) ? s.messages : [];
-				const canDeriveTitle = s.kind !== 'cli' && messages.some(message => message.role === 'user') && !messages.some(message => message.compaction);
+				const canDeriveTitle = !s.subagentRunId && s.kind !== 'cli' && messages.some(message => message.role === 'user') && !messages.some(message => message.compaction);
 				this.sessions.set(s.id, {
 					id: s.id,
 					title: s.customTitle || (canDeriveTitle ? this.deriveTitle(messages) : s.title) || 'Nuevo chat',
 					customTitle: typeof s.customTitle === 'string' && s.customTitle ? s.customTitle : undefined,
 					updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : 0,
 					archived: !!s.archived,
+					pinned: !!s.pinned,
 					hasError: !!s.hasError,
 					forked: !!s.forked,
 					subagentRunId: typeof s.subagentRunId === 'string' && s.subagentRunId ? s.subagentRunId : undefined,
+					subagentStartedAt: typeof s.subagentStartedAt === 'number' ? s.subagentStartedAt : undefined,
+					subagentCompletedAt: typeof s.subagentCompletedAt === 'number' ? s.subagentCompletedAt : undefined,
+					subagentStatus: s.subagentStatus === 'running' ? 'interrupted' : s.subagentStatus,
+					parentSessionId: typeof s.parentSessionId === 'string' ? s.parentSessionId : undefined,
 					kind: s.kind === 'cli' && isOpenideCliId(s.cliId) ? 'cli' : 'native',
 					cliId: s.kind === 'cli' && isOpenideCliId(s.cliId) ? s.cliId : undefined,
 					// A CLI that was running when the window closed is not running any more.
@@ -207,16 +226,17 @@ export class OpenideChatSessions {
 			}));
 		const data: IPersisted = { sessions, openTabIds: this.openTabIds, activeId: this.activeId };
 		this.storageService.store(STORAGE_KEY, JSON.stringify(data), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+		this._onDidChange.fire();
 	}
 
 	private toMeta(s: IChatSession): IChatSessionMeta {
-		return { id: s.id, title: s.title, updatedAt: s.updatedAt, archived: s.archived, hasError: s.hasError, forked: s.forked, empty: this.isEmptySession(s), kind: s.kind, cliId: s.cliId, status: s.status, cwd: s.cwd, providerSessionId: s.providerSessionId, unread: s.unread };
+		return { id: s.id, title: s.title, updatedAt: s.updatedAt, archived: s.archived, pinned: s.pinned, hasError: s.hasError, forked: s.forked, subagentRunId: s.subagentRunId, subagentStartedAt: s.subagentStartedAt, subagentCompletedAt: s.subagentCompletedAt, subagentStatus: s.subagentStatus, parentSessionId: s.parentSessionId, empty: this.isEmptySession(s), kind: s.kind, cliId: s.cliId, status: s.status, cwd: s.cwd, providerSessionId: s.providerSessionId, unread: s.unread };
 	}
 
 	/** No user turns and no name the user chose: nothing worth keeping or listing. A CLI session
 	 *  is never empty — its content lives in the agent's own transcript, not in `messages`. */
 	private isEmptySession(s: IChatSession): boolean {
-		return s.kind === 'native' && !s.customTitle && !s.messages.some(message => message.role === 'user');
+		return s.kind === 'native' && !s.customTitle && !s.pinned && !s.messages.some(message => message.role === 'user');
 	}
 
 	kindOf(id: string | undefined): OpenideChatSessionKind | undefined {
@@ -315,8 +335,27 @@ export class OpenideChatSessions {
 		return this.activeId;
 	}
 
+	/** In-memory revision for readers; metadata changes do not invalidate a transcript. */
+	messageVersionOf(id: string): number | undefined {
+		const session = this.sessions.get(id);
+		return session ? this.messageVersions.get(session) ?? 0 : undefined;
+	}
+
 	messagesOf(id: string | undefined): IChatMessage[] {
 		return (id && this.sessions.get(id)?.messages) || [];
+	}
+
+	/** Exact before/after receipts owned by this conversation, independent of the working tree. */
+	changesOf(id: string | undefined): readonly IConversationFileChange[] {
+		if (!id) { return []; }
+		const session = this.sessions.get(id);
+		if (!session) { return []; }
+		let changes = this.reviewChanges.get(id);
+		if (!changes) {
+			changes = collectConversationChanges(Object.values(session.changeSetsByMessageId));
+			this.reviewChanges.set(id, changes);
+		}
+		return changes;
 	}
 
 	changeSetOf(id: string | undefined, messageId: string): IMessageChangeSet | undefined {
@@ -325,6 +364,7 @@ export class OpenideChatSessions {
 	}
 
 	saveChangeSet(id: string, changeSet: IMessageChangeSet): void {
+		this.reviewChanges.delete(id);
 		const session = this.sessions.get(id);
 		if (!session) { return; }
 		const encoded = JSON.stringify(changeSet);
@@ -340,6 +380,7 @@ export class OpenideChatSessions {
 	}
 
 	removeChangeSets(id: string, messageIds: readonly string[]): void {
+		this.reviewChanges.delete(id);
 		const session = this.sessions.get(id);
 		if (!session) { return; }
 		for (const messageId of messageIds) { delete session.changeSetsByMessageId[messageId]; }
@@ -416,17 +457,40 @@ export class OpenideChatSessions {
 		return undefined;
 	}
 
-	createBackground(title: string, messages: IChatMessage[], subagentRunId?: string): string {
+	setSubagentStatus(id: string, status: NonNullable<IChatSessionMeta['subagentStatus']>): void {
+		const session = this.sessions.get(id);
+		if (!session?.subagentRunId || session.subagentStatus === status) { return; }
+		session.subagentStatus = status;
+		if (status === 'running') { session.subagentStartedAt ??= Date.now(); }
+		else { session.subagentCompletedAt = Date.now(); }
+		session.status = status === 'running' ? 'in-progress' : status === 'failed' ? 'failed' : 'completed';
+		this.persist();
+	}
+
+	linkSubagentParent(id: string, parentSessionId: string, task?: string, definitionName?: string): void {
+		const session = this.sessions.get(id);
+		if (!session?.subagentRunId || id === parentSessionId || !this.sessions.has(parentSessionId)) { return; }
+		const title = task && session.title === definitionName ? subagentTaskTitle(task, session.title) : session.title;
+		if (session.parentSessionId === parentSessionId && title === session.title) { return; }
+		session.parentSessionId = parentSessionId;
+		if (title !== session.title) { session.title = title; session.customTitle = title; }
+		this.persist();
+	}
+
+	createBackground(title: string, messages: IChatMessage[], subagentRunId?: string, parentSessionId?: string): string {
 		const id = generateUuid();
+		title = subagentRunId ? subagentTaskTitle(messages.find(message => message.role === 'user')?.content ?? '', title) : title.trim().slice(0, TITLE_MAX);
 		const session: IChatSession = {
 			id,
-			title: title.trim().slice(0, TITLE_MAX) || 'Subagente',
+			title: title.trim() || 'Subagente',
 			updatedAt: Date.now(),
 			archived: false,
 			hasError: false,
 			forked: true,
 			kind: 'native',
 			subagentRunId,
+			parentSessionId,
+			customTitle: title.trim() || undefined,
 			messages,
 			changeSetsByMessageId: {},
 		};
@@ -558,6 +622,7 @@ export class OpenideChatSessions {
 
 	delete(id: string): void {
 		this.sessions.delete(id);
+		this.reviewChanges.delete(id);
 		this.order = this.order.filter(t => t !== id);
 		this.openTabIds = this.openTabIds.filter(t => t !== id);
 		if (this.activeId === id) { this.activeId = this.openTabIds[this.openTabIds.length - 1]; }
@@ -569,6 +634,7 @@ export class OpenideChatSessions {
 		const s = this.sessions.get(id);
 		if (!s) { return; }
 		s.messages = messages;
+		this.messageVersions.set(s, (this.messageVersions.get(s) ?? 0) + 1);
 		s.updatedAt = Date.now();
 		s.hasError = hasError;
 		// The derived title tracks the FIRST user turn; a manual rename freezes it (VS Code's
@@ -585,7 +651,15 @@ export class OpenideChatSessions {
 		if (!s) { return; }
 		const trimmed = title.trim().slice(0, TITLE_MAX);
 		s.customTitle = trimmed || undefined;
-		s.title = trimmed || this.deriveTitle(s.messages);
+		s.title = trimmed || (s.kind === 'cli' ? getOpenideCli(s.cliId)?.name || s.title : this.deriveTitle(s.messages));
+		this.persist();
+	}
+
+	/** Pinning is a user preference, not activity: it never changes recency or starts a run. */
+	setPinned(id: string, pinned: boolean): void {
+		const session = this.sessions.get(id);
+		if (!session || !!session.pinned === pinned) { return; }
+		session.pinned = pinned;
 		this.persist();
 	}
 
@@ -593,6 +667,7 @@ export class OpenideChatSessions {
 	deleteAll(): void {
 		const ids = [...this.sessions.keys()];
 		this.sessions.clear();
+		this.reviewChanges.clear();
 		this.order = [];
 		this.openTabIds = [];
 		this.activeId = undefined;
@@ -610,8 +685,9 @@ export class OpenideChatSessions {
 			.sort((a, b) => b.updatedAt - a.updatedAt);
 		for (let i = sorted.length - 1; i >= 0 && this.sessions.size > MAX_SESSIONS; i--) {
 			const s = sorted[i];
-			if (!keep.has(s.id)) {
+			if (!keep.has(s.id) && !s.pinned) {
 				this.sessions.delete(s.id);
+				this.reviewChanges.delete(s.id);
 				this.order = this.order.filter(t => t !== s.id);
 			}
 		}

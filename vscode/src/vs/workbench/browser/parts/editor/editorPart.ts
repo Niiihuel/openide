@@ -1425,8 +1425,8 @@ export class EditorPart extends Part<IEditorPartMemento> implements IEditorPart,
 
 		// When the floating panels layout is enabled, reserve a margin around the
 		// main editor so it floats like the side bar and panel cards. Scope to the main
-		// window (auxiliary editor windows do not apply the matching CSS).
-		if (this.windowId === mainWindow.vscodeWindowId && this.layoutService.isFloatingPanelsEnabled()) {
+		// window (auxiliary and modal editors do not apply the matching CSS).
+		if (this.windowId === mainWindow.vscodeWindowId && !this.element.classList.contains('modal-editor-part') && this.layoutService.isFloatingPanelsEnabled()) {
 
 			// When the editor becomes the outermost card on a side (no floating part
 			// sits between it and the window edge) it adopts the same doubled gutter the

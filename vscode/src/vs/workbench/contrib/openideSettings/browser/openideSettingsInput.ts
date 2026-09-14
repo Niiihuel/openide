@@ -10,6 +10,7 @@
  *  the stable, versionless name below; the compatibility detail stays at this boundary.
  *--------------------------------------------------------------------------------------------*/
 
+import { IModalEditorOptions } from '../../../../platform/editor/common/editor.js';
 import { IPreferencesService } from '../../../services/preferences/common/preferences.js';
 import { SettingsEditor2Input } from '../../../services/preferences/common/preferencesEditorInput.js';
 
@@ -20,6 +21,10 @@ export class SettingsEditorInput extends SettingsEditor2Input {
 		@IPreferencesService preferencesService: IPreferencesService,
 	) {
 		super(preferencesService);
+	}
+
+	getModalEditorOptions(): IModalEditorOptions {
+		return { fullWindow: true };
 	}
 
 	override get typeId(): string {

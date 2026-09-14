@@ -16,6 +16,76 @@ suite('ContextView', () => {
 		sinon.restore();
 	});
 
+	test('theme motion animates a resize while retaining the native anchor', async () => {
+		const container = $('.container');
+		container.style.cssText = '--vscode-context-view-motion-duration:20ms;--vscode-context-view-motion-enter-duration:20ms';
+		document.body.append(container);
+		const contextView = new ContextView(container, ContextViewDOMPosition.ABSOLUTE);
+		try {
+			contextView.show({ getAnchor: () => ({ x: 100, y: 100, width: 20, height: 20 }), render: view => {
+				view.style.minWidth = view.style.maxWidth = '100px'; view.style.height = '80px'; return null;
+			} });
+			const view = contextView.getViewElement();
+			await Promise.all(view.getAnimations().map(animation => animation.finished));
+			const before = view.getBoundingClientRect();
+			view.style.height = '140px';
+			contextView.layout();
+			contextView.layout(); // Redundant picker/list layout must preserve the in-flight morph.
+			assert.ok(view.getAnimations().length > 0);
+			await Promise.all(view.getAnimations().map(animation => animation.finished));
+			const after = view.getBoundingClientRect();
+			assert.deepStrictEqual({ x: after.x, y: after.y, height: after.height }, { x: before.x, y: before.y, height: 140 });
+		} finally { contextView.dispose(); container.remove(); }
+	});
+
+	test('shared close is inert and reopening disposes the previous view without hiding the new one', () => {
+		const container = $('.container');
+		container.style.cssText = '--vscode-context-view-motion-duration:20ms;--vscode-context-view-motion-enter-duration:20ms;--vscode-context-view-motion-exit-duration:20ms';
+		document.body.append(container);
+		const contextView = new ContextView(container, ContextViewDOMPosition.ABSOLUTE);
+		let hides = 0; let disposed = 0;
+		const delegate: IDelegate = { getAnchor: () => ({ x: 100, y: 100 }), onHide: () => hides++, render: view => {
+			view.style.height = '80px'; return { dispose: () => disposed++ };
+		} };
+		try {
+			contextView.show(delegate);
+			const opacity = getWindow(container).getComputedStyle(contextView.getViewElement()).opacity;
+			contextView.hide();
+			assert.strictEqual(contextView.getViewElement().style.getPropertyValue('--vscode-context-view-motion-close-opacity'), opacity);
+			assert.deepStrictEqual({ hides, disposed, inert: contextView.getViewElement().inert }, { hides: 1, disposed: 0, inert: true });
+			contextView.show(delegate);
+			assert.deepStrictEqual({ disposed, inert: contextView.getViewElement().inert, closing: contextView.getViewElement().classList.contains('context-view-shared-closing') }, { disposed: 1, inert: false, closing: false });
+		} finally { contextView.dispose(); container.remove(); }
+		assert.strictEqual(disposed, 2);
+	});
+
+	test('zero theme duration keeps immediate disposal and no animation', () => {
+		const container = $('.container'); container.style.setProperty('--vscode-context-view-motion-duration', '0ms');
+		document.body.append(container);
+		const contextView = new ContextView(container, ContextViewDOMPosition.ABSOLUTE);
+		let disposed = false;
+		try {
+			contextView.show({ getAnchor: () => ({ x: 0, y: 0 }), render: () => ({ dispose: () => { disposed = true; } }) });
+			assert.strictEqual(contextView.getViewElement().getAnimations().length, 0);
+			contextView.hide(); assert.strictEqual(disposed, true);
+		} finally { contextView.dispose(); container.remove(); }
+	});
+
+	test('delegates receive real DOM event type and key for keyboard and outside click dismissal', () => {
+		const container = $('.container'); document.body.append(container);
+		const contextView = new ContextView(container, ContextViewDOMPosition.ABSOLUTE);
+		const keys: string[] = []; let clicks = 0;
+		try {
+			contextView.show({ getAnchor: () => ({ x: 0, y: 0 }), render: () => null, onDOMEvent: event => {
+				if (event.type === 'keydown') { keys.push((event as KeyboardEvent).key); }
+				if (event.type === 'click') { clicks++; }
+			} });
+			contextView.getViewElement().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+			container.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+			assert.deepStrictEqual({ keys, clicks }, { keys: ['Escape'], clicks: 2 });
+		} finally { contextView.dispose(); container.remove(); }
+	});
+
 	test('hide() is re-entrant safe and does not double-dispose render result (#319393)', () => {
 		const container = $('.container');
 		const contextView = new ContextView(container, ContextViewDOMPosition.ABSOLUTE);

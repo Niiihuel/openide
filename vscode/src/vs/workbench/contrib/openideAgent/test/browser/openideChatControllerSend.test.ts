@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { DeferredPromise } from '../../../../../base/common/async.js';
 import { VSBuffer, encodeBase64 } from '../../../../../base/common/buffer.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { Emitter } from '../../../../../base/common/event.js';
@@ -26,7 +27,7 @@ import { stubOpenideChatControllerHostServices } from './openideChatControllerTe
 suite('OpenIDE ChatController — send path', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 
-	interface IRun { messages: IChatMessage[]; options: { mode?: string; messageId?: string; modeInstruction?: string; conversationId?: string }; token: CancellationToken; emit: (event: AgentLoopEvent) => void; settle: (error?: Error) => void }
+	interface IRun { messages: IChatMessage[]; options: { mode?: string; messageId?: string; modeInstruction?: string; conversationId?: string; targetWindowId?: number }; token: CancellationToken; emit: (event: AgentLoopEvent) => void; settle: (error?: Error) => void }
 
 	function createHarness(overrides: Partial<IOpenideAgentService> = {}, fileOverrides: Partial<IFileService> = {}) {
 		const runs: IRun[] = [];
@@ -88,6 +89,25 @@ suite('OpenIDE ChatController — send path', () => {
 
 	const settle = async () => { for (let i = 0; i < 4; i++) { await Promise.resolve(); } };
 
+
+	test('the submitting window owns tools and follow effects through asynchronous preparation', async () => {
+		const preparation = new DeferredPromise<string | undefined>();
+		const followed: (number | undefined)[] = [];
+		const h = createHarness({
+			isPlanFollowEnabled: () => true,
+			buildMentionContext: () => preparation.p,
+			followAgentLocation: async (_location, _token, targetWindowId) => { followed.push(targetWindowId); },
+		});
+		h.controller.restore();
+		const sending = h.controller.send({ text: 'work in the companion', targetWindowId: 41 });
+		await preparation.complete(undefined);
+		await sending;
+		h.runs[0].emit({ type: 'agentLocation', location: { kind: 'file', path: 'a.ts', activity: 'edit' } });
+		await settle();
+		assert.deepStrictEqual({ owner: h.runs[0].options.targetWindowId, followed }, { owner: 41, followed: [41] });
+		h.runs[0].settle();
+		await settle();
+	});
 	test('a native /command expands for the model and keeps what was typed for the transcript', async () => {
 		const h = createHarness();
 		h.controller.restore();

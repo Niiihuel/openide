@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, append, clearNode, h } from '../../../../base/browser/dom.js';
+import { renderOpenideCommandRow, renderOpenideEmptyStateHeading } from '../../openideEmptyState.js';
 import { KeybindingLabel } from '../../../../base/browser/ui/keybindingLabel/keybindingLabel.js';
 import { coalesce, shuffle } from '../../../../base/common/arrays.js';
 import { splitRecentLabel } from '../../../../base/common/labels.js';
@@ -115,13 +116,7 @@ export class EditorGroupWatermark extends Disposable {
 			h('.editor-group-watermark-toolbar-container@toolbarContainer'),
 			h('.editor-group-watermark', [
 				h('.watermark-container', [
-					h('.watermark-brand', [
-						h('.letterpress'),
-						h('.watermark-brand-copy', [
-							h('.watermark-brand-title', ['OpenIDE']),
-							h('.watermark-brand-subtitle'),
-						]),
-					]),
+					h('.watermark-brand@brand'),
 					h('.watermark-empty-launcher@emptyLauncher'),
 					h('.shortcuts@shortcuts'),
 				])
@@ -132,7 +127,12 @@ export class EditorGroupWatermark extends Disposable {
 		this.root = elements.root;
 		this.shortcuts = elements.shortcuts;
 		this.emptyLauncher = elements.emptyLauncher;
-		this.brandSubtitle = elements.root.querySelector<HTMLElement>('.watermark-brand-subtitle')!;
+		const heading = renderOpenideEmptyStateHeading(elements.brand, { title: 'OpenIDE', description: '', brand: true });
+		heading.iconNode.classList.add('letterpress');
+		heading.titleNode.classList.add('watermark-brand-title');
+		heading.titleNode.parentElement!.classList.add('watermark-brand-copy');
+		heading.descriptionNode.classList.add('watermark-brand-subtitle');
+		this.brandSubtitle = heading.descriptionNode;
 		this.toolbarContainer = elements.toolbarContainer;
 
 		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, this.toolbarContainer, MenuId.EditorGroupWatermarkToolbar, {
@@ -207,7 +207,7 @@ export class EditorGroupWatermark extends Disposable {
 			entries.push(...additionalEntries.slice(0, EditorGroupWatermark.MINIMUM_ENTRIES - entries.length));
 		}
 
-		const box = append(this.shortcuts, $('.watermark-box'));
+		const box = append(this.shortcuts, $('.watermark-box.openide-command-list'));
 
 		const update = () => {
 			clearNode(box);
@@ -219,11 +219,7 @@ export class EditorGroupWatermark extends Disposable {
 					continue;
 				}
 
-				const dl = append(box, $('dl'));
-				const dt = append(dl, $('dt'));
-				dt.textContent = entry.text;
-
-				const dd = append(dl, $('dd'));
+				const { keys: dd } = renderOpenideCommandRow(box, entry.text);
 
 				const label = this.keybindingLabels.add(new KeybindingLabel(dd, OS, { renderUnboundKeybindings: true, ...defaultKeybindingLabelStyles }));
 				label.set(keys);

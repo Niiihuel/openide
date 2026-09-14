@@ -21,6 +21,7 @@
 	color: var(--vscode-foreground);
 	background: var(--oi-surface);
 	font-family: var(--oi-font);
+	container: openide-settings / inline-size;
 }
 
 /* El frame/editor ya aporta título y acciones. No repetimos otra barra "Settings" adentro. */
@@ -59,62 +60,6 @@
 	color: var(--oi-text-muted);
 }
 .openide-settings-search-kbd.hidden { display: none; }
-/* Account block over the sidebar: the initial in a round chip, the account on the first line, the
-   profile on the second — and, when there is no account, the way to get one. Two rows stacked, so
-   the padding that used to sit on the identity row belongs to the block and the button lines up
-   with it. */
-.openide-settings-profile-block {
-	flex: 0 0 auto;
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-	min-width: 0;
-	padding: 16px 12px 4px;
-}
-.openide-settings-profile {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	min-width: 0;
-}
-/* Full width of the sidebar's column, not content-width: it is the only action in the block, and
-   a short pill floating under a 36px avatar reads as debris. `.oi-btn`'s quiet fill alone is a
-   shade of the same plane the sidebar already is, so it carries the soft hairline to read as a
-   control; it stays secondary — a filled accent block above fifty nav rows would out-shout the
-   map it sits on top of. */
-.openide-settings-profile-signin { width: 100%; justify-content: center; border: 1px solid var(--oi-border-soft); }
-.openide-settings-profile-signin .codicon { font-size: var(--oi-text-md); }
-.openide-settings-profile-signin.hidden { display: none; }
-.openide-settings-profile-avatar {
-	flex: 0 0 auto;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 36px;
-	height: 36px;
-	border-radius: 50%;
-	background: var(--oi-tint-3);
-	color: var(--oi-text);
-	font-size: var(--oi-text-lg);
-	font-weight: 600;
-	user-select: none;
-	position: relative;
-	overflow: hidden;
-}
-/* The generic mark that stands in for the initial while there is no account to take one from. */
-.openide-settings-profile-avatar .codicon { font-size: 18px; color: var(--oi-text-muted); }
-/* GitHub's avatar for the signed-in login sits over the initial and hides it while it shows. */
-.openide-settings-profile-image {
-	position: absolute;
-	inset: 0;
-	width: 100%;
-	height: 100%;
-	border-radius: 50%;
-	object-fit: cover;
-}
-.openide-settings-profile-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.openide-settings-profile-name { font-size: var(--oi-text-md); line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.openide-settings-profile-detail { color: var(--oi-text-muted); font-size: var(--oi-text-sm); line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .openide-settings-search-icon {
 	position: absolute;
 	top: 50%;
@@ -126,20 +71,16 @@
 }
 .openide-settings-count { color: var(--oi-text-muted); font-size: 11.5px; white-space: nowrap; }
 
-.openide-settings-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
+.openide-settings-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 248px minmax(0, 1fr); }
 
-/* Barra lateral: fondo propio y borde. Es el mapa de la pantalla, no una lista más. */
+/* The navigation belongs to the shell; the reading column sits on the canvas. */
 .openide-settings-sidebar {
 	display: flex;
 	flex-direction: column;
 	min-width: 0;
+	min-height: 0;
 	overflow: hidden;
-	/* No rule between nav and content, and none under the search block. Regions are told apart by
-	   their surface and the space around them — drawing a hairline as well is the old look the
-	   fork is moving away from, and it is what read as "rayas" over a flat background. */
-	/* The same surface as the content: Cursor's nav and page are one plane, told apart by the
-	   separators and the spacing, not by a second tone. */
-	background: var(--oi-surface);
+	background: var(--oi-shell, var(--oi-sidebar));
 }
 .openide-settings-sidebar-block {
 	flex: 0 0 auto;
@@ -150,7 +91,7 @@
 	   one left edge. */
 	padding: var(--vscode-spacing-size120, 12px) var(--vscode-spacing-size120, 12px) var(--vscode-spacing-size60, 6px);
 }
-.openide-settings-nav { min-width: 0; flex: 1 1 auto; overflow: auto; padding: 4px 12px 24px; }
+.openide-settings-nav { min-width: 0; min-height: 0; flex: 1 1 auto; overflow: auto; padding: 8px 12px 20px; scrollbar-gutter: auto; }
 /* Between two blocks of rows: a list separator with 8px of air on each side. It is not a region
    rule — both sides of it are rows of the same list — so rule 7 of docs/theming-surfaces.md lets
    it stand. The blocks carry no heading: their first row IS the parent page. */
@@ -159,19 +100,19 @@
 	margin: 8px 0;
 	background: var(--oi-border-soft);
 }
-/* 30px rows, a 16px glyph and a 13px label; the active one is the list's own selection colour
-   at the medium radius. Nothing separates the rows but their own box. */
+/* Navigation rows share the row radius and hover with the rest of the workbench. The gap
+   keeps adjacent hover and selected surfaces distinct. */
 .openide-settings-nav-item {
 	display: flex;
 	align-items: center;
 	gap: 8px;
 	width: 100%;
-	min-height: 30px;
-	margin: 0;
+	min-height: 34px;
+	margin: 0 0 4px;
 	padding: 0 8px;
 	overflow: hidden;
 	border: 0;
-	border-radius: var(--oi-radius-md);
+	border-radius: var(--oi-radius-row, var(--oi-radius-md));
 	background: transparent;
 	color: var(--vscode-foreground);
 	font: inherit;
@@ -179,7 +120,7 @@
 	text-align: left;
 	white-space: nowrap;
 	cursor: pointer;
-	transition: background-color 120ms ease;
+	transition: background-color var(--oi-motion-exit, 120ms) var(--oi-ease-out, ease);
 }
 
 /* Apple System Settings identity: white glyph on a small tinted rounded square. Six hues, fixed
@@ -195,7 +136,7 @@
    todo lo que existe de un vistazo, que es la razón por la que la lateral es plana. */
 .openide-settings-nav-item.nested { padding-left: 36px; font-size: var(--oi-text-sm); color: var(--oi-text-muted); }
 .openide-settings-nav-item.nested.active { color: var(--vscode-list-activeSelectionForeground, var(--oi-text)); }
-.openide-settings-nav-item:hover { background: var(--vscode-list-hoverBackground, var(--oi-tint-2)); }
+.openide-settings-nav-item:hover { background: var(--oi-hover); }
 /* The active row is the list's own selection colour and nothing else: no outline, no weight
    change (a bolder label shifts the text and reads as a second signal). */
 .openide-settings-nav-item.active {
@@ -205,7 +146,7 @@
 
 /* Contenido: una sola columna de lectura, centrada y con ancho máximo. Los settings son texto
    antes que controles — a todo el ancho de un monitor no se leen, se barren. */
-.openide-settings-content { overflow: auto; background: var(--oi-surface); }
+.openide-settings-content { min-width: 0; min-height: 0; overflow: auto; background: var(--oi-surface); container: openide-settings-content / inline-size; scrollbar-gutter: auto; scroll-padding-block: 24px; }
 /* The content region is a `<main tabindex="-1">` so the editor can move focus into it, and
    upstream's `.monaco-workbench [tabindex="-1"]:focus` paints a 1px `focusBorder` outline inset by
    -1px on anything focused. Clicking ANY dead area of the page therefore drew a full rectangle
@@ -222,11 +163,11 @@
 .openide-settings-column {
 	display: flex;
 	flex-direction: column;
-	gap: 20px;
+	gap: 40px;
 	width: 100%;
 	max-width: 1040px;
 	margin: 0 auto;
-	padding: 28px 24px 96px;
+	padding: 48px 40px 96px;
 }
 .openide-settings-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .openide-settings-page-titles { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -246,7 +187,7 @@
 .openide-settings-breadcrumb-item:hover { color: var(--oi-text); text-decoration: underline; }
 .openide-settings-breadcrumb-item:focus-visible { outline: 1px solid var(--oi-focus); outline-offset: 2px; border-radius: var(--oi-radius-sm); }
 .openide-settings-breadcrumb-sep { color: var(--oi-text-muted); font-size: 11.5px; opacity: 0.6; }
-.openide-settings-page-title { margin: 0; font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; }
+.openide-settings-page-title { margin: 0; font-size: 28px; line-height: 36px; font-weight: 400; letter-spacing: -0.01em; }
 .openide-settings-page-actions { display: flex; gap: 4px; flex: 0 0 auto; }
 .openide-settings-list { display: flex; flex-direction: column; gap: 0; }
 
@@ -254,19 +195,28 @@
    the group's rows inside, divided by the card's hairlines. The rows have no hover: the card is
    the unit that reads, and a row lighting up under the pointer promised a click the row does not
    answer (only its control does). */
-.openide-settings-group { display: flex; flex-direction: column; gap: 8px; padding-bottom: 24px; }
-.openide-settings-group-caption { padding: 0 2px; color: var(--oi-text-muted); font-size: var(--oi-text-md); line-height: 18px; }
-.openide-settings-card {
+.openide-settings-group { display: flex; flex-direction: column; gap: 16px; padding-bottom: 32px; }
+.openide-settings-group-caption { padding: 0; color: var(--oi-text); font-size: var(--oi-text-lg); line-height: 20px; }
+.openide-settings-card,
+.openide-settings-inset {
 	display: flex;
 	flex-direction: column;
 	border: 1px solid var(--oi-border-soft);
-	border-radius: var(--oi-radius-lg);
+	border-radius: var(--oi-radius-group, var(--oi-radius-lg));
 	background: var(--oi-card);
 	overflow: hidden;
 }
-/* The line between two rows of a card is the card's own edge work — a box border between the
-   boxes it holds — never on the last row, so the card closes on its own radius (rule 7). */
-.openide-settings-card > .openide-settings-row + .openide-settings-row { border-top: 1px solid var(--oi-border-soft); }
+/* Group dividers stop at the content inset so they never intersect the rounded frame. */
+.openide-settings-card > .openide-settings-row + .openide-settings-row::after,
+.openide-settings-inset > .openide-settings-insetrow + .openide-settings-insetrow::after {
+	content: '';
+	position: absolute;
+	top: 0;
+	inset-inline: 16px;
+	height: 1px;
+	background: var(--oi-divider, var(--oi-border-soft));
+	pointer-events: none;
+}
 /* A row: copy on the left, the control on the right at its own width, both centred. The control
    column is `auto`, not a fixed 260px: a switch, a pill dropdown and a text field are different
    widths and each ends flush on the card's right padding. */
@@ -276,8 +226,8 @@
 	grid-template-columns: minmax(0, 1fr) auto;
 	align-items: center;
 	gap: 24px;
-	min-height: 52px;
-	padding: 12px 16px;
+	min-height: 64px;
+	padding: 16px;
 	margin: 0;
 	border: 0;
 	border-radius: 0;
@@ -297,13 +247,13 @@
 	content: '';
 	position: absolute;
 	top: 0;
-	left: 0;
-	right: 0;
+	left: 16px;
+	right: 16px;
 	height: 1px;
 	background: var(--oi-border-soft);
 }
 /* A provider account row keeps its hover: the whole row is the thing you click. */
-.openide-settings-account:hover, .openide-settings-account:focus-within { background: var(--oi-tint-1); }
+.openide-settings-account:hover, .openide-settings-account:focus-within { background: var(--oi-hover); }
 .openide-settings-row.modified::before {
 	content: '';
 	position: absolute;
@@ -324,7 +274,7 @@
 	font-weight: 400;
 	line-height: 20px;
 }
-.openide-settings-setting-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-settings-setting-name { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
 /* La key vive en la línea del título, invisible hasta hover: ocupa su espacio siempre, así que
    revelarla no mueve nada. */
 .openide-settings-key {
@@ -336,7 +286,7 @@
 	color: var(--oi-text-muted);
 	font: 11.5px/16px var(--oi-font-mono);
 	opacity: 0;
-	transition: opacity 120ms ease;
+	transition: opacity var(--oi-duration-hover, 120ms) var(--oi-ease, ease);
 }
 .openide-settings-row:hover .openide-settings-key,
 .openide-settings-row:focus-within .openide-settings-key { opacity: 0.85; }
@@ -357,7 +307,7 @@
 	color: var(--oi-text-muted);
 	cursor: help;
 	opacity: 0.7;
-	transition: opacity 120ms ease, color 120ms ease;
+	transition: opacity var(--oi-duration-hover, 120ms) var(--oi-ease, ease), color var(--oi-duration-hover, 120ms) var(--oi-ease, ease);
 	align-self: center;
 }
 .openide-settings-hint:hover { color: var(--vscode-foreground); opacity: 1; }
@@ -378,7 +328,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-input[type='number']::-webkit-outer-spin-button { margin: 0; appearance: none; -webkit-appearance: none; }
 .openide-settings-more:hover { background: var(--oi-hover); }
 .openide-settings-reset { width: var(--oi-row-md); height: var(--oi-row-md); flex: 0 0 auto; border: 0; border-radius: var(--oi-radius-md); background: transparent; color: var(--oi-text-muted); cursor: pointer; }
-.openide-settings-reset:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+.openide-settings-reset:hover { background: var(--oi-hover); color: var(--oi-text); }
 .openide-settings-more { display: block; margin: 16px auto; padding: 6px 12px; border: 0; border-radius: var(--oi-radius-md); background: var(--oi-raised); color: var(--vscode-foreground); cursor: pointer; }
 .openide-settings-empty { padding: 54px 20px; color: var(--oi-text-muted); text-align: center; }
 
@@ -390,7 +340,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-list > .openide-settings-section { padding: var(--vscode-spacing-size240, 24px) 0 var(--vscode-spacing-size280, 28px); }
 .openide-settings-list > .openide-settings-section:first-child,
 .openide-settings-list > :first-child > .openide-settings-section:first-child:not(.openide-settings-voice-test) { padding-top: 0; }
-.openide-settings-section-title { font-size: 15px; font-weight: 600; line-height: 20px; letter-spacing: -0.005em; }
+.openide-settings-section-title { font-size: var(--oi-text-lg); font-weight: 400; line-height: 20px; letter-spacing: -0.005em; }
 .openide-settings-section-desc { max-width: 62ch; color: var(--oi-text-muted); font-size: 12.5px; line-height: 19px; }
 /* The policy and globs editors are native InputBoxes in multiline mode, so the class sits on the
    WIDGET now, not on a `<textarea>` element — an element selector here silently stopped matching
@@ -414,12 +364,12 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 }
 .openide-settings-section-body:empty { display: none; }
 .openide-settings-status-group { display: flex; flex-direction: column; gap: 3px; }
-.openide-settings-status-title { color: var(--vscode-foreground); font-size: var(--oi-text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.openide-settings-status-title { color: var(--vscode-foreground); font-size: var(--oi-text-sm); font-weight: 400; }
 .openide-settings-status-list { display: flex; flex-direction: column; }
 /* No hairline between the rows: the row height and the column alignment already separate them
    (docs/theming-surfaces.md, rule 7). */
 .openide-settings-status-row { display: flex; align-items: center; gap: 10px; min-height: var(--oi-row-sm); padding: 3px 0; }
-.openide-settings-status-name { flex: 0 0 auto; max-width: 40%; color: var(--vscode-foreground); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-settings-status-name { flex: 0 0 auto; max-width: 40%; color: var(--vscode-foreground); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .openide-settings-status-detail { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .openide-settings-status-state { flex: 0 0 auto; font-size: var(--oi-text-xs); }
 .openide-settings-status-state.ok { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }
@@ -439,15 +389,12 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-metric-value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .openide-settings-metric-label { color: var(--oi-text-muted); font-size: var(--oi-text-xs); }
 .openide-settings-field { display: flex; flex-direction: column; gap: 4px; }
-.openide-settings-field-label { font-size: var(--oi-text-sm); font-weight: 500; }
+.openide-settings-field-label { font-size: var(--oi-text-sm); font-weight: 400; }
 .openide-settings-globs { width: 100%; font-family: var(--oi-font-mono); font-size: var(--oi-text-sm); line-height: 1.5; }
 .openide-settings-globs textarea { min-height: 82px; }
 .openide-settings-warnbox { display: none; padding: 8px 10px; border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-charts-orange, #d18616)); border-radius: var(--oi-radius-md); background: var(--vscode-inputValidation-warningBackground, transparent); font-size: var(--oi-text-sm); line-height: 1.45; }
 .openide-settings-warnbox.visible { display: block; }
-.openide-settings-section-button.danger { background: transparent; border: 1px solid var(--vscode-errorForeground); color: var(--vscode-errorForeground); }
-.openide-settings-section-button.danger:hover { background: color-mix(in srgb, var(--vscode-errorForeground) 12%, transparent); }
-.openide-settings-section-button.danger.armed { background: var(--vscode-errorForeground); color: var(--vscode-button-foreground); }
-.openide-settings-section-button .codicon { font-size: var(--oi-text-md); }
+.openide-settings-section-button .codicon { font-size: var(--oi-icon-action); }
 
 /* Primitivos de OpenideSectionRenderer (openideSettingsSectionBuilder). */
 .openide-settings-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
@@ -458,7 +405,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-setting-title .openide-settings-badge { margin-left: 0; }
 .openide-settings-badge { margin-left: 7px; padding: 1px 6px; border-radius: var(--oi-radius-sm); background: var(--oi-border-soft); color: var(--oi-text-muted); font-size: 10.5px; font-weight: 600; vertical-align: middle; }
 .openide-settings-iconbtn { width: var(--oi-row-md); height: var(--oi-row-md); flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--oi-radius-md); background: transparent; color: var(--oi-text-muted); cursor: pointer; padding: 0; }
-.openide-settings-iconbtn:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+.openide-settings-iconbtn:not(:disabled):hover { background: var(--oi-hover); color: var(--oi-text); }
 .openide-settings-iconbtn:disabled { opacity: 0.4; cursor: default; }
 /* 16px is THE size of an action glyph across the IDE — the codicon default (codicon.css), the
    same one the chat's header and composer buttons already use. It applies to every glyph that IS
@@ -485,7 +432,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-test-output:not(:empty) { margin-top: 9px; color: var(--oi-text-muted); font-size: var(--oi-text-sm); }
 
 /* Agrupadores dentro de una sección (hooks por evento del lifecycle). */
-.openide-settings-group-label { margin: 16px 0 1px; font-size: var(--oi-text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.openide-settings-group-label { margin: 16px 0 1px; font-size: var(--oi-text-sm); font-weight: 400; }
 .openide-settings-group-label:first-child { margin-top: 0; }
 .openide-settings-group-desc { margin-bottom: 4px; color: var(--oi-text-muted); font-size: var(--oi-text-sm); line-height: 1.45; }
 
@@ -506,22 +453,11 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings button.monaco-text-button:focus-visible { box-shadow: none; }
 .monaco-workbench .openide-settings .openide-settings-search:focus,
 .monaco-workbench .openide-settings .openide-settings-search:focus-visible { outline: 0 !important; box-shadow: none; }
-@media (max-width: 900px) {
-	.openide-settings-body { grid-template-columns: 220px minmax(0, 1fr); }
-	.openide-settings-column { padding: 24px 20px 64px; }
-	.openide-settings-row { grid-template-columns: 1fr; gap: 9px; }
-	.openide-settings-value { justify-content: flex-start; max-width: 440px; }
-}
-@media (max-width: 700px) {
-	.openide-settings-body { grid-template-columns: 1fr; }
-	.openide-settings-profile-block { display: none; }
-	.openide-settings-nav { display: flex; gap: 3px; overflow-x: auto; padding: 7px; }
-	.openide-settings-nav-separator { display: none; }
-	.openide-settings-nav-item { width: auto; flex: 0 0 auto; }
-	.openide-settings-navicon { display: none; }
-}
 @media (prefers-reduced-motion: reduce) {
-	.openide-settings-nav-item { transition: none; }
+	.openide-settings-nav-item,
+	.openide-settings-key,
+	.openide-settings-hint,
+	.openide-settings-account { transition: none; }
 }
 .monaco-workbench.hc-black .openide-settings-row,
 .monaco-workbench.hc-light .openide-settings-row { outline: 1px solid var(--vscode-contrastBorder); outline-offset: -1px; }
@@ -552,6 +488,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 
 /* Formularios adentro de una fila expandida (editar un server MCP, un provider custom). */
 .openide-settings-fieldrow { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.openide-settings-card > .openide-settings-fieldrow { margin: 0; padding: 12px 16px; }
 .openide-settings-fieldrow > .openide-settings-field-label { flex: 0 0 104px; margin: 0; }
 .openide-settings-fieldrow > .openide-settings-input { flex: 1 1 auto; min-width: 0; }
 .openide-settings-field-desc { margin: 2px 0 6px; color: var(--oi-text-muted); font-size: var(--oi-text-xs); line-height: 1.45; }
@@ -583,7 +520,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-progress-meta { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 4px; font-size: 11.5px; }
 .openide-settings-progress-detail { color: var(--oi-text-muted); }
 .openide-settings-progress-track { height: 5px; border-radius: var(--oi-radius-sm); background: var(--oi-border); overflow: hidden; }
-.openide-settings-progress-fill { height: 100%; border-radius: var(--oi-radius-sm); background: var(--vscode-charts-green, #89d185); transition: width 160ms ease; }
+.openide-settings-progress-fill { height: 100%; border-radius: var(--oi-radius-sm); background: var(--vscode-charts-green, #89d185); transition: width var(--oi-motion-enter, 180ms) var(--oi-ease, ease); }
 .openide-settings-progress-fill.warn { background: var(--vscode-editorWarning-foreground); }
 .openide-settings-progress-fill.critical { background: var(--vscode-errorForeground); }
 @media (prefers-reduced-motion: reduce) { .openide-settings-progress-fill { transition: none; } }
@@ -591,7 +528,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 /* Cuentas de un provider: la activa se distingue sin depender del color solo. */
 /* Same geometry as `.openide-settings-row`: the negative inline margin lets the highlight
    breathe past the text without moving it, so both kinds of row line up under the pointer. */
-.openide-settings-account { display: flex; align-items: center; gap: 8px; min-height: var(--oi-row-lg); padding: 4px 12px; margin-inline: -12px; border-radius: var(--oi-radius-md); transition: background-color 120ms ease; }
+.openide-settings-account { display: flex; align-items: center; gap: 8px; min-height: var(--oi-row-lg); padding: 4px 12px; margin-inline: -12px; border-radius: var(--oi-radius-md); transition: background-color var(--oi-motion-exit, 120ms) var(--oi-ease-out, ease); }
 .openide-settings-account-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--oi-text-sm); }
 .openide-settings-provider-mark { width: 17px; height: 17px; flex: 0 0 auto; border-radius: var(--oi-radius-sm); }
 /* En el diseño plano los callouts son lo ÚNICO con caja: borde teñido por tono, radio medium. */
@@ -605,7 +542,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 /* Fila-directorio del índice de una sección con sub-páginas: toda la fila abre la página, así
    que tiene que verse accionable y no como una fila de lectura. */
 .openide-settings-row-link { cursor: pointer; }
-.openide-settings-row-link:hover { background: var(--oi-tint-1); }
+.openide-settings-row-link:hover { background: var(--oi-hover); }
 
 /* Setting que no se puede escribir en el scope elegido. Se muestra igual —ocultarlo se leería
    como "este ajuste no existe"— pero atenuado y con el control inerte. */
@@ -655,7 +592,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 /* The filter hides rows in place; whichever row is first among the visible ones gives up its
    hairline, otherwise the card opened on a line under its own edge. Declared after the card's
    hairline rule so it wins the tie. */
-.openide-settings-card > .openide-settings-row.first-visible { border-top: 0; }
+.openide-settings-card > .openide-settings-row.first-visible::after { display: none; }
 .openide-settings-row-link:focus-visible { outline: 1px solid var(--vscode-list-focusOutline, var(--oi-focus)); outline-offset: -1px; }
 .openide-settings-row.danger .openide-settings-setting-title,
 .monaco-workbench .openide-settings .openide-settings-row.danger .openide-settings-row-glyph.codicon[class*="codicon-"] { color: var(--oi-danger); }
@@ -715,7 +652,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 /* The in-page filter, at the nav's width: full column, the nav box's height and radius. */
 .openide-settings-provider-filter.openide-settings-filter { max-width: none; margin: 0 0 20px; }
 .openide-settings-provider-row .openide-settings-provider-logo { width: 20px; height: 20px; border-radius: var(--oi-radius-sm); }
-.openide-settings-provider-row .openide-settings-setting-title { font-weight: 500; }
+.openide-settings-provider-row .openide-settings-setting-title { font-weight: 400; }
 .openide-settings-provider-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--oi-border-strong); }
 .openide-settings-provider-dot.ok { background: var(--openide-green); }
 /* The "bring your own endpoint" row: a plus in the logo slot, muted copy. */
@@ -742,7 +679,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-provider-head { display: flex; align-items: center; gap: 14px; padding: 0 2px 22px; }
 .openide-settings-provider-head .openide-settings-provider-logo { width: 28px; height: 28px; border-radius: var(--oi-radius-md); }
 .openide-settings-provider-copy { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.openide-settings-provider-name { font-size: 15px; font-weight: 600; line-height: 20px; color: var(--oi-text); }
+.openide-settings-provider-name { font-size: var(--oi-text-lg); font-weight: 400; line-height: 20px; color: var(--oi-text); }
 .openide-settings-provider-sub { color: var(--oi-text-muted); font-size: var(--oi-text-md); line-height: 18px; }
 .openide-settings-provider-head .openide-settings-provider-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .openide-settings-provider-head .openide-settings-section-actions { flex: 0 0 auto; align-items: center; }
@@ -777,36 +714,16 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 /* Usage: the meter in the value column, at a fixed reading width. */
 .openide-settings-value .openide-settings-progress { width: 180px; margin: 0; }
 
-/* ---- Grouped sections (the inset-grouped anatomy) ----------------------------------------------
-   A small muted caption above ONE rounded container, rows inside it, and an optional line of
-   explanation below it. The container is what groups the rows, which is why the rows carry no
-   borders and no cards of their own -- the previous try gave each block its own panel and laid
-   them out in columns, and a page of ragged half-width boxes is not a list.
-
-   The rows used to be divided by an inset hairline. They are not any more: the container has the
-   same 4px inset as a popover (.openide-menu-content) and each row is a rounded strip inside it,
-   so the row's own hover box and its height do the separating (docs/theming-surfaces.md, rule 7).
-
-   `inset` and not `group` in the class names: `.openide-settings-group` was already the settings
-   editor's card wrapper, with `display:flex; gap:4px; padding-bottom:14px` on it. Reusing the name
-   gave every container 14px of dead space under its last row and pushed the rows apart, which is
-   what made the sections look uncentred. */
-.openide-settings-inset-block { margin: 18px 0 0; }
-.openide-settings-inset-block:first-child { margin-top: 4px; }
+/* Legacy group() and card() renderer variants share one surface recipe. Their DOM hooks
+   remain stable for filtering, provider pages and permission controls. */
+.openide-settings-inset-block { margin: 24px 0 0; }
+.openide-settings-inset-block:first-child { margin-top: 0; }
 .openide-settings-inset-title {
-	margin: 0 2px 7px;
-	font-size: var(--oi-text-xs);
-	font-weight: 600;
-	letter-spacing: 0.06em;
-	text-transform: uppercase;
-	color: var(--oi-text-muted);
-}
-.openide-settings-inset {
-	padding: 4px;
-	border: 1px solid var(--oi-border-soft);
-	border-radius: var(--oi-radius);
-	background: var(--oi-card);
-	overflow: hidden;
+	margin: 0 0 16px;
+	font-size: var(--oi-text-lg);
+	font-weight: 400;
+	line-height: 20px;
+	color: var(--oi-text);
 }
 .openide-settings-inset-footer {
 	margin: 7px 4px 0;
@@ -821,13 +738,13 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 	display: flex;
 	align-items: center;
 	gap: 12px;
-	min-height: calc(var(--oi-row-lg) + 8px);
-	padding: 6px 10px;
-	border-radius: var(--oi-radius-sm);
+	min-height: 64px;
+	padding: 16px;
+	border-radius: 0;
 }
 .openide-settings-insetrow-copy { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.openide-settings-insetrow-label { font-size: var(--oi-text-md); color: var(--oi-text); }
-.openide-settings-insetrow-desc { font-size: 11.5px; color: var(--oi-text-muted); }
+.openide-settings-insetrow-label { font-size: var(--oi-text-lg); color: var(--oi-text); }
+.openide-settings-insetrow-desc { font-size: var(--oi-text-md); line-height: 18px; color: var(--oi-text-muted); overflow-wrap: anywhere; }
 .openide-settings-insetrow-trail { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; min-width: 0; }
 /* An action row IS the button: the whole strip highlights and responds, so there is no button
    inside a row that does nothing when you click beside it. */
@@ -850,7 +767,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
    the label, and its own label carries the text. */
 .openide-settings-insetrow.stacked { display: block; padding-top: 10px; padding-bottom: 10px; }
 /* The key field is a row's trailing control, so it claims a share of the row, not a form's width. */
-.openide-settings-insetrow-trail .monaco-inputbox { width: 260px; max-width: 42vw; }
+.openide-settings-insetrow-trail .monaco-inputbox { width: 260px; max-width: 100%; }
 .openide-settings-insetrow-trail .openide-settings-fieldrow { margin: 0; }
 .openide-settings-insetrow-trail .openide-settings-field-label { display: none; }
 
@@ -938,19 +855,17 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 	align-self: flex-start;
 	padding: var(--vscode-spacing-size40) var(--vscode-spacing-size120);
 }
-/* Upstream has primary and `secondary`, but no danger variant: destructive actions keep a tint of
-   their own over the native widget instead of a third hand-rolled recipe. */
+/* The shared native-button adapter owns normal/primary styling. Destructive state supplies
+   variables consumed by that same Button widget, including its pointer and keyboard hover. */
 .openide-settings .openide-settings-section-button.monaco-button.danger {
-	background: transparent;
-	border-color: var(--vscode-errorForeground);
-	color: var(--vscode-errorForeground);
-}
-.openide-settings .openide-settings-section-button.monaco-button.danger:hover {
-	background: color-mix(in srgb, var(--vscode-errorForeground) 12%, transparent);
+	--oi-settings-danger-background: transparent;
+	--oi-settings-danger-hover: color-mix(in srgb, var(--oi-danger) 12%, transparent);
+	--oi-settings-danger-foreground: var(--oi-danger);
 }
 .openide-settings .openide-settings-section-button.monaco-button.danger.armed {
-	background: var(--vscode-errorForeground);
-	color: var(--vscode-button-foreground);
+	--oi-settings-danger-background: var(--oi-danger);
+	--oi-settings-danger-hover: var(--oi-danger);
+	--oi-settings-danger-foreground: var(--vscode-button-foreground);
 }
 
 /* Hosts for the widgets that render themselves into a container (SelectBox, InputBox, Button).
@@ -967,7 +882,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-value .openide-settings-selecthost { width: auto; align-items: flex-end; }
 /* The control column sizes to its content, and a text field has no content width of its own: it
    takes the width the old fixed column gave every control, capped on narrow panes. */
-.openide-settings-value .openide-settings-inputhost { width: 260px; max-width: 42vw; }
+.openide-settings-value .openide-settings-inputhost { width: 260px; max-width: 100%; }
 
 /* Shape and height of the row controls. The widget paints its border and colours inline from
    openideControlStyles.ts and is NOT rewritten here; only the corner (the small radius every
@@ -990,9 +905,9 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-import-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 2px; }
 
 .openide-settings-voice-provider {
-	border: 1px solid var(--oi-border);
-	border-radius: var(--oi-radius-md);
-	background: var(--oi-raised);
+	border: 1px solid var(--oi-border-soft);
+	border-radius: var(--oi-radius-group, var(--oi-radius-lg));
+	background: var(--oi-card);
 	overflow: hidden;
 }
 .openide-settings-voice-provider-summary {
@@ -1012,3 +927,76 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-voice-provider > .openide-settings-cardsection { padding: 0; }
 .openide-settings-voice-provider .openide-settings-group { padding-bottom: 0; }
 .openide-settings-voice-provider .openide-settings-card { border: 0; border-top: 1px solid var(--oi-border); border-radius: 0; }
+
+/* Respond to this editor's width, not the window: split groups and side editors have their
+   own available space. Queries only change layout, leaving controls and their state intact. */
+@container openide-settings (max-width: 900px) {
+	.openide-settings-body { grid-template-columns: 208px minmax(0, 1fr); }
+}
+@container openide-settings (max-width: 680px) {
+	.openide-settings-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+	.openide-settings-profile-block { display: none; }
+	.openide-settings-nav { display: flex; flex: 0 0 auto; gap: 4px; overflow-x: auto; padding: 8px 12px; }
+	.openide-settings-nav-separator { display: none; }
+	.openide-settings-nav-item { width: auto; flex: 0 0 auto; margin: 0; }
+	.openide-settings-nav-item.nested { padding-inline: 8px; }
+}
+@container openide-settings-content (max-width: 660px) {
+	.openide-settings-column { padding: 28px 20px 64px; gap: 28px; }
+	.openide-settings-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+	.openide-settings-row.has-leading { grid-template-columns: auto minmax(0, 1fr); }
+	.openide-settings-row.has-leading > .openide-settings-value { grid-column: 2; }
+	.openide-settings-value { justify-content: flex-start; flex-wrap: wrap; max-width: 100%; }
+	.openide-settings-value .openide-settings-selecthost { align-items: flex-start; }
+	.openide-settings-insetrow { flex-wrap: wrap; }
+	.openide-settings-insetrow-copy { flex-basis: 100%; }
+	.openide-settings-insetrow-trail { max-width: 100%; flex-wrap: wrap; }
+	.openide-settings-fieldrow { flex-wrap: wrap; }
+	.openide-settings-fieldrow > .openide-settings-field-label { flex-basis: 100%; }
+}
+@container openide-settings-content (max-width: 420px) {
+	.openide-settings-column { padding-inline: 12px; }
+	.openide-settings-page-title { font-size: 24px; line-height: 32px; }
+	.openide-settings-section-head { flex-direction: column; }
+	.openide-settings-section-actions { flex-wrap: wrap; }
+}
+
+/* A settings page occupies the entire workbench below the real title bar. The host retains
+   editors, layout and focus history; presentation is scoped to the active input, never a
+   persisted setting or a visual treatment inherited by unrelated dialogs. */
+.monaco-modal-editor-block.full-window-editor {
+	background: transparent;
+	backdrop-filter: none;
+	pointer-events: none;
+}
+.monaco-modal-editor-block.full-window-editor .modal-editor-resizable { pointer-events: auto; }
+.monaco-modal-editor-block.full-window-editor .modal-editor-shadow {
+	box-shadow: none;
+	border-radius: 0;
+}
+.monaco-modal-editor-block.full-window-editor .modal-editor-part {
+	border: 0;
+	border-radius: 0;
+	grid-template-rows: minmax(0, 1fr);
+	background: var(--oi-surface);
+}
+.monaco-modal-editor-block.full-window-editor .modal-editor-header { display: none; }
+.monaco-modal-editor-block.full-window-editor .modal-editor-part > .content { grid-row: 1; }
+.openide-settings-back {
+	display: none;
+	align-items: center;
+	gap: 8px;
+	flex: 0 0 auto;
+	margin: 12px;
+	min-height: 34px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: var(--oi-radius-control);
+	background: transparent;
+	color: var(--oi-text);
+	font: inherit;
+	font-size: var(--oi-text-md);
+	cursor: pointer;
+}
+.full-window-editor .openide-settings-back { display: flex; }
+.openide-settings-back:hover { background: var(--oi-hover); }

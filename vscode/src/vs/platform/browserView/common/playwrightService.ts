@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { Event } from '../../../base/common/event.js';
 import { createDecorator } from '../../instantiation/common/instantiation.js';
 
 export const IPlaywrightService = createDecorator<IPlaywrightService>('playwrightService');
@@ -32,6 +33,9 @@ export interface IInvokeFunctionResult {
  */
 export interface IPlaywrightService {
 	readonly _serviceBrand: undefined;
+
+	/** Actual execution lifetime, including deferred runs; scoped to the target browser view. */
+	readonly onDidChangeActivity: Event<{ pageId: string; active: boolean }>;
 
 	/** Waits for a newly created browser view to become available and returns its initial summary. */
 	waitForPageAndGetSummary(sessionId: string, pageId: string, expectedUrl: string, discoveryTimeoutMs: number): Promise<string>;

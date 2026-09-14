@@ -240,6 +240,8 @@ export class LifecycleMainService extends Disposable implements ILifecycleMainSe
 	private readonly windowToCloseRequest = new Set<number>();
 	private oneTimeListenerTokenGenerator = 0;
 	private windowCounter = 0;
+	private readonly companionWindows = new Set<IAuxiliaryWindow>();
+	private readonly backgroundWorkbenches = new Map<number, ICodeWindow>();
 
 	private pendingQuitPromise: Promise<boolean> | undefined = undefined;
 	private pendingQuitPromiseResolve: { (veto: boolean): void } | undefined = undefined;
@@ -437,6 +439,14 @@ export class LifecycleMainService extends Disposable implements ILifecycleMainSe
 				return;
 			}
 
+			// A companion may outlive the editor surface while using its runtime. Explicit
+			// application quit still follows the normal dirty-buffer/shutdown lifecycle.
+			if (!this._quitRequested && [...this.companionWindows].some(companion => companion.keepWorkbenchAlive && companion.parentId === window.id && !companion.win?.isDestroyed())) {
+				e.preventDefault();
+				this.backgroundWorkbenches.set(window.id, window);
+				win.hide();
+				return;
+			}
 			this.trace(`Lifecycle#window.on('close') - window ID ${window.id}`);
 
 			// Otherwise prevent unload and handle it from window
@@ -460,6 +470,7 @@ export class LifecycleMainService extends Disposable implements ILifecycleMainSe
 		windowListeners.add(Event.fromNodeEventEmitter<electron.Event>(win, 'closed')(() => {
 			this.trace(`Lifecycle#window.on('closed') - window ID ${window.id}`);
 
+			this.backgroundWorkbenches.delete(window.id);
 			// update window count
 			this.windowCounter--;
 
@@ -476,6 +487,7 @@ export class LifecycleMainService extends Disposable implements ILifecycleMainSe
 	}
 
 	registerAuxWindow(auxWindow: IAuxiliaryWindow): void {
+		this.companionWindows.add(auxWindow);
 		const win = assertReturnsDefined(auxWindow.win);
 
 		const windowListeners = new DisposableStore();
@@ -500,6 +512,12 @@ export class LifecycleMainService extends Disposable implements ILifecycleMainSe
 		}));
 		windowListeners.add(Event.fromNodeEventEmitter<electron.Event>(win, 'closed')(() => {
 			this.trace(`Lifecycle#auxWindow.on('closed') - window ID ${auxWindow.id}`);
+			this.companionWindows.delete(auxWindow);
+			const owner = this.backgroundWorkbenches.get(auxWindow.parentId);
+			if (owner && !this._quitRequested && ![...this.companionWindows].some(companion => companion.keepWorkbenchAlive && companion.parentId === owner.id)) {
+				this.backgroundWorkbenches.delete(owner.id);
+				if (owner.win && !owner.win.isVisible()) { owner.win.show(); owner.close(); }
+			}
 
 			windowListeners.dispose();
 		}));

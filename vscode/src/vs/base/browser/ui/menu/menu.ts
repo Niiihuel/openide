@@ -50,6 +50,7 @@ export interface IMenuDirection {
 
 export interface IMenuOptions {
 	context?: unknown;
+	/** Custom rows must extend BaseMenuActionViewItem; toolbar controls fall back to native menu rows. */
 	actionViewItemProvider?: IActionViewItemProvider;
 	actionRunner?: IActionRunner;
 	getKeyBinding?: (action: IAction) => ResolvedKeybinding | undefined;
@@ -422,7 +423,15 @@ export class Menu extends ActionBar {
 				keybinding: keybindingLabel,
 			};
 
-			const menuActionViewItem = new BaseMenuActionViewItem(options.context, action, menuItemOptions, this.menuStyles);
+			const customItem = options.actionViewItemProvider?.(action, { ...menuItemOptions, icon: true, label: true, isMenu: true });
+			// Toolbar overflow forwards its item provider, which may return icon-only
+			// toolbar controls. Menus require labels, positional ARIA and menu navigation.
+			if (customItem && !(customItem instanceof BaseMenuActionViewItem)) {
+				customItem.dispose();
+			}
+			const menuActionViewItem = customItem instanceof BaseMenuActionViewItem
+				? customItem
+				: new BaseMenuActionViewItem(options.context, action, menuItemOptions, this.menuStyles);
 
 			if (options.enableMnemonics) {
 				const mnemonic = menuActionViewItem.getMnemonic();
@@ -445,7 +454,7 @@ interface IMenuItemOptions extends IActionViewItemOptions {
 	readonly enableMnemonics?: boolean;
 }
 
-class BaseMenuActionViewItem extends BaseActionViewItem {
+export class BaseMenuActionViewItem extends BaseActionViewItem {
 
 	public container: HTMLElement | undefined;
 
@@ -649,7 +658,7 @@ class BaseMenuActionViewItem extends BaseActionViewItem {
 
 	protected override updateClass(): void {
 		if (this.cssClass && this.item) {
-			this.item.classList.remove(...this.cssClass.split(' '));
+			this.label?.classList.remove(...this.cssClass.split(' '));
 		}
 		if (this.options.icon && this.label) {
 			this.cssClass = this.action.class || '';
@@ -657,6 +666,10 @@ class BaseMenuActionViewItem extends BaseActionViewItem {
 			if (this.cssClass) {
 				this.label.classList.add(...this.cssClass.split(' '));
 			}
+			// Product-icon variables inherit across shadow roots; document selectors do not.
+			const icon = /(?:^| )codicon-([a-z0-9-]+)(?: |$)/.exec(this.cssClass)?.[1];
+			this.label.style.setProperty('--menu-item-icon-content', icon ? `var(--vscode-icon-${icon}-content)` : 'none');
+			this.label.style.setProperty('--menu-item-icon-font-family', icon ? `var(--vscode-icon-${icon}-font-family, codicon)` : 'inherit');
 			this.updateEnabled();
 		} else if (this.label) {
 			this.label.classList.remove('icon');
@@ -1171,6 +1184,22 @@ ${formatRule(Codicon.menuSubmenu)}
 	background: none;
 	font-size: 12px;
 	line-height: 1;
+}
+
+.monaco-menu .monaco-action-bar.vertical .action-label.codicon {
+	font-family: inherit;
+	font-weight: inherit;
+	text-align: left;
+}
+
+.monaco-menu .monaco-action-bar.vertical .action-label.codicon::before {
+	content: var(--menu-item-icon-content);
+	font-family: var(--menu-item-icon-font-family);
+	font-size: 16px;
+	position: absolute;
+	left: 2px;
+	width: 16px;
+	text-align: center;
 }
 
 .monaco-menu .monaco-action-bar.vertical .keybinding,

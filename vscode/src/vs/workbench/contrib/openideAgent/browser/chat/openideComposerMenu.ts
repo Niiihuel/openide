@@ -3,11 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { addDisposableListener, getDomNodePagePosition } from '../../../../../base/browser/dom.js';
+import { addDisposableListener, getDomNodePagePosition, getWindow } from '../../../../../base/browser/dom.js';
 import { AnchorAlignment } from '../../../../../base/browser/ui/contextview/contextview.js';
 import { AnchorPosition } from '../../../../../base/common/layout.js';
 import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { IContextViewService, IOpenContextView } from '../../../../../platform/contextview/browser/contextView.js';
+import { createOpenideElement } from '../openideDom.js';
 import './media/openideChatMenus.css';
 
 /**
@@ -20,31 +21,51 @@ import './media/openideChatMenus.css';
  */
 const MENU_ANCHOR_GAP = 8;
 
+/** Reserve a real side of the trigger, then give ContextView a preference that actually fits.
+ * Its general ABOVE policy can overlap the anchor when more than half a menu fits above, even
+ * with enough room below. Composer menus must always preserve the trigger and its gap instead.
+ */
+export function updateMenuPlacement(container: HTMLElement, anchor: HTMLElement, preferredPosition: AnchorPosition): AnchorPosition {
+	const rect = anchor.getBoundingClientRect();
+	const above = Math.max(0, rect.top - MENU_ANCHOR_GAP - 12);
+	const below = Math.max(0, getWindow(anchor).innerHeight - rect.bottom - MENU_ANCHOR_GAP - 12);
+	const available = `${Math.floor(Math.max(above, below))}px`;
+	if (container.style.getPropertyValue('--openide-menu-available-height') !== available) {
+		container.style.setProperty('--openide-menu-available-height', available);
+	}
+	// offsetHeight is unaffected by entrance/morph transforms. Read after applying the cap so a
+	// long scrolling list chooses the side on which its actual border box will be rendered.
+	const height = container.offsetHeight;
+	if (preferredPosition === AnchorPosition.ABOVE && height <= above) { return AnchorPosition.ABOVE; }
+	if (preferredPosition === AnchorPosition.BELOW && height <= below) { return AnchorPosition.BELOW; }
+	return below > above ? AnchorPosition.BELOW : AnchorPosition.ABOVE;
+}
+
 /** Class that plays the 90ms entrance (openideChatMenus.css). Shared with `OpenideChatMenuPopover`. */
 export const MENU_ENTER_CLASS = 'openide-menu-enter';
 
 /** `<span class="codicon codicon-x">`, the one shape every row in these menus is built from. */
 export function createCodicon(document: Document, id: string, extraClass = ''): HTMLElement {
-	const element = document.createElement('span');
+	const element = createOpenideElement(document, 'span');
 	element.className = `codicon codicon-${id}${extraClass ? ` ${extraClass}` : ''}`;
 	return element;
 }
 
 export function createMenuSection(document: Document, label: string): HTMLElement {
-	const section = document.createElement('div');
+	const section = createOpenideElement(document, 'div');
 	section.className = 'openide-menu-section';
 	section.textContent = label;
 	return section;
 }
 
 export function createMenuSeparator(document: Document): HTMLElement {
-	const separator = document.createElement('div');
+	const separator = createOpenideElement(document, 'div');
 	separator.className = 'openide-menu-sep';
 	return separator;
 }
 
 export function createMenuEmpty(document: Document, label: string): HTMLElement {
-	const empty = document.createElement('div');
+	const empty = createOpenideElement(document, 'div');
 	empty.className = 'openide-menu-empty';
 	empty.textContent = label;
 	return empty;
@@ -52,7 +73,7 @@ export function createMenuEmpty(document: Document, label: string): HTMLElement 
 
 /** The trailing check of a row. Always present; CSS shows it only while the row is `.openide-menu-active`. */
 export function createMenuCheck(document: Document): HTMLElement {
-	const check = document.createElement('span');
+	const check = createOpenideElement(document, 'span');
 	check.className = 'openide-menu-check';
 	check.appendChild(createCodicon(document, 'check'));
 	return check;
@@ -78,27 +99,27 @@ export interface IMenuRowOptions {
 
 /** A `.menu-row` of the webview, rebuilt as a real button so Enter/Space work without extra code. */
 export function createMenuRow(document: Document, options: IMenuRowOptions): HTMLButtonElement {
-	const row = document.createElement('button');
+	const row = createOpenideElement(document, 'button');
 	row.type = 'button';
 	row.className = `openide-menu-row${options.muted ? ' openide-menu-muted' : ''}${options.active ? ' openide-menu-active' : ''}`;
-	const icon = document.createElement('span');
+	const icon = createOpenideElement(document, 'span');
 	icon.className = 'openide-menu-row-icon';
 	if (options.icon) {
 		icon.appendChild(createCodicon(document, options.icon));
 	}
 	row.appendChild(icon);
-	const label = document.createElement('span');
+	const label = createOpenideElement(document, 'span');
 	label.className = 'openide-menu-label';
 	label.textContent = options.label;
 	row.appendChild(label);
 	if (options.detail !== undefined) {
-		const detail = document.createElement('span');
+		const detail = createOpenideElement(document, 'span');
 		detail.className = 'openide-menu-detail';
 		detail.textContent = options.detail;
 		row.appendChild(detail);
 	}
 	if (options.keybinding) {
-		const keybinding = document.createElement('span');
+		const keybinding = createOpenideElement(document, 'span');
 		keybinding.className = 'openide-menu-keybinding';
 		keybinding.textContent = options.keybinding;
 		row.appendChild(keybinding);
@@ -118,6 +139,9 @@ export function createMenuRow(document: Document, options: IMenuRowOptions): HTM
 export interface IComposerPopoverOptions {
 	/** Extra class on the menu container; each picker uses it to pin its own min/max width. */
 	readonly className?: string;
+	/** Browser views need the overlay inside their native-view host. */
+	readonly container?: HTMLElement;
+	readonly role?: 'menu' | 'dialog';
 	readonly anchorAlignment?: AnchorAlignment;
 	/** Defaults to ABOVE (the composer sits at the bottom); a title-bar anchor opens BELOW. */
 	readonly anchorPosition?: AnchorPosition;
@@ -165,31 +189,65 @@ export class OpenideComposerPopover extends Disposable {
 
 	show(anchor: HTMLElement, options: IComposerPopoverOptions): void {
 		this.close();
+		anchor.setAttribute('aria-expanded', 'true');
+		const preferredPosition = options.anchorPosition ?? AnchorPosition.ABOVE;
+		let position = preferredPosition;
 		this._open = this.contextViewService.showContextView({
 			getAnchor: () => {
 				const rect = getDomNodePagePosition(anchor);
+				if (this._container) { position = updateMenuPlacement(this._container, anchor, preferredPosition); }
 				// Grown on BOTH edges: the context view lays the menu flush against the anchor box, and
 				// the gap has to be there whether it opens above (composer) or below (Build, Settings).
 				return { x: rect.left, y: rect.top - MENU_ANCHOR_GAP, width: rect.width, height: rect.height + MENU_ANCHOR_GAP * 2 };
 			},
 			anchorAlignment: options.anchorAlignment ?? AnchorAlignment.LEFT,
-			anchorPosition: options.anchorPosition ?? AnchorPosition.ABOVE,
+			get anchorPosition() { return position; },
 			// Without this the context view only dismisses on clicks OUTSIDE the whole workbench
 			// (contextview.ts:283 tests the container, not the view), so the menu survived a click
 			// on the transcript. The anchor is excluded so its own handler can toggle it shut.
 			onDOMEvent: event => {
+				if (event.type === 'keydown' && (event as KeyboardEvent).isComposing) { return; }
+				if (event.type === 'keydown' && !event.defaultPrevented && this._container?.contains(event.target as Node)) {
+					const keyboard = event as KeyboardEvent;
+					const target = event.target as HTMLElement;
+					if (!target.matches('input, textarea, [contenteditable=true]') && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(keyboard.key)) {
+						const rows = this._focusableRows();
+						const index = rows.indexOf(target as HTMLButtonElement);
+						const next = keyboard.key === 'Home' ? 0 : keyboard.key === 'End' ? rows.length - 1 : (index + (keyboard.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+						if (rows[next]) { keyboard.preventDefault(); rows[next].focus({ preventScroll: true }); rows[next].scrollIntoView({ block: 'nearest' }); }
+					}
+				}
+				if (event.type === 'keydown' && (event as KeyboardEvent).key === 'Escape') {
+					event.preventDefault();
+					this.close();
+					anchor.focus();
+					return;
+				}
 				if (event.type !== 'click') { return; }
 				const target = event.target as HTMLElement | null;
 				if (target && (this._container?.contains(target) || anchor.contains(target))) { return; }
 				this.close();
 			},
-			render: container => this._render(container, options),
+			render: container => {
+				updateMenuPlacement(container, anchor, preferredPosition);
+				const store = new DisposableStore();
+				store.add(this._render(container, options));
+				store.add(addDisposableListener(container.ownerDocument, 'focusin', event => {
+					const target = event.target as Node | null;
+					if (target && !container.contains(target) && !anchor.contains(target)) { this.close(); }
+				}));
+				return store;
+			},
+			focus: () => {
+				if (!this._container?.contains(this._container.ownerDocument.activeElement)) { this._focusableRows()[0]?.focus({ preventScroll: true }); }
+			},
 			onHide: () => {
+				anchor.setAttribute('aria-expanded', 'false');
 				this._open = undefined;
 				this._container = undefined;
 				options.onHide?.();
 			},
-		});
+		}, options.container ?? anchor.closest<HTMLElement>('.monaco-workbench') ?? anchor.ownerDocument.body);
 		// The entrance animation goes on AFTER showContextView returned: the context view renders,
 		// measures and places the menu synchronously inside that call, and a fixed-position view
 		// (aux windows) measures the view's own rect — which the animation's translate would shift.
@@ -197,8 +255,13 @@ export class OpenideComposerPopover extends Disposable {
 		this._container?.classList.add(MENU_ENTER_CLASS);
 	}
 
+	private _focusableRows(): HTMLButtonElement[] {
+		return Array.from(this._container?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []).filter(button => !button.closest('[hidden], [inert]') && button.getClientRects().length > 0);
+	}
+
 	private _render(container: HTMLElement, options: IComposerPopoverOptions): IDisposable {
 		const store = new DisposableStore();
+		store.add(toDisposable(() => container.style.removeProperty('--openide-menu-available-height')));
 		container.classList.add('openide-menu');
 		if (options.className) {
 			container.classList.add(options.className);
@@ -207,7 +270,7 @@ export class OpenideComposerPopover extends Disposable {
 			container.style.setProperty('--openide-menu-anchor-width', `${options.width}px`);
 			store.add(toDisposable(() => container.style.removeProperty('--openide-menu-anchor-width')));
 		}
-		container.setAttribute('role', 'menu');
+		container.setAttribute('role', options.role ?? 'menu');
 		// A click inside the menu bubbles to the context view's own dismiss handler; rows that
 		// repaint the menu in place (favourites, submenus) would close it on their first press.
 		store.add(addDisposableListener(container, 'mousedown', event => event.stopPropagation()));
@@ -240,7 +303,7 @@ export class OpenideComposerPopover extends Disposable {
 
 /** `.menu-content`: the scrolling body every menu puts its rows into. */
 export function createMenuContent(document: Document): HTMLElement {
-	const content = document.createElement('div');
+	const content = createOpenideElement(document, 'div');
 	content.className = 'openide-menu-content';
 	return content;
 }

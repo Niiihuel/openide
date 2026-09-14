@@ -25,6 +25,8 @@ import { IEditorService, type PreferredGroup } from '../../../../services/editor
 import { formatBrowserEditorList, getBrowserPageResourceNavigationError } from '../../electron-browser/tools/browserToolHelpers.js';
 
 class TestBrowserViewWorkbenchService implements IBrowserViewWorkbenchService {
+	getOrCreatePreview(): BrowserEditorInput { throw new Error('Not implemented in this test'); }
+	registerPreviewEditorTarget(): IDisposable { return Disposable.None; }
 	getPreview(): BrowserEditorInput | undefined { return undefined; }
 	async openPreview(): Promise<BrowserEditorInput> { throw new Error('Not implemented in this test'); }
 	declare readonly _serviceBrand: undefined;

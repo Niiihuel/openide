@@ -34,6 +34,12 @@
 		}
 	}
 
+	/* The viewport scrollbar must remain above sticky file headers (z-index: 1000).
+	   Otherwise the thumb is clipped and cannot be dragged where it crosses a header. */
+	> div > .monaco-scrollable-element > .scrollbar {
+		z-index: 1001;
+	}
+
 	> .multi-diff-root-floating-menu {
 		position: absolute;
 		top: auto;

@@ -268,6 +268,9 @@ export class PtyHostService extends Disposable implements IPtyHostService {
 	setNextCommandId(id: number, commandLine: string, commandId: string): Promise<void> {
 		return this._proxy.setNextCommandId(id, commandLine, commandId);
 	}
+	getProcessId(id: number): Promise<number | undefined> {
+		return this._proxy.getProcessId(id);
+	}
 	getInitialCwd(id: number): Promise<string> {
 		return this._proxy.getInitialCwd(id);
 	}

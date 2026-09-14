@@ -63,6 +63,8 @@ export class TestSharedProcessService implements ISharedProcessService {
 
 export class TestNativeHostService implements INativeHostService {
 
+	async exportCanvasDocument(): Promise<VSBuffer> { throw new Error('Canvas export unavailable in test host.'); }
+
 	declare readonly _serviceBrand: undefined;
 
 	readonly windowId = -1;

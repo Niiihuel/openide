@@ -396,6 +396,8 @@ export interface IEditorService {
 	 * Create a scoped editor service that only operates on the provided
 	 * editor group container. Use `main` to create a scoped editor service
 	 * to the main editor group container of the main window.
+	 * Set `openEditorsInContainer` to route opens without an explicit group to
+	 * this container, independently of the globally focused window.
 	 */
-	createScoped(editorGroupsContainer: IEditorGroupsContainer, disposables: DisposableStore): IEditorService;
+	createScoped(editorGroupsContainer: IEditorGroupsContainer, disposables: DisposableStore, options?: { readonly openEditorsInContainer?: boolean }): IEditorService;
 }

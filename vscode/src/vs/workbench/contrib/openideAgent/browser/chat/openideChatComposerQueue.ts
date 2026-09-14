@@ -4,6 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, append, clearNode } from '../../../../../base/browser/dom.js';
+import { Action } from '../../../../../base/common/actions.js';
+import { AnchorAlignment } from '../../../../../base/browser/ui/contextview/contextview.js';
+import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
+import { FileAccess } from '../../../../../base/common/network.js';
+import { URI } from '../../../../../base/common/uri.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { basename } from '../../../../../base/common/path.js';
@@ -12,6 +17,7 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../../pla
 import { AgentMode, IChatCapabilityMention, IChatImage } from '../../common/openideAgentTypes.js';
 import { IComposerReference, linkLabel } from './openideChatComposerChips.js';
 import { IComposerSnippet } from '../../common/chat/openideChatSnippet.js';
+import { createChatTray, IOpenideChatTray } from './openideChatTray.js';
 import { setupChatTooltip } from './openideChatHover.js';
 import { t } from '../../common/openideStrings.js';
 
@@ -74,11 +80,13 @@ export class OpenideChatComposerQueue extends Disposable {
 	readonly onDidRequestSendNow: Event<IComposerQueueAction> = this._onDidRequestSendNow.event;
 
 	readonly domNode: HTMLElement;
+	private readonly _tray: IOpenideChatTray;
 	private readonly _body: HTMLElement;
 	private readonly _count: HTMLElement;
-	private readonly _chevron: HTMLElement;
 	private readonly _rowStore = this._register(new DisposableStore());
-	private _expanded = true;
+	private _expanded = false;
+	private _source: OpenideChatComposerQueue | undefined;
+	private readonly _onDidChange = this._register(new Emitter<void>());
 	private _queues: Record<string, IComposerQueueEntry[]> = {};
 	private _conversationId: string | undefined;
 
@@ -86,19 +94,35 @@ export class OpenideChatComposerQueue extends Disposable {
 		host: HTMLElement,
 		private readonly storageService: IStorageService,
 		private readonly hoverService: IHoverService,
+		private readonly menuService?: IContextMenuService,
 	) {
 		super();
 		this._queues = this._load();
-		this.domNode = append(host, $('div.openide-chat-queue-tray.hidden'));
-		const head = append(this.domNode, $('div.openide-chat-queue-head'));
-		const toggle = append(head, $<HTMLButtonElement>('button.openide-chat-queue-toggle', { type: 'button' }));
-		this._chevron = append(toggle, $('span.codicon.codicon-chevron-down'));
-		this._count = append(toggle, $('span.openide-chat-queue-count'));
+		this._tray = this._register(createChatTray(host, 'queue', 'list-ordered'));
+		this.domNode = this._tray.domNode;
+		const { toggle } = this._tray;
+		this._count = this._tray.label;
 		this._register(addDisposableListener(toggle, 'click', () => {
 			this._expanded = !this._expanded;
 			this._render();
 		}));
-		this._body = append(this.domNode, $('div.openide-chat-queue-body'));
+		this._body = this._tray.body;
+		this._register(this._tray.onDidChangeExpanded(expanded => {
+			if (this._expanded === expanded) {
+				return;
+			}
+			this._expanded = expanded;
+			this._render();
+		}));
+		this._tray.setExpanded(this._expanded);
+		this._render();
+	}
+
+	/** Shares pending messages while each surface keeps its own tray geometry. */
+	shareWith(source: OpenideChatComposerQueue): void {
+		this._source = source;
+		this._queues = source._queues;
+		this._register(source._onDidChange.event(() => this._render()));
 		this._render();
 	}
 
@@ -173,6 +197,7 @@ export class OpenideChatComposerQueue extends Disposable {
 	}
 
 	private _persist(): void {
+		if (this._source) { this._source._persist(); this._source._render(); return; }
 		for (const key of Object.keys(this._queues)) {
 			if (!this._queues[key].length) { delete this._queues[key]; }
 		}
@@ -181,6 +206,7 @@ export class OpenideChatComposerQueue extends Disposable {
 		} else {
 			this.storageService.remove(STORAGE_KEY, StorageScope.WORKSPACE);
 		}
+		this._onDidChange.fire();
 	}
 
 	private _render(): void {
@@ -193,13 +219,19 @@ export class OpenideChatComposerQueue extends Disposable {
 		this._count.textContent = queue.length === 1
 			? t('chatSurface.queue.one')
 			: t('chatSurface.queue.many', queue.length);
-		this._chevron.className = `codicon codicon-${this._expanded ? 'chevron-down' : 'chevron-right'}`;
-		this._body.classList.toggle('hidden', !this._expanded);
-		if (!hidden && this._expanded) {
-			queue.forEach((entry, index) => {
+		this._tray.setExpanded(this._expanded);
+		this._tray.head.hidden = queue.length <= 1;
+		// The next request stays visible, even when the remainder is folded.
+		if (!hidden) {
+			(this._expanded ? queue : queue.slice(0, 1)).forEach((entry, index) => {
 				const row = append(this._body, $('div.openide-chat-queue-row'));
-				append(row, $('span.codicon.codicon-circle-large-outline'));
+				append(row, $('span.codicon.codicon-list-ordered', { 'aria-hidden': 'true' }));
 				const main = append(row, $('span.openide-chat-queue-main'));
+				const image = entry.images[0];
+				if (image) {
+					const src = image.data ? `data:${image.mimeType};base64,${image.data}` : image.assetUri ? FileAccess.uriToBrowserUri(URI.parse(image.assetUri)).toString(true) : undefined;
+					if (src) { append(main, $('img.openide-chat-queue-thumb', { src, alt: '' })); }
+				}
 				const text = append(main, $('span.openide-chat-queue-text'));
 				const label = entryLabel(entry);
 				text.textContent = label;
@@ -209,17 +241,23 @@ export class OpenideChatComposerQueue extends Disposable {
 					append(main, $('span.openide-chat-queue-intent')).textContent = t('chat.queue.afterPlan');
 				}
 				const actions = append(row, $('span.openide-chat-queue-actions'));
-				this._action(actions, 'edit', () => t('chat.queue.edit'), () => {
+				const edit = () => {
 					const removed = this._removeAt(index);
 					if (removed) { this._onDidRequestEdit.fire({ entry: removed }); }
+				};
+				const send = this._action(actions, 'arrow-up', () => t(entry.mode === 'plan' ? 'chat.queue.nowPlan' : 'chat.queue.now'), () => {
+					const removed = this._removeAt(index);
+					if (removed) { this._onDidRequestSendNow.fire({ entry: removed }); }
 				});
-				this._action(actions, entry.mode === 'plan' ? 'replace-all' : 'arrow-up',
-					() => t(entry.mode === 'plan' ? 'chat.queue.nowPlan' : 'chat.queue.now'),
-					() => {
-						const removed = this._removeAt(index);
-						if (removed) { this._onDidRequestSendNow.fire({ entry: removed }); }
-					});
+				send.classList.add('openide-chat-queue-send');
+				append(send, $('span.openide-chat-queue-send-label', undefined, t('chat.queue.now')));
 				this._action(actions, 'trash', () => t('chat.queue.remove'), () => this._removeAt(index));
+				if (this.menuService) {
+					const more = this._action(actions, 'ellipsis', () => t('chat.header.more'), () => {
+						const action = new Action('openide.queue.edit', t('chat.queue.edit'), 'codicon codicon-edit', true, async () => edit());
+						this.menuService!.showContextMenu({ getAnchor: () => more, getActions: () => [action], anchorAlignment: AnchorAlignment.RIGHT, domForShadowRoot: more, useWindowContainerForShadowRoot: true, onHide: cancelled => { action.dispose(); if (cancelled && more.isConnected) { more.focus(); } } });
+					});
+				} else { this._action(actions, 'edit', () => t('chat.queue.edit'), edit); }
 			});
 		}
 		if (wasHidden !== hidden || !hidden) {
@@ -227,13 +265,14 @@ export class OpenideChatComposerQueue extends Disposable {
 		}
 	}
 
-	private _action(parent: HTMLElement, icon: string, title: () => string, run: () => void): void {
-		const button = append(parent, $<HTMLButtonElement>('button.openide-chat-queue-btn', { type: 'button' }));
+	private _action(parent: HTMLElement, icon: string, title: () => string, run: () => void): HTMLButtonElement {
+		const button = append(parent, $<HTMLButtonElement>('button.openide-chat-queue-btn.oi-dock-action', { type: 'button' }));
 		this._rowStore.add(setupChatTooltip(this.hoverService, button, title));
 		append(button, $(`span.codicon.codicon-${icon}`));
 		this._rowStore.add(addDisposableListener(button, 'click', event => {
 			event.stopPropagation();
 			run();
 		}));
+		return button;
 	}
 }

@@ -56,7 +56,8 @@ import {
 	parseIdeRpc, IIdeDiscoveryStatus, jsonText,
 } from '../common/openideIdeServer.js';
 
-import { OPENIDE_CAPABILITY_INSTRUCTIONS, openideCapabilityHelp } from '../common/openideCapabilityCatalog.js';
+import { prepareCodexContextProfile } from '../node/openideCodexContext.js';
+import { OPENIDE_CAPABILITY_DESCRIPTION, OPENIDE_CAPABILITY_INSTRUCTIONS, openideCapabilityHelp } from '../common/openideCapabilityCatalog.js';
 
 /** How long a non-blocking tool may take before the call is failed. */
 const TOOL_TIMEOUT_MS = 30_000;
@@ -101,7 +102,7 @@ interface IConnection {
 
 const CAPABILITY_TOOL: IIdeToolSchema = {
 	name: 'openide_capabilities',
-	description: 'Discover OpenIDE capabilities by intent: browser and visual checks, architecture and impact, shared Markdown memory, editable plan review, or editor diagnostics. Returns registered tools and prerequisites; does not execute them.',
+	description: OPENIDE_CAPABILITY_DESCRIPTION,
 	inputSchema: { type: 'object', properties: { family: { type: 'string', enum: ['browser', 'map', 'memory', 'plans', 'editor'] } }, additionalProperties: false },
 	annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 };
@@ -109,7 +110,7 @@ const CAPABILITY_TOOL: IIdeToolSchema = {
 const COMPAT_BLOCKING_TOOLS = new Set(IDE_COMPAT_TOOLS.filter(t => t.blocking).map(t => t.name));
 
 function listedTools(extra: readonly IIdeToolSchema[]): unknown[] {
-	return [...IDE_COMPAT_TOOLS, CAPABILITY_TOOL, ...extra]
+	return [CAPABILITY_TOOL, ...IDE_COMPAT_TOOLS, ...extra]
 		.filter(tool => !tool.hidden)
 		.map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, ...(tool.annotations ? { annotations: tool.annotations } : {}) }));
 }
@@ -157,6 +158,7 @@ export class OpenideIdeServerMain extends Disposable {
 	private stopped = false;
 
 	/** Per-session MCP config files written for CLIs that take a path; removed on stop. */
+	private readonly codexContexts = new Map<string, { executable: string; cwd: string | undefined; instructions: string }>();
 	private readonly sessionConfigs = new Set<string>();
 
 	constructor(private readonly logService: ILogService) {
@@ -349,6 +351,22 @@ export class OpenideIdeServerMain extends Disposable {
 		return path;
 	}
 
+	async prepareCodexContext(executable: string, cwd: string | undefined, serverName: string): Promise<string> {
+		const profile = await prepareCodexContextProfile(executable, cwd, serverName);
+		if (this.stopped || this._store.isDisposed) {
+			try { unlinkSync(profile.path); } catch { /* profile already removed */ }
+			throw new Error('IDE owner disconnected during Codex context preparation');
+		}
+		this.codexContexts.set(profile.name, { executable, cwd, instructions: profile.instructions });
+		this.sessionConfigs.add(profile.path);
+		return profile.name;
+	}
+
+	codexContextInstructions(name: string, executable: string, cwd: string): string | undefined {
+		const context = this.codexContexts.get(name);
+		return context?.executable === executable && context.cwd === cwd ? context.instructions : undefined;
+	}
+
 	/**
 	 * Runs a CLI's own `mcp add` so OpenIDE is registered in its config.
 	 *
@@ -478,7 +496,7 @@ export class OpenideIdeServerMain extends Disposable {
 	 * The single dispatcher both doors share. `undefined` means "no such method" — the caller
 	 * turns that into the right framing for its transport.
 	 */
-	private async dispatch(connectionId: string, method: string, params: unknown, rpcId: IdeRpcId | null): Promise<unknown | undefined> {
+	private async dispatch(connectionId: string, method: string, params: unknown, rpcId: IdeRpcId | null, sessionId?: string): Promise<unknown | undefined> {
 		switch (method) {
 			case 'initialize': {
 				const info = (params as { clientInfo?: { name?: string; version?: string } } | undefined)?.clientInfo;
@@ -501,6 +519,8 @@ export class OpenideIdeServerMain extends Disposable {
 				return { prompts: [] };
 			case 'resources/list':
 				return { resources: [] };
+			case 'resources/templates/list':
+				return { resourceTemplates: [] };
 			case 'tools/list':
 				this.discovery = { ...this.discovery, toolsListedAt: Date.now(), toolCount: listedTools(this.extraTools).length };
 				this._onDidChangeDiscovery.fire(this.discovery);
@@ -520,7 +540,7 @@ export class OpenideIdeServerMain extends Disposable {
 					}
 					return jsonText(openideCapabilityHelp([...IDE_COMPAT_TOOLS, ...this.extraTools].filter(tool => !tool.hidden).map(tool => tool.name), args?.family));
 				}
-				return await this.callTool(connectionId, name, call?.arguments ?? {}, rpcId);
+				return await this.callTool(connectionId, name, call?.arguments ?? {}, rpcId, sessionId);
 			}
 			default:
 				return undefined;
@@ -528,7 +548,7 @@ export class OpenideIdeServerMain extends Disposable {
 	}
 
 	/** Parks the call, hands it to the renderer, and guarantees it is settled exactly once. */
-	private callTool(connectionId: string, tool: string, args: unknown, rpcId: IdeRpcId | null): Promise<IIdeToolResult> {
+	private callTool(connectionId: string, tool: string, args: unknown, rpcId: IdeRpcId | null, sessionId?: string): Promise<IIdeToolResult> {
 		const requestId = `${this.generation}-tool-${++this.counter}`;
 		// Tier 2 declares its own blocking tools, and `plan_save` is one: it does not answer until
 		// a person has read the plan. Reading only the compat set here would give a human review
@@ -542,7 +562,7 @@ export class OpenideIdeServerMain extends Disposable {
 				reject(new Error(`tool timed out: ${tool}`));
 			}, timeoutMs);
 			this.pending.set(requestId, { resolve, reject, connectionId, rpcId, timer });
-			this._onDidRequestTool.fire({ requestId, connectionId, tool, args });
+			this._onDidRequestTool.fire({ requestId, connectionId, tool, args, ...(sessionId ? { sessionId } : {}) });
 		});
 	}
 
@@ -615,6 +635,8 @@ export class OpenideIdeServerMain extends Disposable {
 			res.writeHead(404).end();
 			return;
 		}
+		const sessionId = new URL(req.url, 'http://localhost').searchParams.get('openideSession') ?? undefined;
+		if (sessionId !== undefined && (!sessionId || sessionId.length > 256)) { res.writeHead(400).end(); return; }
 		const header = req.headers['authorization'];
 		const bearer = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : '';
 		if (this.stopped || this.info?.authToken !== authToken || !bearer || !secretEquals(bearer, authToken)) {
@@ -655,7 +677,7 @@ export class OpenideIdeServerMain extends Disposable {
 		res.once('close', onClose);
 		try {
 			if (res.destroyed) { return; }
-			const result = await this.dispatch(connectionId, request.method, request.params, request.id);
+			const result = await this.dispatch(connectionId, request.method, request.params, request.id, sessionId);
 			if (res.destroyed) { return; }
 			const frame = result === undefined
 				? ideRpcError(request.id, { code: IDE_RPC_METHOD_NOT_FOUND, message: 'Method not found', data: request.method })
@@ -706,6 +728,7 @@ export class OpenideIdeServerMain extends Disposable {
 			try { unlinkSync(path); } catch { /* already gone */ }
 		}
 		this.sessionConfigs.clear();
+		this.codexContexts.clear();
 		this.info = undefined;
 	}
 }

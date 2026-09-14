@@ -5,7 +5,7 @@
 
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { IBrowserViewWorkbenchService, IBrowserViewCDPService, IBrowserViewModel, IBrowserViewContextualFilter, IBrowserViewOpenHandler, IBrowserViewWorkbenchCreateOptions } from '../common/browserView.js';
-import type { PreferredGroup } from '../../../services/editor/common/editorService.js';
+import type { IEditorService, PreferredGroup } from '../../../services/editor/common/editorService.js';
 import { Event } from '../../../../base/common/event.js';
 import { Disposable, IDisposable } from '../../../../base/common/lifecycle.js';
 import { IBrowserViewEditorOpenOptions } from '../../../../platform/browserView/common/browserView.js';
@@ -34,6 +34,14 @@ class WebBrowserViewWorkbenchService implements IBrowserViewWorkbenchService {
 
 	openPreview(_url?: string): Promise<BrowserEditorInput> {
 		throw new Error('Integrated Browser is not available in web.');
+	}
+
+	getOrCreatePreview(_url?: string): BrowserEditorInput {
+		throw new Error('Integrated Browser is not available in web.');
+	}
+
+	registerPreviewEditorTarget(_windowId: number, _resolve: () => Promise<IEditorService>): IDisposable {
+		return Disposable.None;
 	}
 
 	getPreview(): BrowserEditorInput | undefined {

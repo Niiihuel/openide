@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, append } from '../../../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, getWindow } from '../../../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
@@ -14,23 +14,14 @@ import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openi
 import { setupChatTooltip } from '../openideChatHover.js';
 import { setOpenideChatShimmer } from './openideChatActivityRow.js';
 import { appendSubagentTimelineEvent, lastSubagentTimelineRows, lastSubagentToolStart, subagentStatusText, subagentToolCount } from './openideChatSubagentTimeline.js';
+import { createSubagentAvatar, subagentAvatarKind } from '../../openideSubagentAvatar.js';
+import { subagentTaskTitle } from '../../../common/openideSubagentTitle.js';
 import '../media/openideChatSubagent.css';
 
 export const OPENIDE_CHAT_SUB_CARD_CLASS = 'openide-chat-sub';
 
 /** How much of the specialist's trace the row shows when expanded. */
 const TAIL_ROWS = 3;
-
-/** Status glyph of the row, in the same 16px column the activity rows put theirs. */
-function statusIconClasses(status: OpenideChatSubagentStatus): string {
-	switch (status) {
-		case 'completed': return 'codicon-pass-filled openide-chat-sub-st-ok';
-		case 'failed': return 'codicon-error openide-chat-sub-st-err';
-		case 'cancelled': return 'codicon-circle-slash';
-		case 'running':
-		default: return 'codicon-loading openide-chat-sub-spin';
-	}
-}
 
 /** What the status glyph means, for its tooltip: a coloured dot has to be readable in words too. */
 function statusText(status: OpenideChatSubagentStatus): string {
@@ -71,6 +62,8 @@ function normalizeModel(model: string | undefined): string {
 export interface IOpenideChatSubagentAction {
 	readonly runId: string;
 	readonly action: 'cancel' | 'open';
+	readonly sourceWindow: Window;
+	readonly parentSessionId?: string;
 }
 
 const _onDidRequestAction = new Emitter<IOpenideChatSubagentAction>();
@@ -103,6 +96,9 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 
 	private readonly _head: HTMLElement;
 	private readonly _statusIcon: HTMLElement;
+	private _avatarKind: string | undefined;
+	private _activityVisible = true;
+	private _activityDirty = false;
 	private readonly _title: HTMLElement;
 	private readonly _model: HTMLElement;
 	private readonly _count: HTMLElement;
@@ -139,7 +135,7 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 		this._head.setAttribute('role', 'button');
 		this._head.tabIndex = 0;
 
-		this._statusIcon = append(append(this._head, $('span.openide-chat-part-icon')), $('span.codicon'));
+		this._statusIcon = append(this._head, $('span.openide-chat-sub-avatar'));
 		this._register(setupChatTooltip(this._hoverService, this._statusIcon, () => statusText(this._content.status), { aria: false }));
 		this._title = append(this._head, $('span.openide-chat-part-verb'));
 		this._register(setupChatTooltip(this._hoverService, this._title, () => this._title.textContent ?? '', { aria: false }));
@@ -153,7 +149,7 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 		append(this._stop, $('span.codicon.codicon-debug-stop'));
 		this._register(addDisposableListener(this._stop, 'click', event => {
 			event.stopPropagation();
-			_onDidRequestAction.fire({ runId: this._content.runId, action: 'cancel' });
+			this._requestAction('cancel');
 		}));
 
 		// The chevron is the expander now, so it owns `aria-expanded` — the head announces "open the
@@ -170,18 +166,32 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 		this._status = append(this.domNode, $('div.openide-chat-sub-status'));
 		this._body = append(this.domNode, $('div.openide-chat-part-body.openide-chat-sub-tail'));
 
-		const open = () => _onDidRequestAction.fire({ runId: this._content.runId, action: 'open' });
+		const open = () => this._requestAction('open');
 		this._register(addDisposableListener(this._head, 'click', () => open()));
 		// Enter/Space is not free on a div the way it is on a button.
 		this._register(addDisposableListener(this._head, 'keydown', event => {
 			const key = (event as KeyboardEvent).key;
-			if (key === 'Enter' || key === ' ') {
+			if (event.target === this._head && (key === 'Enter' || key === ' ')) {
 				event.preventDefault();
 				open();
 			}
 		}));
 
 		this._render();
+	}
+
+	private _requestAction(action: 'open' | 'cancel'): void {
+		_onDidRequestAction.fire({ runId: this._content.runId, action, sourceWindow: getWindow(this.domNode), parentSessionId: this._content.run?.parentConversationId });
+	}
+
+	/** A folded summary stores snapshots without scanning or painting its hidden history. */
+	setActivityVisible(visible: boolean): void {
+		this._activityVisible = visible;
+		if (visible && this._activityDirty) {
+			this._activityDirty = false;
+			this._render();
+			this._onDidChangeHeight.fire();
+		}
 	}
 
 	private _toggle(): void {
@@ -196,18 +206,20 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 		const content = this._content;
 		const running = content.status === 'running';
 
-		this._statusIcon.className = `codicon ${statusIconClasses(content.status)}`;
+		const task = content.run ?? { task: content.title };
+		const kind = subagentAvatarKind(task);
+		if (this._avatarKind !== kind) { this._avatarKind = kind; this._statusIcon.replaceChildren(createSubagentAvatar(task)); }
 
-		const title = content.title || t('chat.part.subagentDefault');
+		const title = subagentTaskTitle(content.run?.task ?? content.title, content.title) || t('chat.part.subagentDefault');
 		this._title.textContent = title;
 
 		const badge = subagentModelBadge(content.model, content.parentModel);
 		this._model.textContent = badge;
 		this._model.classList.toggle('hidden', !badge);
 
-		this._count.textContent = countLabel(content.status, subagentToolCount(content.timeline));
+		this._count.textContent = countLabel(content.status, content.run?.metrics.toolCalls ?? subagentToolCount(content.timeline));
 
-		this._head.setAttribute('aria-label', t('chat.part.subagentOpenAria', title));
+		this._head.setAttribute('aria-label', `${t('chat.part.subagentOpenAria', title)} · ${statusText(content.status)}`);
 		this._stop.classList.toggle('hidden', !running);
 
 		// No chevron when there is nothing under it: an expander that opens onto an empty box is a
@@ -269,6 +281,9 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 		return other.runId === this._content.runId
 			&& other.status === this._content.status
 			&& other.title === this._content.title
+			&& other.run?.task === this._content.run?.task
+			&& other.run?.profile === this._content.run?.profile
+			&& other.run?.routingDecision?.profile === this._content.run?.routingDecision?.profile
 			&& other.model === this._content.model
 			&& other.parentModel === this._content.parentModel
 			&& other.timeline.length === this._content.timeline.length
@@ -281,6 +296,7 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 			return false;
 		}
 		this._content = other;
+		if (!this._activityVisible) { this._activityDirty = true; return true; }
 		this._render();
 		this._onDidChangeHeight.fire();
 		return true;

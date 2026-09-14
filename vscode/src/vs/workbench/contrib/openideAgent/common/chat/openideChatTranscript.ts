@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { equals } from '../../../../../base/common/objects.js';
 import { IChatMessage } from '../openideAgentTypes.js';
 import { IOpenideChatCompactionContent, IOpenideChatContent } from './openideChatContent.js';
 import { pushOpenideChatMarkdownBlock } from './openideChatDiagramSplit.js';
@@ -97,7 +98,12 @@ export function buildOpenideChatTranscript(
 		}
 		state = restoreAssistantMessage(state, message, results, now, runs);
 	}
-	return closeTurn(state, now).items;
+	// Replay time is not elapsed work time. Older messages do not persist turn timestamps.
+	return closeTurn(state, now).items.map(item => {
+		if (item.kind !== 'response') { return item; }
+		const { startedAt, completedAt, ...restored } = item;
+		return restored;
+	});
 }
 
 /**
@@ -208,4 +214,19 @@ function closeTurn(state: IOpenideChatReducerState, now: number): IOpenideChatRe
 	interrupt(draft);
 	draft.complete = true;
 	return commitOpenideChatDraft(state, draft);
+}
+
+/** Keep measured rows when a mirrored snapshot has not changed their content. Replay versions
+ * count reducer steps, so replacing text in an existing message needs a new identity of its own. */
+export function reconcileOpenideChatTranscript(previous: readonly IOpenideChatItem[], next: readonly IOpenideChatItem[], revision: number): readonly IOpenideChatItem[] {
+	const prior = new Map(previous.map(item => [item.id, item]));
+	return next.map(item => {
+		const old = prior.get(item.id);
+		if (old) {
+			const { dataId: oldId, currentRenderedHeight: oldHeight, ...oldContent } = old;
+			const { dataId, currentRenderedHeight, ...content } = item;
+			if (equals(oldContent, content)) { return old; }
+		}
+		return { ...item, dataId: `${item.dataId}_snapshot_${revision}` };
+	});
 }

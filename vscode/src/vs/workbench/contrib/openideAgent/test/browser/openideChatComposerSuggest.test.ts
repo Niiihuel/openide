@@ -50,6 +50,8 @@ suite('OpenIDE ChatComposerSuggest', () => {
 		assert.strictEqual(items[items.length - 1].name, 'mine');
 		assert.ok(!items.some(item => item.kind === 'tool'));
 		const filtered = buildOpenideChatSlashSuggestions('verif', [], []);
-		assert.deepStrictEqual(filtered.map(item => item.name), ['verify']);
+		assert.deepStrictEqual(filtered.map(item => item.name), ['goal', 'verify']);
+		const goals = buildOpenideChatSlashSuggestions('goal', [{ slug: 'goal', description: 'shadowed', argumentHint: '' }], []);
+		assert.deepStrictEqual(goals.map(item => item.name), ['goal']);
 	});
 });

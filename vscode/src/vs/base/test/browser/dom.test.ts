@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { $, h, trackAttributes, copyAttributes, disposableWindowInterval, getWindows, getWindowsCount, getWindowId, getWindowById, hasWindow, getWindow, getDocument, isHTMLElement, SafeTriangle, AnimationFrameScheduler, DisposableResizeObserver, getRecentDisposableResizeObserverContextForLoopError, findParentWithClass, hasParentWithClass } from '../../browser/dom.js';
+import { registerWindow, getActiveDocument, $, h, trackAttributes, copyAttributes, disposableWindowInterval, getWindows, getWindowsCount, getWindowId, getWindowById, hasWindow, getWindow, getDocument, isHTMLElement, SafeTriangle, AnimationFrameScheduler, DisposableResizeObserver, getRecentDisposableResizeObserverContextForLoopError, findParentWithClass, hasParentWithClass } from '../../browser/dom.js';
 import { asCssValueWithDefault } from '../../../base/browser/cssValue.js';
 import { ensureCodeWindow, isAuxiliaryWindow, mainWindow } from '../../browser/window.js';
 import { DeferredPromise, timeout } from '../../common/async.js';
@@ -13,6 +13,29 @@ import { runWithFakedTimers } from '../common/timeTravelScheduler.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../common/utils.js';
 
 suite('dom', () => {
+	test('ambiguous auxiliary focus follows the document receiving input', () => {
+		const frame = document.createElement('iframe');
+		document.body.appendChild(frame);
+		const child = frame.contentWindow!;
+		ensureCodeWindow(child, 99);
+		const registration = registerWindow(child);
+		const originalMainFocus = document.hasFocus;
+		const originalChildFocus = child.document.hasFocus;
+		try {
+			document.hasFocus = () => true;
+			child.document.hasFocus = () => true;
+			child.dispatchEvent(new KeyboardEvent('keydown'));
+			assert.strictEqual(getActiveDocument(), child.document);
+			mainWindow.dispatchEvent(new KeyboardEvent('keydown'));
+			assert.strictEqual(getActiveDocument(), document);
+		} finally {
+			document.hasFocus = originalMainFocus;
+			child.document.hasFocus = originalChildFocus;
+			registration.dispose();
+			frame.remove();
+		}
+	});
+
 	test('hasClass', () => {
 
 		const element = document.createElement('div');

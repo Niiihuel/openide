@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { createOpenideElement } from '../openideDom.js';
 import { addDisposableListener, clearNode, getWindow } from '../../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent.js';
 import { KeyCode } from '../../../../../base/common/keyCodes.js';
@@ -51,7 +52,7 @@ export class OpenideChatModelEffort extends Disposable {
 		const document = host.ownerDocument;
 		this._open.clear();
 		if (!this._element) {
-			this._element = document.createElement('div');
+			this._element = createOpenideElement(document, 'div');
 			this._element.className = 'openide-mp-effort-flyout';
 			(host.closest('.monaco-workbench') ?? document.body).appendChild(this._element);
 		}

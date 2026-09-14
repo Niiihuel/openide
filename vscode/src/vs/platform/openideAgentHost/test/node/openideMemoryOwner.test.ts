@@ -19,6 +19,63 @@ suite('OpenIDE authored memory owner', () => {
 	teardown(async () => { owner.dispose(); for (const other of others.splice(0)) { other.dispose(); } await rm(root, { recursive: true, force: true }); });
 	const save = () => ({ action: 'save' as const, topic: 'payments/retry', body: '# Retry policy\nReuse the idempotency key.', operationId: 'request:1', related: ['src/pay.ts#retry'], session: 'session', message: 'request' });
 
+	test('rollback receives exact create/update snapshots after restart and forbids replay', async () => {
+		const created = (await owner.request(save())).document!;
+		const first = await readFile(join(root, created.path), 'utf8');
+		await owner.request({ ...save(), id: created.record.id, expectedRevision: 1, expectedHash: created.hash, message: 'later', operationId: 'request:2', body: 'A later decision.' });
+		const second = await readFile(join(root, created.path), 'utf8');
+		owner.dispose(); owner = new OpenideMemoryOwner(profile); await owner.setWorkspace([root]);
+		const response = await owner.request({ action: 'capture-rollback', session: 'session', messageIds: ['request', 'later'] });
+		assert.strictEqual(response.writeReceipts?.length, 2);
+		assert.strictEqual(response.writeReceipts![0].beforeContent, undefined);
+		assert.strictEqual(response.writeReceipts![0].afterContent, first);
+		assert.strictEqual(response.writeReceipts![1].beforeContent, first);
+		assert.strictEqual(response.writeReceipts![1].afterContent, second);
+		assert.strictEqual(await readFile(join(root, created.path), 'utf8'), second, 'preparation must never delete files itself');
+		await assert.rejects(owner.request(save()), /rolled back/);
+		await assert.rejects(owner.request({ action: 'checkpoint', session: 'session', checkpointId: 'stale', checkpoint: { watermark: 'stale', message: 'request', status: 'pending' } }), /rolled back/);
+	});
+
+	test('rollback cancels only discarded checkpoint owners durably, including jobs with no writes', async () => {
+		for (const message of ['kept', 'discarded']) {
+			await owner.request({ action: 'checkpoint', session: 'chat', checkpointId: message, checkpoint: { watermark: message, message, status: 'pending' } });
+		}
+		await owner.request({ action: 'capture-rollback', session: 'chat', messageIds: ['discarded'] });
+		owner.dispose(); owner = new OpenideMemoryOwner(profile); await owner.setWorkspace([root]);
+		assert.deepStrictEqual((await owner.request({ action: 'checkpoint-list', session: 'chat' })).checkpoints?.map(job => job.state.message), ['kept']);
+		await owner.request({ ...save(), session: 'other-chat', message: 'discarded' });
+		assert.strictEqual((await owner.request({ action: 'list' })).documents?.length, 1);
+	});
+
+	test('rollback preserves later user edits and warns about pre-receipt notes', async () => {
+		const created = (await owner.request({ ...save(), operationId: 'checkpoint:old' })).document!;
+		const original = await readFile(join(root, created.path), 'utf8');
+		const manual = original + '\nManually added detail.\n';
+		await writeFile(join(root, created.path), manual);
+		const response = await owner.request({ action: 'capture-rollback', session: 'session', messageIds: ['request'] });
+		assert.strictEqual(response.writeReceipts?.[0].afterContent, original);
+		assert.strictEqual(await readFile(join(root, created.path), 'utf8'), manual);
+		// Simulate an installation that wrote this note before capture receipts existed.
+		const state = join(profile, 'User/globalStorage/openide/memory');
+		for (const directory of await readdir(state)) { await rm(join(state, directory, 'captures'), { recursive: true, force: true }); }
+		const legacy = await owner.request({ action: 'capture-rollback', session: 'session', messageIds: ['request'] });
+		assert.strictEqual(legacy.writeReceipts?.length, 0);
+		assert.match(legacy.rollbackWarning!, /sin un recibo verificable/);
+		assert.strictEqual(await readFile(join(root, created.path), 'utf8'), manual);
+	});
+
+	test('a crash before the Markdown commit leaves a durable intent and no untracked write', async () => {
+		owner.dispose();
+		let synced = 0;
+		owner = new OpenideMemoryOwner(profile, async file => { await file.sync(); if (++synced === 2) { throw new Error('simulated crash'); } });
+		await owner.setWorkspace([root]);
+		await assert.rejects(owner.request(save()), /simulated crash/);
+		owner.dispose(); owner = new OpenideMemoryOwner(profile); await owner.setWorkspace([root]);
+		const response = await owner.request({ action: 'capture-rollback', session: 'session', messageIds: ['request'] });
+		assert.strictEqual(response.writeReceipts?.length, 1);
+		assert.deepStrictEqual((await owner.request({ action: 'list' })).documents, []);
+	});
+
 	test('persists Markdown, survives restart and keeps node identity after editing and moving', async () => {
 		const first = (await owner.request(save())).document!;
 		const before = await readFile(join(root, first.path), 'utf8');
@@ -154,7 +211,7 @@ suite('OpenIDE authored memory owner', () => {
 			if (revoke === 'disconnect') { owner.dispose(); } else { await owner.setWorkspace(revoke === 'workspace change' ? [profile] : []); }
 			release();
 			await assert.rejects(writing, /workspace changed|disconnected/i);
-			assert.deepStrictEqual(await readdir(join(root, '.openide/memory/notes')), []);
+			assert.deepStrictEqual(await readdir(join(root, '.openide/memory/notes')).catch(error => { if (error.code === 'ENOENT') { return []; } throw error; }), []);
 		});
 	}
 

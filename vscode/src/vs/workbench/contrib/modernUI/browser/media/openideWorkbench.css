@@ -1,0 +1,272 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Product roles bridge the upstream widgets without replacing their event handlers, virtual
+ * rows, editor metrics or theme service. User documents inside webviews do not inherit this. */
+.monaco-workbench.openide-visual {
+	--vscode-cornerRadius-small: var(--oi-radius-item);
+	--vscode-cornerRadius-medium: var(--oi-radius-row);
+	--vscode-cornerRadius-large: var(--oi-radius-popover);
+	background: var(--oi-shell);
+}
+
+/* Auxiliary windows retain a contiguous editor: they do not reserve main-window card margins. */
+.monaco-workbench.openide-visual:not(.floating-panels) .monaco-grid-view .part.editor:not(.modal-editor-part) {
+	border: 0;
+	border-radius: 0;
+	background: var(--oi-canvas);
+}
+.monaco-workbench.openide-visual .part.sidebar {
+	background: var(--oi-shell);
+}
+.monaco-workbench.openide-visual .part > .title,
+.monaco-workbench.openide-visual .part > .header-or-footer {
+	background: transparent;
+}
+
+/* One control state treatment. No universal element radius: connected controls, sliders,
+ * checkboxes and content retain their own shapes. Native inline widget colors remain themed. */
+.monaco-workbench.openide-visual :is(.monaco-button, .monaco-inputbox, .monaco-select-box),
+.monaco-workbench.openide-visual .monaco-findInput .monaco-inputbox {
+	border-radius: var(--oi-radius-control);
+	transition: background-color var(--oi-duration-hover) var(--oi-ease), border-color var(--oi-duration-hover) var(--oi-ease);
+}
+.monaco-workbench.openide-visual .monaco-action-bar .action-label {
+	transition: background-color var(--oi-duration-hover) var(--oi-ease);
+}
+.monaco-workbench.openide-visual .monaco-menu .monaco-action-bar.vertical .action-menu-item {
+	border-radius: var(--oi-radius-item);
+}
+.monaco-workbench.openide-visual :is(.monaco-menu-container, .quick-input-widget, .select-box-dropdown-container) {
+	border-radius: var(--oi-radius-popover);
+	border-color: var(--oi-border-overlay);
+	box-shadow: var(--oi-shadow);
+	animation: oi-overlay-enter var(--oi-motion-enter) var(--oi-ease-out);
+}
+.monaco-workbench.openide-visual .monaco-hover {
+	border-radius: var(--oi-radius-tooltip);
+	border-color: var(--oi-border-overlay);
+	box-shadow: var(--oi-shadow-sm);
+	animation: oi-tooltip-enter var(--oi-motion-tooltip) var(--oi-ease-out);
+}
+.monaco-workbench.openide-visual .monaco-dialog-box {
+	border-radius: var(--oi-radius-dialog);
+	border-color: var(--oi-border-overlay);
+	box-shadow: var(--oi-shadow-lg);
+}
+.monaco-workbench.openide-visual :is(.notifications-center, .notification-toast) {
+	border-radius: var(--oi-radius-group);
+}
+
+/* Opacity only: transforming native overlays would invalidate their measured anchor/pointer. */
+@keyframes oi-overlay-enter { from { opacity: 0; } to { opacity: 1; } }
+@keyframes oi-tooltip-enter { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench.openide-visual :is(.monaco-menu-container, .quick-input-widget, .select-box-dropdown-container, .monaco-hover) {
+		animation: none;
+	}
+}
+
+/* Match PartLayout in both main-window cards (32px) and auxiliary contiguous editors (35px). */
+.monaco-workbench.openide-visual.modern-ui .part > .title,
+.monaco-workbench.openide-visual.modern-ui .part > .header-or-footer,
+.monaco-workbench.openide-visual.modern-ui .part > .title > .title-actions { height: 35px; }
+.monaco-workbench.openide-visual.modern-ui .part > .title > .title-label { line-height: 35px; }
+
+.monaco-workbench.openide-visual .part.auxiliarybar {
+	background: var(--oi-canvas);
+}
+
+/* Native form/scroll fallback follows the active editor theme, including inherited context views.
+ * This does not reach iframe documents or set an operating-system/browser preference. */
+.monaco-workbench.openide-visual:is(.vs-dark, .hc-black) { color-scheme: dark; }
+.monaco-workbench.openide-visual:is(.vs, .hc-light) { color-scheme: light; }
+
+/* A part's own inset shadow is painted beneath its opaque pane/content children. Draw the
+ * shared divider on a non-interactive overlay above them instead. Position classes are supplied
+ * by Layout for both sidebars (opposite sides) and all four panel placements. This changes no
+ * border widths, padding, grid measurements or sash hit areas. */
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel, .titlebar, .statusbar) {
+	position: relative;
+	--oi-part-divider-color: var(--vscode-contrastBorder, var(--oi-divider, var(--oi-border)));
+}
+/* Native side/panel border widths still belong to PartLayout. Their paint is replaced, so themes
+ * with a real native border do not produce two adjacent separator strokes. */
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel) {
+	border-color: transparent !important;
+	box-shadow: none;
+}
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel, .titlebar)::after,
+.monaco-workbench.openide-visual .part.statusbar::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 10;
+	pointer-events: none;
+	box-shadow: var(--oi-part-divider-shadow, none);
+}
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel).left {
+	--oi-part-divider-shadow: inset -1px 0 var(--oi-part-divider-color);
+}
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel).right {
+	--oi-part-divider-shadow: inset 1px 0 var(--oi-part-divider-color);
+}
+.monaco-workbench.openide-visual .part.panel.bottom,
+.monaco-workbench.openide-visual .part.statusbar {
+	--oi-part-divider-shadow: inset 0 1px var(--oi-part-divider-color);
+}
+.monaco-workbench.openide-visual .part.panel.top,
+.monaco-workbench.openide-visual .part.titlebar {
+	--oi-part-divider-shadow: inset 0 -1px var(--oi-part-divider-color);
+}
+/* The status bar's existing one-pixel pseudo-border occupies this same top edge. Use its shared
+ * color too; focused status items keep their native focus outline. */
+.monaco-workbench.openide-visual .part.statusbar { --status-border-top-color: var(--oi-part-divider-color); }
+
+/* Editor groups keep the native SplitView separator: only its color is standardized. No second
+ * overlay is added to nested editor grids, including horizontal and vertical split groups. */
+.monaco-workbench.openide-visual .part.editor .monaco-split-view2.separator-border > .monaco-scrollable-element > .split-view-container > .split-view-view:not(:first-child)::before {
+	background-color: var(--vscode-contrastBorder, var(--oi-divider, var(--oi-border)));
+}
+
+/* Dock adapters share the product roles with custom renderers. Keep the native list service's
+ * selection/keyboard colors, virtualized dimensions, drag targets and input validation states.
+ * Only paint is adapted here; no wrapper or runtime DOM traversal is needed. */
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel) .monaco-list-row:not(.separator) {
+	border-radius: var(--oi-radius-item);
+	transition: background-color var(--oi-duration-hover) var(--oi-ease);
+}
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel) :is(.title, .pane-header, .viewpane-filter-container) .monaco-action-bar .action-label {
+	border-radius: var(--oi-radius-item);
+	transition: background-color var(--oi-duration-hover) var(--oi-ease);
+}
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel) :is(.title, .pane-header, .viewpane-filter-container) .monaco-action-bar .action-item:not(.disabled) .action-label:hover {
+	background-color: var(--oi-hover);
+}
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel) .pane-header {
+	color: var(--oi-text-muted);
+	transition: background-color var(--oi-duration-hover) var(--oi-ease);
+}
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel) .pane-header:hover {
+	background-color: var(--oi-hover) !important;
+}
+/* Native widgets paint colors inline. This product skin supplies the neutral control
+ * role in both windows; native validation colors and keyboard focus keep their meaning.
+ * InputBox always reserves its one-pixel border, so hover never changes layout. */
+.monaco-workbench.openide-visual .monaco-inputbox:not(.info):not(.warning):not(.error) {
+	background-color: var(--oi-control) !important;
+}
+.monaco-workbench.openide-visual .monaco-inputbox:not(.synthetic-focus):not(.info):not(.warning):not(.error) {
+	border-color: var(--oi-control-border) !important;
+}
+.monaco-workbench.openide-visual .monaco-inputbox:not(.synthetic-focus):not(.info):not(.warning):not(.error):not(:has(input:disabled, textarea:disabled)):hover {
+	border-color: var(--oi-control-border-hover) !important;
+}
+/* Inherit the frame's rounding without clipping input actions, validation or suggest widgets. */
+.monaco-workbench.openide-visual .monaco-inputbox > .ibwrapper,
+.monaco-workbench.openide-visual .monaco-inputbox > .ibwrapper > .input { border-radius: inherit; }
+.monaco-workbench.openide-visual .monaco-button.secondary {
+	background-color: var(--oi-control) !important;
+	color: var(--oi-text) !important;
+	border-color: var(--oi-control-border) !important;
+}
+.monaco-workbench.openide-visual .monaco-button.secondary:not(.disabled):hover {
+	background-color: var(--oi-hover) !important;
+	border-color: var(--oi-control-border-hover) !important;
+}
+
+.monaco-workbench.openide-visual :is(.explorer-folders-view, .open-editors, .outline-pane, .timeline-tree-view) .monaco-action-bar .action-label.codicon {
+	border-radius: var(--oi-radius-item);
+	transition: background-color var(--oi-duration-hover) var(--oi-ease);
+}
+.monaco-workbench.openide-visual :is(.explorer-folders-view, .open-editors, .outline-pane, .timeline-tree-view) .monaco-action-bar .action-item:not(.disabled) .action-label.codicon:hover {
+	background-color: var(--oi-hover);
+}
+
+/* Main-window dock cards use the margins and 1px border inset already reserved by
+ * AbstractPaneCompositePart and EditorPart. floatingPanels.css owns margins and sash offsets:
+ * never replace these with a visual transform or a full-size card over the content. */
+.monaco-workbench.openide-visual.floating-panels .part:is(.sidebar, .auxiliarybar, .panel),
+.monaco-workbench.openide-visual.floating-panels > .monaco-grid-view .part.editor:not(.modal-editor-part) {
+	border: 1px solid var(--vscode-contrastBorder, var(--oi-border)) !important;
+	border-radius: var(--oi-radius-group);
+	background-color: var(--oi-canvas) !important;
+	overflow: hidden;
+}
+
+/* The card border replaces the contiguous-grid overlay. It must follow the rounded perimeter,
+ * not draw a square separator across the gutter or in front of the first/last control. */
+.monaco-workbench.openide-visual.floating-panels .part:is(.sidebar, .auxiliarybar, .panel)::after {
+	display: none;
+}
+
+.monaco-workbench.openide-visual.modern-ui.floating-panels .part > .title,
+.monaco-workbench.openide-visual.modern-ui.floating-panels .part > .header-or-footer,
+.monaco-workbench.openide-visual.modern-ui.floating-panels .part > .title > .title-actions { height: 32px; }
+.monaco-workbench.openide-visual.modern-ui.floating-panels .part > .title > .title-label { line-height: 32px; }
+
+/* Rounded islands already define the content perimeter. The old top/bottom shell strokes
+ * (including StatusbarPart's native ::after) must not bridge across the rounded corners. */
+.monaco-workbench.openide-visual.floating-panels .part.titlebar::after,
+.monaco-workbench.openide-visual.floating-panels .part.statusbar::before,
+.monaco-workbench.openide-visual.floating-panels .part.statusbar::after {
+	display: none;
+}
+
+/* Native tab fills remain inside their existing hit targets. The top dock tabs and editor
+ * tabs share the control radius; no row height or draggable/tab hit area changes. */
+.monaco-workbench.openide-visual.modern-ui-tabs .pane-composite-part > :is(.title, .header-or-footer) .active-item-indicator,
+.monaco-workbench.openide-visual.modern-ui-tabs .part.editor .tab > .tab-fill {
+	border-radius: var(--oi-radius-control);
+}
+
+/* Only the main editor is a card. Settings' full-window modal must keep a square, edge-to-edge
+ * content frame, including the generic floating-panel >content rule. */
+.monaco-workbench.openide-visual.floating-panels .part.editor:not(.modal-editor-part) > .content {
+	border-radius: calc(var(--oi-radius-group) - 1px);
+}
+.monaco-workbench.openide-visual.floating-panels .full-window-editor .modal-editor-part,
+.monaco-workbench.openide-visual.floating-panels .full-window-editor .modal-editor-part > .content {
+	border-radius: 0;
+}
+
+/* Neutral toolbar icons use the same foreground on intent as oi-dock-action. Keep disabled
+ * actions and the explicit run/stop/restart status colors owned by their native widgets. */
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel) :is(.title, .pane-header, .viewpane-filter-container) .action-item:not(.disabled) .action-label.codicon:not(.codicon-debug-start):not(.codicon-debug-stop):not(.codicon-debug-restart):hover,
+.monaco-workbench.openide-visual :is(.explorer-folders-view, .open-editors, .outline-pane, .timeline-tree-view) .action-item:not(.disabled) .action-label.codicon:hover {
+	color: var(--oi-action-hover-foreground, var(--oi-text));
+}
+
+/* Native split buttons are one connected control, like oi-split. The generic button radius
+ * must not round the inner seam. Preserve native colors, borders, disabled/focus and actions. */
+.monaco-workbench.openide-visual .monaco-button-dropdown {
+	border-radius: var(--oi-radius-control);
+	overflow: hidden;
+}
+.monaco-workbench.openide-visual .monaco-button-dropdown > .monaco-button.monaco-text-button {
+	border-radius: var(--oi-radius-control) 0 0 var(--oi-radius-control);
+}
+.monaco-workbench.openide-visual .monaco-button-dropdown > .monaco-button.monaco-dropdown-button {
+	border-radius: 0 var(--oi-radius-control) var(--oi-radius-control) 0;
+}
+.monaco-workbench.openide-visual .monaco-button-dropdown > .monaco-button-dropdown-separator {
+	padding-block: 0;
+}
+
+/* Dock title actions share the chat/composer action scale, including the native auxiliarybar
+ * close, maximize, settings and more buttons. Textual composite tabs keep their own typography. */
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel) > :is(.title, .header-or-footer) .title-actions .action-label.codicon,
+.monaco-workbench.openide-visual .part:is(.sidebar, .auxiliarybar, .panel) > :is(.title, .header-or-footer) .title-actions .action-label.codicon::before {
+	font-size: var(--oi-icon-action, 16px);
+}
+
+/* The browser address is a composed input, with one shared outline around its widgets. */
+.monaco-workbench.openide-visual .browser-root .browser-url-container {
+	border-radius: var(--oi-radius-control);
+	background-color: var(--oi-control);
+	border-color: var(--oi-control-border);
+}
+.monaco-workbench.openide-visual .browser-root .browser-url-container:hover:not(:focus-within) { border-color: var(--oi-control-border-hover); }
+.monaco-workbench.openide-visual .browser-root .browser-url-container:focus-within { border-color: var(--oi-focus); }

@@ -18,7 +18,7 @@
 }
 
 .openide-diff {
-	--oi-edit-surface: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-foreground));
+	--oi-edit-surface: var(--oi-control, var(--vscode-editor-background));
 	background: var(--oi-edit-surface);
 	/* Keep the viewport constrained; the inner canvas owns the shared width of every row. */
 	display: block;
@@ -28,6 +28,8 @@
 	line-height: 1.55;
 	max-height: 108px;
 	overflow-x: auto;
+	overscroll-behavior: contain;
+	scrollbar-gutter: auto;
 	overflow-y: hidden;
 	tab-size: 4;
 }
@@ -109,14 +111,14 @@
 	bottom: 1px;
 	transform: translateX(-50%);
 	z-index: 4;
-	width: 28px;
-	height: 18px;
+	width: 30px;
+	height: 30px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	/* Bare glyph, as in Cursor: the fade underneath is what separates it from the code. */
 	border: none;
-	border-radius: 0;
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	box-shadow: none;
 	outline: none;
@@ -125,7 +127,7 @@
 	padding: 0;
 	opacity: 0;
 	pointer-events: none;
-	transition: opacity 100ms ease, color 100ms ease;
+	transition: opacity var(--oi-motion-exit, 120ms) var(--oi-ease-out, ease-out), color var(--oi-motion-exit, 120ms) var(--oi-ease-out, ease-out);
 }
 .openide-fold-expand .codicon { font-size: 16px; }
 .openide-fold:not(.needs-expand) > .openide-fold-expand { display: none; }
@@ -135,3 +137,8 @@
 	pointer-events: auto;
 }
 .openide-fold-expand:hover { color: var(--vscode-foreground); background: transparent; }
+
+.openide-fold-expand:focus-visible { outline: 2px solid var(--oi-focus, var(--vscode-focusBorder)); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) {
+	.openide-fold-expand { transition: none; }
+}

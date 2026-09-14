@@ -17,11 +17,12 @@ import { IChatSessionMeta, OpenideChatSessions } from '../openideChatSessions.js
 import { OpenideChatKebabMenu } from './openideChatKebabMenu.js';
 import { OpenideChatSessionKindChoice, OpenideChatSessionKindPicker, OpenideCliAvailability } from './openideChatSessionKindPicker.js';
 import { IOpenideAgentService } from '../openideAgentService.js';
-import { createProviderIcon } from '../openideProviderIcons.js';
 import { getOpenideCli, OPENIDE_CLI_CATALOG, OpenideCliId } from '../../common/openideAgentCliCatalog.js';
 import './media/openideChatHeader.css';
 import { onDidChangeOpenideLanguage, t } from '../../common/openideStrings.js';
 import { setupChatTooltip } from './openideChatHover.js';
+import { createChatExpandIcon, createChatSessionStatusIcon } from './openideChatIcons.js';
+import { IWorkbenchLayoutService } from '../../../../services/layout/browser/layoutService.js';
 
 /**
  * The dock's header: ONE 32px row, Cursor's chat chrome economy on VS Code's anatomy.
@@ -106,6 +107,11 @@ export class OpenideChatHeader extends Disposable {
 	private readonly _element: HTMLElement;
 	private readonly _tabs: HTMLElement;
 	private readonly _kindPicker: OpenideChatSessionKindPicker;
+	/** Reuse the conversation menu in alternate shells without duplicating its actions. */
+	showConversationMenu(anchor: HTMLElement): void {
+		this._kebabMenu.toggle(anchor, anchor);
+	}
+
 	private readonly _kebabButton: HTMLButtonElement;
 	private readonly _kebabMenu: OpenideChatKebabMenu;
 	private readonly _availability: OpenideCliAvailability;
@@ -164,17 +170,18 @@ export class OpenideChatHeader extends Disposable {
 		@IOpenideAgentService agentService: IOpenideAgentService,
 		@IStorageService private readonly storageService: IStorageService,
 		@IHoverService private readonly hoverService: IHoverService,
+		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
 	) {
 		super();
 
 		this._element = append(parent, $('div.openide-chat-headbar'));
 		const strip = append(this._element, $('div.openide-chat-header'));
-		this._tabs = append(strip, $('div.openide-chat-tabs', { role: 'tablist' }));
+		this._tabs = append(strip, $('div.openide-chat-tabs.modern-ui-editor-tab-group.modern-ui-editor-tab-group-active', { role: 'tablist' }));
 		this.installStripScrolling();
 		const actions = append(strip, $('div.openide-chat-header-actions'));
 		this._availability = new OpenideCliAvailability(agentService);
 		this._kindPicker = this._register(new OpenideChatSessionKindPicker(contextViewService, this._availability, choice => {
-			if (choice.kind === 'native') { this.newSession(); } else { this._onDidChooseNewKind.fire(choice); }
+			if (choice.kind === 'native') { this.newSession(choice.title); } else { this._onDidChooseNewKind.fire(choice); }
 		}));
 
 		this._kebabMenu = this._register(new OpenideChatKebabMenu(contextViewService, {
@@ -192,6 +199,7 @@ export class OpenideChatHeader extends Disposable {
 				if (active) { void this.deleteSession(active); }
 			},
 			removeAll: () => void this.deleteAllSessions(),
+			openAgentWindow: () => { void this.commandService.executeCommand('openide.agent.openAgentWindow'); },
 			openProjectMap: () => { void this.commandService.executeCommand(PROJECT_MAP_COMMAND); },
 		}));
 
@@ -221,10 +229,19 @@ export class OpenideChatHeader extends Disposable {
 			this._kindPicker.close();
 			this._kebabMenu.toggle(this._element, this._kebabButton);
 		});
-		append(actions, $('span.openide-chat-head-sep'));
-		this.createHeadButton(actions, 'screen-full', () => t('chat.header.maximize'), () => {
+		const maximizeLabel = () => t(layoutService.isAuxiliaryBarMaximized() ? 'chat.header.restore' : 'chat.header.maximize');
+		const maximizeButton = this.createHeadButton(actions, createChatExpandIcon(this._element.ownerDocument, layoutService.isAuxiliaryBarMaximized()), maximizeLabel, () => {
 			void this.commandService.executeCommand(MAXIMIZE_COMMAND);
 		});
+		maximizeButton.classList.add('openide-chat-head-maximize');
+		const updateMaximize = () => {
+			clearNode(maximizeButton);
+			maximizeButton.appendChild(createChatExpandIcon(this._element.ownerDocument, layoutService.isAuxiliaryBarMaximized()));
+			maximizeButton.setAttribute('aria-label', maximizeLabel());
+			maximizeButton.setAttribute('aria-pressed', String(layoutService.isAuxiliaryBarMaximized()));
+		};
+		this._register(layoutService.onDidChangeAuxiliaryBarMaximized(updateMaximize));
+		updateMaximize();
 		this.createHeadButton(actions, 'close', () => t('chat.header.close'), () => {
 			void this.commandService.executeCommand(CLOSE_COMMAND);
 		});
@@ -359,7 +376,7 @@ export class OpenideChatHeader extends Disposable {
 		const left = tab.offsetLeft;
 		const right = left + tab.offsetWidth;
 		// A tab wider than the strip cannot be revealed whole, and then its LEFT edge is the half
-		// worth showing: the mark and the beginning of the title identify it, its tail does not.
+		// worth showing: the beginning of the title identifies it, its tail does not.
 		if (left < this._tabs.scrollLeft || tab.offsetWidth >= this._tabs.clientWidth) {
 			this._tabs.scrollLeft = left;
 		} else if (right > this._tabs.scrollLeft + this._tabs.clientWidth) {
@@ -390,27 +407,14 @@ export class OpenideChatHeader extends Disposable {
 		});
 	}
 
-	/** The agent behind a conversation, for the tab's tooltip and its mark. */
+	/** The agent behind a conversation remains available in the tab's tooltip. */
 	private agentLabel(session: IChatSessionMeta): string {
 		return getOpenideCli(session.cliId)?.name ?? t('chat.view.local');
 	}
 
-	/**
-	 * The mark that says WHICH AGENT runs this conversation: the provider brand for a hosted CLI —
-	 * the same `createProviderIcon` the "New session with…" picker paints — and the local harness's
-	 * glyph otherwise. It is the reason a tab can carry both facts the two old rows carried, so it
-	 * never shrinks and never hides: once the strip is tight and the title has ellipsised away, the
-	 * mark is all that still identifies the tab.
-	 */
-	private createTabIcon(session: IChatSessionMeta, document: Document): HTMLElement {
-		const cli = getOpenideCli(session.cliId);
-		return cli
-			? createProviderIcon(document, cli.icon, cli.name, 'openide-chat-tab-icon')
-			: $('span.openide-chat-tab-icon.openide-chat-conversation-icon', { 'aria-hidden': 'true' });
-	}
-
 	private createTab(session: IChatSessionMeta, active: boolean): HTMLElement {
-		const tab = $('button.openide-chat-tab', { type: 'button', role: 'tab' });
+		const tab = $('button.openide-chat-tab.modern-ui-editor-tab', { type: 'button', role: 'tab' });
+		append(tab, $('span.modern-ui-editor-tab-fill', { 'aria-hidden': 'true' }));
 		tab.classList.toggle('active', active);
 		tab.classList.toggle('unread', !!session.unread);
 		tab.setAttribute('aria-selected', String(active));
@@ -426,19 +430,17 @@ export class OpenideChatHeader extends Disposable {
 		// repaint parked on the header's own store would never be released.
 		this._tabStore.add(setupChatTooltip(this.hoverService, tab, () => `${this.agentLabel(session)} · ${title}`, { position: HoverPosition.BELOW }));
 
-		append(tab, this.createTabIcon(session, this._tabs.ownerDocument));
-		if (session.status === 'needs-input' || session.status === 'in-progress') {
-			append(tab, $(`span.openide-chat-tab-dot.${session.status}`));
-		}
-		append(tab, $('span.openide-chat-tab-title', undefined, title));
+		const statusIcon = createChatSessionStatusIcon(tab.ownerDocument, session.status);
+		if (statusIcon) { append(tab, statusIcon); }
+		append(tab, $('span.openide-chat-tab-title.modern-ui-editor-tab-label', undefined, title));
 
-		const close = append(tab, $<HTMLButtonElement>('span.openide-chat-tab-close', { role: 'button' }));
+		const close = append(tab, $<HTMLButtonElement>('span.openide-chat-tab-close.oi-dock-action', { role: 'button' }));
 		this._tabStore.add(setupChatTooltip(this.hoverService, close, () => t('chat.header.closeTab'), { position: HoverPosition.BELOW }));
 		// The hover fires on `mouseover`, which BUBBLES: without this the tab's own tooltip would win
 		// over the close box's, because the tab's listener runs after the box's own. The native title
 		// attribute resolved this by itself (the innermost one wins); a listener has to be told.
 		this._tabStore.add(addDisposableListener(close, 'mouseover', event => event.stopPropagation()));
-		append(close, $('span.codicon.codicon-close'));
+		append(close, $('span.codicon.codicon-close-small'));
 		this._tabStore.add(addDisposableListener(close, 'click', event => {
 			event.stopPropagation();
 			this.closeTab(session.id);
@@ -679,10 +681,10 @@ export class OpenideChatHeader extends Disposable {
 	 * when it is shown, so a language change only has to rewrite `aria-label`. The row sits under
 	 * the title bar, so the widget hangs BELOW it the way the title bar's own actions do.
 	 */
-	private createHeadButton(parent: HTMLElement, icon: string, tooltip: () => string, onClick: () => void): HTMLButtonElement {
-		const button = append(parent, $<HTMLButtonElement>('button.openide-chat-head-btn', { type: 'button' }));
+	private createHeadButton(parent: HTMLElement, icon: string | SVGSVGElement, tooltip: () => string, onClick: () => void): HTMLButtonElement {
+		const button = append(parent, $<HTMLButtonElement>('button.openide-chat-head-btn.oi-dock-action', { type: 'button' }));
 		this._register(setupChatTooltip(this.hoverService, button, tooltip, { position: HoverPosition.BELOW }));
-		append(button, $(`span.codicon.codicon-${icon}`));
+		append(button, typeof icon === 'string' ? $(`span.codicon.codicon-${icon}`) : icon);
 		this._register(addDisposableListener(button, 'click', event => {
 			event.stopPropagation();
 			onClick();
@@ -691,9 +693,10 @@ export class OpenideChatHeader extends Disposable {
 	}
 
 	/** Public: the "New chat" command of the view pane routes through here. */
-	newSession(): void {
+	newSession(title?: string): void {
 		this._kebabMenu.close();
 		const id = this.sessions.create();
+		if (title?.trim()) { this.sessions.rename(id, title.trim()); }
 		this._listMode = false;
 		this.render();
 		this._onDidChangeActiveSession.fire(id);

@@ -22,6 +22,7 @@
  *  tool from colliding with ours, and keeps this file honest about which half is ours to change.
  *--------------------------------------------------------------------------------------------*/
 
+import { mainWindow } from '../../../../base/browser/window.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -30,7 +31,7 @@ import { IMarkerService, MarkerSeverity } from '../../../../platform/markers/com
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IOpenideNativeServices } from '../common/openideNativeServices.js';
-import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { createDecorator, IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import {
 	IDE_NOTIFY_AT_MENTIONED, IDE_NOTIFY_SELECTION_CHANGED,
@@ -46,6 +47,7 @@ import { buildClaudeSessionSettings, IOpenideCliDefinition, IOpenideMcpEndpoint 
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
+import { IOpenideAgentService } from './openideAgentService.js';
 
 /** Kill switch. This opens a listening socket, so it has to be something a user can refuse. */
 export const OPENIDE_IDE_SERVER_SETTING = 'openide.ideServer.enabled';
@@ -55,7 +57,7 @@ export const IOpenideIdeServerService = createDecorator<OpenideIdeServerService>
 /** Executes one Tier 2 tool. Registered by whoever owns those tools, not by this file. */
 export interface IIdeExtraTool {
 	readonly schema: IIdeToolSchema;
-	invoke(args: unknown, token: CancellationToken): Promise<IIdeToolResult>;
+	invoke(args: unknown, token: CancellationToken, targetWindowId?: number): Promise<IIdeToolResult>;
 }
 
 export type OpenideCliIntegrationState = 'preparing' | 'configured' | 'unavailable' | 'manual' | 'failed';
@@ -80,6 +82,7 @@ export class OpenideIdeServerService extends Disposable {
 	private lifecycle: Promise<unknown> = Promise.resolve();
 	private readonly pending = new Map<string, CancellationTokenSource>();
 	private readonly extraTools = new Map<string, IIdeExtraTool>();
+	private readonly sessionWindows = new Map<string, number>();
 
 	/**
 	 * The last non-empty selection, kept because `getLatestSelection` must survive the user
@@ -101,6 +104,7 @@ export class OpenideIdeServerService extends Disposable {
 		@IPathService private readonly pathService: IPathService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@ILogService private readonly logService: ILogService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
 	) {
 		super();
 		this.host = nativeServices.host;
@@ -114,7 +118,7 @@ export class OpenideIdeServerService extends Disposable {
 			this.pending.set(request.requestId, cancellation);
 			let result: IIdeToolResult;
 			try {
-				result = await this.invoke(request.tool, request.args, cancellation.token);
+				result = await this.invoke(request.tool, request.args, cancellation.token, request.sessionId);
 			} catch (error) {
 				// A thrown tool still has to answer, or the CLI waits on a reply that never comes.
 				result = toolError(error instanceof Error ? error.message : String(error));
@@ -145,6 +149,11 @@ export class OpenideIdeServerService extends Disposable {
 	private readonly integrations = new Map<string, OpenideCliIntegrationState>();
 	private discovery: IIdeDiscoveryStatus = { toolCount: 0 };
 
+	getSessionWindowId(sessionId: string): number | undefined { return this.sessionWindows.get(sessionId); }
+	/** Only explicit input in a hosted CLI may move its presentation after launch. */
+	setSessionWindowId(sessionId: string, windowId: number): void {
+		if (this.sessionWindows.has(sessionId)) { this.sessionWindows.set(sessionId, windowId); }
+	}
 	integrationState(sessionId: string): OpenideCliIntegrationState { return this.integrations.get(sessionId) ?? 'unavailable'; }
 	get discoveryStatus(): IIdeDiscoveryStatus { return this.discovery; }
 	private setIntegration(sessionId: string, state: OpenideCliIntegrationState): void {
@@ -156,6 +165,7 @@ export class OpenideIdeServerService extends Disposable {
 		this.generation++;
 		this.discovery = { toolCount: 0 };
 		this.integrations.clear();
+		this.sessionWindows.clear();
 		this._onDidChangeIntegration.fire();
 		this.info = undefined;
 		this.lastSelection = undefined;
@@ -253,7 +263,7 @@ export class OpenideIdeServerService extends Disposable {
 	 * Falls back to the endpoint alone if the file cannot be written: a CLI that only accepts a
 	 * path then simply gets no OpenIDE tools, which is better than one that fails to launch.
 	 */
-	async mcpEndpointFor(sessionId: string, cli: IOpenideCliDefinition): Promise<IOpenideMcpEndpoint | undefined> {
+	async mcpEndpointFor(sessionId: string, cli: IOpenideCliDefinition, executable?: string, cwd?: string, targetWindowId = mainWindow.vscodeWindowId): Promise<IOpenideMcpEndpoint | undefined> {
 		if (!cli.mcpInjection) {
 			this.setIntegration(sessionId, cli.mcpRegisterArgs ? 'manual' : 'unavailable');
 			return undefined;
@@ -264,7 +274,18 @@ export class OpenideIdeServerService extends Disposable {
 		if (!endpoint) { this.setIntegration(sessionId, 'failed'); return undefined; }
 		// A distinct server key adds our launch config without shadowing a user's 'openide' entry.
 		const generation = this.generation;
-		const scoped = { ...endpoint, name: `openide_${this.info!.port}` };
+		// Bind presentation at launch; subsequent focus changes cannot redirect this CLI.
+		this.sessionWindows.set(sessionId, targetWindowId);
+		let scoped: IOpenideMcpEndpoint = { ...endpoint, url: `${endpoint.url}?openideSession=${encodeURIComponent(sessionId)}`, name: `openide_${this.info!.port}` };
+		if (cli.id === 'codex' && executable) {
+			try {
+				const contextProfile = await this.host.idePrepareCodexContext(executable, cwd, scoped.name);
+				scoped = { ...scoped, contextProfile };
+			} catch (error) {
+				this.logService.warn('[openide-ide] Codex launch orientation unavailable; MCP discovery remains available', error);
+			}
+			if (generation !== this.generation || this._store.isDisposed) { return undefined; }
+		}
 		if (!cli.mcpConfigBuilder) { this.setIntegration(sessionId, 'configured'); return scoped; }
 		try {
 			const configFile = await this.host.ideWriteMcpConfig(`${sessionId}-${cli.id}`, cli.mcpConfigBuilder(scoped));
@@ -290,7 +311,7 @@ export class OpenideIdeServerService extends Disposable {
 	 */
 	bridgeAgentTools(
 		definitions: readonly IToolDefinition[],
-		invoke: (name: string, argumentsJson: string, token: CancellationToken) => Promise<{ readonly output: string; readonly isError: boolean }>,
+		invoke: (name: string, argumentsJson: string, token: CancellationToken, targetWindowId?: number) => Promise<{ readonly output: string; readonly isError: boolean }>,
 		completions?: ReadonlyMap<string, (output: string, token: CancellationToken) => Promise<string>>,
 	): void {
 		this.registerTools(definitions.map(definition => ({
@@ -300,8 +321,8 @@ export class OpenideIdeServerService extends Disposable {
 				inputSchema: definition.parameters as IIdeToolSchema['inputSchema'],
 				blocking: completions?.has(definition.name),
 			},
-			invoke: async (args: unknown, token: CancellationToken): Promise<IIdeToolResult> => {
-				const result = await invoke(definition.name, JSON.stringify(args ?? {}), token);
+			invoke: async (args: unknown, token: CancellationToken, targetWindowId?: number): Promise<IIdeToolResult> => {
+				const result = await invoke(definition.name, JSON.stringify(args ?? {}), token, targetWindowId);
 				if (result.isError) { return { ...text(result.output), isError: true }; }
 				let output = result.output;
 				// A completion turns a tool that merely DID something into one that waits for a
@@ -376,12 +397,14 @@ export class OpenideIdeServerService extends Disposable {
 
 	// ---- Dispatch ------------------------------------------------------------------------------
 
-	private async invoke(tool: string, rawArgs: unknown, token: CancellationToken): Promise<IIdeToolResult> {
+	private async invoke(tool: string, rawArgs: unknown, token: CancellationToken, sessionId?: string): Promise<IIdeToolResult> {
+		const targetWindowId = sessionId ? this.sessionWindows.get(sessionId) : mainWindow.vscodeWindowId;
+		if (targetWindowId === undefined) { return toolError('The CLI session presentation is no longer available'); }
 		if (token.isCancellationRequested) { return toolError('IDE request cancelled'); }
 		const args = (rawArgs ?? {}) as Record<string, unknown>;
 		switch (tool) {
-			case 'openFile': return this.openFile(args);
-			case 'openDiff': return this.openDiff(args, token);
+			case 'openFile': return this.openFile(args, await this.editorTarget(targetWindowId));
+			case 'openDiff': return this.openDiff(args, token, await this.editorTarget(targetWindowId), targetWindowId);
 			case 'getCurrentSelection': return this.getCurrentSelection();
 			case 'getLatestSelection': return this.getLatestSelection();
 			case 'getOpenEditors': return this.getOpenEditors();
@@ -389,15 +412,15 @@ export class OpenideIdeServerService extends Disposable {
 			case 'getDiagnostics': return this.getDiagnostics(args);
 			case 'checkDocumentDirty': return this.checkDocumentDirty(args);
 			case 'saveDocument': return this.saveDocument(args);
-			case 'close_tab': return this.closeTab(args);
-			case 'closeAllDiffTabs': return this.closeAllDiffTabs();
+			case 'close_tab': return this.closeTab(args, await this.editorTarget(targetWindowId), targetWindowId);
+			case 'closeAllDiffTabs': return this.closeAllDiffTabs(targetWindowId);
 			case 'executeCode': return toolError('executeCode requires a Jupyter kernel, which OpenIDE does not host');
 			default: {
 				const extra = this.extraTools.get(tool);
 				if (!extra) {
 					return toolError(`unknown tool: ${tool}`);
 				}
-				return extra.invoke(rawArgs, token);
+				return extra.invoke(rawArgs, token, targetWindowId);
 			}
 		}
 	}
@@ -410,13 +433,22 @@ export class OpenideIdeServerService extends Disposable {
 		return URI.file(path);
 	}
 
-	private async openFile(args: Record<string, unknown>): Promise<IIdeToolResult> {
+	private async editorTarget(windowId: number): Promise<IEditorService> {
+		// Hosted CLIs may start before the restored-phase tool catalog is registered.
+		// Resolve presentation from the runtime itself, without revealing any IDE view.
+		const target = windowId === mainWindow.vscodeWindowId ? this.editorService
+			: await this.instantiationService.invokeFunction(accessor => accessor.get(IOpenideAgentService).resolveEditorTarget(windowId));
+		if (!target) { throw new Error('The CLI session window has closed'); }
+		return target;
+	}
+
+	private async openFile(args: Record<string, unknown>, editorService: IEditorService): Promise<IIdeToolResult> {
 		const resource = this.resolvePath(args['filePath']);
 		if (!resource) {
 			return toolError('missing filePath');
 		}
 		const makeFrontmost = args['makeFrontmost'] !== false;
-		const pane = await this.editorService.openEditor({
+		const pane = await editorService.openEditor({
 			resource,
 			// `preview` on the wire is VS Code's non-pinned tab, and makeFrontmost=false is
 			// exactly `inactive` — open it, do not steal the tab the user is looking at.
@@ -442,13 +474,14 @@ export class OpenideIdeServerService extends Disposable {
 	 * tab closes. Accepting still goes through OpenIDE's own review surface
 	 * (openideEditReview.ts), so a rejection here is genuinely "the user did not take it".
 	 */
-	private async openDiff(args: Record<string, unknown>, token: CancellationToken): Promise<IIdeToolResult> {
+	private async openDiff(args: Record<string, unknown>, token: CancellationToken, editorService: IEditorService, targetWindowId: number): Promise<IIdeToolResult> {
 		const original = this.resolvePath(args['old_file_path']);
 		const modified = this.resolvePath(args['new_file_path']);
 		const tabName = typeof args['tab_name'] === 'string' ? args['tab_name'] : 'Proposed changes';
 		if (!original || !modified) {
 			return toolError('openDiff needs old_file_path and new_file_path');
 		}
+		const key = `${targetWindowId}:${tabName}`;
 		const proposed = String(args['new_file_contents'] ?? '');
 		// The proposal is content that does not exist on disk yet, so it travels as an untitled
 		// buffer seeded with it rather than as a file we would have to write first — writing it
@@ -457,7 +490,8 @@ export class OpenideIdeServerService extends Disposable {
 		const store = new DisposableStore();
 		try {
 			if (token.isCancellationRequested) { return text('DIFF_REJECTED'); }
-			await this.editorService.openEditor({
+			if (await this.editorTarget(targetWindowId) !== editorService || token.isCancellationRequested) { return text('DIFF_REJECTED'); }
+			await editorService.openEditor({
 				original: { resource: original },
 				modified: { resource: scratch.resource },
 				label: tabName,
@@ -469,16 +503,16 @@ export class OpenideIdeServerService extends Disposable {
 						return;
 					}
 					settled = true;
-					this.openDiffs.delete(tabName);
+					this.openDiffs.delete(key);
 					store.dispose();
 					resolve(text(value));
 				};
 				if (token.isCancellationRequested) { store.dispose(); resolve(text('DIFF_REJECTED')); return; }
-				this.openDiffs.get(tabName)?.();
-				this.openDiffs.set(tabName, () => finish('DIFF_REJECTED'));
+				this.openDiffs.get(key)?.();
+				this.openDiffs.set(key, () => finish('DIFF_REJECTED'));
 				store.add(token.onCancellationRequested(() => finish('DIFF_REJECTED')));
 				if (token.isCancellationRequested) { finish('DIFF_REJECTED'); return; }
-				store.add(this.editorService.onDidCloseEditor(event => {
+				store.add(editorService.onDidCloseEditor(event => {
 					if (event.editor.resource?.toString() === scratch.resource.toString()) {
 						// Saved-then-closed and closed-outright are the same event; the dirty flag
 						// is what separates "took it" from "walked away".
@@ -591,23 +625,24 @@ export class OpenideIdeServerService extends Disposable {
 		return jsonText({ success: true, filePath: resource.fsPath, saved: true, message: 'Document saved successfully' });
 	}
 
-	private async closeTab(args: Record<string, unknown>): Promise<IIdeToolResult> {
+	private async closeTab(args: Record<string, unknown>, editorService: IEditorService, targetWindowId: number): Promise<IIdeToolResult> {
 		const name = typeof args['tab_name'] === 'string' ? args['tab_name'] : '';
-		const diff = this.openDiffs.get(name);
+		const diff = this.openDiffs.get(`${targetWindowId}:${name}`);
 		if (diff) {
 			diff();
 			return text(IDE_TAB_CLOSED);
 		}
-		const editor = this.editorService.editors.find(candidate => candidate.getName() === name);
+		const editor = editorService.editors.find(candidate => candidate.getName() === name);
 		if (editor) {
-			await this.editorService.closeEditor({ editor, groupId: this.editorService.activeEditorPane?.group.id ?? 0 });
+			await editorService.closeEditor({ editor, groupId: editorService.activeEditorPane?.group.id ?? 0 });
 		}
 		return text(IDE_TAB_CLOSED);
 	}
 
-	private closeAllDiffTabs(): IIdeToolResult {
-		const count = this.openDiffs.size;
-		for (const close of [...this.openDiffs.values()]) {
+	private closeAllDiffTabs(targetWindowId?: number): IIdeToolResult {
+		const diffs = [...this.openDiffs].filter(([key]) => targetWindowId === undefined || key.startsWith(`${targetWindowId}:`));
+		const count = diffs.length;
+		for (const [, close] of diffs) {
 			close();
 		}
 		return text(ideClosedDiffTabs(count));

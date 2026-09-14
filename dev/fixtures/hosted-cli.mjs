@@ -4,6 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+// Discovery probes must not create a hosted-session generation.
+if (process.argv.includes('--help')) { console.log('Controlled CLI fixture'); process.exit(0); }
+
 const directory = process.env.OPENIDE_FIXTURE_DIRECTORY;
 const workspace = process.env.OPENIDE_FIXTURE_WORKSPACE;
 if (!directory || !workspace || path.resolve(process.cwd()) !== path.resolve(workspace)) {

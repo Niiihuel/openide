@@ -17,6 +17,8 @@ import { IOpenideChatContent, isOpenideChatContentOfKind, isOpenideChatMarkdownC
 import { IOpenideChatItem, IOpenideChatResponseItem, isOpenideChatResponseItem } from '../../common/chat/openideChatItem.js';
 import { isOpenideChatLiveTail, openideChatLiveStatusLabel } from '../../common/chat/openideChatLiveStatus.js';
 import { IOpenideChatContentPart, IOpenideChatContentPartContext } from './openideChatContentPart.js';
+import { OpenideChatActivityGroups } from './openideChatActivityGroups.js';
+import { OpenideChatTurnDuration } from './openideChatTurnDuration.js';
 import { OpenideChatStatusLine } from './openideChatStatusLine.js';
 import { OPENIDE_CHAT_RESPONSE_TEMPLATE_ID } from './openideChatListDelegate.js';
 import { OpenideChatMarkdownRenderer } from './openideChatMarkdown.js';
@@ -41,6 +43,8 @@ import { OpenideChatAskPart } from './parts/openideChatAskPart.js';
 import { OpenideChatConfirmationPart } from './parts/openideChatConfirmationPart.js';
 import { OpenideChatAccountChoicePart } from './parts/openideChatAccountChoicePart.js';
 import { OpenideChatTodosPart } from './parts/openideChatTodosPart.js';
+import { webPreviewFromTool } from '../../common/chat/openideChatWebPreview.js';
+import { OpenideChatWebPreviewPart } from './parts/openideChatWebPreviewPart.js';
 import { OpenideChatToolPart } from './parts/openideChatToolPart.js';
 import { OpenideChatUnrenderedContentPart } from './parts/openideChatUnrenderedPart.js';
 import { t } from '../../common/openideStrings.js';
@@ -53,6 +57,8 @@ export interface IOpenideChatItemHeightChange {
 export interface IOpenideChatResponseTemplate {
 	readonly row: HTMLElement;
 	readonly partsHost: HTMLElement;
+	readonly activityGroups: OpenideChatActivityGroups;
+	readonly duration: OpenideChatTurnDuration;
 	/** The turn's ONE live line: the step in flight, swapped in place. See `_renderStatus`. */
 	readonly status: OpenideChatStatusLine;
 	readonly footer: HTMLElement;
@@ -115,12 +121,14 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 	renderTemplate(container: HTMLElement): IOpenideChatResponseTemplate {
 		const templateDisposables = new DisposableStore();
 		const row = append(container, $('.openide-chat-row.openide-chat-row-response'));
+		const duration = templateDisposables.add(new OpenideChatTurnDuration(row));
 		const partsHost = append(row, $('.openide-chat-response-parts'));
+		const activityGroups = templateDisposables.add(new OpenideChatActivityGroups(partsHost));
 		// Cursor-style live line: lives OUTSIDE partsHost so the content diffing never sees it, and
 		// the renderer decides per paint which step it is speaking for.
-		const status = templateDisposables.add(new OpenideChatStatusLine(row));
+		const status = templateDisposables.add(new OpenideChatStatusLine(row, undefined, this._hoverService));
 		const footer = append(row, $('.openide-chat-response-footer'));
-		const template: IOpenideChatResponseTemplate = { row, partsHost, status, footer, templateDisposables, parts: [], currentElement: undefined, renderedId: undefined };
+		const template: IOpenideChatResponseTemplate = { row, partsHost, activityGroups, duration, status, footer, templateDisposables, parts: [], currentElement: undefined, renderedId: undefined };
 		const observer = templateDisposables.add(new DisposableResizeObserver('OpenideChatResponseRenderer.height', () => {
 			this._fireItemHeightChange(template);
 		}, getWindow(row)));
@@ -150,6 +158,7 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		template.row.classList.toggle('openide-chat-row-streaming', !element.isComplete);
 		this._renderStatus(element, template);
 		this._renderFooter(element, template);
+		template.duration.update(element);
 		// Include inserted parts, collapsed reasoning, and status/footer changes in one measurement.
 		this._deferHeightReport(template, element);
 	}
@@ -174,11 +183,26 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		const status = enabled ? openideChatLiveStatusLabel(element.content, element.isComplete) : undefined;
 		if (status === undefined) {
 			template.status.hide();
+			if (template.status.domNode.parentElement !== template.row) { template.row.insertBefore(template.status.domNode, template.footer); }
 		} else {
 			// The line decides WHEN to show it: a step it just put up is held for a moment even if
 			// the content moved on, which is the difference between reading the turn and watching it
 			// strobe. See `openideChatStatusLine.ts`.
 			template.status.setStatus(status);
+			const live = !status.waitingForResponse && template.parts.find((part, index) => part instanceof OpenideChatExplorePart && isOpenideChatLiveTail(element.content, index, element.isComplete));
+			if (live instanceof OpenideChatExplorePart) {
+				const toggle = () => {
+					live.setLiveExpanded(!live.liveExpanded);
+					template.status.setDisclosure(toggle, live.liveExpanded);
+				};
+				template.status.setDisclosure(toggle, live.liveExpanded);
+				// Reuse the one status node directly above the existing live records. The parts array
+				// still owns only content parts; no row cloning or extra tool state is introduced.
+				if (template.status.domNode.nextSibling !== live.domNode) { live.domNode.before(template.status.domNode); }
+			} else {
+				template.status.setDisclosure(undefined);
+				if (template.status.domNode.parentElement !== template.row) { template.row.insertBefore(template.status.domNode, template.footer); }
+			}
 		}
 	}
 
@@ -233,6 +257,15 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		for (let i = 0; i < template.parts.length; i++) {
 			template.parts[i]?.setLive?.(isOpenideChatLiveTail(content, i, element.isComplete));
 		}
+		const previewUrls = new Set<string>();
+		for (let i = 0; i < content.length; i++) {
+			const preview = webPreviewFromTool(content[i]);
+			if (!preview) { continue; }
+			const node = template.parts[i]?.domNode;
+			if (node) { node.hidden = previewUrls.has(preview.url); }
+			previewUrls.add(preview.url);
+		}
+		template.activityGroups.render(content, template.parts, this._configurationService.getValue(OPENIDE_CHAT_TOOLS_EXPANDED_KEY) === true, this._configurationService.getValue(OPENIDE_CHAT_THINKING_OPEN_KEY) === true, element.isComplete);
 	}
 
 	private _replacePart(element: IOpenideChatResponseItem, elementIndex: number, template: IOpenideChatResponseTemplate, index: number, content: readonly IOpenideChatContent[]): void {
@@ -293,6 +326,8 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 			return new OpenideChatThinkingPart(content, context);
 		}
 		if (isOpenideChatToolContent(content)) {
+			const preview = webPreviewFromTool(content);
+			if (preview) { return this._instantiationService.createInstance(OpenideChatWebPreviewPart, preview); }
 			return new OpenideChatToolPart(content, context, this._hoverService);
 		}
 		if (isOpenideChatContentOfKind(content, 'explore')) {
@@ -347,13 +382,6 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		if (isOpenideChatContentOfKind(content, 'video')) {
 			return this._instantiationService.createInstance(OpenideChatVideoPart, content, context);
 		}
-		// Still unmapped: 'confirmation' and 'ask', the two blocking prompts. They need a way to
-		// answer the promise the agent service is parked on, which no content part owns — the
-		// controller warns the user about that separately (`BLOCKING_UNSUPPORTED`). Everything else
-		// that lands here is a genuine gap, and the fallback now says so out loud instead of
-		// rendering a zero-height row nobody could diagnose.
-		// Both of these BLOCK the run: the service is parked on a promise until the user answers, so
-		// an unmapped kind here is not a cosmetic gap — it is a turn that can never finish.
 		if (isOpenideChatContentOfKind(content, 'confirmation')) {
 			return this._instantiationService.createInstance(OpenideChatConfirmationPart, content, context);
 		}
@@ -376,6 +404,8 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 			this._disposePart(part);
 		}
 		template.parts = [];
+		template.activityGroups.clear();
+		template.duration.pause();
 	}
 
 	/**
@@ -425,10 +455,12 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 
 	disposeElement(_node: ITreeNode<IOpenideChatItem, FuzzyScore>, _index: number, template: IOpenideChatResponseTemplate): void {
 		template.currentElement = undefined;
+		template.duration.pause();
 	}
 
 	disposeTemplate(template: IOpenideChatResponseTemplate): void {
 		template.currentElement = undefined;
+		template.duration.pause();
 		this._deferredHeights.delete(template);
 		this._clearParts(template);
 		template.renderedId = undefined;

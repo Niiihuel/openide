@@ -44,13 +44,69 @@ suite('OpenIDE durable run journal (real disk)', () => {
 		assert.strictEqual((await readFile(file)).length, durable.length + Buffer.byteLength('{"version":1}\n'));
 	});
 
-	test('capacity failure leaves the accepted prefix unchanged and another session usable', async () => {
-		const store = new OpenideRunJournalStore(root, { records: 1 });
+	test('rotates a full legacy journal without rewriting its accepted prefix', async () => {
+		const legacy = new OpenideRunJournalStore(root);
+		await legacy.append('a', event(0));
+		const base = join(root, (await readdir(root))[0]);
+		const prefix = await readFile(base);
+		const store = new OpenideRunJournalStore(root, { segmentBytes: prefix.length });
+		await store.append('a', event(1));
+		await store.append('a', event(2));
+		assert.deepStrictEqual(await readFile(base), prefix);
+		assert.strictEqual((await readdir(root)).length, 3);
+		const records = await new OpenideRunJournalStore(root).read('a');
+		assert.deepStrictEqual(records.map(record => record.seq), [0, 1, 2]);
+		assert.strictEqual(records[1].previousHash, records[0].hash);
+		assert.strictEqual(records[2].previousHash, records[1].hash);
+	});
+
+	test('record bounds still fail without altering the accepted prefix', async () => {
+		const store = new OpenideRunJournalStore(root, { recordBytes: 400 });
 		await store.append('a', event(0));
-		await assert.rejects(store.append('a', event(1)), /capacity/);
-		await store.append('b', event(2));
+		await assert.rejects(store.append('a', { ...event(1), payload: { content: 'x'.repeat(401) } }), /capacity/);
 		assert.strictEqual((await store.read('a')).length, 1);
-		assert.strictEqual((await store.read('b')).length, 1);
+	});
+
+	test('recovers a tool at the rotation boundary exactly once', async () => {
+		const store = new OpenideRunJournalStore(root, { segmentRecords: 1 });
+		await store.append('a', { kind: 'tool/intent', runId: 'run', payload: { operationId: 'op', callId: 'call', name: 'write_file' } });
+		const recovered = await store.recover('a');
+		assert.deepStrictEqual(recovered.map(record => record.event.kind), ['tool/intent', 'tool/unknown']);
+		assert.strictEqual((await store.recover('a')).length, 2);
+		assert.strictEqual((await readdir(root)).length, 2);
+	});
+
+	test('failed rotation checkpoint preserves history and retries the empty final segment', async () => {
+		const store = new OpenideRunJournalStore(root, { segmentRecords: 1 });
+		await store.append('a', event(0));
+		const failed = new OpenideRunJournalStore(root, { segmentRecords: 1 }, async () => { throw new Error('disk failure'); });
+		await assert.rejects(failed.append('a', event(1)), /disk failure/);
+		assert.strictEqual((await store.read('a')).length, 1);
+		await store.append('a', event(2));
+		assert.deepStrictEqual((await store.read('a')).map(record => record.event.runId), ['run-0', 'run-2']);
+		assert.strictEqual((await readdir(root)).length, 2);
+	});
+
+	test('does not repair or trust a changed archived segment, including a cached same-size edit', async () => {
+		const store = new OpenideRunJournalStore(root, { segmentRecords: 1 });
+		await store.append('a', event(0));
+		await store.append('a', event(1));
+		const base = join(root, (await readdir(root)).find(name => name.split('.').length === 2)!);
+		const prefix = await readFile(base, 'utf8');
+		await writeFile(base, prefix.replace('run-0', 'run-X'));
+		await assert.rejects(store.append('a', event(2)), /corrupt/);
+		await writeFile(base, prefix.slice(0, -1));
+		await assert.rejects(store.recover('a'), /corrupt/);
+		assert.strictEqual(await readFile(base, 'utf8'), prefix.slice(0, -1));
+	});
+
+	test('rejects missing segments and serializes multiple owners across rotations', async () => {
+		const first = new OpenideRunJournalStore(root, { segmentRecords: 1 });
+		const second = new OpenideRunJournalStore(root, { segmentRecords: 1 });
+		await Promise.all(Array.from({ length: 8 }, (_, index) => (index % 2 ? first : second).append('a', event(index))));
+		assert.deepStrictEqual((await first.read('a')).map(record => record.seq), [0, 1, 2, 3, 4, 5, 6, 7]);
+		await rm(join(root, (await readdir(root)).find(name => name.endsWith('.00000001.jsonl'))!));
+		await assert.rejects(first.append('a', event(9)), /segments/);
 	});
 
 	test('failed fsync acknowledgement rolls back physical bytes before a subsequent successful append', async () => {

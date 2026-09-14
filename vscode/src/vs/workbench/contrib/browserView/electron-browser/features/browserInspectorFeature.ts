@@ -24,6 +24,7 @@ import { registerIcon } from '../../../../../platform/theme/common/iconRegistry.
 import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
 // OpenIDE: the panel's selects are the product's own dropdown — the Settings trigger over the
 // shared popover — so the list a property opens is the list every other menu in the IDE opens.
+import { OpenideComposerPopover } from '../../../openideAgent/browser/chat/openideComposerMenu.js';
 import { OpenideSettingsDropdown } from '../../../openideSettings/browser/openideSettingsDropdown.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IColorPresentation } from '../../../../../editor/common/languages.js';
@@ -213,6 +214,7 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 	private model: IBrowserViewModel | undefined;
 	private applying = false;
 	private colorPickerOpen = false;
+	private readonly colorPopover: OpenideComposerPopover;
 	private suppressColorPickerResync = false;
 	private liveStyleQueue: Promise<void> = Promise.resolve();
 	private pendingLiveStyle: { property: string; value: string } | undefined;
@@ -231,6 +233,7 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		@IStorageService storageService: IStorageService,
 	) {
 		super(editor);
+		this.colorPopover = this._register(new OpenideComposerPopover(contextViewService));
 		this.panel = this._register(new BrowserResizableSidePanel(editor, 'browser-inspector-panel', 'browser.cssInspector.width', 400, storageService, 300));
 		this.visibleContext = CONTEXT_BROWSER_INSPECTOR_VISIBLE.bindTo(contextKeyService);
 		this.selectingContext = CONTEXT_BROWSER_INSPECTOR_SELECTING.bindTo(contextKeyService);
@@ -280,7 +283,7 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		// workbench does.
 		const closePickerOnScroll = () => {
 			if (this.colorPickerOpen) {
-				this.contextViewService.hideContextView();
+				this.colorPopover.close();
 			}
 		};
 		this._register(this.bodyScroll.onScroll(closePickerOnScroll));
@@ -415,7 +418,7 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 	private render(): void {
 		if (this.colorPickerOpen) {
 			this.suppressColorPickerResync = true;
-			this.contextViewService.hideContextView();
+			this.colorPopover.close();
 			this.suppressColorPickerResync = false;
 			this.colorPickerOpen = false;
 		}
@@ -632,6 +635,7 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 			event.stopPropagation();
 			this.openColorPicker(property, input, swatch, updateSwatch);
 		};
+		swatch.setAttribute('aria-haspopup', 'dialog');
 		swatch.addEventListener('click', open);
 		// The field is the PRIMARY trigger for the picker (not the small swatch): clicking it opens
 		// the ColorPickerWidget, which already carries its own text field with a hex/rgb/hsl switch.
@@ -648,6 +652,10 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		swatch: HTMLElement,
 		updateSwatch: (cssValue: string) => void,
 	): void {
+		// Reopening hides the previous view synchronously; its resync would then detach the new
+		// anchor. A second activation is a toggle, never a second picker on the same row.
+		if (this.colorPickerOpen) { this.colorPopover.close(); return; }
+		if (!swatch.isConnected) { return; }
 		const initial = tryParseCssColor(input.value) ?? Color.black;
 		const model = new ColorPickerModel(initial, colorPresentationsFor(initial), 0);
 		model.guessColorPresentation(initial, input.value.trim() || Color.Format.CSS.formatHexA(initial, true));
@@ -665,12 +673,12 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 		// left edge and takes the row's width (capped), so it never runs out over the editor next
 		// door the way a 24px anchor with a content-sized popover did.
 		const row = swatch.closest<HTMLElement>('.browser-inspector-editable-property') ?? swatch;
-		this.contextViewService.showContextView({
-			getAnchor: () => row,
-			render: (container) => {
-				const store = new DisposableStore();
+		this.colorPopover.show(swatch, {
+			container: this.panel.element,
+			role: 'dialog',
+			width: Math.min(300, Math.max(240, row.getBoundingClientRect().width)),
+			render: (container, store) => {
 				const wrapper = $('.browser-inspector-color-picker');
-				wrapper.style.width = `${Math.min(300, Math.max(240, row.getBoundingClientRect().width))}px`;
 				container.appendChild(wrapper);
 				// The header's chip reads the picked colour from here (browser.css): the widget only
 				// paints it as the bar's inline background, which the chip replaces.
@@ -707,21 +715,20 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 				store.add(toDisposable(() => {
 					this.colorPickerOpen = false;
 				}));
-				return store;
 			},
 			onHide: () => {
 				this.colorPickerOpen = false;
-				if (this.suppressColorPickerResync) {
+				if (this.suppressColorPickerResync || this._store.isDisposed) {
 					return;
 				}
 				// Finish any in-flight live previews, then resync the panel.
 				void this.liveStyleQueue.then(() => {
-					if (this.data) {
+					if (this.data && !this.colorPickerOpen && !this._store.isDisposed) {
 						this.render();
 					}
 				});
 			},
-		}, this.panel.element);
+		});
 	}
 
 	/** The picker's footer: legibility contrast, copy, eyedropper and swatches for the project's
@@ -886,7 +893,7 @@ export class BrowserCssInspectorContribution extends BrowserEditorContribution {
 	}
 
 	private closeInspector(): void {
-		this.contextViewService.hideContextView();
+		this.colorPopover.close();
 		this.setVisible(false);
 		const model = this.editor.model;
 		if (model?.isElementSelectionActive && model.elementSelectionPurpose === BrowserElementSelectionPurpose.Inspector) {

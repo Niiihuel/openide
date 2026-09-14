@@ -49,14 +49,6 @@
 .openide-chat-sub .openide-chat-sub-st-ok { color: var(--openide-green, #2b9771); }
 .openide-chat-sub .openide-chat-sub-st-err { color: var(--vscode-errorForeground); }
 
-/* A keyframe of its own rather than the codicon-modifier spin: that one is applied through a class
-   the icon theme can remap, and a specialist that stops spinning while it runs reads as finished. */
-.openide-chat-sub .openide-chat-sub-spin { animation: openide-chat-sub-spin 1s linear infinite; }
-@keyframes openide-chat-sub-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-	.openide-chat-sub .openide-chat-sub-spin { animation: none; }
-}
-
 /* The two controls the row carries: BARE GLYPHS, no chip, no plate, no rounded background.
    A boxed hover turns a 22px text line into a row of little cards, which is exactly the shape this
    redesign took out. The affordance is the glyph itself brightening to the foreground colour, plus
@@ -74,7 +66,7 @@
 	height: 20px;
 	padding: 0;
 	border: 0;
-	border-radius: 0;
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
 	cursor: pointer;
@@ -91,7 +83,7 @@
 /* Colour only. No background: see above. */
 .openide-chat-sub .openide-chat-sub-action:hover,
 .openide-chat-sub .openide-chat-sub-chevron:hover {
-	background: transparent;
+	background: var(--oi-hover);
 	color: var(--vscode-foreground);
 }
 /* The keyboard needs to see where it is, and with no hover plate the ring is the only signal. */

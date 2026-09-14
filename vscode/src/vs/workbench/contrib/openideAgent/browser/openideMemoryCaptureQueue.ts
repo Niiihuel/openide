@@ -14,11 +14,14 @@ interface CaptureDrain { readonly task: Promise<void>; revision: number }
 export class OpenideMemoryCaptureQueue extends Disposable {
 	private readonly running = new Map<string, CaptureDrain>();
 	private readonly persisting = new Map<string, Promise<void>>();
+	private readonly sessionCancellation = new Map<string, CancellationTokenSource>();
+	private readonly pendingWork = new Map<string, Set<Promise<unknown>>>();
+	private readonly paused = new Set<string>();
 	private cancellation = new CancellationTokenSource();
 
 	async enqueue(memory: IOpenideCheckpointMemory, session: string, state: IOpenideMemoryCheckpointState | undefined, factory: CaptureFactory, start = true): Promise<boolean> {
-		if (!state || memory.captureMode !== 'automatic' || this._store.isDisposed) { return false; }
-		const token = this.cancellation.token;
+		if (!state || memory.captureMode !== 'automatic' || this._store.isDisposed || this.paused.has(session)) { return false; }
+		const token = this.sessionToken(session);
 		// Serialize the check-and-create pair. Two concurrent enqueues of the same delta
 		// must never overwrite a capture that the first enqueue already completed.
 		const previous = this.persisting.get(session) ?? Promise.resolve();
@@ -27,7 +30,7 @@ export class OpenideMemoryCaptureQueue extends Disposable {
 			if (!existing) { await memory.request({ action: 'checkpoint', session, checkpointId: state.watermark, checkpoint: state }); }
 			return !existing || existing.status === 'pending' || existing.status === 'deferred';
 		});
-		const tail = result.then(() => undefined, () => undefined); this.persisting.set(session, tail);
+		const tail = result.then(() => undefined, () => undefined); this.persisting.set(session, tail); this.track(session, tail);
 		void tail.then(() => { if (this.persisting.get(session) === tail) { this.persisting.delete(session); } });
 		const pending = await result;
 		// A reset may happen during disk IO. Keep the durable receipt, but never start
@@ -36,9 +39,15 @@ export class OpenideMemoryCaptureQueue extends Disposable {
 		return pending;
 	}
 
+	/** Publish the pending notice after disk acknowledgement, before the worker may finish. */
+	start(memory: IOpenideCheckpointMemory, session: string, factory: CaptureFactory): void {
+		void this.drain(memory, session, factory).catch(() => undefined);
+	}
+
 	/** Returns true when memory remains pending, including failures and an expired barrier. */
 	async resume(memory: IOpenideCheckpointMemory, session: string, factory: CaptureFactory, budgetMs = 250): Promise<boolean> {
 		if (memory.captureMode !== 'automatic' || this._store.isDisposed) { return false; }
+		this.paused.delete(session);
 		const task = this.drain(memory, session, factory);
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
@@ -55,9 +64,10 @@ export class OpenideMemoryCaptureQueue extends Disposable {
 	}
 
 	private drain(memory: IOpenideCheckpointMemory, session: string, factory: CaptureFactory): Promise<void> {
+		if (this.paused.has(session)) { return Promise.resolve(); }
 		const current = this.running.get(session);
 		if (current) { current.revision++; return current.task; }
-		const token = this.cancellation.token;
+		const token = this.sessionToken(session);
 		let observedRevision = 0;
 		// Defer execution until the entry is installed, including for synchronous test adapters.
 		const task = Promise.resolve().then(async () => {
@@ -74,7 +84,7 @@ export class OpenideMemoryCaptureQueue extends Disposable {
 				try { await factory(next.id, next.state, token).capture([], token, 'background'); } catch { /* Retain durable pending state. */ }
 			}
 		});
-		const entry: CaptureDrain = { task, revision: 0 }; this.running.set(session, entry);
+		const entry: CaptureDrain = { task, revision: 0 }; this.running.set(session, entry); this.track(session, task);
 		void task.finally(() => {
 			if (this.running.get(session) !== entry) { return; }
 			this.running.delete(session);
@@ -84,13 +94,33 @@ export class OpenideMemoryCaptureQueue extends Disposable {
 		return task;
 	}
 
+	private sessionToken(session: string): CancellationToken {
+		let source = this.sessionCancellation.get(session);
+		if (!source) { source = new CancellationTokenSource(this.cancellation.token); this.sessionCancellation.set(session, source); }
+		return source.token;
+	}
+	private track(session: string, task: Promise<unknown>): void {
+		const work = this.pendingWork.get(session) ?? new Set<Promise<unknown>>();
+		work.add(task); this.pendingWork.set(session, work);
+		void task.finally(() => { work.delete(task); if (!work.size && this.pendingWork.get(session) === work) { this.pendingWork.delete(session); } }).catch(() => undefined);
+	}
+	/** Keep the session paused until its next explicit resume; join even IO surviving reset. */
+	async quiesce(session: string): Promise<void> {
+		this.paused.add(session);
+		const source = this.sessionCancellation.get(session);
+		source?.cancel(); source?.dispose(); this.sessionCancellation.delete(session);
+		while (this.pendingWork.get(session)?.size) { await Promise.allSettled([...this.pendingWork.get(session)!]); }
+	}
+
 	/** Root/trust changes cancel active work; pending files remain available after recovery. */
 	reset(): void {
 		this.cancellation.cancel(); this.cancellation.dispose();
 		this.cancellation = new CancellationTokenSource(); this.running.clear(); this.persisting.clear();
+		for (const source of this.sessionCancellation.values()) { source.dispose(); } this.sessionCancellation.clear();
 	}
 
 	override dispose(): void {
-		this.cancellation.cancel(); this.cancellation.dispose(); this.running.clear(); this.persisting.clear(); super.dispose();
+		this.cancellation.cancel(); this.cancellation.dispose(); this.running.clear(); this.persisting.clear();
+		for (const source of this.sessionCancellation.values()) { source.dispose(); } this.sessionCancellation.clear(); super.dispose();
 	}
 }

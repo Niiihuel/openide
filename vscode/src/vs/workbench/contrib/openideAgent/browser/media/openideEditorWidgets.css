@@ -20,11 +20,11 @@
 	white-space: nowrap;
 	margin-bottom: 4px;
 	padding: 2px;
-	border: 1px solid var(--vscode-editorWidget-border, var(--oi-border));
-	border-radius: var(--oi-radius-md);
-	background: var(--vscode-editorWidget-background);
+	border: 1px solid var(--oi-border-overlay, var(--vscode-editorWidget-border));
+	border-radius: var(--oi-radius-popover);
+	background: var(--oi-popover, var(--vscode-editorWidget-background));
 	color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
-	box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+	box-shadow: var(--oi-shadow-md);
 	font-family: var(--vscode-font-family);
 	font-size: 12px;
 	line-height: 18px;
@@ -36,10 +36,10 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	height: 22px;
+	height: 29px;
 	padding: 0 8px;
 	border: none;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: inherit;
 	font: inherit;
@@ -47,14 +47,14 @@
 	white-space: nowrap;
 }
 .monaco-editor .openide-selection-hint-action:hover { background: var(--vscode-toolbar-hoverBackground); }
-.monaco-editor .openide-selection-hint-action:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.monaco-editor .openide-selection-hint-action:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
 
 /* The shortcut, drawn like the workbench's own keybinding labels. */
 .monaco-editor .openide-selection-hint-kbd {
 	padding: 0 4px;
 	border: 1px solid var(--vscode-keybindingLabel-border, var(--oi-border));
 	border-bottom-color: var(--vscode-keybindingLabel-bottomBorder, var(--oi-border-strong));
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: var(--vscode-keybindingLabel-background, var(--oi-tint-2));
 	color: var(--vscode-keybindingLabel-foreground, var(--vscode-descriptionForeground));
 	font-family: var(--vscode-font-family);
@@ -66,14 +66,15 @@
 
 .monaco-editor .openide-quick-edit {
 	width: 520px;
+	max-width: calc(100vw - 24px);
 	box-sizing: border-box;
 	margin-bottom: 4px;
 	padding: 6px 8px;
-	border: 1px solid var(--vscode-editorWidget-border, var(--oi-border));
-	border-radius: var(--oi-radius-md);
-	background: var(--vscode-editorWidget-background);
+	border: 1px solid var(--oi-border-overlay, var(--vscode-editorWidget-border));
+	border-radius: var(--oi-radius-popover);
+	background: var(--oi-popover, var(--vscode-editorWidget-background));
 	color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
-	box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+	box-shadow: var(--oi-shadow-md);
 	font-family: var(--vscode-font-family);
 	font-size: 12px;
 	z-index: 41;
@@ -94,11 +95,11 @@
 .monaco-editor .openide-quick-edit-input {
 	flex: 1 1 auto;
 	min-width: 0;
-	height: 24px;
+	height: 29px;
 	padding: 0 6px;
 	border: 1px solid var(--vscode-input-border, transparent);
-	border-radius: var(--oi-radius-sm);
-	background: var(--vscode-input-background);
+	border-radius: var(--oi-radius-control);
+	background: var(--oi-control, var(--vscode-input-background));
 	color: var(--vscode-input-foreground);
 	font: inherit;
 	outline: none;
@@ -113,11 +114,11 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
-	height: 24px;
+	height: 29px;
 	max-width: 220px;
 	padding: 0 6px;
 	border: 1px solid var(--vscode-input-border, var(--oi-border-soft));
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	font: inherit;
@@ -135,3 +136,6 @@
 	font-size: 11px;
 }
 .monaco-editor .openide-quick-edit-note:empty { display: none; }
+
+.monaco-editor .openide-quick-edit-model:focus-visible,
+.monaco-editor .openide-quick-edit-input:focus-visible { outline: 2px solid var(--oi-focus, var(--vscode-focusBorder)); outline-offset: 2px; }

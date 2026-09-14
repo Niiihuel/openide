@@ -37,7 +37,7 @@
 }
 
 .monaco-workbench.mac .part > .title > .title-actions .start-debug-action-item {
-	border-radius: 5px;
+	border-radius: var(--oi-radius-control, var(--vscode-cornerRadius-small));
 }
 
 .monaco-workbench .part > .title > .title-actions .start-debug-action-item .codicon {
@@ -136,7 +136,7 @@
 }
 
 .debug-pane .call-stack-state-message > .label {
-	border-radius: 3px;
+	border-radius: var(--oi-radius-control, var(--vscode-cornerRadius-small));
 	padding: 1px 2px;
 	font-size: 9px;
 }
@@ -271,7 +271,7 @@
 }
 
 .debug-pane .monaco-list-row .expression .value.changed {
-	border-radius: 4px;
+	border-radius: var(--oi-radius-control, var(--vscode-cornerRadius-small));
 }
 
 .debug-pane .monaco-inputbox {
@@ -491,4 +491,14 @@
 }
 .monaco-workbench .part.sidebar .debug-pane .pane-header .breakpoint-warning, .monaco-workbench .part.auxiliarybar .debug-pane .pane-header .breakpoint-warning {
     margin-left: calc(var(--vscode-workbench-sidebar-font-size) * 0.230769)
+}
+/* The configuration half of Run/Debug is a secondary control; the native start icon retains
+ * its semantic green and the joined button retains flat inner corners. */
+.monaco-workbench.openide-visual .monaco-action-bar .start-debug-action-item .configuration .monaco-dropdown > .dropdown-label {
+	color: var(--oi-text);
+	background: var(--oi-control);
+	transition: background-color var(--oi-duration-hover) var(--oi-ease);
+}
+.monaco-workbench.openide-visual .monaco-action-bar .start-debug-action-item .configuration:not(.disabled) .monaco-dropdown > .dropdown-label:hover {
+	background: var(--oi-hover);
 }

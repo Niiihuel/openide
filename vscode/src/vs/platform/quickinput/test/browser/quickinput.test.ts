@@ -197,6 +197,7 @@ suite('QuickInput', () => { // https://github.com/microsoft/vscode/issues/147543
 			},
 			animationName: mainWindow.getComputedStyle(widget).animationName,
 			overlay: widget.classList.contains('quick-input-widget-overlay'),
+			backdrop: !!fixture.querySelector('.quick-input-backdrop'),
 		};
 
 		quickpick.hide();
@@ -213,6 +214,7 @@ suite('QuickInput', () => { // https://github.com/microsoft/vscode/issues/147543
 				alignmentDelta: { left: 0, top: 0, width: 0, height: 0 },
 				animationName: 'none',
 				overlay: true,
+				backdrop: false,
 			},
 			closeState: {
 				display: 'none',
@@ -220,6 +222,36 @@ suite('QuickInput', () => { // https://github.com/microsoft/vscode/issues/147543
 				inert: false,
 			},
 		});
+	});
+
+	test('anchored modal picker opts into the shared backdrop and releases it on hide', () => {
+		const anchor = document.createElement('div'); fixture.appendChild(anchor);
+		const picker = store.add(controller.createQuickPick());
+		picker.anchor = anchor; picker.anchorPosition = 'overlay'; picker.modal = true;
+		picker.show();
+		assert.ok(fixture.querySelector('.quick-input-backdrop'));
+		picker.hide();
+		assert.strictEqual(fixture.querySelector('.quick-input-backdrop'), null);
+	});
+
+	test('overlay custom widget does not align a hidden input and follows its anchor window resize', () => {
+		fixture.style.width = '600px'; fixture.style.height = '400px';
+		controller.layout({ width: 600, height: 400 }, 0);
+		const anchor = document.createElement('div');
+		anchor.style.cssText = 'position:absolute;left:80px;top:40px;width:300px;height:26px';
+		fixture.appendChild(anchor);
+		const input = store.add(controller.createQuickWidget());
+		input.anchor = anchor; input.anchorPosition = 'overlay';
+		input.widget = document.createElement('textarea'); input.show();
+		const widget = fixture.querySelector<HTMLElement>('.quick-input-widget')!;
+		assert.strictEqual(widget.style.width, '300px', 'a hidden filter must not double the overlay width');
+		anchor.style.width = '220px';
+		const resize = document.createEvent('Event'); resize.initEvent('resize', false, false);
+		mainWindow.dispatchEvent(resize);
+		assert.strictEqual(widget.style.width, '220px', 'resize does not depend on active workbench layout events');
+		input.hide();
+		anchor.style.width = '180px'; mainWindow.dispatchEvent(resize);
+		assert.strictEqual(widget.style.width, '220px', 'hidden widgets release their resize listener');
 	});
 
 	test('pick - basecase', async () => {

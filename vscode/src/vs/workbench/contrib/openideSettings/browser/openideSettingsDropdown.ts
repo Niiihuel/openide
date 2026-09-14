@@ -50,7 +50,7 @@ export class OpenideSettingsDropdown extends Disposable {
 	private _enabled = true;
 
 	constructor(
-		private readonly _options: readonly IOpenideDropdownOption[],
+		private _options: readonly IOpenideDropdownOption[],
 		selected: number,
 		contextViewService: IContextViewService,
 		ariaLabel?: string,
@@ -65,10 +65,7 @@ export class OpenideSettingsDropdown extends Disposable {
 			this.domNode.setAttribute('aria-label', ariaLabel);
 		}
 		this._label = append(this.domNode, $('span.openide-settings-dropdown-label'));
-		// The select's up-down glyph. The codicon set has no chevron-up-down (only the fold/unfold
-		// pair, which carries a bar), so the mark is two stacked chevrons in one span.
 		const chevron = append(this.domNode, $('span.openide-settings-dropdown-chevron', { 'aria-hidden': 'true' }));
-		append(chevron, $('span.codicon.codicon-chevron-up'));
 		append(chevron, $('span.codicon.codicon-chevron-down'));
 		this._paintLabel();
 
@@ -92,6 +89,23 @@ export class OpenideSettingsDropdown extends Disposable {
 		}
 		this._selected = index;
 		this._paintLabel();
+	}
+
+	/** Refresh dynamic options without rebuilding the trigger or stealing keyboard focus. */
+	setOptions(options: readonly IOpenideDropdownOption[], selected = this._selected): void {
+		this._options = options;
+		this._selected = Math.max(0, Math.min(selected, options.length - 1));
+		this._paintLabel();
+		const rows = this._popover.container?.querySelectorAll<HTMLButtonElement>('.openide-menu-row');
+		if (!rows) { return; }
+		if (rows.length !== options.length) { this._popover.close(); return; }
+		rows.forEach((row, index) => {
+			row.querySelector('.openide-menu-label')!.textContent = options[index].label;
+			const detail = row.querySelector('.openide-menu-detail');
+			if (detail) { detail.textContent = options[index].detail ?? ''; }
+			row.classList.toggle('openide-menu-active', index === this._selected);
+		});
+		this._popover.layout();
 	}
 
 	setEnabled(enabled: boolean): void {

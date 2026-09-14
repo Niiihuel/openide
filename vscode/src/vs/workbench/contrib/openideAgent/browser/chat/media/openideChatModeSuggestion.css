@@ -86,7 +86,7 @@
 .openide-chat-suggest-dismiss {
 	padding: 4px 8px;
 	border: none;
-	border-radius: var(--oi-radius-md);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	font-family: inherit;
@@ -108,7 +108,7 @@
 	gap: 6px;
 	padding: 4px 10px;
 	border: 1px solid var(--vscode-button-border, transparent);
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: var(--vscode-button-background);
 	color: var(--vscode-button-foreground);
 	font-family: inherit;

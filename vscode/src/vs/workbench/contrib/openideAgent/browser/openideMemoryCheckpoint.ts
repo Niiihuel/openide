@@ -91,10 +91,9 @@ export class OpenideMemoryCheckpoint {
 					body: existing ? `${existing.record.body}\n\n## Additional observation\n${note.body}` : note.body, kind: note.kind, related: note.related,
 					id: existing?.record.id, expectedRevision: existing?.record.revision, expectedHash: existing?.hash,
 					session: this.session, message: state.message ?? this.message, origin: 'native', operationId });
-				this.emit({ type: 'info', severity: 'info', message: saved.document ? this.memory.savedMessage(saved.document) : t('memory.saved', note.topic_key) });
+				this.emit({ type: 'info', source: 'memoryCapture', messageId: state.message ?? this.message, severity: 'info', message: saved.document ? this.memory.savedMessage(saved.document) : t('memory.saved', note.topic_key) });
 			}
 			await this.persist({ watermark: state.watermark, message: state.message, status: candidates.length ? 'saved' : 'no_durable_change' }, reason);
-			if (!candidates.length) { this.emit({ type: 'info', severity: 'info', message: t('memory.captureNoChange') }); }
 			if (!pending || pending.watermark === delta?.watermark) { this.cursor = messages.length; }
 			else if (delta) { state = delta; durable = false; await this.persist(delta, 'next-delta'); durable = true; }
 		} catch (error) {
@@ -104,7 +103,7 @@ export class OpenideMemoryCheckpoint {
 				catch (persistError) { if (isOpenideRunJournalError(persistError)) { throw persistError; } }
 			}
 			if (reason === 'compaction' && !durable) { throw error; }
-			if (!token.isCancellationRequested) { this.emit({ type: 'info', message: t('memory.captureDeferred', error instanceof Error ? error.message : String(error)) }); }
+			if (!token.isCancellationRequested) { this.emit({ type: 'info', source: 'memoryCapture', messageId: state?.message ?? this.message, severity: 'warning', message: t('memory.captureDeferred', error instanceof Error ? error.message : String(error)) }); }
 		} finally { this.running = false; }
 	}
 	resetProjection(length: number): void { this.cursor = length; }

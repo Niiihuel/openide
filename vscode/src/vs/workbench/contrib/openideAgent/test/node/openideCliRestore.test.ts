@@ -26,6 +26,7 @@ import { IOpenideAgentHostService } from '../../../../../platform/openideAgentHo
 import { IWorkspaceContextService, Workspace, WorkspaceFolder } from '../../../../../platform/workspace/common/workspace.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IWorkingCopyService } from '../../../../services/workingCopy/common/workingCopyService.js';
+import { IOpenideReviewDiffService } from '../../browser/openideReviewDiffService.js';
 import { OpenideCliChangesService } from '../../browser/openideCliChangesService.js';
 import { IOpenideNativeServices } from '../../common/openideNativeServices.js';
 import { OpenideAgentRunStateService } from '../../common/openideAgentRunState.js';
@@ -90,7 +91,7 @@ suite('OpenIDE CLI snapshot restore (real Git and filesystem)', () => {
 			override getWorkspace() { return new Workspace('fixture', [new WorkspaceFolder({ uri: URI.file(cwd), name: 'fixture', index: 0 })], false, null, () => false); }
 		};
 		runState = new OpenideAgentRunStateService();
-		service = store.add(new OpenideCliChangesService(native, log, new class extends mock<IEditorService>() { }, new class extends mock<IModelService>() { }, new class extends mock<ILanguageService>() { }, models, files, workingCopies, context, runState));
+		service = store.add(new OpenideCliChangesService(native, new class extends mock<IOpenideReviewDiffService>() {}, log, new class extends mock<IEditorService>() { }, new class extends mock<IModelService>() { }, new class extends mock<ILanguageService>() { }, models, files, workingCopies, context, runState));
 		session = { id: 'fixture', cliId: 'claude', cwd, title: 'Fixture' };
 	});
 

@@ -4,6 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, append, clearNode } from '../../../../../../base/browser/dom.js';
+import { toDisposable } from '../../../../../../base/common/lifecycle.js';
+import { AnchorPosition } from '../../../../../../base/common/layout.js';
+import { IContextViewService } from '../../../../../../platform/contextview/browser/contextView.js';
+import { createMenuContent, createMenuRow, OpenideComposerPopover } from '../openideComposerMenu.js';
 import { IOpenideChatConfirmationContent, IOpenideChatContent } from '../../../common/chat/openideChatContent.js';
 import { ToolApprovalDecision } from '../../../common/openideAgentTypes.js';
 import { getOpenideToolMeta, toolVisualKind } from '../../../common/chat/openideChatToolMeta.js';
@@ -20,14 +24,17 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 	private readonly _actions: HTMLElement;
 	private readonly _status: HTMLElement;
 	private readonly _requestId: string;
+	private readonly _scopePopover: OpenideComposerPopover;
 	private _decision: ToolApprovalDecision | undefined;
 
 	constructor(
 		content: IOpenideChatConfirmationContent,
 		_context: IOpenideChatContentPartContext,
 		@IOpenideAgentService private readonly _agentService: IOpenideAgentService,
+		@IContextViewService contextViewService: IContextViewService,
 	) {
 		super();
+		this._scopePopover = this._register(new OpenideComposerPopover(contextViewService));
 		this._requestId = content.requestId;
 		this._decision = content.decision;
 
@@ -36,7 +43,7 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 		this.domNode.setAttribute('role', 'group');
 		this.domNode.setAttribute('aria-label', content.title);
 		// These controls live inside a tree. Let their native keyboard behavior run without
-		// letting the tree consume Enter, Space or the select's navigation keys.
+		// letting the tree consume Enter, Space or the scope menu's navigation keys.
 		for (const eventName of ['keydown', 'keyup']) {
 			this._register(addDisposableListener(this.domNode, eventName, event => {
 				if (!event.ctrlKey && !event.metaKey && !event.altKey
@@ -74,19 +81,19 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 	}
 
 	private _renderActions(content: IOpenideChatConfirmationContent): void {
-		const scopeLabel = append(this._actions, $('label.openide-chat-approval-scope'));
-		const scope = append(scopeLabel, $('select.openide-chat-approval-scope-select')) as HTMLSelectElement;
-		scope.setAttribute('aria-label', t('chatSurface.approval.scope'));
-		const option = (label: string, decision: ToolApprovalDecision) => {
-			const item = append(scope, $('option')) as HTMLOptionElement;
-			item.value = decision;
-			item.textContent = label;
-		};
-		option(t('chatSurface.approval.scopeOnce'), 'once');
-		option(t('chatSurface.approval.scopeSession'), 'session');
-		if (!content.sensitive) {
-			option(t('chatSurface.approval.scopeAlways'), 'always');
-		}
+		const scope = append(this._actions, $('button.oi-btn.ghost.openide-chat-approval-scope-trigger', {
+			type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false',
+			'aria-label': t('chatSurface.approval.scope'),
+		})) as HTMLButtonElement;
+		const scopeText = append(scope, $('span.openide-chat-approval-scope-label'));
+		append(scope, $('span.codicon.codicon-chevron-down', { 'aria-hidden': 'true' }));
+		let selected: ToolApprovalDecision = 'once';
+		const options: { label: string; decision: ToolApprovalDecision }[] = [
+			{ label: t('chatSurface.approval.scopeOnce'), decision: 'once' },
+			{ label: t('chatSurface.approval.scopeSession'), decision: 'session' },
+		];
+		if (!content.sensitive) { options.push({ label: t('chatSurface.approval.scopeAlways'), decision: 'always' }); }
+		scopeText.textContent = options[0].label;
 		const buttons = append(this._actions, $('.openide-chat-approval-buttons'));
 		const choice = (label: string, decision: () => ToolApprovalDecision, extraClass: string) => {
 			const button = append(buttons, $(`button.openide-chat-abtn${extraClass}`)) as HTMLButtonElement;
@@ -96,23 +103,44 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 		};
 		choice(t('chatSurface.approval.deny'), () => 'deny', '.deny');
 		choice(t('chatSurface.approval.allow'), () => {
-			// Narrow the DOM value explicitly: unsupported values cannot widen a grant.
-			return scope.value === 'session' ? 'session' : scope.value === 'always' && !content.sensitive ? 'always' : 'once';
+			// Only the offered scopes can be selected; sensitive actions never persist a grant.
+			return selected === 'session' ? 'session' : selected === 'always' && !content.sensitive ? 'always' : 'once';
 		}, '.primary');
 		const hint = append(this._actions, $('.openide-chat-approval-scope-hint'));
 		hint.hidden = true;
 		hint.setAttribute('aria-live', 'polite');
-		this._register(addDisposableListener(scope, 'change', () => {
-			const remembered = scope.value === 'session' || scope.value === 'always';
-			const description = remembered
-				? content.risk === 'exec' && content.command
-					? t('chatSurface.approval.scopeCommandHint')
-					: t('chatSurface.approval.scopeToolHint')
-				: '';
-			hint.hidden = !remembered;
-			hint.textContent = description;
-			scope.setAttribute('aria-description', description);
-			this._onDidChangeHeight.fire();
+		this._register(addDisposableListener(scope, 'click', () => {
+			if (this._decision) { return; }
+			this._scopePopover.toggle(scope, {
+				anchorPosition: AnchorPosition.BELOW,
+				render: (container, store) => {
+					container.setAttribute('aria-label', t('chatSurface.approval.scope'));
+					store.add(toDisposable(() => container.removeAttribute('aria-label')));
+					const menu = append(container, createMenuContent(container.ownerDocument));
+					for (const option of options) {
+						const row = append(menu, createMenuRow(container.ownerDocument, { label: option.label, active: selected === option.decision }));
+						row.setAttribute('role', 'menuitemradio');
+						row.setAttribute('aria-label', option.label);
+						row.setAttribute('aria-checked', String(selected === option.decision));
+						store.add(addDisposableListener(row, 'click', () => {
+							selected = option.decision;
+							scopeText.textContent = option.label;
+							const remembered = selected !== 'once';
+							const description = remembered
+								? content.risk === 'exec' && content.command
+									? t('chatSurface.approval.scopeCommandHint')
+									: t('chatSurface.approval.scopeToolHint')
+								: '';
+							hint.hidden = !remembered;
+							hint.textContent = description;
+							scope.setAttribute('aria-description', description);
+							this._scopePopover.close();
+							scope.focus();
+							this._onDidChangeHeight.fire();
+						}));
+					}
+				},
+			});
 		}));
 	}
 
@@ -139,6 +167,7 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 			if (notify) { this._onDidChangeHeight.fire(); }
 			return;
 		}
+		this._scopePopover.close();
 		const denied = decision === 'deny';
 		const icon = append(this._status, $(`span.codicon.codicon-${denied ? 'close' : 'check'}`));
 		icon.setAttribute('aria-hidden', 'true');

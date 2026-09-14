@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { openideSecondaryButtonStyles } from '../../../openideAgent/browser/openideControlStyles.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { $ } from '../../../../../base/browser/dom.js';
 import { Event } from '../../../../../base/common/event.js';
@@ -198,6 +199,8 @@ export class BrowserEditorChatIntegration extends BrowserEditorContribution {
 
 		this._shareButtonContainer = $('.browser-share-toggle-container');
 		this._shareButton = this._register(new Button(this._shareButtonContainer, {
+			...openideSecondaryButtonStyles,
+			secondary: true,
 			supportIcons: true,
 			title: localize('browser.shareWithAgent', "Share with Agent"),
 			small: true,

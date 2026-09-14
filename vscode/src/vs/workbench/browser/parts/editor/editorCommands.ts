@@ -27,13 +27,12 @@ import { ITelemetryService } from '../../../../platform/telemetry/common/telemet
 import { ActiveGroupEditorsByMostRecentlyUsedQuickAccess } from './editorQuickAccess.js';
 import { SideBySideEditor } from './sideBySideEditor.js';
 import { TextDiffEditor } from './textDiffEditor.js';
-import { ActiveEditorCanSplitInGroupContext, ActiveEditorGroupEmptyContext, ActiveEditorGroupLockedContext, ActiveEditorStickyContext, EditorPartModalContext, EditorPartModalMaximizedContext, EditorPartModalNavigationContext, EditorPartModalSidebarContext, IsSessionsWindowContext, MultipleEditorGroupsContext, SideBySideEditorActiveContext, TextCompareEditorActiveContext } from '../../../common/contextkeys.js';
-import { CloseDirection, EditorInputCapabilities, EditorsOrder, IResourceDiffEditorInput, IUntitledTextResourceEditorInput, isDiffEditorInput, isEditorInputWithOptionsAndGroup } from '../../../common/editor.js';
+import { ActiveEditorCanSplitInGroupContext, ActiveEditorGroupEmptyContext, ActiveEditorGroupLockedContext, ActiveEditorStickyContext, EditorPartModalContext, EditorPartModalDockableContext, EditorPartModalMaximizedContext, EditorPartModalNavigationContext, EditorPartModalSidebarContext, IsSessionsWindowContext, MultipleEditorGroupsContext, SideBySideEditorActiveContext, TextCompareEditorActiveContext } from '../../../common/contextkeys.js';
+import { CloseDirection, EditorInputCapabilities, EditorsOrder, IEditorCommandsContext, IResourceDiffEditorInput, IUntitledTextResourceEditorInput, isDiffEditorInput, isEditorInputWithOptionsAndGroup } from '../../../common/editor.js';
 import { EditorInput } from '../../../common/editor/editorInput.js';
 import { SideBySideEditorInput } from '../../../common/editor/sideBySideEditorInput.js';
 import { EditorGroupColumn, columnToEditorGroup } from '../../../services/editor/common/editorGroupColumn.js';
 import { EditorGroupLayout, GroupDirection, GroupLocation, GroupsOrder, IEditorGroup, IEditorGroupsService, IEditorReplacement, IModalEditorPart, preferredSideBySideGroupDirection } from '../../../services/editor/common/editorGroupsService.js';
-import { mainWindow } from '../../../../base/browser/window.js';
 import { IEditorResolverService } from '../../../services/editor/common/editorResolverService.js';
 import { IEditorService, SIDE_GROUP } from '../../../services/editor/common/editorService.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
@@ -1462,18 +1461,16 @@ function registerModalEditorCommands(): void {
 					id: MenuId.ModalEditorTitle,
 					group: 'navigation',
 					order: 0,
-					when: IsSessionsWindowContext.negate()
+					when: ContextKeyExpr.and(IsSessionsWindowContext.negate(), EditorPartModalDockableContext.negate())
 				}
 			});
 		}
-		async run(accessor: ServicesAccessor): Promise<void> {
+		async run(accessor: ServicesAccessor, context?: IEditorCommandsContext): Promise<void> {
 			const editorGroupsService = accessor.get(IEditorGroupsService);
 
-			for (const part of editorGroupsService.parts) {
-				if (isModalEditorPart(part)) {
-					await part.close({ mergeAllEditorsToMainPart: true });
-					break;
-				}
+			const part = resolveModalEditorPart(editorGroupsService, context);
+			if (part) {
+				await part.close({ mergeAllEditorsToMainPart: true });
 			}
 		}
 	});
@@ -1495,21 +1492,19 @@ function registerModalEditorCommands(): void {
 				}]
 			});
 		}
-		async run(accessor: ServicesAccessor): Promise<void> {
+		async run(accessor: ServicesAccessor, context?: IEditorCommandsContext): Promise<void> {
 			const editorGroupsService = accessor.get(IEditorGroupsService);
 
-			for (const part of editorGroupsService.parts) {
-				if (isModalEditorPart(part)) {
-					const auxiliaryEditorPart = await editorGroupsService.createAuxiliaryEditorPart();
+			const part = resolveModalEditorPart(editorGroupsService, context);
+			if (part) {
+				const auxiliaryEditorPart = await editorGroupsService.createAuxiliaryEditorPart();
 
-					for (const group of part.getGroups(GroupsOrder.MOST_RECENTLY_ACTIVE)) {
-						group.moveEditors(group.editors.map(editor => ({ editor, options: { preserveFocus: true } })), auxiliaryEditorPart.activeGroup);
-					}
-
-					auxiliaryEditorPart.activeGroup.focus();
-					await part.close();
-					break;
+				for (const group of part.getGroups(GroupsOrder.MOST_RECENTLY_ACTIVE)) {
+					group.moveEditors(group.editors.map(editor => ({ editor, options: { preserveFocus: true } })), auxiliaryEditorPart.activeGroup);
 				}
+
+				auxiliaryEditorPart.activeGroup.focus();
+				await part.close();
 			}
 		}
 	});
@@ -1524,14 +1519,12 @@ function registerModalEditorCommands(): void {
 				precondition: ContextKeyExpr.and(EditorPartModalContext, EditorPartModalSidebarContext),
 			});
 		}
-		run(accessor: ServicesAccessor): void {
+		run(accessor: ServicesAccessor, context?: IEditorCommandsContext): void {
 			const editorGroupsService = accessor.get(IEditorGroupsService);
 
-			for (const part of editorGroupsService.parts) {
-				if (isModalEditorPart(part)) {
-					part.toggleSidebar();
-					break;
-				}
+			const part = resolveModalEditorPart(editorGroupsService, context);
+			if (part) {
+				part.toggleSidebar();
 			}
 		}
 	});
@@ -1552,18 +1545,17 @@ function registerModalEditorCommands(): void {
 				menu: {
 					id: MenuId.ModalEditorTitle,
 					group: 'navigation',
-					order: 99
+					order: 99,
+					when: EditorPartModalDockableContext.negate()
 				}
 			});
 		}
-		run(accessor: ServicesAccessor): void {
+		run(accessor: ServicesAccessor, context?: IEditorCommandsContext): void {
 			const editorGroupsService = accessor.get(IEditorGroupsService);
 
-			for (const part of editorGroupsService.parts) {
-				if (isModalEditorPart(part)) {
-					part.toggleMaximized();
-					break;
-				}
+			const part = resolveModalEditorPart(editorGroupsService, context);
+			if (part) {
+				part.toggleMaximized();
 			}
 		}
 	});
@@ -1601,12 +1593,12 @@ function registerModalEditorCommands(): void {
 				}
 			});
 		}
-		async run(accessor: ServicesAccessor): Promise<void> {
+		async run(accessor: ServicesAccessor, context?: IEditorCommandsContext): Promise<void> {
 			const editorGroupsService = accessor.get(IEditorGroupsService);
 
 			// Modal editor parts can be nested. Always close the topmost part so
 			// actions from a child modal never dismiss the modal behind it.
-			await editorGroupsService.activeModalEditorPart?.close();
+			await resolveModalEditorPart(editorGroupsService, context)?.requestClose();
 		}
 	});
 
@@ -1624,16 +1616,14 @@ function registerModalEditorCommands(): void {
 				}
 			});
 		}
-		run(accessor: ServicesAccessor): void {
+		run(accessor: ServicesAccessor, context?: IEditorCommandsContext): void {
 			const editorGroupsService = accessor.get(IEditorGroupsService);
 
-			for (const part of editorGroupsService.parts) {
-				if (isModalEditorPart(part)) {
-					const nav = part.navigation;
-					if (nav && nav.current > 0) {
-						nav.navigate(nav.current - 1);
-					}
-					break;
+			const part = resolveModalEditorPart(editorGroupsService, context);
+			if (part) {
+				const nav = part.navigation;
+				if (nav && nav.current > 0) {
+					nav.navigate(nav.current - 1);
 				}
 			}
 		}
@@ -1653,20 +1643,29 @@ function registerModalEditorCommands(): void {
 				}
 			});
 		}
-		run(accessor: ServicesAccessor): void {
+		run(accessor: ServicesAccessor, context?: IEditorCommandsContext): void {
 			const editorGroupsService = accessor.get(IEditorGroupsService);
 
-			for (const part of editorGroupsService.parts) {
-				if (isModalEditorPart(part)) {
-					const nav = part.navigation;
-					if (nav && nav.current < nav.total - 1) {
-						nav.navigate(nav.current + 1);
-					}
-					break;
+			const part = resolveModalEditorPart(editorGroupsService, context);
+			if (part) {
+				const nav = part.navigation;
+				if (nav && nav.current < nav.total - 1) {
+					nav.navigate(nav.current + 1);
 				}
 			}
 		}
 	});
+}
+
+function resolveModalEditorPart(editorGroupsService: IEditorGroupsService, context?: IEditorCommandsContext): IModalEditorPart | undefined {
+	const group = typeof context?.groupId === 'number' ? editorGroupsService.getGroup(context.groupId) : undefined;
+	if (group) {
+		const part = editorGroupsService.getPart(group);
+		if (isModalEditorPart(part)) {
+			return part;
+		}
+	}
+	return editorGroupsService.activeModalEditorPart;
 }
 
 function isModalEditorPart(obj: unknown): obj is IModalEditorPart {
@@ -1678,8 +1677,7 @@ function isModalEditorPart(obj: unknown): obj is IModalEditorPart {
 		&& typeof part.toggleMaximized === 'function'
 		&& typeof part.maximized === 'boolean'
 		&& typeof part.updateOptions === 'function'
-		&& !!part.modalElement
-		&& part.windowId === mainWindow.vscodeWindowId;
+		&& !!part.modalElement;
 }
 
 export function setup(): void {

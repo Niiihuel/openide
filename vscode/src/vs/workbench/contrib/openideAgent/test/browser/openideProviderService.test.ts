@@ -79,6 +79,26 @@ suite('OpenIDE provider service without a chat harness', () => {
 			{ model: 'new-model', effort: '', previous: 'high', legacy: undefined });
 	});
 
+	test('fast mode defaults off, persists per model, and ignores unsupported or malformed stored choices', async () => {
+		const { service, makeService, storage } = await setup();
+		assert.strictEqual(service.getFastMode('test', 'fast'), false);
+		await service.setFastMode(true, 'test', 'fast');
+		assert.strictEqual(storage.get('openide.agent.fastModeByModel', StorageScope.APPLICATION), undefined);
+		service.getFastModeCapability = (_provider, model) => ({ supported: model === 'fast', serviceTier: model === 'fast' ? 'priority' : undefined });
+		await service.setFastMode(true, 'test', 'fast');
+		assert.strictEqual(service.getFastMode('test', 'fast'), true);
+		assert.strictEqual(service.getFastMode('test', 'other'), false);
+		const reloaded = makeService();
+		reloaded.getFastModeCapability = service.getFastModeCapability;
+		assert.strictEqual(reloaded.getFastMode('test', 'fast'), true);
+		await reloaded.setFastMode(false, 'test', 'fast');
+		assert.strictEqual(service.getFastMode('test', 'fast'), false);
+		storage.store('openide.agent.fastModeByModel', '{"test/fast":"true"}', StorageScope.APPLICATION, StorageTarget.MACHINE);
+		assert.strictEqual(service.getFastMode('test', 'fast'), false);
+		storage.store('openide.agent.fastModeByModel', 'invalid', StorageScope.APPLICATION, StorageTarget.MACHINE);
+		assert.strictEqual(service.getFastMode('test', 'fast'), false);
+	});
+
 	test('account activation invalidates live discovery and restores refreshed credentials across service reload', async () => {
 		const { service, makeService, secrets, headers, healthResets } = await setup();
 		await service.setApiKey('test', 'first');

@@ -35,9 +35,8 @@ export const OPENIDE_CHAT_PART_OPEN_CLASS = 'openide-chat-part-open';
 export const OPENIDE_CHAT_PART_LIVE_CLASS = 'openide-chat-part-live';
 
 /**
- * Webview `.shimmer`: a gradient swept across the TEXT (`background-clip: text`), not an opacity
- * pulse of the row. The keyframe `openide-chat-shimmer-sweep` is declared once in
- * `media/openideChatNative.css` and reused here so both files animate at the same 2.1s cadence.
+ * Text-only shimmer from OPENIDE_SHIMMER_CSS, shared with background CLI labels.
+ * Toggling the live class ends the animation when the work completes.
  */
 export const OPENIDE_CHAT_SHIMMER_CLASS = 'openide-chat-shimmer';
 
@@ -143,11 +142,11 @@ export function truncateOpenideChatResult(result: string): string {
  * cosmetic: the list runs with `horizontalScrolling: false`, so a single long line of tool output
  * escaping this box would widen every row in the transcript.
  */
-export function renderOpenideChatActivityResult(row: IOpenideChatActivityRow, resultText: string | undefined, label: string): void {
+export function renderOpenideChatActivityResult(row: IOpenideChatActivityRow, resultText: string | undefined, label: string, full = false): void {
 	if (!row.body || !row.resultPre || !row.resultLabel) {
 		return;
 	}
-	const text = resultText ? truncateOpenideChatResult(resultText) : '';
+	const text = resultText ? (full ? resultText : truncateOpenideChatResult(resultText)) : '';
 	row.resultLabel.textContent = label;
 	row.resultPre.textContent = text;
 	row.resultLabel.classList.toggle('hidden', !text);

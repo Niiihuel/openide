@@ -15,6 +15,7 @@ import { IPosition } from '../../../../editor/common/core/position.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { ITextModelService } from '../../../../editor/common/services/resolverService.js';
 import * as nls from '../../../../nls.js';
+import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { Extensions, getDefaultValue, IConfigurationRegistry, OVERRIDE_PROPERTY_REGEX } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { FileOperationError, FileOperationResult } from '../../../../platform/files/common/files.js';
@@ -94,6 +95,7 @@ export class PreferencesService extends Disposable implements IPreferencesServic
 		@IExtensionService private readonly extensionService: IExtensionService,
 		@IProgressService private readonly progressService: IProgressService,
 		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
+		@IContextViewService private readonly contextViewService: IContextViewService,
 	) {
 		super();
 		// The default keybindings.json updates based on keyboard layouts, so here we make sure
@@ -275,11 +277,12 @@ export class PreferencesService extends Disposable implements IPreferencesServic
 			...options,
 			focusSearch: true
 		};
-		// OpenIDE Settings is a modal product surface. Test harnesses keep the active group to
-		// avoid modal timing flakiness, matching the existing workbench test safeguard.
-		const group = !this.environmentService.enableSmokeTestDriver && !this.environmentService.extensionTestsLocationURI
-			? MODAL_GROUP
-			: this.getEditorGroupFromOptions(options);
+		this.contextViewService.hideContextView();
+		// The default settings page temporarily covers the workbench using its existing editor
+		// host. Explicit source/side requests keep their destination and all underlying editors.
+		const group = options.groupId !== undefined || options.openToSide
+			? this.getEditorGroupFromOptions(options)
+			: MODAL_GROUP;
 		return this.editorService.openEditor(input, validateSettingsEditorOptions(options), group);
 	}
 
@@ -379,6 +382,8 @@ export class PreferencesService extends Disposable implements IPreferencesServic
 
 	private getEditorGroupFromOptions(options: { groupId?: number; openToSide?: boolean }): PreferredGroup {
 
+		if (options.openToSide) { return SIDE_GROUP; }
+
 		// When the caller knows the source editor group (e.g. the editor title actions
 		// and their keyboard shortcuts that switch between the settings UI and JSON editor),
 		// open in that same group so the editor stays in the editor part (main, modal or
@@ -401,9 +406,6 @@ export class PreferencesService extends Disposable implements IPreferencesServic
 			!this.environmentService.enableSmokeTestDriver && !this.environmentService.extensionTestsLocationURI	// but not in smoke test or extension test environments to reduce flakiness
 		) {
 			return MODAL_GROUP;
-		}
-		if (options.openToSide) {
-			return SIDE_GROUP;
 		}
 		if (options?.groupId !== undefined) {
 			return this.editorGroupService.getGroup(options.groupId) ?? this.editorGroupService.activeGroup;

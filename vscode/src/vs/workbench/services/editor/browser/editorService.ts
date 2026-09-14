@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { getActiveWindow } from '../../../../base/browser/dom.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IResourceEditorInput, IEditorOptions, EditorActivation, IResourceEditorInputIdentifier, ITextResourceEditorInput } from '../../../../platform/editor/common/editor.js';
 import { SideBySideEditor, IEditorPane, GroupIdentifier, IUntitledTextResourceEditorInput, IResourceDiffEditorInput, EditorInputWithOptions, isEditorInputWithOptions, IEditorIdentifier, IEditorCloseEvent, ITextDiffEditorPane, IRevertOptions, SaveReason, EditorsOrder, IWorkbenchEditorConfiguration, EditorResourceAccessor, IVisibleEditorPane, EditorInputCapabilities, isResourceDiffEditorInput, IUntypedEditorInput, isResourceEditorInput, isEditorInput, isEditorInputWithOptionsAndGroup, IFindEditorOptions, isResourceMergeEditorInput, IEditorWillOpenEvent, IEditorControl, ITextResourceDiffEditorInput } from '../../../common/editor.js';
@@ -16,9 +17,9 @@ import { joinPath } from '../../../../base/common/resources.js';
 import { DiffEditorInput } from '../../../common/editor/diffEditorInput.js';
 import { SideBySideEditor as SideBySideEditorPane } from '../../../browser/parts/editor/sideBySideEditor.js';
 import { IEditorGroupsService, IEditorGroup, GroupsOrder, IEditorReplacement, isEditorReplacement, ICloseEditorOptions, IEditorGroupsContainer } from '../common/editorGroupsService.js';
-import { IUntypedEditorReplacement, IEditorService, ISaveEditorsOptions, ISaveAllEditorsOptions, IRevertAllEditorsOptions, IBaseSaveRevertAllEditorOptions, IOpenEditorsOptions, PreferredGroup, isPreferredGroup, IEditorsChangeEvent, ISaveEditorsResult, IVisibleEditorsChangeEvent } from '../common/editorService.js';
+import { ACTIVE_GROUP, MODAL_GROUP, IUntypedEditorReplacement, IEditorService, ISaveEditorsOptions, ISaveAllEditorsOptions, IRevertAllEditorsOptions, IBaseSaveRevertAllEditorOptions, IOpenEditorsOptions, PreferredGroup, isPreferredGroup, IEditorsChangeEvent, ISaveEditorsResult, IVisibleEditorsChangeEvent } from '../common/editorService.js';
 import { IConfigurationChangeEvent, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
-import { Disposable, IDisposable, dispose, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { Disposable, IDisposable, dispose, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
 import { coalesce, distinct } from '../../../../base/common/arrays.js';
 import { isCodeEditor, isDiffEditor, ICodeEditor, IDiffEditor, isCompositeEditor } from '../../../../editor/browser/editorBrowser.js';
 import { IEditorGroupView, EditorServiceImpl } from '../../../browser/parts/editor/editor.js';
@@ -35,6 +36,13 @@ import { IHostService } from '../../host/browser/host.js';
 import { findGroup } from '../common/editorGroupFinder.js';
 import { ITextEditorService } from '../../textfile/common/textEditorService.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
+
+/** Auxiliary workspaces can own default editor opens without changing explicit group targets. */
+const windowEditorTargets = new Map<number, (modal: boolean) => Promise<IEditorService>>();
+export function registerEditorWindowTarget(windowId: number, target: (modal: boolean) => Promise<IEditorService>): IDisposable {
+	windowEditorTargets.set(windowId, target);
+	return toDisposable(() => { if (windowEditorTargets.get(windowId) === target) { windowEditorTargets.delete(windowId); } });
+}
 
 export class EditorService extends Disposable implements EditorServiceImpl {
 
@@ -92,8 +100,12 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 		this.registerListeners();
 	}
 
-	createScoped(editorGroupsContainer: IEditorGroupsContainer, disposables: DisposableStore): IEditorService {
-		return disposables.add(new EditorService(editorGroupsContainer, this.editorGroupService, this.instantiationService, this.fileService, this.configurationService, this.contextService, this.uriIdentityService, this.editorResolverService, this.workspaceTrustRequestService, this.hostService, this.textEditorService));
+	private openEditorsInContainer = false;
+
+	createScoped(editorGroupsContainer: IEditorGroupsContainer, disposables: DisposableStore, options?: { readonly openEditorsInContainer?: boolean }): IEditorService {
+		const service = disposables.add(new EditorService(editorGroupsContainer, this.editorGroupService, this.instantiationService, this.fileService, this.configurationService, this.contextService, this.uriIdentityService, this.editorResolverService, this.workspaceTrustRequestService, this.hostService, this.textEditorService));
+		service.openEditorsInContainer = options?.openEditorsInContainer ?? false;
+		return service;
 	}
 
 	private registerListeners(): void {
@@ -538,12 +550,22 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 	openEditor(editor: IResourceDiffEditorInput, group?: PreferredGroup): Promise<ITextDiffEditorPane | undefined>;
 	openEditor(editor: EditorInput | IUntypedEditorInput, optionsOrPreferredGroup?: IEditorOptions | PreferredGroup, preferredGroup?: PreferredGroup): Promise<IEditorPane | undefined>;
 	async openEditor(editor: EditorInput | IUntypedEditorInput, optionsOrPreferredGroup?: IEditorOptions | PreferredGroup, preferredGroup?: PreferredGroup): Promise<IEditorPane | undefined> {
+		const requestedGroup = isPreferredGroup(optionsOrPreferredGroup) ? optionsOrPreferredGroup : preferredGroup;
+		const windowTarget = !this.openEditorsInContainer && (requestedGroup === undefined || requestedGroup === ACTIVE_GROUP || requestedGroup === MODAL_GROUP) ? windowEditorTargets.get(getActiveWindow().vscodeWindowId) : undefined;
+		if (windowTarget) {
+			const service = await windowTarget(requestedGroup === MODAL_GROUP);
+			return isEditorInput(editor) ? service.openEditor(editor, isPreferredGroup(optionsOrPreferredGroup) ? undefined : optionsOrPreferredGroup) : service.openEditor(editor);
+		}
 		let typedEditor: EditorInput | undefined = undefined;
 		let options = isEditorInput(editor) ? optionsOrPreferredGroup as IEditorOptions : editor.options;
 		let group: IEditorGroup | undefined = undefined;
 
 		if (isPreferredGroup(optionsOrPreferredGroup)) {
 			preferredGroup = optionsOrPreferredGroup;
+		}
+
+		if (this.openEditorsInContainer && preferredGroup === undefined) {
+			preferredGroup = this.editorGroupsContainer.activeGroup;
 		}
 
 		// Resolve override unless disabled
@@ -604,6 +626,12 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 	openEditors(editors: IUntypedEditorInput[], group?: PreferredGroup, options?: IOpenEditorsOptions): Promise<IEditorPane[]>;
 	openEditors(editors: Array<EditorInputWithOptions | IUntypedEditorInput>, group?: PreferredGroup, options?: IOpenEditorsOptions): Promise<IEditorPane[]>;
 	async openEditors(editors: Array<EditorInputWithOptions | IUntypedEditorInput>, preferredGroup?: PreferredGroup, options?: IOpenEditorsOptions): Promise<IEditorPane[]> {
+		const windowTarget = !this.openEditorsInContainer && (preferredGroup === undefined || preferredGroup === ACTIVE_GROUP || preferredGroup === MODAL_GROUP) ? windowEditorTargets.get(getActiveWindow().vscodeWindowId) : undefined;
+		if (windowTarget) { return [...await (await windowTarget(preferredGroup === MODAL_GROUP)).openEditors(editors, undefined, options)]; }
+
+		if (this.openEditorsInContainer && preferredGroup === undefined) {
+			preferredGroup = this.editorGroupsContainer.activeGroup;
+		}
 
 		// Pass all editors to trust service to determine if
 		// we should proceed with opening the editors if we

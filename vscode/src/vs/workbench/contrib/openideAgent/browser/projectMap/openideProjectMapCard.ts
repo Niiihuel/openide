@@ -73,7 +73,7 @@ export class OpenideProjectMapCard extends Disposable {
 	) {
 		super();
 		this.card = append(parent, $(`.openide-pmap-card.${options.className}`));
-		this.head = append(this.card, $('.openide-pmap-card-head'));
+		this.head = append(this.card, $('.openide-pmap-card-head.oi-dock-section'));
 		if (options.icon) {
 			append(this.head, projectMapIcon(options.icon));
 		}
@@ -81,7 +81,7 @@ export class OpenideProjectMapCard extends Disposable {
 			append(this.head, $('span.openide-pmap-card-title', undefined, options.title));
 		}
 		this.headActions = append(this.head, $('.openide-pmap-head-actions'));
-		this.toggle = append(this.headActions, $('button.openide-pmap-iconbtn.openide-pmap-collapse', { type: 'button', tabindex: '-1' })) as HTMLButtonElement;
+		this.toggle = append(this.headActions, $('button.openide-pmap-iconbtn.oi-dock-action.openide-pmap-collapse', { type: 'button', tabindex: '-1' })) as HTMLButtonElement;
 		this.body = append(this.card, $('.openide-pmap-card-body'));
 
 		// The whole head is the hit target, like a workbench pane header. The actions inside it are
@@ -96,6 +96,12 @@ export class OpenideProjectMapCard extends Disposable {
 			this.setCollapsed(!this._collapsed, true);
 		}));
 		this._register(addDisposableListener(this.head, 'keydown', event => {
+			// Typing a space or activating an embedded action belongs to that control.
+			// The header and its own chevron remain the collapse keyboard targets.
+			const target = event.target as HTMLElement | null;
+			if (target && target !== this.head && target !== this.toggle && !this.toggle.contains(target)) {
+				return;
+			}
 			const key = new StandardKeyboardEvent(event);
 			if (key.keyCode === KeyCode.Enter || key.keyCode === KeyCode.Space) {
 				key.preventDefault();

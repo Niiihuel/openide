@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { createOpenideElement } from '../openideDom.js';
 import { addDisposableListener, append, clearNode } from '../../../../../base/browser/dom.js';
 import { IListRenderer, IListVirtualDelegate } from '../../../../../base/browser/ui/list/list.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
@@ -49,7 +50,7 @@ export const MODEL_ROW_TEMPLATE = 'openide.model.row';
  * `.mp-head`), which a virtualized list cannot do without measuring every row. These are the
  * resulting box heights at 13px/11px text, pinned in CSS so the two agree.
  */
-export const MODEL_ROW_HEIGHT = 24;
+export const MODEL_ROW_HEIGHT = 28;
 export const MODEL_SECTION_HEIGHT = 25;
 
 export class ModelPickerDelegate implements IListVirtualDelegate<ModelPickerRow> {
@@ -78,11 +79,11 @@ export class ModelSectionRenderer implements IListRenderer<IModelSectionRow, ISe
 	renderTemplate(container: HTMLElement): ISectionTemplate {
 		const store = new DisposableStore();
 		const document = container.ownerDocument;
-		const head = document.createElement('div');
+		const head = createOpenideElement(document, 'div');
 		head.className = 'openide-mp-head';
-		const icon = append(head, document.createElement('span'));
+		const icon = append(head, createOpenideElement(document, 'span'));
 		icon.className = 'openide-mp-head-icon';
-		const label = append(head, document.createElement('span'));
+		const label = append(head, createOpenideElement(document, 'span'));
 		label.className = 'openide-mp-head-label';
 		head.appendChild(createCodicon(document, 'chevron-down', 'openide-mp-chevron'));
 		container.appendChild(head);
@@ -143,24 +144,24 @@ export class ModelRowRenderer implements IListRenderer<IModelEntryRow, IModelRow
 	renderTemplate(container: HTMLElement): IModelRowTemplate {
 		const store = new DisposableStore();
 		const document = container.ownerDocument;
-		const row = document.createElement('div');
+		const row = createOpenideElement(document, 'div');
 		row.className = 'openide-menu-row openide-mp-row';
-		const iconSlot = append(row, document.createElement('span'));
+		const iconSlot = append(row, createOpenideElement(document, 'span'));
 		iconSlot.className = 'openide-menu-row-icon';
-		const name = append(row, document.createElement('span'));
+		const name = append(row, createOpenideElement(document, 'span'));
 		name.className = 'openide-mp-name';
 		// Between the name and the context window, which is the order Cursor reads in: what the
 		// model IS, how hard it thinks, how much it holds.
-		const effort = append(row, document.createElement('span'));
+		const effort = append(row, createOpenideElement(document, 'span'));
 		effort.className = 'openide-mp-effort';
-		const size = append(row, document.createElement('span'));
+		const size = append(row, createOpenideElement(document, 'span'));
 		size.className = 'openide-mp-size';
 		// Only on the hovered row (CSS), so a list of twenty models is not a list of twenty buttons.
-		const edit = append(row, document.createElement('button')) as HTMLButtonElement;
+		const edit = append(row, createOpenideElement(document, 'button')) as HTMLButtonElement;
 		edit.type = 'button';
 		edit.className = 'openide-mp-edit';
 		edit.textContent = t('chat.model.edit');
-		const star = append(row, document.createElement('span'));
+		const star = append(row, createOpenideElement(document, 'span'));
 		star.className = 'openide-mp-star';
 		star.setAttribute('role', 'button');
 		container.appendChild(row);

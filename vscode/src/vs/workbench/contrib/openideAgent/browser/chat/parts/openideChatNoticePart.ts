@@ -119,6 +119,7 @@ export class OpenideChatNoticePart extends OpenideChatContentPart {
 
 	private _render(): void {
 		const content = this._content;
+		this.domNode.classList.toggle('openide-chat-memory-receipt', content.source === 'memoryCapture');
 		this._icon.className = `codicon codicon-${noticeIcon(content)}`;
 		const title = noticeTitle(content);
 		this._title.textContent = title ?? '';

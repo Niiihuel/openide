@@ -15,6 +15,7 @@
  *  test can run it without a DOM.
  *--------------------------------------------------------------------------------------------*/
 
+import { DetailedLineRangeMapping } from '../../../../editor/common/diff/rangeMapping.js';
 import { linesDiffComputers } from '../../../../editor/common/diff/linesDiffComputers.js';
 import { IPersistedFileDiff } from './openideAgentTypes.js';
 
@@ -46,14 +47,16 @@ export function textLines(text: string): string[] {
  * creating a 21-line file reported `+21 −1` and the review painted a deleted-line band above line
  * 1 of a brand new file. Git says `+21 −0`, and so does this now.
  */
-export function countDiff(oldStr: string, newStr: string): { added: number; removed: number } {
+export function countDiff(oldStr: string, newStr: string, computedChanges?: readonly DetailedLineRangeMapping[]): { added: number; removed: number } {
 	if (!oldStr || !newStr) {
-		return { added: newStr ? textLines(newStr).length : 0, removed: oldStr ? textLines(oldStr).length : 0 };
+		// A final newline terminates the preceding line; the editor's trailing empty slot is not an added line.
+		const lineCount = (text: string) => text ? textLines(text).length - (/[\r\n]$/.test(text) ? 1 : 0) : 0;
+		return { added: lineCount(newStr), removed: lineCount(oldStr) };
 	}
-	const result = linesDiffComputers.getDefault().computeDiff(textLines(oldStr), textLines(newStr), DIFF_OPTIONS);
+	const changes = computedChanges ?? linesDiffComputers.getDefault().computeDiff(textLines(oldStr), textLines(newStr), DIFF_OPTIONS).changes;
 	let added = 0;
 	let removed = 0;
-	for (const change of result.changes) {
+	for (const change of changes) {
 		added += change.modified.length;
 		removed += change.original.length;
 	}
@@ -64,7 +67,7 @@ export function countDiff(oldStr: string, newStr: string): { added: number; remo
  * COMPACT unified diff of one change: hunks with 2 context lines, a `gap` between hunks, and caps
  * on rows and width. It is what the edit card persists and what the sidebar computes on demand.
  */
-export function buildDiffPreview(oldStr: string, newStr: string, maxLines = 120): OpenideDiffLine[] {
+export function buildDiffPreview(oldStr: string, newStr: string, maxLines = 120, computedChanges?: readonly DetailedLineRangeMapping[]): OpenideDiffLine[] {
 	const cap = (line: string) => line.length > MAX_COLUMNS ? line.slice(0, MAX_COLUMNS) + '…' : line;
 	// Same rule as `countDiff`: one side empty is a pure creation or a pure wipe, and running the
 	// computer over a phantom empty line is what put a lone `-` at the top of every new file's card.
@@ -76,7 +79,7 @@ export function buildDiffPreview(oldStr: string, newStr: string, maxLines = 120)
 	}
 	const o = textLines(oldStr);
 	const n = textLines(newStr);
-	const changes = linesDiffComputers.getDefault().computeDiff(o, n, DIFF_OPTIONS).changes;
+	const changes = computedChanges ?? linesDiffComputers.getDefault().computeDiff(o, n, DIFF_OPTIONS).changes;
 	const out: OpenideDiffLine[] = [];
 	let lastShown = 0; // last line (new side) already emitted
 	for (const c of changes) {
@@ -88,13 +91,13 @@ export function buildDiffPreview(oldStr: string, newStr: string, maxLines = 120)
 		if (lastShown && ctxFrom > lastShown + 1) {
 			out.push({ t: 'gap', x: '⋯' });
 		}
-		for (let l = ctxFrom; l < c.modified.startLineNumber; l++) {
+		for (let l = ctxFrom; l < c.modified.startLineNumber && out.length < maxLines; l++) {
 			out.push({ t: 'ctx', x: cap(n[l - 1] ?? '') });
 		}
-		for (let l = c.original.startLineNumber; l < c.original.endLineNumberExclusive; l++) {
+		for (let l = c.original.startLineNumber; l < c.original.endLineNumberExclusive && out.length < maxLines; l++) {
 			out.push({ t: 'del', x: cap(o[l - 1] ?? '') });
 		}
-		for (let l = c.modified.startLineNumber; l < c.modified.endLineNumberExclusive; l++) {
+		for (let l = c.modified.startLineNumber; l < c.modified.endLineNumberExclusive && out.length < maxLines; l++) {
 			out.push({ t: 'add', x: cap(n[l - 1] ?? '') });
 		}
 		lastShown = Math.max(lastShown, c.modified.endLineNumberExclusive - 1, c.modified.startLineNumber - 1);

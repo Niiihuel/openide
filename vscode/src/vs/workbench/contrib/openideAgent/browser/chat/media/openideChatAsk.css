@@ -1,17 +1,8 @@
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — `ask_user`'s transcript record. The interactive card moved to the composer dock
- *  (openideChatQuestions.css); what stays in the list is the shimmer while the run waits and the
+ *  (openideChatQuestions.css); the shared status line describes the wait. This record shows the
  *  settled question → answer pairs afterwards, on the shared card recipe (--oi-chat-card-*).
  *--------------------------------------------------------------------------------------------*/
-
-/* While the run is parked the row is a single shimmer line, no frame: the frame lives on the
-   docked card the line is pointing at. */
-.openide-chat-ask:not(.answered) {
-	margin: 5px 0 7px;
-	font-size: 12.5px;
-}
-
-.openide-chat-ask-pending { line-height: 1.5; }
 
 .openide-chat-ask.answered {
 	margin: 5px 0 7px;

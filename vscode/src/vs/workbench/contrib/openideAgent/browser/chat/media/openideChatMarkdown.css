@@ -62,7 +62,7 @@
    workbench markdown renderer does not, so the fence's own `code` is excluded structurally. */
 .openide-chat-markdown :not(pre) > code {
 	padding: 1px 4px;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: var(--oi-border-soft);
 	font-family: var(--vscode-editor-font-family, monospace);
 	font-size: 0.92em;
@@ -181,7 +181,7 @@
 	height: 22px;
 	padding: 0;
 	border: 1px solid var(--vscode-widget-border, transparent);
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: var(--vscode-editorWidget-background);
 	color: var(--vscode-foreground);
 	opacity: 0;
@@ -193,9 +193,17 @@
 	opacity: 0.9;
 }
 .openide-chat-codeblock-copy:hover {
-	background: var(--vscode-toolbar-hoverBackground);
+	background: var(--oi-hover);
 }
 .openide-chat-codeblock-copy.copied {
 	color: var(--openide-green);
 	opacity: 1;
+}
+
+.openide-chat-native a .openide-chat-link-icon.codicon {
+ display: inline-block;
+ margin-right: 4px;
+ font-size: 1em;
+ vertical-align: -0.1em;
+ color: inherit;
 }

@@ -103,7 +103,7 @@ export const OPENIDE_TOOL_META: Readonly<Record<string, IOpenideToolMeta>> = {
 	browser_type: { icon: 'edit', verb: 'Typing', done: 'Typed', key: 'selector' },
 	browser_evaluate: { icon: 'code', verb: 'Evaluating JS', done: 'Evaluated', key: 'expression' },
 	browser_set_style: { icon: 'paintcan', verb: 'Applying styles', done: 'Applied styles', key: 'selector' },
-	browser_playwright: { icon: 'run', verb: 'Running Playwright', done: 'Ran Playwright', key: 'code' },
+	browser_playwright: { icon: 'beaker', verb: 'Running Playwright', done: 'Ran Playwright', key: 'code' },
 	browser_dialog: { icon: 'comment-discussion', verb: 'Handling dialog', done: 'Handled dialog', key: '' },
 
 	// ---- The tools the registry adds at runtime (browser/openideAgentService.ts). They were all
@@ -117,6 +117,14 @@ export const OPENIDE_TOOL_META: Readonly<Record<string, IOpenideToolMeta>> = {
 	memory_graph_impact: { icon: 'git-compare', verb: 'Checking impact', done: 'Checked impact', key: 'targets', explore: true, exploreKind: 'search' },
 	memory_graph_path: { icon: 'arrow-both', verb: 'Tracing path', done: 'Traced path', key: 'from', explore: true, exploreKind: 'search' },
 	memory_graph_related_tests: { icon: 'beaker', verb: 'Looking for tests', done: 'Found tests', key: 'targets', explore: true, exploreKind: 'search' },
+	canvas_templates: { icon: 'preview', verb: 'Discovering templates', done: 'Found Canvas templates', key: '', explore: true, exploreKind: 'search' },
+	canvas_create: { icon: 'preview', verb: 'Creating design', done: 'Created design', key: 'title', base: true },
+	canvas_inspect: { icon: 'preview', verb: 'Inspecting design', done: 'Inspected design', key: 'path', explore: true, exploreKind: 'file' },
+	canvas_patch: { icon: 'preview', verb: 'Editing design', done: 'Edited design', key: 'path', base: true },
+	canvas_import: { icon: 'preview', verb: 'Importing Canvas content', done: 'Imported Canvas content', key: 'sourcePath', base: true },
+	canvas_preview: { icon: 'preview', verb: 'Capturing design', done: 'Captured design', key: 'path', base: true },
+	canvas_export: { icon: 'preview', verb: 'Exporting design', done: 'Exported HTML', key: 'path', base: true },
+	canvas_handoff: { icon: 'preview', verb: 'Preparing design brief', done: 'Prepared design brief', key: 'path', base: true },
 	canvas_read: { icon: 'preview', verb: 'Reading canvas', done: 'Read canvas', key: 'path', explore: true, exploreKind: 'file' },
 	canvas_list: { icon: 'preview', verb: 'Listing canvases', done: 'Listed canvases', key: '', explore: true, exploreKind: 'search' },
 	list_conversations: { icon: 'comment-discussion', verb: 'Checking the other conversations', done: 'Checked the other conversations', key: '', explore: true, exploreKind: 'other' },

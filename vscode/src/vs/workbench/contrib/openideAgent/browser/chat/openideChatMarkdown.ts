@@ -6,6 +6,10 @@
 import { $, addDisposableListener, append, getWindow, isHTMLElement } from '../../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent.js';
 import { StandardMouseEvent } from '../../../../../base/browser/mouseEvent.js';
+import { toAction, Separator } from '../../../../../base/common/actions.js';
+import { URI } from '../../../../../base/common/uri.js';
+import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
+import { IBrowserViewWorkbenchService } from '../../../browserView/common/browserView.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { onUnexpectedError } from '../../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
@@ -249,6 +253,8 @@ export class OpenideChatMarkdownRenderer implements IMarkdownRenderer {
 		@IHoverService private readonly _hoverService: IHoverService,
 		@IClipboardService private readonly _clipboardService: IClipboardService,
 		@IOpenerService private readonly _openerService: IOpenerService,
+		@IContextMenuService private readonly _menus: IContextMenuService,
+		@IBrowserViewWorkbenchService private readonly _browsers: IBrowserViewWorkbenchService,
 		@ILanguageService languageService: ILanguageService,
 		@IConfigurationService configurationService: IConfigurationService,
 	) {
@@ -270,6 +276,7 @@ export class OpenideChatMarkdownRenderer implements IMarkdownRenderer {
 		this._decorateCodeBlocks(result.element);
 		this._normalizeTopLevel(result.element);
 		this.attachNodeExtras(result.element, store);
+		store.add(this.attachLinkActivation(result.element));
 
 		return {
 			element: result.element,
@@ -317,6 +324,12 @@ export class OpenideChatMarkdownRenderer implements IMarkdownRenderer {
 		// an attribute so the hover can be set up again on a node that outlived its first render.
 		// eslint-disable-next-line no-restricted-syntax
 		for (const anchor of node.querySelectorAll('a')) {
+			const web = chatWebLink(anchor.dataset['href'] ?? '');
+			if (web?.hostname.toLowerCase() === 'github.com' && !anchor.querySelector('.openide-chat-link-icon')) {
+				const icon = $('span.codicon.codicon-github.openide-chat-link-icon', { 'aria-hidden': 'true' });
+				anchor.prepend(icon);
+			}
+
 			if (anchor.title) {
 				anchor.setAttribute(LINK_TITLE_ATTRIBUTE, anchor.title);
 				anchor.title = '';
@@ -344,7 +357,7 @@ export class OpenideChatMarkdownRenderer implements IMarkdownRenderer {
 			try {
 				const href = target.dataset['href'];
 				if (href) {
-					void openLinkFromMarkdown(this._openerService, href, false);
+					void this._openLink(href, target).catch(onUnexpectedError);
 				}
 			} catch (error) {
 				onUnexpectedError(error);
@@ -359,15 +372,37 @@ export class OpenideChatMarkdownRenderer implements IMarkdownRenderer {
 				activate(mouseEvent);
 			}
 		};
-		store.add(addDisposableListener(host, 'click', onClick));
-		store.add(addDisposableListener(host, 'auxclick', onClick));
+		store.add(addDisposableListener(host, 'click', onClick, true));
+		store.add(addDisposableListener(host, 'auxclick', onClick, true));
 		store.add(addDisposableListener(host, 'keydown', (event: KeyboardEvent) => {
 			const keyboardEvent = new StandardKeyboardEvent(event);
 			if (keyboardEvent.equals(KeyCode.Space) || keyboardEvent.equals(KeyCode.Enter)) {
 				activate(keyboardEvent);
 			}
+		}, true));
+		store.add(addDisposableListener(host, 'contextmenu', (event: MouseEvent) => {
+			const target = isHTMLElement(event.target) ? event.target.closest<HTMLElement>('a[data-href]') : null;
+			const href = target?.dataset['href'];
+			if (!target || !href || !chatWebLink(href)) { return; }
+			event.preventDefault(); event.stopPropagation();
+			this._menus.showContextMenu({
+				getAnchor: () => new StandardMouseEvent(getWindow(host), event),
+				getActions: () => [
+					toAction({ id: 'chat.link.browser', label: t('chatSurface.link.browser'), run: () => this._openLink(href, target) }),
+					toAction({ id: 'chat.link.external', label: t('chatSurface.resource.external'), run: () => this._openerService.open(URI.parse(href), { openExternal: true, allowCommands: false }) }),
+					new Separator(),
+					toAction({ id: 'chat.link.copy', label: t('chatSurface.resource.copy'), run: () => this._clipboardService.writeText(href) }),
+				],
+				domForShadowRoot: host, useWindowContainerForShadowRoot: true,
+			});
 		}));
 		return store;
+	}
+
+	private async _openLink(href: string, anchor: HTMLElement): Promise<void> {
+		if (chatWebLink(href)) {
+			await this._browsers.openPreview(href, undefined, { targetWindowId: getWindow(anchor).vscodeWindowId, reveal: true });
+		} else { await openLinkFromMarkdown(this._openerService, href, false); }
 	}
 
 	/**
@@ -416,4 +451,8 @@ export class OpenideChatMarkdownRenderer implements IMarkdownRenderer {
 			}
 		}
 	}
+}
+
+function chatWebLink(href: string): URL | undefined {
+	try { const url = new URL(href); return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password ? url : undefined; } catch { return undefined; }
 }

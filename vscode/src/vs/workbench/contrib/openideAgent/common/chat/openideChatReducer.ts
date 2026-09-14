@@ -301,7 +301,7 @@ function applySubagentStart(draft: IOpenideChatDraft, ev: Extract<AgentLoopEvent
 	});
 	draft.subagents.set(ev.id, index);
 	// R7: the mirror session is created by the controller. The reducer only says it must exist.
-	addOpenideChatEffect(draft, { type: 'subagentSessionStart', runId: ev.id, title: ev.title, prompt: ev.prompt });
+	addOpenideChatEffect(draft, { type: 'subagentSessionStart', runId: ev.id, title: ev.title, prompt: ev.prompt, inLoop: true });
 }
 
 function applySubagentDone(draft: IOpenideChatDraft, ev: Extract<AgentLoopEvent, { type: 'subagentDone' }>): void {
@@ -311,14 +311,14 @@ function applySubagentDone(draft: IOpenideChatDraft, ev: Extract<AgentLoopEvent,
 	if (existing && index !== undefined && existing.status === 'running') {
 		setOpenideChatContentAt(draft, index, { ...existing, status });
 	}
-	if (ev.cancelled) {
+	if (status === 'cancelled') {
 		addOpenideChatEffect(draft, {
 			type: 'subagentSessionMessage', runId: ev.id, mergeText: false,
 			message: { role: 'assistant', content: 'Subagente cancelado por el usuario.' } satisfies IChatMessage,
 		});
 	}
-	addOpenideChatEffect(draft, { type: 'subagentSessionEnd', runId: ev.id, isError: !!ev.isError, cancelled: !!ev.cancelled });
-	addOpenideChatEffect(draft, { type: 'subagentSessionSave', runId: ev.id, isError: !!ev.isError });
+	addOpenideChatEffect(draft, { type: 'subagentSessionEnd', runId: ev.id, isError: status === 'failed', cancelled: status === 'cancelled' });
+	addOpenideChatEffect(draft, { type: 'subagentSessionSave', runId: ev.id, isError: status === 'failed' });
 }
 
 /** Durable subagent runs carry their own timeline, so the card is rebuilt from the run itself. */

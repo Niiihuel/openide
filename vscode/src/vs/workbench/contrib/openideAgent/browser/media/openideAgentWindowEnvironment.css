@@ -1,0 +1,24 @@
+/* Copyright (c) OpenIDE. Licensed under the MIT License. */
+.openide-agent-window-environment-menu {
+	min-width: 260px;
+	max-width: min(420px, calc(100vw - 24px));
+}
+
+.openide-agent-window-environment-details {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 8px 16px;
+	margin: 8px 12px 12px;
+	font-size: var(--vscode-font-size);
+}
+
+.openide-agent-window-environment-details dt {
+	color: var(--oi-muted);
+}
+
+.openide-agent-window-environment-details dd {
+	margin: 0;
+	color: var(--oi-text);
+	overflow-wrap: anywhere;
+	user-select: text;
+}

@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { createOpenideElement } from '../openideDom.js';
 import { addDisposableListener, append, clearNode } from '../../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent.js';
 import { KeyCode } from '../../../../../base/common/keyCodes.js';
@@ -283,7 +284,7 @@ export class OpenideChatComposerSuggest extends Disposable {
 	 * outside the panel's rounded clip.
 	 */
 	private _paintScrollShadow(container: HTMLElement, content: HTMLElement): void {
-		const shadow = append(container, container.ownerDocument.createElement('div'));
+		const shadow = append(container, createOpenideElement(container.ownerDocument, 'div'));
 		shadow.className = 'openide-chat-suggest-shadow';
 		const sync = () => shadow.classList.toggle('visible', content.scrollTop > 0);
 		this._register(addDisposableListener(content, 'scroll', sync));
@@ -294,20 +295,20 @@ export class OpenideChatComposerSuggest extends Disposable {
 		const document = content.ownerDocument;
 		this._files.forEach((item, index) => {
 			const row = this._row(content, index);
-			const slot = append(row, document.createElement('span'));
+			const slot = append(row, createOpenideElement(document, 'span'));
 			slot.className = 'openide-menu-row-icon';
-			const icon = append(slot, document.createElement('span'));
+			const icon = append(slot, createOpenideElement(document, 'span'));
 			icon.className = item.iconClasses ? `openide-chat-file-icon ${item.iconClasses}` : 'codicon codicon-file';
 			// Copilot's picker shows the basename first and the folder dimmed after it, in the UI
 			// font — a path in monospace reads as code, not as a file you are choosing.
 			const slash = item.path.lastIndexOf('/');
-			const label = append(row, document.createElement('span'));
+			const label = append(row, createOpenideElement(document, 'span'));
 			label.className = 'openide-chat-suggest-file';
-			const name = append(label, document.createElement('span'));
+			const name = append(label, createOpenideElement(document, 'span'));
 			name.className = 'openide-chat-suggest-file-name';
 			name.textContent = slash >= 0 ? item.path.slice(slash + 1) : item.path;
 			if (slash > 0) {
-				const dir = append(label, document.createElement('span'));
+				const dir = append(label, createOpenideElement(document, 'span'));
 				dir.className = 'openide-chat-suggest-file-dir';
 				dir.textContent = item.path.slice(0, slash);
 			}
@@ -325,9 +326,9 @@ export class OpenideChatComposerSuggest extends Disposable {
 		for (const group of SLASH_GROUPS) {
 			const entries = this._slash.map((item, index) => ({ item, index })).filter(entry => entry.item.kind === group.kind);
 			if (!entries.length) { continue; }
-			const section = append(content, document.createElement('div'));
+			const section = append(content, createOpenideElement(document, 'div'));
 			section.className = 'openide-chat-suggest-section';
-			const title = append(section, document.createElement('div'));
+			const title = append(section, createOpenideElement(document, 'div'));
 			title.className = 'openide-menu-section';
 			title.textContent = group.label;
 			// Two lines per row: the name with its signature on the first, the description on the
@@ -337,21 +338,21 @@ export class OpenideChatComposerSuggest extends Disposable {
 			// not how few pixels tall the row is.
 			for (const { item, index } of entries) {
 				const row = this._row(section, index);
-				const slot = append(row, document.createElement('span'));
+				const slot = append(row, createOpenideElement(document, 'span'));
 				slot.className = 'openide-menu-row-icon';
 				slot.appendChild(createCodicon(document, group.icon));
-				const text = append(row, document.createElement('span'));
+				const text = append(row, createOpenideElement(document, 'span'));
 				text.className = 'openide-chat-suggest-text';
 				// Name and signature are separate spans so they give way in the right order: the
 				// name never shrinks and the signature truncates before it. Sharing one span made
 				// "/openide-canvas" collapse to "/openide-…" while its hint still had room.
-				const title = append(text, document.createElement('span'));
+				const title = append(text, createOpenideElement(document, 'span'));
 				title.className = 'openide-chat-suggest-title';
-				const name = append(title, document.createElement('span'));
+				const name = append(title, createOpenideElement(document, 'span'));
 				name.className = 'openide-chat-suggest-name';
 				this._paintSlashLabel(name, `/${item.name}`);
 				if (item.hint) {
-					const hint = append(title, document.createElement('span'));
+					const hint = append(title, createOpenideElement(document, 'span'));
 					hint.className = 'openide-chat-suggest-hint';
 					// No leading space in the text: the title is a flex row, and a space at the
 					// start of a flex item is collapsed away. The gap belongs to the layout.
@@ -360,11 +361,11 @@ export class OpenideChatComposerSuggest extends Disposable {
 				// Only painted when there is something to warn about. An always-present empty span
 				// still ate the row's gap, which pushed the signature into truncating early.
 				if (item.risk === 'exec' || item.risk === 'write') {
-					const risk = append(title, document.createElement('span'));
+					const risk = append(title, createOpenideElement(document, 'span'));
 					risk.className = `openide-chat-suggest-risk ${item.risk}`;
 					risk.textContent = item.risk;
 				}
-				const detail = append(text, document.createElement('span'));
+				const detail = append(text, createOpenideElement(document, 'span'));
 				detail.className = 'openide-chat-suggest-desc';
 				detail.textContent = compactSlashDescription(item.description);
 				// The workbench hover, not `title=`: a bare title attribute draws the OPERATING
@@ -392,14 +393,14 @@ export class OpenideChatComposerSuggest extends Disposable {
 			return;
 		}
 		label.append(label.ownerDocument.createTextNode(text.slice(0, at)));
-		const hit = append(label, label.ownerDocument.createElement('span'));
+		const hit = append(label, createOpenideElement(label.ownerDocument, 'span'));
 		hit.className = 'openide-chat-suggest-hit';
 		hit.textContent = text.slice(at, at + query.length);
 		label.append(label.ownerDocument.createTextNode(text.slice(at + query.length)));
 	}
 
 	private _row(parent: HTMLElement, index: number): HTMLButtonElement {
-		const row = append(parent, parent.ownerDocument.createElement('button'));
+		const row = append(parent, createOpenideElement(parent.ownerDocument, 'button'));
 		row.type = 'button';
 		row.className = `openide-menu-row${index === this._selected ? ' focus' : ''}`;
 		row.setAttribute('data-suggest-index', String(index));
@@ -429,17 +430,17 @@ export class OpenideChatComposerSuggest extends Disposable {
 				this._pinWidth(container);
 				container.classList.add('openide-chat-suggest');
 				const content = append(container, createMenuContent(container.ownerDocument));
-				const row = append(content, container.ownerDocument.createElement('div'));
+				const row = append(content, createOpenideElement(container.ownerDocument, 'div'));
 				row.className = 'openide-menu-row openide-chat-suggest-ghost';
-				const slot = append(row, container.ownerDocument.createElement('span'));
+				const slot = append(row, createOpenideElement(container.ownerDocument, 'span'));
 				slot.className = 'openide-menu-row-icon';
 				slot.appendChild(createCodicon(container.ownerDocument, 'terminal'));
 				// The ghost is one row of the same list, so it lays out like one: name left, hint
 				// right, on a single line. It kept the stacked wrapper the entries used to have.
-				const label = append(row, container.ownerDocument.createElement('span'));
+				const label = append(row, createOpenideElement(container.ownerDocument, 'span'));
 				label.className = 'openide-menu-label';
 				label.textContent = `/${ghost.slug}`;
-				const hint = append(row, container.ownerDocument.createElement('span'));
+				const hint = append(row, createOpenideElement(container.ownerDocument, 'span'));
 				hint.className = 'openide-menu-detail';
 				hint.textContent = ghost.hint;
 				row.setAttribute('aria-label', t('chatSurface.composer.suggestHint', ghost.slug, ghost.hint));

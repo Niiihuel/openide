@@ -53,6 +53,7 @@ function categoryFor(group: ISettingsGroup, setting: ISetting): string {
  * already ships in the language packs.
  */
 const OPENIDE_NAV_LABELS = {
+	'workbench/profile': 'accounts.profileTitle',
 	'workbench/language': 'settings.nav.language',
 	'openideAgent': 'settings.nav.agent',
 	'openideAgent/providers': 'settings.nav.agent.providers',

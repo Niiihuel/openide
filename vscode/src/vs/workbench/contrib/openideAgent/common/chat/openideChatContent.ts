@@ -263,6 +263,8 @@ export interface IOpenideChatNoticeContent {
 	readonly severity: 'info' | 'warning' | 'error';
 	readonly message: string;
 	readonly action?: 'connect' | 'continue' | 'account-back';
+	/** Updated in place by the background capture service, rather than stacked repeatedly. */
+	readonly source?: 'memoryCapture';
 	readonly retry?: IOpenideChatRetryInfo;
 }
 

@@ -85,8 +85,9 @@ body {
    High contrast is excluded on purpose: those themes trade depth cues for edge contrast, and a
    blur works against that — upstream special-cases hc-black/hc-light throughout for the same
    reason. */
-.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-modal-editor-block,
-.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-modal-block.dimmed {
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-modal-editor-block:not(.full-window-editor),
+.monaco-workbench:not(.hc-black):not(.hc-light) .monaco-dialog-modal-block.dimmed,
+.monaco-workbench:not(.hc-black):not(.hc-light) .quick-input-backdrop {
 	-webkit-backdrop-filter: blur(var(--vscode-backdrop-blur));
 	backdrop-filter: blur(var(--vscode-backdrop-blur));
 }
@@ -418,3 +419,5 @@ body {
     outline: calc(var(--vscode-workbench-sidebar-font-size) * 0.076923) dashed var(--vscode-toolbar-hoverOutline);
     outline-offset: calc(var(--vscode-workbench-sidebar-font-size) * -0.076923)
 }
+/* QuickInput uses the same modal backdrop treatment in its owning window. */
+.monaco-workbench .quick-input-backdrop { position: absolute; inset: 0; z-index: 2549; background: rgba(0, 0, 0, .3); pointer-events: none; }

@@ -16,7 +16,7 @@
 	position: absolute;
 	left: 0;
 	bottom: 0;
-	color: #3794ff;
+	color: var(--vscode-textLink-foreground);
 }
 
 .monaco-workbench .terminal-hover-target {
@@ -42,4 +42,12 @@
 
 .monaco-workbench .terminal-env-var-info.codicon {
 	line-height: 28px;
+}
+
+.monaco-workbench.openide-visual .terminal-env-var-info {
+	border-radius: var(--oi-radius-control);
+	transition: opacity var(--oi-duration-hover) var(--oi-ease), background-color var(--oi-duration-hover) var(--oi-ease);
+}
+.monaco-workbench.openide-visual .terminal-env-var-info:hover {
+	background: var(--oi-hover);
 }

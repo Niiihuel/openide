@@ -18,26 +18,112 @@
 import { getWindow } from '../../../../base/browser/dom.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { RunOnceScheduler, timeout } from '../../../../base/common/async.js';
-import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IReference, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
-import { ContentWidgetPositionPreference, ICodeEditor, IContentWidget, IContentWidgetPosition, IContentWidgetRenderedCoordinate, IOverlayWidget, MouseTargetType, OverlayWidgetPositionPreference } from '../../../../editor/browser/editorBrowser.js';
+import { ContentWidgetPositionPreference, getCodeEditor, ICodeEditor, IContentWidget, IContentWidgetPosition, IContentWidgetRenderedCoordinate, IOverlayWidget, MouseTargetType, OverlayWidgetPositionPreference } from '../../../../editor/browser/editorBrowser.js';
 import { IEditorDecorationsCollection } from '../../../../editor/common/editorCommon.js';
 import { ICodeEditorService } from '../../../../editor/browser/services/codeEditorService.js';
 import { Range } from '../../../../editor/common/core/range.js';
-import { linesDiffComputers } from '../../../../editor/common/diff/linesDiffComputers.js';
 import { DetailedLineRangeMapping } from '../../../../editor/common/diff/rangeMapping.js';
-import { LineRange } from '../../../../editor/common/core/ranges/lineRange.js';
 import { EditorOption } from '../../../../editor/common/config/editorOptions.js';
 import { ITextModel, OverviewRulerLane } from '../../../../editor/common/model.js';
 import { IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { DEFAULT_EDITOR_ASSOCIATION } from '../../../common/editor.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { ITextFileService, TextFileResolveReason } from '../../../services/textfile/common/textfiles.js';
+import { onUnexpectedError } from '../../../../base/common/errors.js';
+import { IOpenideReviewDiff, IOpenideReviewDiffService } from './openideReviewDiffService.js';
 import { OpenideDiffSnapshotProvider } from './openideDiffSnapshot.js';
 import { applyOpenideSurfaceCss } from './openideSurfaceStyle.js';
 import { t } from '../common/openideStrings.js';
 
-const DIFF_OPTIONS = { ignoreTrimWhitespace: false, maxComputationTimeMs: 5000, computeMoves: false };
+/** Shared inline diff paint for normal editors and the all-files review. No snapshot mutation. */
+export function paintOpenideReviewChanges(editor: ICodeEditor, decorations: IEditorDecorationsCollection, changes: readonly DetailedLineRangeMapping[], baselineLines: string[], previousZones: string[]) {
+	const model = editor.getModel()!;
+	let zoneIds = previousZones;
+	let deletionZones: { change: DetailedLineRangeMapping; dom: HTMLElement }[] = [];
+	const additions = changes.filter(c => !c.modified.isEmpty).map(c => ({
+		range: new Range(c.modified.startLineNumber, 1, c.modified.endLineNumberExclusive - 1, model.getLineMaxColumn(c.modified.endLineNumberExclusive - 1)),
+		options: {
+			description: c.original.isEmpty ? 'openide-review-added' : 'openide-review-modified',
+			isWholeLine: true,
+			className: c.original.isEmpty ? 'openide-review-added-line' : 'openide-review-modified-line',
+			linesDecorationsClassName: 'openide-review-change-gutter',
+			overviewRuler: { color: 'rgba(43, 151, 113, 0.72)', position: OverviewRulerLane.Right },
+		},
+	}));
+	const deletions = changes.filter(c => !c.original.isEmpty).map(c => {
+		const line = Math.max(1, Math.min(model.getLineCount(), c.modified.startLineNumber));
+		return {
+			range: new Range(line, 1, line, 1),
+			options: {
+				description: 'openide-review-deleted',
+				overviewRuler: { color: 'rgba(194, 63, 96, 0.72)', position: OverviewRulerLane.Left },
+			},
+		};
+	});
+	const neutral: { range: Range; options: { description: string; overviewRuler: { color: string; position: OverviewRulerLane } } }[] = [];
+	const changed = changes.filter(c => !c.modified.isEmpty).map(c => c.modified).sort((a, b) => a.startLineNumber - b.startLineNumber);
+	let unchangedStart = 1;
+	for (const range of changed) {
+		if (unchangedStart < range.startLineNumber) {
+			neutral.push({
+				range: new Range(unchangedStart, 1, range.startLineNumber - 1, 1),
+				options: { description: 'openide-review-context', overviewRuler: { color: 'rgba(128, 128, 128, 0.25)', position: OverviewRulerLane.Center } },
+			});
+		}
+		unchangedStart = Math.max(unchangedStart, range.endLineNumberExclusive);
+	}
+	if (unchangedStart <= model.getLineCount()) {
+		neutral.push({
+			range: new Range(unchangedStart, 1, model.getLineCount(), 1),
+			options: { description: 'openide-review-context', overviewRuler: { color: 'rgba(128, 128, 128, 0.25)', position: OverviewRulerLane.Center } },
+		});
+	}
+	decorations.set([...neutral, ...additions, ...deletions]);
+
+	// removed lines: red view zone holding the baseline content
+	const base = baselineLines;
+	const fontInfo = editor.getOption(EditorOption.fontInfo);
+	editor.changeViewZones(accessor => {
+		for (const id of zoneIds) {
+			accessor.removeZone(id);
+		}
+		zoneIds = [];
+		deletionZones = [];
+		for (const c of changes) {
+			if (c.original.isEmpty) {
+				continue;
+			}
+			const lines = base.slice(c.original.startLineNumber - 1, c.original.endLineNumberExclusive - 1);
+			const dom = document.createElement('div');
+			dom.className = 'openide-review-deleted-zone';
+			dom.style.fontFamily = fontInfo.fontFamily;
+			dom.style.fontSize = `${fontInfo.fontSize}px`;
+			dom.style.lineHeight = `${fontInfo.lineHeight}px`;
+			for (const text of lines) {
+				const ln = document.createElement('div');
+				ln.className = 'openide-review-deleted-line';
+				const sign = document.createElement('span');
+				sign.className = 'openide-review-deleted-sign';
+				sign.textContent = '−';
+				const code = document.createElement('span');
+				code.className = 'openide-review-deleted-code';
+				code.textContent = text || ' ';
+				ln.append(sign, code);
+				dom.appendChild(ln);
+			}
+			deletionZones.push({ change: c, dom });
+			zoneIds.push(accessor.addZone({
+				afterLineNumber: c.modified.isEmpty ? c.modified.startLineNumber - 1 : c.modified.startLineNumber - 1,
+				heightInLines: lines.length,
+				domNode: dom,
+			}));
+		}
+	});
+
+	return { zoneIds, deletionZones };
+}
 
 /** True when the active editor has an agent review session (the gate for the integrated
  *  keybindings: Ctrl+N undoes the block, Ctrl+Y keeps it, Ctrl+Enter keeps the file — ONLY
@@ -81,6 +167,10 @@ class ReviewSession extends Disposable {
 	/** Baseline content the diff is computed against (the live session's if there was one, else git
 	 *  HEAD). Per-block keep overwrites it locally with the kept block folded in. */
 	private baseline: string;
+	private readonly diff = this._register(new MutableDisposable<IReference<IOpenideReviewDiff>>());
+	private diffModel: ITextModel | undefined;
+	private diffBaseline: string | undefined;
+	private renderEpoch = 0;
 	private lastRender: { model: ITextModel; version: number; baseline: string } | undefined;
 	/** Becomes true on seeing the first diff. It prevents auto-resolving the file when the review
 	 *  attaches BEFORE the model reloads from disk (diff still empty). */
@@ -98,6 +188,7 @@ class ReviewSession extends Disposable {
 		baseline: string,
 		private readonly host: IEditReviewHost,
 		private readonly textFileService: ITextFileService,
+		private readonly diffs: IOpenideReviewDiffService,
 		private readonly onResolved: () => void,
 		private readonly onPendingChanged: () => void,
 	) {
@@ -128,7 +219,7 @@ class ReviewSession extends Disposable {
 			undoBlock: () => this.runAction('undoBlock'),
 			keepBlock: () => this.runAction('keepBlock'),
 		}));
-		this.recompute = this._register(new RunOnceScheduler(() => this.render(), 50));
+		this.recompute = this._register(new RunOnceScheduler(() => this.refresh(), 100));
 		// The hunk pill also activates on hover intent: a second resting over a block is enough and
 		// avoids forcing the user to move the cursor or click the code.
 		this.hoverScheduler = this._register(new RunOnceScheduler(() => {
@@ -140,6 +231,7 @@ class ReviewSession extends Disposable {
 			this.updateChrome();
 		}, 1000));
 		this._register(this.editor.onDidChangeModelContent(() => {
+			this.blockWidget.setComputing(true);
 			if (!this.applying) {
 				this.stopFollowing();
 				if (!this.recompute.isScheduled()) { this.recompute.schedule(); }
@@ -174,7 +266,7 @@ class ReviewSession extends Disposable {
 			this.headerWidget.remount();
 			this.blockWidget.layout();
 		}));
-		this.render();
+		this.refresh();
 	}
 
 	private model(): ITextModel | null {
@@ -193,113 +285,34 @@ class ReviewSession extends Disposable {
 
 	// ---- render ----
 
-	private render(revealActive = false): void {
+	/** A hunk can mutate text only while its mapping belongs to this exact model version. */
+	private isCurrent(): boolean {
 		const model = this.model();
-		if (!model) {
-			return;
+		return !this._store.isDisposed && !!model && !model.isDisposed() && this.lastRender?.model === model
+			&& this.lastRender.version === model.getVersionId() && this.lastRender.baseline === this.baseline;
+	}
+
+	private async render(revealActive = false): Promise<boolean> {
+		const model = this.model();
+		if (this._store.isDisposed || !model || model.isDisposed()) { return false; }
+		if (this.isCurrent()) { this.updateChrome(revealActive); return true; }
+		const epoch = ++this.renderEpoch;
+		const baseline = this.baseline;
+		if (this.diffModel !== model || this.diffBaseline !== baseline) {
+			this.diff.value = this.diffs.acquire(model, baseline);
+			this.diffModel = model; this.diffBaseline = baseline;
 		}
-		if (this.lastRender?.model === model && this.lastRender.version === model.getVersionId() && this.lastRender.baseline === this.baseline) {
-			this.updateChrome(revealActive);
-			return;
-		}
-		const original = this.baselineLines();
-		const modified = model.getLinesContent();
-		// A CREATED file has no baseline, and "no lines" is not a document: every text has at least
-		// one line. Handing Monaco's differ a zero-line side made it ask `toRangeMapping2` for a
-		// mapping it cannot build — original range empty, starting at line 1, touching the last line
-		// — and that path ends in `throw new BugIndicatingError()`. That is the "An unexpected bug
-		// occurred" the console reported on files the agent created.
-		//
-		// It never needed computing: a creation is every line added, which is exactly the mapping
-		// below (empty on the original side, the whole file on the modified one). Passing `['']`
-		// instead would compute a MODIFICATION of an empty line, and the review would paint a
-		// phantom deleted line above a file that never had one.
-		const emptyModified = modified.length === 1 && modified[0].length === 0;
-		this.changes = original.length === 0
-			? (emptyModified ? [] : [new DetailedLineRangeMapping(new LineRange(1, 1), new LineRange(1, modified.length + 1), undefined)])
-			: linesDiffComputers.getDefault().computeDiff(original, modified, DIFF_OPTIONS).changes;
+		this.blockWidget.setComputing(true);
+		const result = await this.diff.value!.object.compute(CancellationToken.None).catch(error => { onUnexpectedError(error); return undefined; });
+		if (!result || epoch !== this.renderEpoch || this._store.isDisposed || this.model() !== model || model.isDisposed()
+			|| model.getVersionId() !== result.version || this.baseline !== baseline) { return false; }
+		this.changes = result.changes;
 
 		// The left margin marks the active hunk in yellow. The right overview ruler is exclusively a
 		// map of the diff: green added, red removed, grey context.
-		const additions = this.changes.filter(c => !c.modified.isEmpty).map(c => ({
-			range: new Range(c.modified.startLineNumber, 1, c.modified.endLineNumberExclusive - 1, model.getLineMaxColumn(c.modified.endLineNumberExclusive - 1)),
-			options: {
-				description: c.original.isEmpty ? 'openide-review-added' : 'openide-review-modified',
-				isWholeLine: true,
-				className: c.original.isEmpty ? 'openide-review-added-line' : 'openide-review-modified-line',
-				linesDecorationsClassName: 'openide-review-change-gutter',
-				overviewRuler: { color: 'rgba(43, 151, 113, 0.72)', position: OverviewRulerLane.Right },
-			},
-		}));
-		const deletions = this.changes.filter(c => !c.original.isEmpty).map(c => {
-			const line = Math.max(1, Math.min(model.getLineCount(), c.modified.startLineNumber));
-			return {
-				range: new Range(line, 1, line, 1),
-				options: {
-					description: 'openide-review-deleted',
-					overviewRuler: { color: 'rgba(194, 63, 96, 0.72)', position: OverviewRulerLane.Left },
-				},
-			};
-		});
-		const neutral: { range: Range; options: { description: string; overviewRuler: { color: string; position: OverviewRulerLane } } }[] = [];
-		const changed = this.changes.filter(c => !c.modified.isEmpty).map(c => c.modified).sort((a, b) => a.startLineNumber - b.startLineNumber);
-		let unchangedStart = 1;
-		for (const range of changed) {
-			if (unchangedStart < range.startLineNumber) {
-				neutral.push({
-					range: new Range(unchangedStart, 1, range.startLineNumber - 1, 1),
-					options: { description: 'openide-review-context', overviewRuler: { color: 'rgba(128, 128, 128, 0.25)', position: OverviewRulerLane.Center } },
-				});
-			}
-			unchangedStart = Math.max(unchangedStart, range.endLineNumberExclusive);
-		}
-		if (unchangedStart <= model.getLineCount()) {
-			neutral.push({
-				range: new Range(unchangedStart, 1, model.getLineCount(), 1),
-				options: { description: 'openide-review-context', overviewRuler: { color: 'rgba(128, 128, 128, 0.25)', position: OverviewRulerLane.Center } },
-			});
-		}
-		this.decorations.set([...neutral, ...additions, ...deletions]);
-
-		// removed lines: red view zone holding the baseline content
-		const base = this.baselineLines();
-		const fontInfo = this.editor.getOption(EditorOption.fontInfo);
-		this.editor.changeViewZones(accessor => {
-			for (const id of this.zoneIds) {
-				accessor.removeZone(id);
-			}
-			this.zoneIds = [];
-			this.deletionZones = [];
-			for (const c of this.changes) {
-				if (c.original.isEmpty) {
-					continue;
-				}
-				const lines = base.slice(c.original.startLineNumber - 1, c.original.endLineNumberExclusive - 1);
-				const dom = document.createElement('div');
-				dom.className = 'openide-review-deleted-zone';
-				dom.style.fontFamily = fontInfo.fontFamily;
-				dom.style.fontSize = `${fontInfo.fontSize}px`;
-				dom.style.lineHeight = `${fontInfo.lineHeight}px`;
-				for (const text of lines) {
-					const ln = document.createElement('div');
-					ln.className = 'openide-review-deleted-line';
-					const sign = document.createElement('span');
-					sign.className = 'openide-review-deleted-sign';
-					sign.textContent = '−';
-					const code = document.createElement('span');
-					code.className = 'openide-review-deleted-code';
-					code.textContent = text || ' ';
-					ln.append(sign, code);
-					dom.appendChild(ln);
-				}
-				this.deletionZones.push({ change: c, dom });
-				this.zoneIds.push(accessor.addZone({
-					afterLineNumber: c.modified.isEmpty ? c.modified.startLineNumber - 1 : c.modified.startLineNumber - 1,
-					heightInLines: lines.length,
-					domNode: dom,
-				}));
-			}
-		});
+		const paint = paintOpenideReviewChanges(this.editor, this.decorations, this.changes, this.baselineLines(), this.zoneIds);
+		this.zoneIds = paint.zoneIds;
+		this.deletionZones = paint.deletionZones;
 
 		if (this.changes.length) { this.hadChanges = true; }
 		if (this.changes.length) {
@@ -327,6 +340,7 @@ class ReviewSession extends Disposable {
 			this.host.notifyCounts(this.path, 0, 0);
 			this.onResolved();
 		}
+		return true;
 	}
 
 	/** Single source of truth for both surfaces. It also relayouts the content widget when
@@ -337,6 +351,7 @@ class ReviewSession extends Disposable {
 		const block = this.currentBlock >= 0 ? this.changes[this.currentBlock] : undefined;
 		const line = block ? (block.modified.isEmpty ? Math.max(1, block.modified.startLineNumber - 1) : block.modified.endLineNumberExclusive - 1) : undefined;
 		this.blockWidget.update(this.changes.length, this.currentBlock, line);
+		this.blockWidget.setComputing(!this.isCurrent());
 		if (line !== undefined && revealActive) {
 			this.editor.revealLineInCenterIfOutsideViewport(line);
 		}
@@ -358,7 +373,7 @@ class ReviewSession extends Disposable {
 
 	/** The bar's ∧/∨ stepper: navigates to the previous/next block (no wrap) and reveals it. */
 	private stepBlock(dir: 1 | -1): void {
-		if (!this.changes.length) { return; }
+		if (!this.isCurrent() || !this.changes.length) { return; }
 		const cur = this.currentBlock >= 0 ? this.currentBlock : 0;
 		const ni = Math.max(0, Math.min(this.changes.length - 1, cur + dir));
 		const block = this.changes[ni];
@@ -403,6 +418,7 @@ class ReviewSession extends Disposable {
 	}
 
 	private async undoBlockAt(line: number): Promise<void> {
+		if (!this.isCurrent()) { return; }
 		const block = this.blockAt(line);
 		const model = this.model();
 		if (!block || !model) {
@@ -417,11 +433,11 @@ class ReviewSession extends Disposable {
 		} finally {
 			this.applying = false;
 		}
-		this.render(true);
-		this.notify();
+		if (await this.render(true)) { this.notify(); }
 	}
 
-	private keepBlockAt(line: number): void {
+	private async keepBlockAt(line: number): Promise<void> {
+		if (!this.isCurrent()) { return; }
 		const block = this.blockAt(line);
 		const model = this.model();
 		if (!block || !model) {
@@ -439,12 +455,12 @@ class ReviewSession extends Disposable {
 		// aceptado en la bandeja de Files.
 		this.baseline = merged;
 		this.snapshot.overwriteBaseline(this.path, merged);
-		this.render(true);
-		this.notify();
+		if (await this.render(true)) { this.notify(); }
 	}
 
 	/** Recomputes +N/−N against the current baseline and notifies the chat (0/0 ⇒ row resolved). */
 	private notify(): void {
+		if (!this.isCurrent()) { return; }
 		const model = this.model();
 		if (!model) {
 			return; // ya resuelto (render() avisó 0/0)
@@ -492,7 +508,7 @@ class ReviewSession extends Disposable {
 
 	/** Repaints decorations/zones (e.g. after a model swap with the same URI). */
 	refresh(): void {
-		this.render();
+		void this.render().catch(onUnexpectedError);
 	}
 
 	/** Highlights the completed edit without hiding code or replaying a simulated typing queue. */
@@ -500,7 +516,8 @@ class ReviewSession extends Disposable {
 		this.stopFollowing();
 		if (token.isCancellationRequested) { return; }
 		this.recompute.cancel();
-		this.render();
+		const epoch = this.followEpoch;
+		if (!await this.render() || epoch !== this.followEpoch || token.isCancellationRequested) { return; }
 		const model = this.model();
 		if (!model) { return; }
 		const from = Math.max(1, Math.min(model.getLineCount(), startLine ?? 1));
@@ -508,7 +525,6 @@ class ReviewSession extends Disposable {
 		this.editor.revealLineInCenterIfOutsideViewport(from);
 		const domNode = this.editor.getDomNode();
 		if (!domNode || getWindow(domNode).matchMedia('(prefers-reduced-motion: reduce)').matches) { return; }
-		const epoch = this.followEpoch;
 		const blocks = this.changes.filter(change => {
 			const start = Math.max(1, change.modified.startLineNumber - (change.modified.isEmpty ? 1 : 0));
 			return start <= to && Math.max(start, change.modified.endLineNumberExclusive - 1) >= from;
@@ -543,6 +559,7 @@ class ReviewSession extends Disposable {
 
 	/** API for the keybindings (Ctrl+N / Ctrl+Y / Ctrl+Enter, gated by openideReviewActive). */
 	runAction(action: ReviewAction): void {
+		if ((action === 'undoBlock' || action === 'keepBlock') && !this.isCurrent()) { return; }
 		const line = this.editor.getPosition()?.lineNumber;
 		const blockLine = (() => {
 			if (this.currentBlock >= 0 && this.changes[this.currentBlock]) {
@@ -553,10 +570,10 @@ class ReviewSession extends Disposable {
 		})();
 		switch (action) {
 			case 'undoBlock':
-				if (blockLine !== undefined) { this.undoBlockAt(blockLine); }
+				if (blockLine !== undefined) { void this.undoBlockAt(blockLine).catch(onUnexpectedError); }
 				break;
 			case 'keepBlock':
-				if (blockLine !== undefined) { this.keepBlockAt(blockLine); }
+				if (blockLine !== undefined) { void this.keepBlockAt(blockLine).catch(onUnexpectedError); }
 				break;
 			case 'undoFile':
 				this.resolveFile('revert');
@@ -665,6 +682,11 @@ class ReviewBlockWidget extends Disposable implements IContentWidget {
 		this.label.textContent = total > 0 ? `${Math.max(0, current) + 1} of ${total}` : '';
 		this.dom.classList.toggle('hidden', this.line === undefined);
 		this.layout();
+	}
+
+	setComputing(computing: boolean): void {
+		for (const button of this.dom.querySelectorAll('button')) { button.disabled = computing; }
+		this.dom.setAttribute('aria-busy', String(computing));
 	}
 
 	/** Cache for `width()`, keyed by the label it was measured against. */
@@ -919,6 +941,7 @@ export class OpenideEditReview extends Disposable {
 		@ICodeEditorService private readonly codeEditorService: ICodeEditorService,
 		@ITextFileService private readonly textFileService: ITextFileService,
 		@IContextKeyService contextKeyService: IContextKeyService,
+		@IOpenideReviewDiffService private readonly diffs: IOpenideReviewDiffService,
 	) {
 		super();
 		this.ctxReviewActive = CTX_OPENIDE_REVIEW_ACTIVE.bindTo(contextKeyService);
@@ -961,7 +984,7 @@ export class OpenideEditReview extends Disposable {
 	/** Opens the file in the normal editor and attaches the review (replacing vscode.diff). It
 	 *  attaches the explicit path DIRECTLY (it does not depend on the `pendingPaths()` gate, which
 	 *  is empty after a restart): the baseline resolves against git HEAD then → the diff survives reloads. */
-	async openReview(path: string, preserveFocus = false, follow?: { startLine?: number; endLine?: number; token?: CancellationToken }): Promise<void> {
+	async openReview(path: string, preserveFocus = false, follow?: { startLine?: number; endLine?: number; token?: CancellationToken }, targetEditorService: IEditorService = this.editorService): Promise<void> {
 		if (follow?.token?.isCancellationRequested) { return; }
 		const uri = this.host.resolveUri(path);
 		if (!uri) {
@@ -971,7 +994,7 @@ export class OpenideEditReview extends Disposable {
 		// preview/webview: there is no ICodeEditor with a model → the file looks "flat" and the
 		// integrated review (green/red + Undo/Keep) never attaches. This is exactly the
 		// "the chat has a diff, the editor does not" symptom.
-		await this.editorService.openEditor({
+		const pane = await targetEditorService.openEditor({
 			resource: uri,
 			options: { pinned: true, preserveFocus, override: DEFAULT_EDITOR_ASSOCIATION.id },
 		});
@@ -983,12 +1006,16 @@ export class OpenideEditReview extends Disposable {
 		if (follow?.token?.isCancellationRequested) { return; }
 		// openEditor can resolve BEFORE Monaco has the model: wait for the editor whose model.uri
 		// matches; otherwise the file opened without the green/red decorations.
-		const editor = await this.waitForEditorWithModel(uri);
+		// A companion can show the same file as the IDE. Attach to the pane opened HERE,
+		// never whichever same-URI editor happened to be focused in the other window.
+		if (!pane && targetEditorService !== this.editorService) { return; }
+		const preferredEditor = () => getCodeEditor(pane?.getControl()) ?? undefined;
+		const editor = await this.waitForEditorWithModel(uri, 5000, pane ? preferredEditor : undefined);
 		if (follow?.token?.isCancellationRequested) { return; }
 		if (!editor) {
 			throw new Error(`No se pudo abrir el editor de texto para revisar: ${path}`);
 		}
-		const attached = await this.attach(path, editor);
+		const attached = await this.attach(path, editor, targetEditorService);
 		if (!attached) {
 			throw new Error(`No se pudo activar el review del agente para: ${path}`);
 		}
@@ -1059,8 +1086,12 @@ export class OpenideEditReview extends Disposable {
 	}
 
 	/** Waits for a code editor holding `uri`'s model to exist (cap ~5s). */
-	private waitForEditorWithModel(uri: URI, timeoutMs = 5000): Promise<ICodeEditor | undefined> {
-		const existing = this.findEditorForUri(uri);
+	private waitForEditorWithModel(uri: URI, timeoutMs = 5000, preferred?: () => ICodeEditor | undefined): Promise<ICodeEditor | undefined> {
+		const find = () => {
+			const editor = preferred ? preferred() : this.findEditorForUri(uri);
+			return editor?.getModel()?.uri.toString() === uri.toString() ? editor : undefined;
+		};
+		const existing = find();
 		if (existing) {
 			return Promise.resolve(existing);
 		}
@@ -1076,7 +1107,7 @@ export class OpenideEditReview extends Disposable {
 				resolve(editor);
 			};
 			const check = () => {
-				const found = this.findEditorForUri(uri);
+				const found = find();
 				if (found) {
 					finish(found);
 				}
@@ -1089,7 +1120,7 @@ export class OpenideEditReview extends Disposable {
 			for (const ed of this.codeEditorService.listCodeEditors()) {
 				store.add(ed.onDidChangeModel(() => check()));
 			}
-			timeout(timeoutMs).then(() => finish(this.findEditorForUri(uri)));
+			timeout(timeoutMs).then(() => finish(find()));
 		});
 	}
 
@@ -1123,11 +1154,12 @@ export class OpenideEditReview extends Disposable {
 		this.updateContext();
 	}
 
-	private async attach(path: string, editor: ICodeEditor): Promise<boolean> {
+	private async attach(path: string, editor: ICodeEditor, targetEditorService: IEditorService = this.editorService): Promise<boolean> {
 		const existing = this.sessions.get(path);
 		if (existing) {
 			// Same session already alive: just repaint (repeated click in the tray / Review).
 			if (existing.session.codeEditor === editor) {
+				existing.session.hopRequest = p => this.openReview(p, false, undefined, targetEditorService);
 				existing.session.refresh();
 				this.updateContext();
 				return true;
@@ -1140,11 +1172,13 @@ export class OpenideEditReview extends Disposable {
 		if (inflight) {
 			await inflight;
 			const after = this.sessions.get(path);
-			if (after) {
+			if (after?.session.codeEditor === editor) {
+				after.session.hopRequest = p => this.openReview(p, false, undefined, targetEditorService);
 				after.session.refresh();
 				this.updateContext();
 				return true;
 			}
+			if (after) { this.detach(path); }
 			// the previous attach aborted: retry below
 		}
 
@@ -1169,9 +1203,9 @@ export class OpenideEditReview extends Disposable {
 			}
 			// After awaiting the baseline the editor may have lost the model (preview→text swap).
 			// Wait again: a silent return here was the "opens the file flat with no diff" bug.
-			let live = this.findEditorForUri(expected);
+			let live: ICodeEditor | undefined = editor.getModel()?.uri.toString() === expected.toString() ? editor : undefined;
 			if (!live || live.getModel()?.uri.toString() !== expected.toString()) {
-				live = await this.waitForEditorWithModel(expected, 3000);
+				live = await this.waitForEditorWithModel(expected, 3000, () => editor);
 			}
 			if (!live || live.getModel()?.uri.toString() !== expected.toString()) {
 				return false;
@@ -1188,8 +1222,8 @@ export class OpenideEditReview extends Disposable {
 				if (other !== path && entry.session.codeEditor === editor) { this.detach(other); }
 			}
 			const store = new DisposableStore();
-			const session = new ReviewSession(path, editor, this.snapshot, baseline, this.host, this.textFileService, () => this.detach(path), () => this.refreshSessionChrome());
-			session.hopRequest = p => this.openReview(p);
+			const session = new ReviewSession(path, editor, this.snapshot, baseline, this.host, this.textFileService, this.diffs, () => this.detach(path), () => this.refreshSessionChrome());
+			session.hopRequest = p => this.openReview(p, false, undefined, targetEditorService);
 			store.add(session);
 			store.add(editor.onDidDispose(() => this.detach(path)));
 			// Detach only when the model moves to ANOTHER path. An intermediate clear (null) or a swap

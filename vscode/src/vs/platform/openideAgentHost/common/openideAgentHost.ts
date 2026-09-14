@@ -12,8 +12,10 @@
  *  shlex (hooks here; /commands use it for $1..$9 with quoting).
  *--------------------------------------------------------------------------------------------*/
 
+import { IOpenideGoal, IOpenideGoalCreate, IOpenideGoalUpdate, IOpenideGoalVerification } from './openideGoal.js';
 import { IOpenideMemoryRequest, IOpenideMemoryResponse } from '../../openideCodebase/common/openideMemoryRecord.js';
 import { IOpenideRunJournalEvent, IOpenideRunJournalRecord } from './openideRunJournal.js';
+import { IOpenideCodexGoalPrepare, IOpenideCodexGoalConnection, IOpenideCodexGoalEvent, IOpenideCodexGoalResult } from './openideCodexGoal.js';
 import { IOpenideAgentTerminalRegistration, IOpenideProcessIsolationRequest, IOpenideProcessIsolationStatus, IOpenidePreparedProcess, IOpenideSubagentWorktree, IOpenideSubagentWorktreeApplyResult } from './openideProcessIsolation.js';
 import { ICredentialSourcesSnapshot } from './openideCredentialSources.js';
 import { Event } from '../../../base/common/event.js';
@@ -169,6 +171,10 @@ export interface HookExecResult {
 
 
 export interface IOpenideAgentHostService {
+	goalGet(sessionId: string): Promise<IOpenideGoal | undefined>;
+	goalCreate(request: IOpenideGoalCreate): Promise<IOpenideGoal>;
+	goalUpdate(sessionId: string, request: IOpenideGoalUpdate): Promise<IOpenideGoal>;
+	goalVerify(sessionId: string, request: IOpenideGoalVerification): Promise<IOpenideGoal>;
 	memoryRequest(request: IOpenideMemoryRequest): Promise<IOpenideMemoryResponse>;
 	setMemoryDirtyResources(paths: readonly string[]): Promise<void>;
 	validateWorkspacePath(request: { path: string; roots: readonly string[]; mutation?: boolean }): Promise<void>;
@@ -176,6 +182,12 @@ export interface IOpenideAgentHostService {
 	openRunJournal(sessionId: string): Promise<IOpenideRunJournalRecord[]>;
 	appendRunJournal(sessionId: string, event: IOpenideRunJournalEvent): Promise<void>;
 	closeRunJournal(sessionId: string): Promise<void>;
+	readonly onDidChangeCodexGoal: Event<IOpenideCodexGoalEvent>;
+	codexGoalPrepare(input: IOpenideCodexGoalPrepare): Promise<IOpenideCodexGoalConnection>;
+	codexGoalRun(sessionId: string, runId: string, prompt: string): Promise<IOpenideCodexGoalResult>;
+	codexGoalInterrupt(sessionId: string, runId: string): Promise<void>;
+	codexGoalRespond(sessionId: string, approvalId: string, accepted: boolean): Promise<void>;
+	codexGoalDispose(sessionId: string): Promise<void>;
 	registerAgentTerminal(request: IOpenideAgentTerminalRegistration): Promise<void>;
 	shutdownAgentTerminals(conversationId: string): Promise<void>;
 	processIsolationStatus(): Promise<IOpenideProcessIsolationStatus>;
@@ -242,6 +254,8 @@ export interface IOpenideAgentHostService {
 	ideSetExtraTools(tools: readonly IIdeToolSchema[]): Promise<void>;
 	/** Runs a CLI's own `mcp add` to register OpenIDE in its config. Rejects with its output. */
 	ideRegisterInCli(executable: string, args: readonly string[]): Promise<string>;
+	/** Creates an additive, private Codex launch profile while preserving effective user instructions. */
+	idePrepareCodexContext(executable: string, cwd: string | undefined, serverName: string): Promise<string>;
 	/**
 	 * Runs `git` in `cwd` and returns its stdout. Never rejects: a repo without git, or a folder
 	 * that is not a repo, is an ordinary answer here and not an error to handle at every call.

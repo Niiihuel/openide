@@ -2,19 +2,10 @@
  *  OpenIDE — popovers of the native composer (mode, model, reasoning effort, permissions, the
  *  `@` / `/` suggestions) and of the chat header (history, kebab, session kind).
  *
- *  One surface, drawn once: a hairline-bordered card with a large radius and a soft shadow, whose
- *  rows are INSET by the container's 4px padding so the hover highlight never touches the border
- *  or its corners. The current value is marked by a trailing check, not by a tint — the hover is
- *  the only fill in the menu, so a moving cursor is always the strongest signal.
- *
- *  These are rendered by IContextViewService into the workbench overlay, which owns
- *  `position`/`z-index`; only the surface is described here. For the same reason the selectors are
- *  NOT scoped under `.openide-chat-native` — the popovers are not inside that subtree.
- *
- *  Geometry (measured against the reference, then tightened to Cursor's density on request):
- *  container padding 4, row 24 tall with 6px side padding and a 6px gap, a 16px icon column
- *  carrying a 14px glyph, a 12px check on the trailing
- *  edge of the active row, radius-lg on the card and radius-md on the row.
+ *  One shared surface: popover radius/border/shadow, item radius, hover and action glyph tokens.
+ *  Native context views own placement; only the inner list owns model scrolling. Insets follow
+ *  the shared scrollbar clearance (6px) plus a 2px inner pad, so headers, rows and footers align.
+ *  Virtual model/section heights remain 28px/25px and are part of the native list contract.
  *--------------------------------------------------------------------------------------------*/
 
 /* ---- Popovers --------------------------------------------------------------------------- */
@@ -26,20 +17,24 @@
 .openide-mp-detail,
 .openide-mp-detail * { box-sizing: border-box; }
 
-.openide-menu {
+/* Fixed context views reset all CSS; match that specificity so embedded browser popovers
+   retain the same surface and sizing as the regular workbench overlay. */
+.openide-menu,
+.context-view.fixed:where(.openide-menu) {
+	box-sizing: border-box;
 	display: flex;
 	flex-direction: column;
-	min-width: min(200px, calc(100vw - 16px));
-	max-width: calc(100vw - 16px);
+	min-width: min(var(--openide-menu-anchor-width, 200px), calc(100vw - 24px));
+	max-width: min(var(--openide-menu-anchor-width, 100vw), calc(100vw - 24px));
 	/* The ONE height rule for every popover in the product (dropdowns in Settings and the CSS
 	   inspector, the model and mode pickers, the kebab menus): past this the body scrolls
 	   (`.openide-menu-content`). 420px was half the window on a laptop — a list of twenty
 	   `display` values opened as a column from the trigger to the status bar and read as a
 	   panel, not a menu. 320px is about a dozen rows: enough to scan, small enough to stay a
 	   popover; the 50vh keeps it under half of a short window. */
-	max-height: min(320px, 50vh);
-	border-radius: var(--oi-radius-lg);
-	border: 1px solid var(--oi-border);
+	max-height: min(420px, 70vh, var(--openide-menu-available-height, 100vh));
+	border-radius: var(--oi-radius-popover);
+	border: 1px solid var(--oi-border-overlay);
 	background: var(--oi-overlay);
 	color: var(--vscode-menu-foreground, var(--vscode-foreground));
 	box-shadow: var(--oi-shadow);
@@ -57,7 +52,7 @@
 	to { opacity: 1; transform: translateY(0); }
 }
 
-.openide-menu.openide-menu-enter { animation: openide-menu-enter 90ms ease-out; }
+.openide-menu.openide-menu-enter { animation: openide-menu-enter var(--oi-motion-enter) var(--oi-ease-out); }
 
 @media (prefers-reduced-motion: reduce) {
 	.openide-menu.openide-menu-enter { animation: none; }
@@ -80,7 +75,7 @@
 .openide-menu.openide-chat-history-menu {
 	min-width: var(--openide-menu-anchor-width, 0);
 	max-width: var(--openide-menu-anchor-width, none);
-	max-height: min(480px, 70vh);
+	max-height: min(480px, 70vh, var(--openide-menu-available-height, 100vh));
 }
 
 .openide-menu.openide-chat-kebab-menu {
@@ -88,19 +83,23 @@
 	max-width: min(280px, calc(100vw - 16px));
 }
 
-/* The 4px inset lives on the scrolling body, not on the card: the model picker hangs a footer and
-   a hint bar under the body whose top hairlines have to run the full card width. */
+/* Keep the scrollbar 6px inside the surface and the row paint another 2px inside it. */
 .openide-menu-content {
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
-	padding: 4px;
+	padding: 2px;
+	margin: var(--oi-scroll-inset);
 	overflow-y: auto;
 	overflow-x: hidden;
-	scrollbar-width: none;
+	scrollbar-gutter: auto;
+	scrollbar-width: thin;
 }
 
-.openide-menu-content::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.openide-menu-content::-webkit-scrollbar { width: 6px; height: 6px; }
+.openide-menu-content::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: var(--oi-radius-circle); }
+.openide-menu-content::-webkit-scrollbar-button { display: none; }
+.monaco-workbench .openide-menu button:focus:not(:focus-visible) { outline: none; }
 
 /* ---- Rows ------------------------------------------------------------------------------- */
 
@@ -109,11 +108,11 @@
 	align-items: center;
 	gap: 6px;
 	width: 100%;
-	min-height: 24px;
+	min-height: 28px;
 	padding: 0 6px;
 	background: transparent;
 	border: none;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-item);
 	cursor: pointer;
 	font-family: inherit;
 	font-size: 12px;
@@ -127,7 +126,7 @@
    contrast themes; drawn as an inset outline so it costs the row no box. */
 .openide-menu-row:hover,
 .openide-menu-row:focus-visible {
-	background: var(--vscode-list-hoverBackground, var(--oi-tint-2));
+	background: var(--oi-hover);
 }
 
 /* `.monaco-workbench button:focus` (0-2-1) outranks a bare `:focus-visible` (0-2-0), so the ring
@@ -139,18 +138,17 @@
 }
 
 .openide-menu-row-icon {
-	flex: 0 0 16px;
-	width: 18px;
+	flex: 0 0 var(--oi-icon-action, 16px);
+	width: var(--oi-icon-action, 16px);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 }
 
-/* 16px glyphs in the 18px column. The workbench's blanket `.codicon` rule is 16px already; this
-   restates it at a weight the rows own, and hands the glyph the row's colour. */
-.monaco-workbench .openide-menu .openide-menu-row .codicon[class*="codicon-"] { font-size: 14px; color: inherit; }
-.monaco-workbench .openide-menu .openide-menu-row .openide-menu-submenu-chevron.codicon[class*="codicon-"] { font-size: 12px; color: var(--vscode-descriptionForeground); }
-.openide-menu-row .openide-menu-row-icon > .openide-provider-icon { width: 14px; height: 14px; }
+/* The shared action glyph and icon slot have the same width in every native menu. */
+.monaco-workbench .openide-menu .openide-menu-row .codicon[class*="codicon-"] { font-size: var(--oi-icon-action, 16px); color: inherit; }
+.monaco-workbench .openide-menu .openide-menu-row .openide-menu-submenu-chevron.codicon[class*="codicon-"] { font-size: var(--oi-icon-action, 16px); color: var(--vscode-descriptionForeground); }
+.openide-menu-row .openide-menu-row-icon > .openide-provider-icon { width: var(--oi-icon-action, 16px); height: var(--oi-icon-action, 16px); }
 
 .openide-menu-label {
 	flex: 1;
@@ -204,16 +202,9 @@
 
 .openide-menu-section {
 	padding: 5px 6px 2px;
-	font-size: 10.5px;
+	font-size: 12px;
 	color: var(--vscode-descriptionForeground);
 	user-select: none;
-}
-
-/* Plain-text headings are set in small caps; a composite heading (the usage popover's, which lays
-   out a title, a freshness line and a button) styles its own children and must not inherit it. */
-.openide-menu-section:not(:has(*)) {
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
 }
 
 .openide-menu-sep {
@@ -226,7 +217,7 @@
 .openide-menu-empty {
 	display: flex;
 	align-items: center;
-	min-height: 24px;
+	min-height: 28px;
 	padding: 0 6px 0 28px;
 	color: var(--vscode-descriptionForeground);
 	font-size: 12px;
@@ -234,22 +225,25 @@
 
 /* ---- Search row (model picker, history) --------------------------------------------------- */
 
-/* Sits inside the body, so it respects the 4px inset like the rows under it. */
+/* Search uses the same control recipe and outer inset as its adjacent menu rows. */
 .openide-menu-search-row {
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	min-height: 26px;
+	min-height: 28px;
 	padding: 0 6px;
-	margin-bottom: 4px;
-	border-bottom: 1px solid var(--oi-border-soft);
+	margin: 2px 0 4px;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-control);
+	background: var(--oi-control);
+	transition: border-color var(--oi-duration-hover) var(--oi-ease);
 }
 
 .monaco-workbench .openide-menu .openide-menu-search-row .codicon[class*="codicon-"] {
-	flex: 0 0 18px;
-	width: 18px;
+	flex: 0 0 var(--oi-icon-action, 16px);
+	width: var(--oi-icon-action, 16px);
 	text-align: center;
-	font-size: 14px;
+	font-size: var(--oi-icon-action, 16px);
 	color: var(--vscode-descriptionForeground);
 }
 
@@ -264,7 +258,6 @@
 	font-size: 13px;
 }
 
-.openide-menu-search::placeholder { color: var(--vscode-descriptionForeground); opacity: 0.7; }
 
 /* Restated at a weight that wins inside the workbench: `.monaco-workbench input` (0-1-1),
    `.monaco-workbench input::placeholder` (0-1-2) and `.monaco-workbench input[type="text"]:focus`
@@ -272,12 +265,14 @@
    up `input.placeholderForeground` and a 1px focus ring — and both popovers focus this field on
    open, so the ring was on screen the whole time the search was usable. */
 .monaco-workbench .openide-menu .openide-menu-search {
-	font-size: 13px;
+	font-size: 12px;
 	color: var(--vscode-menu-foreground, var(--vscode-foreground));
 }
 
 .monaco-workbench .openide-menu .openide-menu-search:focus { outline: none; }
-.monaco-workbench .openide-menu .openide-menu-search::placeholder { color: var(--vscode-descriptionForeground); opacity: 0.7; }
+.monaco-workbench .openide-menu .openide-menu-search::placeholder { color: var(--oi-secondary); opacity: 1; }
+.openide-menu-search-row:hover { border-color: var(--oi-border-hover); }
+.openide-menu-search-row:focus-within { border-color: var(--vscode-contrastActiveBorder, var(--oi-focus)); }
 
 /* The per-row action strip (`menuRowAction()`) is styled in media/openideChatHistory.css: the
    history popover is its only consumer, and keeping the rules here meant a row that reflowed on
@@ -293,19 +288,19 @@
 /* Same row as the menus above, at the height the virtual list is told (PICKER_ROW_HEIGHT in
    openideChatModelPicker.ts). 14px on the trailing edge = the 10px overlay scrollbar
    (scrollableElement.ts default `verticalScrollbarSize`) + 4px of air, the same "separate from
-   scrollbar" reserve quickInput.css gives its row action bar. Reserved unconditionally so the star
-   column does not shift by 10px the moment the list becomes scrollable. */
+   scrollbar" reserve quickInput.css gives its row action bar. The trailing reserve is enabled
+   only by `.openide-mp-scrolls`, after the native list reports actual overflow. */
 .openide-mp-row {
-	height: 24px;
-	min-height: 24px;
-	padding: 0 12px 0 6px;
+	height: 28px;
+	min-height: 28px;
+	padding: 0 6px;
 }
 
 /* The list is driven from the search field, so its own focus/hover paint is switched off
    (openideChatModelPicker.ts hands `List.style` no row colours) and the fill is painted on the
    inner row instead — the same inset fill as every other menu row. */
-.openide-mp-list .monaco-list-row.focused .openide-mp-row {
-	background: var(--vscode-list-hoverBackground, var(--oi-tint-2));
+.openide-mp-list.openide-mp-keyboard-focus .monaco-list-row.focused .openide-mp-row {
+	background: var(--oi-hover);
 }
 
 .openide-mp-name { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -337,8 +332,8 @@
 	margin-left: 8px;
 	padding: 0 6px;
 	border: none;
-	border-radius: var(--oi-radius-sm);
-	background: var(--oi-tint-2, var(--vscode-toolbar-hoverBackground));
+	border-radius: var(--oi-radius-item);
+	background: var(--oi-tint-2, var(--oi-hover));
 	color: var(--vscode-foreground);
 	font-family: inherit;
 	font-size: 11px;
@@ -346,8 +341,8 @@
 }
 .openide-mp-edit[hidden] { display: none !important; }
 .openide-mp-list .monaco-list-row:hover .openide-mp-edit,
-.openide-mp-list .monaco-list-row.focused .openide-mp-edit { display: inline-flex; }
-.openide-mp-edit:hover { background: var(--vscode-toolbar-hoverBackground); }
+.openide-mp-list.openide-mp-keyboard-focus .monaco-list-row.focused .openide-mp-edit { display: inline-flex; }
+.openide-mp-edit:hover { background: var(--oi-hover); }
 
 /* The levels of ONE model, beside the row that opened them. Same card as the detail panel — same
    ground, same shadow, same z-index band — because they are the same kind of thing: a surface the
@@ -359,8 +354,8 @@
 	padding: 4px;
 	display: flex;
 	flex-direction: column;
-	border-radius: var(--oi-radius-lg);
-	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-popover);
+	border: 1px solid var(--oi-border-overlay);
 	background-color: var(--oi-overlay);
 	box-shadow: var(--oi-shadow);
 	font-family: var(--vscode-font-family);
@@ -372,9 +367,9 @@
 /* `margin-left: auto` opens the whole slack HERE, so the star pins to a fixed column. Hanging off
    the name instead, every row put its star at a different x and the column read as a sawtooth. */
 .openide-mp-star {
-	/* The LAST thing on the row, 12px wide like the section chevrons, so the stars line up with
+	/* The LAST thing on the row, the same size as the section chevrons, so stars line up with
 	   them on the trailing edge. `order` puts it past the check, which `createMenuRow` appends. */
-	flex: 0 0 12px;
+	flex: 0 0 var(--oi-icon-action, 16px);
 	order: 101;
 	display: inline-flex;
 	align-items: center;
@@ -387,7 +382,7 @@
 	cursor: pointer;
 }
 
-.monaco-workbench .openide-menu .openide-mp-star .codicon[class*="codicon-"] { font-size: 12px; }
+.monaco-workbench .openide-menu .openide-mp-star .codicon[class*="codicon-"] { font-size: var(--oi-icon-action, 16px); }
 .openide-mp-star.on { color: var(--vscode-textLink-foreground, var(--vscode-focusBorder)); }
 .openide-mp-star:hover { color: var(--vscode-foreground); }
 
@@ -406,8 +401,9 @@
 	height: 25px;
 	/* Same trailing reserve as the model rows: the chevron shares their column and would otherwise
 	   sit under the overlay scrollbar. */
-	padding: 4px 12px 2px 6px;
+	padding: 0 6px;
 	border: none;
+	border-radius: var(--oi-radius-item);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	font: inherit;
@@ -418,19 +414,19 @@
 	user-select: none;
 }
 
-.openide-mp-head:hover { color: var(--vscode-foreground); }
+.openide-mp-head:hover { color: var(--oi-text); background: var(--oi-hover); }
 .openide-mp-head-icon { display: inline-flex; align-items: center; }
-.openide-mp-head .openide-provider-icon { width: 14px; height: 14px; }
-.monaco-workbench .openide-menu .openide-mp-head .codicon[class*="codicon-"] { font-size: 14px; }
+.openide-mp-head .openide-provider-icon { width: var(--oi-icon-action, 16px); height: var(--oi-icon-action, 16px); }
+.monaco-workbench .openide-menu .openide-mp-head .codicon[class*="codicon-"] { font-size: var(--oi-icon-action, 16px); }
 .openide-mp-head-label { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.monaco-workbench .openide-menu .openide-mp-head .openide-mp-chevron { font-size: 12px; transition: transform 120ms; }
+.monaco-workbench .openide-menu .openide-mp-head .openide-mp-chevron { font-size: var(--oi-icon-action, 16px); transition: transform var(--oi-motion-exit) var(--oi-ease-out); }
 .openide-mp-head.collapsed .openide-mp-chevron { transform: rotate(-90deg); }
 
 /* Same override as the composer's trigger: the workbench's monogram has no frame, the webview's
    does, and the picker is where the two would otherwise sit side by side. */
 .openide-menu .openide-provider-icon.monogram {
 	border: 1px solid var(--oi-border-strong);
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-item);
 	background: var(--oi-tint-2);
 	font-size: 7.5px;
 	font-weight: 700;
@@ -444,8 +440,7 @@
    foot of the popover instead of scrolling away with the models. */
 .openide-mp-foot {
 	flex: 0 0 auto;
-	padding: 4px;
-	border-top: 1px solid var(--oi-border-soft);
+	padding: 0 calc(var(--oi-scroll-inset) + 2px) calc(var(--oi-scroll-inset) + 2px);
 }
 
 /* Detail panel: a sibling of the menu (which is `overflow: hidden`), placed in viewport
@@ -463,8 +458,8 @@
 	display: flex;
 	flex-direction: column;
 	gap: 7px;
-	border-radius: var(--oi-radius-lg);
-	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-popover);
+	border: 1px solid var(--oi-border-overlay);
 	/* `background-color`, not the `background` shorthand: the shorthand also resets `background-image`
 	   and every other longhand, and one unresolved variable in it drops the whole declaration —
 	   including the colour. */
@@ -500,7 +495,7 @@
 .openide-mp-skeleton-row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; }
 .openide-mp-skeleton-icon,
 .openide-mp-skeleton-bar {
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-item);
 	background: linear-gradient(100deg,
 		color-mix(in srgb, var(--vscode-foreground) 8%, transparent) 40%,
 		color-mix(in srgb, var(--vscode-foreground) 16%, transparent) 50%,
@@ -517,3 +512,59 @@
 @media (prefers-reduced-motion: reduce) {
 	.openide-mp-skeleton-icon, .openide-mp-skeleton-bar { animation: none; }
 }
+
+/* Summary → searchable model list → discrete effort slider, in the same native context view. */
+.openide-menu.openide-menu-model-compact { min-width: min(260px, calc(100vw - 24px)); max-width: min(260px, calc(100vw - 24px)); }
+.openide-menu :is(.openide-mp-summary, .openide-mp-effort-panel)[hidden],
+.openide-menu-model > [hidden], .openide-menu .openide-mp-back[hidden] { display: none; }
+.openide-mp-summary .openide-menu-row { min-height: 32px; }
+.openide-mp-summary .openide-menu-row-icon:empty { display: none; }
+.openide-mp-summary .openide-menu-detail { max-width: 62%; font-size: inherit; }
+/* The virtual list owns model scrolling; search/back remain fixed during resize/morph. */
+.openide-menu-model .openide-mp-models-content { flex-shrink: 1; overflow: hidden; }
+.openide-mp-models-content > :not(.openide-mp-list) { flex-shrink: 0; }
+.openide-menu-model .openide-mp-list { flex-shrink: 0; }
+.openide-mp-list.openide-mp-scrolls :is(.openide-mp-row, .openide-mp-head) { padding-right: 16px; }
+.openide-menu-model .openide-mp-row { height: 28px; min-height: 28px; }
+.openide-menu-model .openide-mp-list { min-height: 0; }
+/* Motion recipe adapted from Zanwei Guo's MIT selector; native range keeps keyboard semantics. */
+.openide-mp-effort-panel { position: relative; padding: 8px 8px 14px; }
+.openide-mp-effort-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 42px; }
+.openide-menu .openide-mp-control { width: 28px; height: 28px; padding: 0; flex: 0 0 28px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--oi-radius-item); background: transparent; color: var(--oi-secondary); cursor: pointer; }
+.openide-menu .openide-mp-control:hover:not(:disabled) { background: var(--oi-hover); color: var(--oi-text); }
+.openide-menu .openide-mp-control:disabled, .openide-menu .openide-mp-control[aria-disabled=true] { opacity: .42; cursor: default; }
+.openide-menu .openide-mp-fast[aria-pressed=true] { color: var(--oi-accent); }
+.openide-menu .openide-mp-model-toggle { min-width: 0; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 7px; border: 0; border-radius: var(--oi-radius-item); background: transparent; color: var(--oi-text); cursor: pointer; }
+.openide-menu .openide-mp-model-toggle:hover { background: var(--oi-hover); }
+.openide-mp-model-top { display: flex; justify-content: center; align-items: center; gap: 4px; max-width: 100%; }
+.openide-mp-model-top > .codicon { color: var(--oi-secondary); font-size: 12px; }
+.openide-mp-effort-value { color: var(--oi-accent); font-size: 14px; line-height: 20px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.openide-mp-effort-model { display: block; max-width: 100%; color: var(--oi-secondary); font-size: 12px; line-height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.openide-mp-effort-header.is-maximum .openide-mp-effort-value { color: #b598f2; }
+.openide-mp-effort-track { --oi-slider-spring: linear(0,.062 3.4%,.24 7.5%,.51 12.5%,.76 17.9%,.905 22.4%,.997 27.2%,1.038 32.4%,1.05 37.4%,1.044 42.7%,1.028 49.2%,1.012 56.9%,1.003 65.7%,.999 76%,1); position: relative; height: 36px; margin: 14px 0 4px; touch-action: none; }
+.openide-mp-slider-track { position: absolute; inset: 4px 0; border-radius: var(--oi-radius-circle); overflow: hidden; background: var(--oi-hover); }
+.openide-mp-slider-fill { position: absolute; inset: 0 auto 0 0; border-radius: var(--oi-radius-circle); overflow: hidden; background: var(--oi-accent); }
+.openide-mp-slider-fill::before { content: ''; position: absolute; inset: 0; opacity: 0; background: linear-gradient(90deg,#2e61d4,#a57bfd 65%,#8b73f3); transition: opacity 300ms var(--oi-ease-out); }
+.openide-mp-effort-track.is-maximum .openide-mp-slider-fill::before { opacity: 1; }
+.openide-mp-slider-sparkles { position: absolute; inset: 0; pointer-events: none; }
+.openide-mp-slider-ticks { position: absolute; inset: 0; pointer-events: none; }
+.openide-mp-slider-tick { position: absolute; top: 50%; width: 4px; height: 4px; border-radius: var(--oi-radius-circle); background: color-mix(in srgb,var(--oi-text) 35%,transparent); translate: -50% -50%; }
+.openide-mp-slider-knob { position: absolute; top: 50%; width: 30px; height: 30px; border-radius: 50%; background: var(--oi-text); translate: -50% -50%; box-shadow: 0 1px 3px #0003; transition: scale 140ms var(--oi-ease-out); pointer-events: none; }
+.openide-mp-slider-knob::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 4px 10px #0004; opacity: 0; transition: opacity 140ms var(--oi-ease-out); }
+.openide-mp-effort-track.is-dragging .openide-mp-slider-knob { scale: 1.04; }
+.openide-mp-effort-track.is-dragging .openide-mp-slider-knob::after { opacity: 1; }
+.openide-mp-effort-track.is-snapping .openide-mp-slider-knob { transition: left 380ms var(--oi-slider-spring),scale 140ms var(--oi-ease-out); }
+.openide-mp-effort-track.is-snapping .openide-mp-slider-fill { transition: width 380ms var(--oi-slider-spring); }
+.openide-mp-slider-effects { position: absolute; inset: 0; overflow: clip; pointer-events: none; z-index: 2; }
+.openide-mp-slider-burst { position: absolute; left: -32px; top: -40px; pointer-events: none; }
+.openide-menu .openide-mp-effort-slider { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: grab; touch-action: none; }
+.openide-mp-effort-track.is-dragging .openide-mp-effort-slider { cursor: grabbing; }
+.openide-mp-effort-track.is-keyboard-focus:has(.openide-mp-effort-slider:focus)::after { content: ''; position: absolute; inset: -3px; border: 1px solid var(--vscode-focusBorder); border-radius: var(--oi-radius-circle); pointer-events: none; }
+.openide-mp-summary > .openide-menu-row { animation: openide-mp-row-enter var(--oi-motion-morph) var(--oi-ease-out) backwards; }
+.openide-mp-summary > .openide-menu-row:nth-child(2) { animation-delay: 30ms; }
+.openide-mp-summary > .openide-mp-advanced { animation-delay: 60ms; }
+@keyframes openide-mp-row-enter { from { opacity: 0; translate: 0 5px; } to { opacity: 1; translate: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .openide-mp-effort-panel *, .openide-mp-effort-panel *::before, .openide-mp-effort-panel *::after, .openide-mp-summary > .openide-menu-row { animation: none !important; transition: none !important; } }
+@media (forced-colors: active) { .openide-mp-slider-track, .openide-mp-slider-knob { border: 1px solid CanvasText; } .openide-mp-slider-fill { background: Highlight; } }
+.openide-mp-summary, .openide-mp-effort-panel { animation: openide-menu-enter var(--oi-motion-morph) var(--oi-ease-out); }
+@media (prefers-reduced-motion: reduce) { .openide-mp-summary, .openide-mp-effort-panel { animation: none; } }

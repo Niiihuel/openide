@@ -243,6 +243,22 @@ export function detectCommunities(
 		}
 	}
 
+	return finalizeCodebaseCommunities(groups, degreeById, nameById, previous);
+}
+
+/**
+ * Locale-sensitive presentation and stable IDs shared by the native and TS partitions.
+ * Keep this small host pass: replacing localeCompare with byte ordering changes existing IDs
+ * and labels for punctuation, accented paths and the user's locale.
+ */
+export function finalizeCodebaseCommunities(
+	partition: readonly (readonly string[])[],
+	degreeById: ReadonlyMap<string, number>,
+	nameById: (id: string) => string,
+	previous?: readonly ICodebaseCommunity[],
+): ICodebaseCommunity[] {
+	let groups = partition.map(group => [...group]);
+
 	// --- reindexed with a TOTAL ORDER: (-size, the sorted tuple of members) ---
 	groups = groups.filter(group => group.length > 0);
 	groups.sort((a, b) => b.length - a.length || a.join(' ').localeCompare(b.join(' ')));

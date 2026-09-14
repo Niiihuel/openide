@@ -12,6 +12,8 @@
 
 .openide-cli-changes {
 	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-gutter: auto;
 	overflow-x: hidden;
 	user-select: none;
 }
@@ -26,7 +28,7 @@
 	/* The separator does the sectioning, so the header needs no background of its own: two
 	   conversations must be tellable apart at a glance without the list turning into stripes. */
 	margin-top: 4px;
-	border-top: 1px solid var(--vscode-panel-border, var(--vscode-editorWidget-border));
+	border-top: 1px solid var(--oi-divider, var(--vscode-panel-border));
 	padding-top: 4px;
 }
 
@@ -34,7 +36,9 @@
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	min-height: 26px;
+	min-height: 29px;
+	margin: 0 var(--oi-scroll-inset, 6px);
+	border-radius: var(--oi-radius-row);
 	padding: 2px 10px 2px 6px;
 	cursor: pointer;
 }
@@ -69,7 +73,7 @@
 }
 
 .openide-cli-changes-agent {
-	font-size: 11px;
+	font-size: 12px;
 	font-weight: 600;
 	letter-spacing: .02em;
 	color: var(--vscode-foreground);
@@ -79,7 +83,7 @@
 }
 
 .openide-cli-changes-subtitle {
-	font-size: 11px;
+	font-size: 12px;
 	color: var(--vscode-descriptionForeground);
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -90,7 +94,7 @@
 	flex: 0 0 auto;
 	min-width: 16px;
 	padding: 0 5px;
-	border-radius: var(--oi-radius-lg);
+	border-radius: var(--oi-radius-circle);
 	background: var(--vscode-badge-background);
 	color: var(--vscode-badge-foreground);
 	font-size: 10px;
@@ -102,9 +106,9 @@
    real, but two chips competing in a 26px header meant neither got read. */
 .openide-cli-changes-state {
 	flex: 0 0 auto;
-	font-size: 10px;
-	letter-spacing: .04em;
-	text-transform: uppercase;
+	font-size: 12px;
+	letter-spacing: normal;
+	text-transform: none;
 	white-space: nowrap;
 }
 
@@ -127,51 +131,19 @@
 	color: var(--vscode-editorError-foreground, var(--vscode-errorForeground));
 }
 
-/* The dock's shimmer, recipe for recipe (openideChatActivity.css). Redeclared here rather than
-   imported because this view renders with the chat dock closed, and a keyframe that lives in the
-   chat's stylesheet would resolve to no animation at all. */
-.openide-cli-changes-shimmer {
-	background: linear-gradient(90deg,
-		var(--vscode-descriptionForeground) 0%,
-		var(--vscode-descriptionForeground) 30%,
-		var(--vscode-chat-thinkingShimmer, var(--vscode-foreground)) 50%,
-		var(--vscode-descriptionForeground) 70%,
-		var(--vscode-descriptionForeground) 100%);
-	background-size: 400% 100%;
-	-webkit-background-clip: text;
-	background-clip: text;
-	-webkit-text-fill-color: transparent;
-	color: transparent;
-	animation: openide-cli-changes-shimmer-sweep 2s linear infinite;
-	/* No `will-change`: see openideChatActivity.css — the hint costs a re-uploaded layer per
-	   frame and composites nothing, because `background-position` is not a compositable property. */
-}
-
-@keyframes openide-cli-changes-shimmer-sweep {
-	0% { background-position: 120% 0; }
-	100% { background-position: -120% 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.openide-cli-changes-shimmer {
-		animation: none;
-		-webkit-text-fill-color: var(--vscode-foreground);
-		color: var(--vscode-foreground);
-	}
-}
+/* Live labels use the same globally installed text shimmer as the chat. */
 
 /* ---- file rows ----------------------------------------------------------------------------- */
 
 /* The row is `OpenideChatFileRow` (openideChatFiles.css), the primitive the chat paints; this
    file only sets its metrics for a sidebar list: Source Control's 22px and left inset, so the
-   list measures like the neighbouring view's, and the chat's radius removed — a sidebar row is
-   a band, not a chip. The status letter and the ±N come from the primitive. */
+   list measures like the neighbouring view's, with an inset hover target. The status letter and the ±N come from the primitive. */
 .openide-cli-changes .openide-cli-changes-row {
 	--oi-file-row-size: 13px;
 	min-height: 22px;
-	padding: 0 10px 0 22px;
-	margin: 0;
-	border-radius: 0;
+	padding: 0 8px 0 16px;
+	margin: 0 var(--oi-scroll-inset, 6px);
+	border-radius: var(--oi-radius-item);
 	width: auto;
 }
 .openide-cli-changes .openide-cli-changes-row:hover {
@@ -193,7 +165,7 @@
 
 .openide-cli-changes-note {
 	padding: 3px 10px 5px 22px;
-	font-size: 11px;
+	font-size: 12px;
 	line-height: 1.4;
 	color: var(--vscode-descriptionForeground);
 }
@@ -201,3 +173,6 @@
 .openide-cli-changes-warn {
 	color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground));
 }
+
+.openide-cli-changes-header:focus-visible,
+.openide-cli-changes-row:focus-visible { outline: 2px solid var(--oi-focus, var(--vscode-focusBorder)); outline-offset: -2px; }

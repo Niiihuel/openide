@@ -301,6 +301,19 @@ suite('OpenIDE agent common', () => {
 		]);
 	});
 
+	test('verification can run again after a successful mutation, while mutator loops stay bounded', () => {
+		const guard = new OpenideToolCallGuard();
+		for (let i = 0; i < 4; i++) { guard.inspect('browser_check_visual', '{}', true); }
+		guard.inspect('edit_file', '{"path":"page.css"}');
+		guard.recordStateChange();
+		assert.strictEqual(guard.inspect('browser_check_visual', '{}', true).block, false);
+		for (let i = 0; i < 2; i++) {
+			assert.strictEqual(guard.inspect('edit_file', '{"path":"page.css"}').block, false);
+			guard.recordStateChange();
+		}
+		assert.strictEqual(guard.inspect('edit_file', '{"path":"page.css"}').block, true);
+	});
+
 	test('maps reasoning effort by provider protocol quirks', () => {
 		assert.deepStrictEqual(
 			openAIReasoningBody('openrouter', 'https://openrouter.ai/api/v1', 'anthropic/claude-sonnet-5', 'high'),

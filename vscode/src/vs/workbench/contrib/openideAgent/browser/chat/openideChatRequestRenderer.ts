@@ -25,6 +25,7 @@ import { setupChatTooltip } from './openideChatHover.js';
  * `IOpenideAgentService` on its own, it can only ask, and the widget decides.
  */
 export interface IOpenideChatRequestRendererDelegate {
+	readonly readOnly?: boolean;
 	/**
 	 * Reverts the files of this exact turn and truncates the transcript from it.
 	 * Resolves `false` when the rollback was rejected, which is the row's cue to re-arm its button.
@@ -86,6 +87,7 @@ export class OpenideChatRequestRenderer extends Disposable implements ITreeRende
 		const actions = append(bubble, $('.openide-chat-request-actions'));
 
 		const rollback = append(actions, $('button.openide-chat-request-action')) as HTMLButtonElement;
+		rollback.hidden = !!this._delegate.readOnly;
 		rollback.type = 'button';
 		// Rejection copy and tooltip are the webview's, word for word (the removed chat webview,
 		// 2728-2730): the button is not a generic "undo", it says what it does to the files. It is
@@ -108,9 +110,9 @@ export class OpenideChatRequestRenderer extends Disposable implements ITreeRende
 		}));
 		// The whole bubble opens the turn for editing (Cursor). Buttons, links and the attached
 		// images keep their own meaning.
-		templateDisposables.add(setupChatTooltip(this._hoverService, text, () => t('chat.request.edit'), { aria: false }));
+		if (!this._delegate.readOnly) { templateDisposables.add(setupChatTooltip(this._hoverService, text, () => t('chat.request.edit'), { aria: false })); }
 		templateDisposables.add(addDisposableListener(bubble, 'click', event => {
-			if ((event.target as HTMLElement).closest('button, a, img')) {
+			if (this._delegate.readOnly || (event.target as HTMLElement).closest('button, a, img')) {
 				return;
 			}
 			if (template.currentElement) {

@@ -53,8 +53,8 @@ export async function runOpenideChatRollback(request: IOpenideChatRollbackReques
 	if (freshCut < 0 || freshCut !== cut) {
 		return { committed: false, removedMessageIds: [], warning: 'El mensaje cambió durante el rollback.' };
 	}
-	const warning = await revertTransaction(request);
 	const removedMessageIds = messages.slice(cut).map(message => message.messageId).filter((value): value is string => !!value);
+	const warning = await revertTransaction(request, removedMessageIds);
 	messages.splice(cut);
 	sessions.removeChangeSets(conversationId, removedMessageIds);
 	sessions.clearUsage(conversationId);
@@ -72,18 +72,26 @@ export async function runOpenideChatRollback(request: IOpenideChatRollbackReques
  * Reverting files is best-effort: a conflict is reported back but never blocks the truncation.
  * History navigation must always work, even when the workspace can no longer be put back exactly.
  */
-async function revertTransaction(request: IOpenideChatRollbackRequest): Promise<string | undefined> {
-	const changeSet = request.sessions.changeSetOf(request.conversationId, request.messageId);
-	if (!changeSet) {
-		return undefined;
+async function revertTransaction(request: IOpenideChatRollbackRequest, removedMessageIds: readonly string[]): Promise<string | undefined> {
+	// This barrier includes durable enqueue IO and capture requests that outlived the turn.
+	// Cancellation is persisted before restoring files, so a restart cannot replay undone work.
+	const memory = await request.agentService.prepareMemoryRollback(request.conversationId, removedMessageIds);
+	const warnings: string[] = [];
+	const conflicts = new Set<string>();
+	for (const messageId of [...new Set(removedMessageIds)].reverse()) {
+		// Preserve individual memory deltas: folding two writes across an intervening user
+		// edit would put that user edit in the inverse transaction and could erase it.
+		const changes = memory.filter(change => change.messageId === messageId).sort((a, b) => a.timestamp - b.timestamp).reverse();
+		const turn = request.sessions.changeSetOf(request.conversationId, messageId);
+		if (turn) { changes.push(turn); }
+		for (const changeSet of changes) {
+			if (changeSet.state === 'unavailable') { warnings.push(changeSet.unavailableReason ?? 'No hay un recibo verificable para restaurar este turno.'); continue; }
+			let result = await request.agentService.rollbackMessage(changeSet);
+			if (result.status === 'conflict' && changeSet === turn) { result = await request.agentService.rollbackMessage(changeSet, true); }
+			for (const file of result.files) { if (file.status === 'conflict') { conflicts.add(file.uri); } }
+			if (result.status === 'unavailable' && !result.files.length) { warnings.push('La restauración de archivos no está disponible.'); }
+		}
 	}
-	let result = await request.agentService.rollbackMessage(changeSet);
-	if (result.status === 'conflict') {
-		result = await request.agentService.rollbackMessage(changeSet, true);
-	}
-	const conflicts = result.files.filter(file => file.status === 'conflict');
-	if (!conflicts.length) {
-		return undefined;
-	}
-	return `${conflicts.length} archivo(s) no se pudieron revertir por cambios posteriores: ${conflicts.map(file => file.uri).join(', ')}.`;
+	if (conflicts.size) { warnings.push(`${conflicts.size} archivo(s) no se pudieron revertir por cambios posteriores: ${[...conflicts].join(', ')}.`); }
+	return warnings.length ? warnings.join(' ') : undefined;
 }

@@ -1,0 +1,10 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const {layout}=require('./overlay.js');
+const viewport={width:800,height:480};
+const size={width:240,height:120};
+test('opens below with an 8px gap when it fits',()=>{const a={left:200,top:100,bottom:128};const p=layout(a,size,viewport);assert.equal(p.side,'below');assert.equal(p.top-a.bottom,8);});
+test('flips above near the bottom instead of shifting across the trigger',()=>{const a={left:600,top:410,bottom:438};const p=layout(a,size,viewport);assert.equal(p.side,'above');assert.equal(a.top-(p.top+p.height),8);assert.equal(p.left+p.width,788);});
+test('constrains tall menus to the larger side without overlap',()=>{const a={left:300,top:220,bottom:248};const p=layout(a,{width:360,height:600},viewport);assert.equal(p.height,212);assert.equal(p.top,256);assert.equal(p.top+p.height,468);});
+test('does not display an overlay when the anchor consumes all available space',()=>{assert.equal(layout({left:0,top:0,bottom:480},size,viewport),null);});
+test('maintains separation across window sizes, positions and menu heights',()=>{for(const height of [240,480,708,900])for(const top of [20,Math.floor(height/2),height-48])for(const menuHeight of [60,140,400,800]){const a={left:750,top,bottom:top+28};const p=layout(a,{width:360,height:menuHeight},{width:800,height});assert.ok(p);assert.ok(p.top>=12);assert.ok(p.top+p.height<=height-12);assert.ok(p.top>=a.bottom+8||p.top+p.height<=a.top-8);}});

@@ -534,6 +534,14 @@ export interface IAuxiliaryEditorPart extends IEditorPart {
 
 export interface IModalEditorPart extends IEditorPart {
 
+	/** Dismiss the presented view, preserving other editors in a dockable workspace. */
+	requestClose(): Promise<boolean>;
+
+	/** Dock the same native editor part in an auxiliary workbench surface. */
+	readonly embedded: boolean;
+	setEmbeddedContainer(container: unknown /* HTMLElement */ | undefined): void;
+	setEmbeddedVisible(visible: boolean): void;
+
 	/**
 	 * Modal container of the editor part.
 	 */

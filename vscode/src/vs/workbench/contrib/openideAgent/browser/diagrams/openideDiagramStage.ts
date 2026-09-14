@@ -74,6 +74,7 @@ export class OpenideDiagramStage extends Disposable {
 		this.zoomLabel = append(this.bar, $('span.openide-diagram-viewer-zoom', undefined, '100%'));
 		const zoomIn = this.toolButton(this.bar, Codicon.zoomIn, t('diagram.viewer.zoomIn'));
 		const fit = this.toolButton(this.bar, Codicon.screenFull, t('diagram.viewer.fit'));
+		fit.querySelector('.codicon')?.classList.add('openide-icon-fit');
 		// Anything the pane adds lands here, after the zoom controls and before the hint.
 		this.actions = append(this.bar, $('span.openide-diagram-viewer-actions'));
 		append(this.bar, $('span.openide-diagram-viewer-spacer'));

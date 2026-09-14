@@ -53,7 +53,8 @@ suite('OpenIDE journal runtime composition (real disk)', () => {
 	});
 
 	test('a rejected tool checkpoint prevents the real filesystem effect', async () => {
-		const store = new OpenideRunJournalStore(root, { records: 3 });
+		let checkpoints = 0;
+		const store = new OpenideRunJournalStore(root, {}, async handle => { if (++checkpoints > 3) { throw new Error('disk checkpoint failed'); } await handle.sync(); });
 		const messages: IChatMessage[] = [{ role: 'user', content: 'write' }];
 		let effects = 0;
 		await assert.rejects(runOpenideTurn({ messages, provider, token: CancellationToken.None, onEvent: () => {}, maxIterations: 2, runId: 'run' }, {
@@ -61,7 +62,7 @@ suite('OpenIDE journal runtime composition (real disk)', () => {
 			stream: async () => ({ message: { role: 'assistant', content: '', toolCalls: [{ id: 'call', name: 'write_file', argumentsJson: '{}' }] } }),
 			compact: async () => false, executeTools: async () => { effects++; await writeFile(join(root, 'effect'), 'unsafe'); return false; },
 			enrichUsage: () => ({ type: 'usage' }), planDraft: () => {}, stop: () => {},
-		}), /capacity/);
+		}), /disk checkpoint failed/);
 		assert.strictEqual(effects, 0);
 		await assert.rejects(readFile(join(root, 'effect')), { code: 'ENOENT' });
 	});

@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { createOpenideElement } from './openideDom.js';
+import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { $, addDisposableListener, append, clearNode } from '../../../../base/browser/dom.js';
 import { AnchorAlignment, AnchorPosition } from '../../../../base/browser/ui/contextview/contextview.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
@@ -56,13 +58,14 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 		@IOpenideAgentService private readonly _agentService: IOpenideAgentService,
 		@IContextViewService private readonly _contextViewService: IContextViewService,
 		@ICommandService private readonly _commandService: ICommandService,
+		@IHoverService private readonly _hoverService: IHoverService,
 		@INotificationService private readonly _notificationService: INotificationService,
 		@IDialogService private readonly _dialogService: IDialogService,
 		@IOpenideIdePlanReview private readonly _planReview: OpenideIdePlanReview,
 		@IOpenideCliChangesService private readonly _cliChanges: OpenideCliChangesService,
 	) {
 		super();
-		this.domNode = document.createElement('div');
+		this.domNode = createOpenideElement(document, 'div');
 		this.domNode.className = 'openide-plan-breadcrumb-actions';
 		// The breadcrumb widget listens for clicks on its row to open the picker of a crumb; the
 		// plan's own controls must not read as one.
@@ -126,7 +129,7 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 		// ---- model chip: the composer's trigger, verbatim
 		const button = append(this.domNode, $('button.openide-composer-trigger.openide-composer-model.openide-plan-model-chip', { type: 'button' })) as HTMLButtonElement;
 		button.title = t('chatSurface.plan.modelPicker');
-		const icon = append(button, document.createElement('span'));
+		const icon = append(button, createOpenideElement(document, 'span'));
 		icon.className = 'openide-composer-provider-icon';
 		const label = append(button, $('span.openide-composer-trigger-label'));
 		// The level belongs to the model, so wherever a model is chosen the level goes with it: the
@@ -136,12 +139,13 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 		const effort = append(button, $('span.openide-composer-model-effort'));
 		effort.hidden = true;
 		effort.appendChild(createThinkingGlyph(document));
-		const effortLabel = append(effort, document.createElement('span'));
+		const effortLabel = append(effort, createOpenideElement(document, 'span'));
 		append(button, $('span.codicon.codicon-chevron-down.openide-composer-chevron'));
 		this._modelButton = button; this._modelIcon = icon; this._modelLabel = label;
 		this._modelEffort = effort; this._modelEffortLabel = effortLabel;
 
 		const picker = new OpenideChatModelPicker(this._agentService, this._contextViewService, this._commandService, () => this._paintModel(), {
+			hoverService: this._hoverService,
 			anchorPosition: AnchorPosition.BELOW,
 			anchorAlignment: AnchorAlignment.RIGHT,
 			width: 340,
@@ -213,7 +217,7 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 		// Ctrl+⏎" and a chevron holding the alternatives, as Cursor draws it in the plan's toolbar.
 		const split = append(host, $('span.oi-split.openide-plan-run-split'));
 		const button = append(split, $('button.oi-split-main.openide-plan-run-btn', { type: 'button' })) as HTMLButtonElement;
-		const icon = append(button, document.createElement('span'));
+		const icon = append(button, createOpenideElement(document, 'span'));
 		const text = append(button, $('span.oreview-btn-label'));
 
 		if (running) {
@@ -302,7 +306,7 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 		this._renderStore.add(addDisposableListener(discard, 'click', () => void this._commandService.executeCommand(OPENIDE_IDE_PLAN_REJECT, path)));
 
 		const approve = append(host, $('button.openide-review-btn.openide-plan-run-btn.primary', { type: 'button' })) as HTMLButtonElement;
-		const icon = append(approve, document.createElement('span'));
+		const icon = append(approve, createOpenideElement(document, 'span'));
 		icon.className = 'codicon codicon-check';
 		append(approve, $('span.oreview-btn-label')).textContent = t('ide.planReview.approve');
 		approve.title = t('ide.planReview.approveTitle');

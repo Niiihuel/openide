@@ -14,15 +14,12 @@ interface IOwnedTerminal { readonly request: IOpenideAgentTerminalRegistration; 
 
 /** Main-process ownership survives renderer crashes; only backend-confirmed exits settle shutdown. */
 export class OpenideAgentTerminalOwner {
-	private readonly ready = new Map<number, number>();
 	private readonly terminals = new Map<number, IOwnedTerminal>();
 	private readonly listeners: IDisposable[] = [];
 	private disposed = false;
 	constructor(private readonly pty: IPtyService | undefined, private readonly worktrees: OpenideSubagentWorktrees) {
 		if (!pty) { return; }
-		this.listeners.push(pty.onProcessReady(({ id, event }) => this.ready.set(id, event.pid)));
 		this.listeners.push(pty.onProcessExit(({ id }) => {
-			this.ready.delete(id);
 			const terminal = this.terminals.get(id);
 			if (!terminal) { return; }
 			this.terminals.delete(id);
@@ -34,7 +31,9 @@ export class OpenideAgentTerminalOwner {
 
 	async register(request: IOpenideAgentTerminalRegistration): Promise<void> {
 		if (!this.pty || this.disposed) { throw new Error('The native agent terminal owner is unavailable.'); }
-		if (!Number.isSafeInteger(request.terminalId) || !Number.isSafeInteger(request.processId) || request.processId <= 0 || this.ready.get(request.terminalId) !== request.processId) { throw new Error('The terminal process identity was not confirmed by the native PTY backend.'); }
+		// The renderer receives ready on a direct MessagePort. Its registration can reach
+		// main before the separate main-process ready event, so query the native backend.
+		if (!Number.isSafeInteger(request.terminalId) || !Number.isSafeInteger(request.processId) || request.processId <= 0 || await this.pty.getProcessId(request.terminalId) !== request.processId) { throw new Error('The terminal process identity was not confirmed by the native PTY backend.'); }
 		const existing = this.terminals.get(request.terminalId);
 		if (existing) {
 			if (JSON.stringify(existing.request) !== JSON.stringify(request)) { throw new Error('An agent terminal cannot change its owner or workspace.'); }
@@ -46,7 +45,8 @@ export class OpenideAgentTerminalOwner {
 		// Record the PID before any payload can be sent. Recovery after a whole-main-process
 		// crash conservatively refuses live/reused PIDs; no unverified OS PID is ever killed.
 		await this.worktrees.trackShell(root, request.processId);
-		if (this.disposed || this.ready.get(request.terminalId) !== request.processId || owners.has(request.terminalId)) { throw new Error('The terminal owner changed during registration.'); }
+		const confirmedPid = await this.pty.getProcessId(request.terminalId);
+		if (this.disposed || confirmedPid !== request.processId || owners.has(request.terminalId)) { throw new Error('The terminal owner changed during registration.'); }
 		let resolveExit!: () => void;
 		const exited = new Promise<void>(resolve => { resolveExit = resolve; });
 		this.terminals.set(request.terminalId, { request, exited, resolveExit });

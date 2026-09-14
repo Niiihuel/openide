@@ -62,6 +62,7 @@ export function openideSettingsSurfaceSearch(): ReadonlyMap<string, readonly IOp
 		['openideAgent/voice', [
 			{ title: t('settings.nav.agent.voice'), description: t('settings.surface.voice.desc'), keywords: ['voz', 'voice', 'dictado', 'dictation', 'dictar', 'dictate', 'microfono', 'micrófono', 'microphone', 'mic', 'hablar', 'speech', 'transcripcion', 'transcripción', 'transcription', 'audio', 'whisper', 'stt'] },
 		]],
+		['workbench/profile', [{ title: t('accounts.profileTitle'), description: t('accounts.profileDescription'), keywords: ['profile', 'perfil', 'cuenta', 'account', 'github', 'login'] }]],
 		['workbench/language', [
 			{ title: t('settings.nav.language'), description: t('settings.surface.language.desc'), keywords: ['idioma', 'language', 'locale', 'español', 'spanish', 'english', 'inglés', 'ingles', 'paquete de idioma', 'language pack', 'traduccion', 'traducción'] },
 		]],

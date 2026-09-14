@@ -121,7 +121,7 @@ export class OpenideChatHistoryMenu extends OpenideChatMenuPopover {
 		const query = this.search.trim().toLowerCase();
 		// Empty sessions never reach history — VS Code filters `isEmpty` out of the picker too.
 		const visible = this.actions.list()
-			.filter(session => !session.empty)
+			.filter(session => !session.empty && !session.subagentRunId)
 			.filter(session => !query || (session.title || DEFAULT_TITLE).toLowerCase().includes(query));
 		const recent = visible.filter(session => !session.archived);
 		const archived = visible.filter(session => session.archived);

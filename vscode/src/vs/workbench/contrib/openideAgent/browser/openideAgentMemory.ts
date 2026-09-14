@@ -62,7 +62,7 @@ export class OpenideAgentMemory extends Disposable {
 	}
 	async request(request: IOpenideMemoryRequest, root?: URI): Promise<IOpenideMemoryResponse> {
 		if (!this.host || this.trust && !this.trust.isWorkspaceTrusted()) { throw new Error('Memory requires a trusted native workspace.'); }
-		if (this.captureMode === 'off' && !['get', 'list', 'semantic', 'checkpoint-list'].includes(request.action)) { throw new Error('Memory capture is disabled.'); }
+		if (this.captureMode === 'off' && !['get', 'list', 'semantic', 'checkpoint-list', 'capture-rollback'].includes(request.action)) { throw new Error('Memory capture is disabled.'); }
 		await this.dirtyReady;
 		const folder = root ?? this.contextService.getWorkspace().folders[0]?.uri;
 		if (!folder || folder.scheme !== 'file') { throw new Error('Memory requires a local workspace folder.'); }
@@ -74,7 +74,7 @@ export class OpenideAgentMemory extends Disposable {
 		return response;
 	}
 	savedMessage(document: IOpenideMemoryDocument, root = this.contextService.getWorkspace().folders[0]?.uri): string {
-		const label = document.path.replace(/[\[\]\\]/g, '\\$&');
+		const label = (document.record.topic_key || document.path).replace(/[\[\]\\]/g, '\\$&');
 		return t('memory.saved', root ? `[${label}](<${joinPath(root, document.path).toString()}>)` : label);
 	}
 	async handoff(session: string, maxTokens = 200, documents?: readonly IOpenideMemoryDocument[]): Promise<string> {

@@ -244,6 +244,11 @@ export type AgentStreamEvent =
 	| { type: 'toolCallDelta'; id: string; name: string; argumentsJson: string }
 	| { type: 'usage'; inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheCreationTokens?: number };
 
+export interface IFastModeCapability {
+	readonly supported: boolean;
+	readonly serviceTier?: 'priority';
+}
+
 export interface IProviderRequest {
 	/** Credencial ya resuelta (API key u OAuth bearer token). */
 	readonly credential: ICredential;
@@ -254,6 +259,8 @@ export interface IProviderRequest {
 	/** Reasoning effort chosen by the user: '' default · none off ·
 	 *  minimal/low/medium/high/xhigh (each adapter maps it per protocol). */
 	readonly effort?: string;
+	/** Explicit opt-in to a supported priority tier; omitted uses the provider default. */
+	readonly serviceTier?: 'priority';
 	readonly system?: string;
 	readonly messages: IChatMessage[];
 	readonly tools?: IToolDefinition[];
@@ -282,6 +289,8 @@ export interface IProviderResult {
 
 /** A PROTOCOL adapter (openai-compatible, anthropic, …). Few of them; providers are data. */
 export interface ILLMProvider {
+	/** Discovered model capability, never inferred from a provider/model display name. */
+	getFastModeCapability?(model: string, providerId?: string, baseUrl?: string): IFastModeCapability;
 	readonly id: string;
 	streamChat(req: IProviderRequest, onEvent: (e: AgentStreamEvent) => void, token: CancellationToken): Promise<IProviderResult>;
 	/** Optional authenticated discovery. If it fails, the static catalog remains the fallback. */
@@ -296,6 +305,10 @@ export type AgentMode = 'agent' | 'plan' | 'ask' | 'debug';
 
 /** Options for an agent run. */
 export interface IAgentRunOptions {
+	/** Presentation that submitted the turn; never inferred from focus after asynchronous work. */
+	readonly targetWindowId?: number;
+	/** Host-authored objective context for this execution. */
+	readonly goalContext?: string;
 	readonly mode?: AgentMode;
 	/**
 	 * The conversation this run belongs to. It is what lets two conversations work at the same
@@ -433,7 +446,7 @@ export type AgentLoopEvent =
 	// The active account is spent and several could take over: the UI shows the choice and answers
 	// with resolveAccountChoice(id, accountId | 'stop').
 	| { type: 'accountChoiceRequest'; id: string; spentLabel: string; candidates: readonly { accountId: string; label: string; paid?: boolean }[] }
-	| { type: 'info'; message: string; severity?: 'info' | 'warning' }
+	| { type: 'info'; message: string; severity?: 'info' | 'warning'; source?: 'memoryCapture'; messageId?: string }
 	| {
 		type: 'compaction';
 		status: 'started' | 'completed' | 'skipped' | 'failed';

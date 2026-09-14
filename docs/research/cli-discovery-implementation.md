@@ -40,7 +40,7 @@ The user explicitly authorized using the existing authenticated `/home/nihuel/.l
 
 The first fresh invocation selected capability help for all five families, searched/read the empty project memory, and saved `payments/retry-policy`. The test independently verified the canonical Markdown file on disk. A second invocation with no shared conversation history selected memory search/get and recovered the same decision and canonical path without writing. Both returned success and zero permission denials. Their CLI elapsed times were about 31 and 10 seconds.
 
-This evaluation isolates the supplied MCP server and grants only the six relevant test tool names for the invocation. It uses print mode, disables conversation persistence and built-in tools, and runs in a disposable repository. Therefore it demonstrates real-model discovery and cross-session canonical recall under this controlled setup; it does not certify spontaneous capture in an ordinary unrestricted session, interactive permission prompts or post-compaction recall. Other clients remain untested with real models.
+This evaluation isolates the supplied MCP server and grants only the six relevant test tool names for the invocation. It uses print mode, disables conversation persistence and built-in tools, and runs in a disposable repository. Therefore it demonstrates real-model discovery and cross-session canonical recall under this controlled setup; it does not certify spontaneous capture in an ordinary unrestricted session, interactive permission prompts or post-compaction recall. At the time of that Claude evaluation, other clients remained untested with real models; see the Codex evaluation below.
 
 Reproduce only with explicit authorization to consume Claude usage:
 
@@ -49,3 +49,23 @@ OPENIDE_LIVE_CLAUDE=/home/nihuel/.local/bin/claude ./result-fhs/bin/openide-buil
 ```
 
 Artifacts: `.build/performance-cli-implementation/claude-live/result.json` and the two streamed event logs. The temporary workspace and IDE profile are removed after the run; the report retains the synthetic note as evidence.
+
+
+## Codex natural-intent regression — 7 September 2026
+
+The reported session already had a working OpenIDE MCP endpoint and all 37 tools. Codex 0.153.4 nevertheless selected another plugin's computer/browser inventory for a natural-language request about OpenIDE's internal browser. Explicit OpenIDE tool names worked. Richer MCP descriptions alone did not fix the controlled natural-intent reproduction.
+
+The launch adapter now adds a private, random, mode-0600 Codex profile containing concise OpenIDE orientation and the effective existing developer instructions read through `config/read`. It preserves the user's main configuration and other plugins; the existing host removes the profile on disposal. The server also answers `resources/templates/list` with an empty list and capability help lists only registered entry tools. Orientation maps natural browser, memory, map, plan and editor requests to available tools.
+
+With the authenticated Codex binary and `gpt-5.6-luna`, three natural Spanish requests selected the intended tools: browser snapshot, memory search/get, and project-map query. This is a real-model selection test against controlled read-only MCP fixtures, not certification of the underlying browser or index implementation. No credentials were changed. Results: `.build/codex-discovery/live/result.json`.
+
+Credential-free profile checks also passed for preservation of global instructions, project AGENTS.md, unchanged configuration and file permissions. An explicit project `developer_instructions` override retains Codex's higher precedence and can replace the added orientation. Older Codex versions without `CONFIG_PROFILE_V2` keep MCP-only discovery. Neither case is claimed to guarantee natural tool selection.
+
+Validation: client transpilation, client typecheck and layer checks passed; 62 focused unit tests and 14 hosted-PTY/isolated-GUI checks passed. The hosted GUI uses a fixture CLI; it is distinct from the three real-model tests. These changes are in source, not in the installed 1.3.0 release.
+
+Reproduction (live test consumes usage from the configured account):
+
+```bash
+OPENIDE_TEST_CODEX=/home/nihuel/.npm-global/bin/codex node dev/test-codex-context.mjs
+OPENIDE_LIVE_CODEX=/home/nihuel/.npm-global/bin/codex OPENIDE_CODEX_TEST_MODEL=gpt-5.6-luna node dev/test-codex-live.mjs
+```

@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Disposable, DisposableMap, IDisposable } from '../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, IDisposable, toDisposable } from '../../../base/common/lifecycle.js';
+import { Emitter } from '../../../base/common/event.js';
 import { DeferredPromise, disposableTimeout, raceTimeout, timeout } from '../../../base/common/async.js';
 import { ILogService } from '../../log/common/log.js';
 import { ITelemetryService } from '../../telemetry/common/telemetry.js';
@@ -60,6 +61,21 @@ function isCDPRequest(message: object): message is CDPRequest {
  */
 export class PlaywrightService extends Disposable implements IPlaywrightService {
 	declare readonly _serviceBrand: undefined;
+
+	private readonly activityCounts = new Map<string, number>();
+	private readonly activityEmitter = this._register(new Emitter<{ pageId: string; active: boolean }>());
+	readonly onDidChangeActivity = this.activityEmitter.event;
+
+	private beginActivity(pageId: string): IDisposable {
+		const count = this.activityCounts.get(pageId) ?? 0;
+		this.activityCounts.set(pageId, count + 1);
+		if (!count) { this.activityEmitter.fire({ pageId, active: true }); }
+		return toDisposable(() => {
+			const remaining = (this.activityCounts.get(pageId) ?? 1) - 1;
+			if (remaining) { this.activityCounts.set(pageId, remaining); }
+			else { this.activityCounts.delete(pageId); this.activityEmitter.fire({ pageId, active: false }); }
+		});
+	}
 
 	private readonly _sessions = this._register(new DisposableMap<string, PlaywrightSession>());
 
@@ -171,6 +187,7 @@ export class PlaywrightService extends Disposable implements IPlaywrightService 
 		}
 
 		const session = new PlaywrightSession(
+			pageId => this.beginActivity(pageId),
 			sessionId,
 			browser,
 			group,
@@ -271,6 +288,7 @@ export class PlaywrightService extends Disposable implements IPlaywrightService 
  * Playwright {@link Page} instances by their Chromium target IDs.
  */
 class PlaywrightSession extends Disposable {
+	private readonly activeInvocations = this._register(new DisposableMap<string, IDisposable>());
 
 	// --- Page matching ---
 
@@ -289,6 +307,7 @@ class PlaywrightSession extends Disposable {
 	} & IDisposable>());
 
 	constructor(
+		private readonly beginActivity: (pageId: string) => IDisposable,
 		readonly sessionId: string,
 		private _browser: Browser,
 		readonly group: IBrowserViewGroup,
@@ -361,7 +380,12 @@ class PlaywrightSession extends Disposable {
 			const summary = await this._getSummary(pageId);
 			return { error: err instanceof Error ? err.message : String(err), summary };
 		}
-		const wrappedCallback = async (page: Page) => fn(createPageApiProxy(page, logCtx.pageMethodsCalled), args);
+		const wrappedCallback = async (page: Page) => {
+			const id = generateUuid();
+			this.activeInvocations.set(id, this.beginActivity(pageId));
+			try { return await fn(createPageApiProxy(page, logCtx.pageMethodsCalled), args); }
+			finally { this.activeInvocations.deleteAndDispose(id); }
+		};
 
 		if (timeoutMs !== undefined) {
 			return this._runWithDeferral(pageId, wrappedCallback, timeoutMs, undefined, logCtx);

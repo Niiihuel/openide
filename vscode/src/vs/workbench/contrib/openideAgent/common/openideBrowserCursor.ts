@@ -16,7 +16,7 @@
  *    1. Explicit `moveTo`, used by browser_click and browser_type: the glide happens BEFORE the
  *          action, so the screenshot taken afterwards shows the pointer in the right place.
  *    2. Mirroring of real events (pointermove/mousedown in the capture phase), BUT only while
- *          the agent is operating (engage): this covers browser_playwright without wiring tool by tool.
+ *          the agent is operating (engage): available for legacy callers; Playwright now decorates actions before execution.
  *          The user's mouse NEVER moves this pointer — they are independent things.
  *
  *  The overlay lives in a closed shadow root, with pointer-events:none and outside layout: it
@@ -57,6 +57,7 @@ export function openideCursorRuntimeMain(): void {
 	// The host takes part in neither layout nor hit-testing: it cannot cover or steal a click.
 	host.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;margin:0;padding:0;border:0;pointer-events:none;z-index:2147483647';
 	const shadow = host.attachShadow({ mode: 'closed' });
+	const listeners = new scope.AbortController();
 
 	const style = doc.createElement('style');
 	style.textContent = [
@@ -118,7 +119,7 @@ export function openideCursorRuntimeMain(): void {
 		'box-shadow:0 0 16px 3px rgba(120,175,255,.26);transition:opacity 180ms ease-out;',
 		'will-change:transform,opacity;pointer-events:none}',
 		'.box.show{opacity:1;animation:oc-box 300ms cubic-bezier(.16,.84,.44,1)}',
-		'@keyframes oc-box{0%{opacity:0;transform:scale(.96)}100%{opacity:1;transform:none}}',
+		'@keyframes oc-box{0%{opacity:0}100%{opacity:1}}',
 		// Typing: the wash breathes instead of the corners moving. `.typing` sits after `.show` so
 		// its animation is the one that wins while the keys are landing.
 		'.box.typing{animation:oc-breathe 1.6s ease-in-out infinite}',
@@ -156,6 +157,7 @@ export function openideCursorRuntimeMain(): void {
 	// gate, any user hover over the preview would move the pointer.
 	let engaged = false;
 	let labelTimer = 0;
+	const reducedMotion = () => scope.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 
 	const APPEAR_MS = 240;
 
@@ -171,10 +173,11 @@ export function openideCursorRuntimeMain(): void {
 	function travelTime(x: number, y: number): number {
 		// First appearance: there is no path to show, but there is a fade that must be awaited before
 		// continuing, or the step's screenshot would come out with the pointer still invisible.
+		if (reducedMotion()) { return 0; }
 		if (!placed) { return APPEAR_MS; }
 		const distance = Math.hypot(x - at.x, y - at.y);
 		// Neither instant on short hops nor endless when crossing the screen.
-		return Math.max(140, Math.min(620, 120 + distance * 0.55));
+		return Math.max(100, Math.min(360, 90 + distance * 0.35));
 	}
 
 	const api = {
@@ -196,7 +199,7 @@ export function openideCursorRuntimeMain(): void {
 			return new Promise<void>(resolve => scope.setTimeout(() => {
 				cursor.classList.remove('active');
 				resolve();
-			}, 260));
+			}, reducedMotion() ? 0 : 160));
 		},
 		label(text?: string, kind?: string): void {
 			const slot = tag.querySelector('.tag-text') as PageElement;
@@ -222,7 +225,7 @@ export function openideCursorRuntimeMain(): void {
 			box.classList.remove('show');
 			void box.offsetWidth;
 			box.classList.add('show');
-			return new Promise<void>(resolve => scope.setTimeout(resolve, 200));
+			return new Promise<void>(resolve => scope.setTimeout(resolve, reducedMotion() ? 0 : 100));
 		},
 		clearHighlight(): void { box.classList.remove('show'); box.classList.remove('typing'); },
 		/** Typing in progress: the caption stays with a pulsing caret and the brackets breathe, so
@@ -234,8 +237,15 @@ export function openideCursorRuntimeMain(): void {
 			else if (labelTimer === 0) { tag.classList.remove('show'); }
 		},
 		/** Turns the real-input mirror on/off. Off by default: the user's mouse must not move this
-		 *  pointer. browser_playwright turns it on while it operates. */
+		 *  pointer. Legacy event-driven callers can opt in while operating. */
 		engage(on: boolean): void { engaged = on === true; },
+		finish(): void {
+			engaged = false;
+			api.typing(false);
+			api.clearHighlight();
+			api.label(undefined);
+			cursor.classList.remove('visible', 'active');
+		},
 		/** A failed step is information too: it marks where it was attempted and why it did not work. */
 		fail(message: string): Promise<void> {
 			api.label(message, 'error');
@@ -247,6 +257,7 @@ export function openideCursorRuntimeMain(): void {
 		},
 		hide(): void {
 			api.label(undefined);
+			listeners.abort();
 			host.remove();
 			delete scope[GLOBAL];
 		},
@@ -271,12 +282,12 @@ export function openideCursorRuntimeMain(): void {
 	doc.addEventListener('pointermove', (event: any) => {
 		if (!event.isTrusted || !engaged) { return; }
 		place(event.clientX, event.clientY, false);
-	}, { capture: true, passive: true });
+	}, { capture: true, passive: true, signal: listeners.signal });
 	doc.addEventListener('mousedown', (event: any) => {
 		if (!event.isTrusted || !engaged) { return; }
 		place(event.clientX, event.clientY, true);
 		void api.press();
-	}, { capture: true, passive: true });
+	}, { capture: true, passive: true, signal: listeners.signal });
 
 	scope[GLOBAL] = api;
 }

@@ -30,7 +30,8 @@ const enum Constants {
 	ResizePartCellCount = 4
 }
 
-class SplitPaneContainer extends Disposable {
+/** Native terminal split presentation, reusable by auxiliary workbench surfaces. */
+export class SplitPaneContainer extends Disposable {
 	private _height: number;
 	private _width: number;
 	private _splitView!: SplitView;

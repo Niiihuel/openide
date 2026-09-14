@@ -34,13 +34,13 @@
    modernUI, which is how the first version of this file ended up with its background applied and
    its padding ignored. */
 .openide-dialogs.monaco-workbench .monaco-dialog-box {
+	box-sizing: border-box;
 	padding: 0;
-	min-width: 460px;
-	max-width: min(560px, 90vw);
-	/* The same curve as the tabs and the islands (cornerRadius.small). One radius language across
-	   the product was an explicit decision; a modal is not the place to open a second one. */
-	border-radius: var(--oi-radius-sm);
-	border: 1px solid var(--oi-border);
+	min-width: min(460px, calc(100vw - 24px));
+	max-width: min(560px, calc(100vw - 24px));
+	/* Dialogs have room for context; controls inside retain their smaller radius. */
+	border-radius: var(--oi-radius-dialog);
+	border: 1px solid var(--oi-border-overlay, var(--oi-border));
 	background: var(--oi-overlay, var(--vscode-editorWidget-background));
 	box-shadow: var(--oi-shadow-lg);
 }
@@ -51,7 +51,7 @@
    of the paragraph instead of sitting on the title it belongs to. */
 .openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-message-row {
 	align-items: flex-start;
-	padding: 20px 22px 0;
+	padding: 24px 24px 0;
 }
 
 .openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-icon.codicon {
@@ -74,14 +74,14 @@
 	margin: 0 0 6px;
 	font-size: 14px;
 	line-height: 20px;
-	font-weight: 600;
+	font-weight: 500;
 	letter-spacing: -0.005em;
 	color: var(--oi-text, var(--vscode-foreground));
 }
 
 .openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-message-row .dialog-message-container .dialog-message-detail {
 	margin: 0;
-	font-size: 12.5px;
+	font-size: 13px;
 	line-height: 18px;
 	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
 	opacity: 1;
@@ -93,30 +93,27 @@
 }
 
 .openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-checkbox-row .dialog-checkbox-message {
-	font-size: 12.5px;
+	font-size: 13px;
 	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
 }
 
 .openide-dialogs.monaco-workbench .monaco-dialog-box .dialog-message-input .monaco-inputbox {
 	margin-top: 12px;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 }
 
 /* ---- buttons ------------------------------------------------------------------------------ */
 
-/* A separated footer band, the shape every confirmation in this IDE already has (the chat's own
-   cards, Settings): the decision sits on its own surface at the bottom right, so the eye lands on
-   the primary action after reading, not before. Upstream floats the buttons on the dialog's own
-   background with a 67px left margin to fake the alignment. */
+/* The footer groups the decision with spacing and a quiet divider. */
 .openide-dialogs.monaco-workbench .monaco-dialog-box > .dialog-buttons-row {
 	margin-top: 20px;
 	/* The band spans the whole box (the box carries no padding), so its own padding is the gutter.
 	   `overflow: hidden` on the box would clip the focus ring of the primary button, hence the
 	   explicit bottom radii below instead. */
-	padding: 12px 22px;
+	padding: 16px 24px;
 	border-top: 1px solid var(--oi-border-soft);
-	background: var(--oi-raised, transparent);
-	border-radius: 0 0 var(--oi-radius-sm) var(--oi-radius-sm);
+	background: transparent;
+	border-radius: 0 0 var(--oi-radius-dialog) var(--oi-radius-dialog);
 }
 
 .openide-dialogs.monaco-workbench .monaco-dialog-box:not(.align-vertical) > .dialog-buttons-row > .dialog-buttons {
@@ -128,10 +125,10 @@
 .openide-dialogs.monaco-workbench .monaco-dialog-box > .dialog-buttons-row > .dialog-buttons > .monaco-button {
 	margin: 0;
 	min-width: 88px;
-	min-height: 28px;
+	min-height: 29px;
 	padding: 4px 14px;
-	border-radius: var(--oi-radius-sm);
-	font-size: 12.5px;
+	border-radius: var(--oi-radius-control);
+	font-size: 13px;
 	justify-content: center;
 }
 
@@ -160,4 +157,9 @@
 	right: 12px;
 	padding: 0;
 	height: auto;
+}
+
+.openide-dialogs.monaco-workbench .monaco-dialog-box .monaco-button:focus-visible {
+	outline: 2px solid var(--oi-focus, var(--vscode-focusBorder));
+	outline-offset: 2px;
 }

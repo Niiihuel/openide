@@ -22,15 +22,53 @@
  *  reasoning as rule 2 there: a surface uses the colour family that paints it.
  *--------------------------------------------------------------------------------------------*/
 
+import { IButtonStyles } from '../../../../base/browser/ui/button/button.js';
 import { ICheckboxStyles, IToggleStyles } from '../../../../base/browser/ui/toggle/toggle.js';
 import { IInputBoxStyles } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { ISelectBoxStyles } from '../../../../base/browser/ui/selectBox/selectBox.js';
-import { defaultCheckboxStyles, defaultInputBoxStyles, defaultSelectBoxStyles, defaultToggleStyles } from '../../../../platform/theme/browser/defaultStyles.js';
+import { defaultButtonStyles, defaultCheckboxStyles, defaultInputBoxStyles, defaultSelectBoxStyles, defaultToggleStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 
 /** The product's border. Declared on `:root, .monaco-workbench` by `openideSurfaceCss.ts`. */
 const OI_BORDER = 'var(--oi-border)';
 
-export const openideInputBoxStyles: IInputBoxStyles = { ...defaultInputBoxStyles, inputBorder: OI_BORDER };
-export const openideSelectBoxStyles: ISelectBoxStyles = { ...defaultSelectBoxStyles, selectBorder: OI_BORDER };
+export const openideInputBoxStyles: IInputBoxStyles = {
+	...defaultInputBoxStyles,
+	inputBorder: 'var(--oi-control-border)',
+	inputBackground: 'var(--oi-control)',
+	inputForeground: 'var(--oi-text)',
+};
+/** Search is a native InputBox variant; it shares the dock's control surface and border. */
+export const openideSearchBoxStyles: IInputBoxStyles = openideInputBoxStyles;
+export const openideSelectBoxStyles: ISelectBoxStyles = { ...defaultSelectBoxStyles, selectBorder: 'var(--oi-control-border)' };
 export const openideCheckboxStyles: ICheckboxStyles = { ...defaultCheckboxStyles, checkboxBorder: OI_BORDER };
 export const openideToggleStyles: IToggleStyles = { ...defaultToggleStyles, inputActiveOptionBorder: OI_BORDER };
+
+/** Shared paint variants; the native Button retains behavior and accessibility. */
+export const openideButtonStyles: IButtonStyles = {
+	...defaultButtonStyles,
+	buttonBackground: 'var(--oi-primary)',
+	buttonForeground: 'var(--oi-primary-foreground)',
+	buttonHoverBackground: 'var(--oi-primary-hover)',
+	buttonBorder: 'var(--oi-border-overlay)',
+	buttonSeparator: 'var(--oi-border-overlay)',
+	buttonSecondaryBackground: 'var(--oi-control)',
+	buttonSecondaryForeground: 'var(--oi-text)',
+	buttonSecondaryHoverBackground: 'var(--oi-hover)',
+	buttonSecondaryBorder: 'var(--oi-control-border)',
+};
+
+export const openideSecondaryButtonStyles: IButtonStyles = {
+	...openideButtonStyles,
+	buttonBackground: openideButtonStyles.buttonSecondaryBackground,
+	buttonForeground: openideButtonStyles.buttonSecondaryForeground,
+	buttonHoverBackground: openideButtonStyles.buttonSecondaryHoverBackground,
+};
+
+/** The neutral circular chat action; native Button and raw composer buttons share its tokens. */
+export const openideRoundButtonStyles: IButtonStyles = {
+	...openideButtonStyles,
+	buttonBackground: 'var(--oi-round-action-background)',
+	buttonForeground: 'var(--oi-round-action-foreground)',
+	buttonHoverBackground: 'var(--oi-round-action-background)',
+	buttonBorder: 'var(--oi-round-action-background)',
+};

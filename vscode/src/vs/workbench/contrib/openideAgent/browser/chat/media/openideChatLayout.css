@@ -1,0 +1,102 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Layout composition for the native chat. Feature styles own content and state; these rules own
+   the shared chrome. In particular, Monaco and xterm keep their measurement and scrolling APIs. */
+.openide-chat-native {
+	--oi-chat-card-bg: var(--oi-group);
+	--oi-chat-card-radius: var(--oi-radius-group);
+	--oi-chat-card-border: var(--oi-border);
+	--openide-chat-head-height: 32px;
+	--openide-chat-tab-height: 24px;
+}
+.openide-chat-native .openide-chat-header { padding: 0 6px; border-bottom: 0; }
+.openide-chat-native .openide-chat-tabs { gap: 0; }
+.openide-chat-native .openide-chat-row { padding-top: 10px; padding-bottom: 10px; }
+.openide-chat-native.density-compact .openide-chat-row { padding-top: 4px; padding-bottom: 4px; }
+.openide-chat-native .openide-chat-dock { padding: 12px 12px 4px; background: var(--oi-surface); }
+.openide-chat-native .openide-chat-block { border: 0; background: transparent; border-radius: var(--oi-radius-composer); }
+.openide-chat-native .openide-chat-input-card {
+	padding: 8px 10px;
+	gap: 6px;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-composer);
+	background: var(--oi-conversation-panel);
+}
+/* The tray frame recedes behind the composer. Empty hosts never create a border or spacer. */
+.openide-chat-native .openide-chat-block > .openide-chat-tray-host {
+	width: calc(100% - 16px);
+	margin: 0 auto -8px;
+	padding: 2px 4px 10px;
+	border: 1px solid var(--oi-border);
+	border-bottom: 0;
+	border-radius: var(--oi-radius-composer) var(--oi-radius-composer) 0 0;
+	background: var(--oi-conversation-panel);
+	overflow: hidden;
+}
+.openide-chat-native .openide-chat-block > .openide-chat-tray-host:not(:has(> :not(.hidden))) { display: none; }
+.openide-chat-native .openide-chat-block .openide-chat-tray-host > :not(.hidden) {
+	border-radius: 0;
+	border: 0;
+	padding-bottom: 2px;
+	background: transparent;
+}
+.openide-chat-native .openide-chat-block .openide-chat-tray-host > :not(.hidden) ~ :not(.hidden) { border-top: 1px solid var(--oi-divider); }
+.openide-chat-native .openide-chat-block:has(.openide-chat-tray-host > :not(.hidden)) > .openide-chat-input-card {
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-composer);
+}
+.openide-chat-native .openide-chat-prompt { padding: 2px 2px 4px; min-height: 28px; font-size: var(--openide-chat-font-size, 14px); line-height: 1.5; }
+.openide-chat-native .openide-chat-input-row { min-height: 32px; height: 32px; gap: 4px; }
+.openide-chat-native .openide-composer-trigger { height: 28px; border-radius: var(--oi-radius-control); padding-inline: 6px; }
+.openide-chat-native .openide-chat-input-row > .openide-composer-anchor + .openide-composer-anchor { margin-left: 0; }
+.openide-chat-native .openide-attach-chip { width: 72px; height: 72px; border-radius: var(--oi-radius-group); border-color: var(--oi-border); }
+.openide-chat-native .openide-attach-remove { top: 4px; right: 4px; width: 20px; height: 20px; border-radius: 50%; background: var(--oi-text); color: var(--oi-surface); }
+/* Quiet shared icon/control treatment. Only OpenIDE-owned controls are selected. */
+.openide-chat-native :is(.openide-chat-head-btn, .openide-chat-footer-item, .openide-chat-pick-remove, .openide-chat-chip-remove, .openide-chat-sub-stop, .openide-chat-sub-pause) {
+	border-radius: var(--oi-radius-control);
+	transition: background-color var(--oi-motion-exit) var(--oi-ease-out), color var(--oi-motion-exit) var(--oi-ease-out);
+}
+.openide-chat-native :is(.openide-chat-head-btn, .openide-chat-footer-button, .openide-chat-pick-remove, .openide-chat-chip-remove, .openide-composer-trigger, .openide-chat-sub-stop, .openide-chat-sub-pause):hover {
+	background: var(--oi-hover);
+	color: var(--oi-text);
+}
+.monaco-workbench .openide-chat-native button:focus:not(:focus-visible) { outline: none; }
+.monaco-workbench .openide-chat-native button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+
+/* Activity is a disclosure with readable rows, without a timeline rail behind every icon. */
+.openide-chat-native .openide-chat-activity-body::before,
+.openide-chat-native .openide-chat-tool-activity::before { display: none; }
+.openide-chat-native .openide-chat-activity-body { gap: 4px; padding-block: 4px; }
+.openide-chat-native .openide-chat-activity-summary .openide-chat-activity-chevron { order: 1; }
+.openide-chat-native .openide-chat-activity-chip { background: transparent; border: 0; padding: 0; text-decoration: underline dotted; text-underline-offset: 3px; }
+.openide-chat-native .openide-chat-part-icon { background: transparent; }
+
+/* GOAL is another composed tray. Its state machine and explicit review controls stay intact. */
+.openide-chat-native .openide-chat-goal-tray { background: var(--oi-conversation-panel); border-color: var(--oi-border); border-radius: var(--oi-radius-group); }
+.openide-chat-native .openide-chat-goal-tray button { border-radius: var(--oi-radius-control); background: transparent; border: 1px solid var(--oi-border); }
+.openide-chat-native .openide-chat-goal-tray button:hover { background: var(--oi-hover); border-color: var(--oi-border-hover); }
+.openide-chat-native .openide-chat-goal-tray .openide-chat-goal-toggle { border-color: transparent; font-weight: 400; }
+.openide-chat-native .openide-chat-goal-body { margin-right: var(--oi-scroll-inset); scrollbar-gutter: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-native :is(.openide-chat-head-btn, .openide-chat-footer-item, .openide-chat-pick-remove, .openide-chat-chip-remove) { transition: none; }
+}
+
+.openide-chat-native .openide-composer-attach { order: -2; }
+.openide-chat-native .openide-composer-spacer { order: 0; }
+.openide-chat-native .openide-composer-anchor-shrink { order: 1; }
+.openide-chat-native .openide-composer-follow { order: 2; }
+.openide-chat-native .openide-composer-mic { order: 3; }
+.openide-chat-native .openide-composer-send { order: 4; }
+
+.openide-chat-native .openide-chat-part-live.openide-chat-live-expanded { display: block; }
+.openide-chat-native .openide-chat-live-expanded > .openide-chat-activity-summary { display: none; }
+.openide-chat-native .openide-chat-status-disclosure {
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 26px; height: 26px; margin-left: 4px; padding: 0;
+	border: 0; border-radius: var(--oi-radius-control); background: transparent; color: var(--oi-secondary); cursor: pointer;
+}
+.openide-chat-native .openide-chat-status-disclosure:hover { background: var(--oi-hover); color: var(--oi-text); }

@@ -28,7 +28,7 @@ import { IWorkbenchContribution } from '../../../common/contributions.js';
 import { IHostService } from '../../../services/host/browser/host.js';
 import { ShowCurrentReleaseNotesActionId } from '../common/update.js';
 import { IParsedUpdateInfoInput, parseUpdateInfoInput } from '../common/updateInfoParser.js';
-import { getUpdateInfoUrl, isMajorMinorVersionChange } from '../common/updateUtils.js';
+import { getUpdateInfoUrl, tryParseVersion } from '../common/updateUtils.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -50,7 +50,9 @@ interface ILastKnownVersion {
  */
 export class PostUpdateWidgetContribution extends Disposable implements IWorkbenchContribution {
 
+	static readonly ID = 'workbench.contrib.postUpdateWidget';
 	private static idCounter = 0;
+	private startupPending = false;
 
 	constructor(
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
@@ -74,54 +76,47 @@ export class PostUpdateWidgetContribution extends Disposable implements IWorkben
 		}
 
 		this._register(CommandsRegistry.registerCommand('_update.showUpdateInfo', (_accessor, markdown?: string) => this.showUpdateInfo(markdown)));
+		this._register(this.hostService.onDidChangeFocus(focused => { if (focused) { void this.tryShowOnStartup(); } }));
 		void this.tryShowOnStartup();
 	}
 
-	private async tryShowOnStartup() {
-		if (!await this.hostService.hadLastFocus()) {
-			return;
+	private async tryShowOnStartup(): Promise<void> {
+		if (this.startupPending || this._store.isDisposed) { return; }
+		this.startupPending = true;
+		try {
+			if (!await this.hostService.hadLastFocus() || this._store.isDisposed
+				|| this.meteredConnectionService.isConnectionMetered
+				|| this.configurationService.getValue<boolean>('update.showPostInstallInfo') === false
+				|| !this.detectVersionChange()) { return; }
+			// Failed/offline requests leave the previous version intact so the next focused
+			// startup can retry. Displaying the card, rather than starting a fetch, consumes it.
+			await this.showUpdateInfo(undefined, false);
+		} finally {
+			this.startupPending = false;
 		}
-
-		if (this.meteredConnectionService.isConnectionMetered) {
-			return;
-		}
-
-		if (!this.detectVersionChange()) {
-			return;
-		}
-
-		if (this.configurationService.getValue<boolean>('update.showPostInstallInfo') === false) {
-			return;
-		}
-
-		await this.showUpdateInfo();
 	}
 
-	private async showUpdateInfo(markdown?: string) {
+	async showUpdateInfo(markdown?: string, takeFocus = true): Promise<boolean> {
 		const info = await this.getUpdateInfo(markdown);
-		if (!info) {
-			return;
-		}
+		if (!info || this._store.isDisposed || (!takeFocus && !await this.hostService.hadLastFocus())) { return false; }
 
 		const contentDisposables = new DisposableStore();
 		const target = this.layoutService.mainContainer;
-		const { clientWidth } = target;
-		const maxWidth = 420;
-		const x = Math.max(clientWidth - maxWidth - 80, 16);
-
-		this.hoverService.showInstantHover({
+		const x = Math.max(target.clientWidth - 420 - 80, 16);
+		const hover = this.hoverService.showInstantHover({
 			content: this.buildContent(info, contentDisposables),
 			target: {
-				targetElements: [target],
-				x,
-				y: 40,
+				targetElements: [target], x, y: 40,
 				dispose: () => contentDisposables.dispose()
 			},
 			additionalClasses: ['post-update-widget-hover'],
 			persistence: { sticky: true },
 			appearance: { showPointer: false, compact: true, maxHeightRatio: 1 },
-			trapFocus: true,
-		}, true);
+			trapFocus: takeFocus,
+		}, takeFocus);
+		if (!hover) { contentDisposables.dispose(); return false; }
+		if (!markdown) { this.rememberCurrentVersion(); }
+		return true;
 	}
 
 	private async getUpdateInfo(input?: string | null): Promise<IParsedUpdateInfoInput | undefined> {
@@ -290,7 +285,7 @@ export class PostUpdateWidgetContribution extends Disposable implements IWorkben
 				row.setAttribute('role', 'listitem');
 				const iconEl = dom.append(row, dom.$('.feature-icon'));
 				const iconId = feature.icon ?? Codicon.sparkle.id;
-				const themeIcon = ThemeIcon.fromId(iconId);
+				const themeIcon = ThemeIcon.fromString(iconId) ?? ThemeIcon.fromId(iconId);
 				iconEl.classList.add(...ThemeIcon.asClassNameArray(themeIcon));
 				iconEl.setAttribute('aria-hidden', 'true');
 				const text = dom.append(row, dom.$('.feature-text'));
@@ -367,30 +362,28 @@ export class PostUpdateWidgetContribution extends Disposable implements IWorkben
 		return container;
 	}
 
+	private rememberCurrentVersion(): void {
+		const current: ILastKnownVersion = { version: getOpenideVersion(this.productService), commit: this.productService.commit, timestamp: Date.now() };
+		this.storageService.store(LAST_KNOWN_VERSION_KEY, JSON.stringify(current), StorageScope.APPLICATION, StorageTarget.MACHINE);
+	}
+
 	private detectVersionChange(): boolean {
 		let from: ILastKnownVersion | undefined;
-		try {
-			from = this.storageService.getObject(LAST_KNOWN_VERSION_KEY, StorageScope.APPLICATION);
-		} catch { }
-
-		const to: ILastKnownVersion = {
-			version: getOpenideVersion(this.productService),
-			commit: this.productService.commit,
-			timestamp: Date.now(),
-		};
-
-		if (from?.commit === to.commit) {
+		try { from = this.storageService.getObject(LAST_KNOWN_VERSION_KEY, StorageScope.APPLICATION); } catch { }
+		if (!from) {
+			// A fresh install establishes a baseline; the Help action can always show its card.
+			this.rememberCurrentVersion();
 			return false;
 		}
-
-		this.storageService.store(LAST_KNOWN_VERSION_KEY, JSON.stringify(to), StorageScope.APPLICATION, StorageTarget.MACHINE);
-
-		if (from) {
-			return isMajorMinorVersionChange(from.version, to.version);
-		}
-
-		return false;
+		const previous = tryParseVersion(from.version);
+		const current = tryParseVersion(getOpenideVersion(this.productService));
+		if (!previous || !current) { return false; }
+		// The product version owns release announcements, including patches. Build hashes can
+		// be absent or unchanged and are not evidence that a release was already shown.
+		return current.major !== previous.major ? current.major > previous.major
+			: current.minor !== previous.minor ? current.minor > previous.minor : current.patch > previous.patch;
 	}
+
 }
 
 /**

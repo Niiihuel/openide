@@ -9,7 +9,7 @@ import { IHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelega
 import { ISashEvent, Orientation, OrthogonalEdge, Sash, SashState } from '../../../../../base/browser/ui/sash/sash.js';
 import { HoverPosition } from '../../../../../base/browser/ui/hover/hoverWidget.js';
 import { InputBox } from '../../../../../base/browser/ui/inputbox/inputBox.js';
-import { SelectBox } from '../../../../../base/browser/ui/selectBox/selectBox.js';
+import { OpenideSettingsDropdown } from '../../../openideSettings/browser/openideSettingsDropdown.js';
 import { Action } from '../../../../../base/common/actions.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter } from '../../../../../base/common/event.js';
@@ -25,7 +25,7 @@ import { IContextViewService } from '../../../../../platform/contextview/browser
 import { IHoverService, WorkbenchHoverDelegate } from '../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IQuickInputService, IQuickPickItem } from '../../../../../platform/quickinput/common/quickInput.js';
-import { defaultInputBoxStyles, defaultSelectBoxStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
+import { openideSearchBoxStyles } from '../../../openideAgent/browser/openideControlStyles.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IBrowserViewModel } from '../../common/browserView.js';
 import { BrowserEditor, BrowserEditorContribution, BrowserWidgetLocation, IBrowserEditorWidget, IContainerLayout, IContainerLayoutOverride, BROWSER_EDITOR_ACTIVE, BrowserActionCategory, BrowserActionGroup } from '../browserEditor.js';
@@ -80,7 +80,7 @@ class BrowserEmulationToolbar extends Disposable {
 	private readonly _heightInput: InputBox;
 	private readonly _swapDimensionsAction: Action;
 	private readonly _dprInput: InputBox;
-	private readonly _zoom: SelectBox;
+	private readonly _zoom: OpenideSettingsDropdown;
 
 	private _suppressChange = false;
 	private _autoFitScale = 1;
@@ -134,12 +134,11 @@ class BrowserEmulationToolbar extends Disposable {
 		const zoomLabel = $('span.browser-emulation-toolbar-label');
 		zoomLabel.textContent = localize('browser.device.scaleLabel', "Scale:");
 		zoomGroup.appendChild(zoomLabel);
-		this._zoom = this._register(new SelectBox(
+		this._zoom = this._register(new OpenideSettingsDropdown(
 			this._buildZoomOptions(),
 			BrowserEmulationToolbar.AUTO_INDEX,
 			contextViewService,
-			defaultSelectBoxStyles,
-			{ ariaLabel: localize('browser.device.zoomAriaLabel', "Zoom factor") }
+			localize('browser.device.zoomAriaLabel', "Zoom factor")
 		));
 		this._zoom.render(zoomGroup);
 
@@ -204,7 +203,7 @@ class BrowserEmulationToolbar extends Disposable {
 		this._autoFitScale = scale;
 		const newPercent = Math.round(scale * 100);
 		if (oldPercent !== newPercent) {
-			// setOptions rebuilds <select>; keep it rare to avoid focus loss.
+			// Update only when the displayed percentage changes.
 			const wasSuppressed = this._suppressChange;
 			this._suppressChange = true;
 			try {
@@ -240,10 +239,10 @@ class BrowserEmulationToolbar extends Disposable {
 		return group;
 	}
 
-	private _buildZoomOptions(): { text: string }[] {
+	private _buildZoomOptions(): { label: string }[] {
 		return [
-			{ text: localize('browser.device.zoomAuto', "Auto ({0}%)", Math.round(this._autoFitScale * 100)) },
-			...BrowserEmulationToolbar.ZOOM_PRESETS.map(z => ({ text: `${Math.round(z * 100)}%` })),
+			{ label: localize('browser.device.zoomAuto', "Auto ({0}%)", Math.round(this._autoFitScale * 100)) },
+			...BrowserEmulationToolbar.ZOOM_PRESETS.map(z => ({ label: `${Math.round(z * 100)}%` })),
 		];
 	}
 
@@ -313,7 +312,7 @@ class BrowserEmulationToolbar extends Disposable {
 			type: 'number',
 			ariaLabel,
 			placeholder: localize('browser.device.inputPlaceholderAuto', "auto"),
-			inputBoxStyles: defaultInputBoxStyles,
+			inputBoxStyles: openideSearchBoxStyles,
 		}));
 		input.inputElement.min = String(min);
 		input.inputElement.max = String(max);
@@ -360,12 +359,12 @@ export class BrowserEditorEmulationSupport extends BrowserEditorContribution {
 		this._isMobile = CONTEXT_BROWSER_EMULATION_IS_MOBILE.bindTo(contextKeyService);
 		this._hasUserAgent = CONTEXT_BROWSER_EMULATION_HAS_USER_AGENT.bindTo(contextKeyService);
 
-		const actionsContainer = $('.browser-emulation-toolbar-actions');
+		const actionsContainer = $('.browser-emulation-toolbar-actions.oi-dock-toolbar');
 		const hoverDelegate = this._register(instantiationService.createInstance(
 			WorkbenchHoverDelegate,
 			'element',
 			undefined,
-			{ position: { hoverPosition: HoverPosition.ABOVE } }
+			{ position: { hoverPosition: HoverPosition.BELOW }, appearance: { showPointer: true } }
 		));
 		const actionsToolbar = this._register(instantiationService.createInstance(
 			MenuWorkbenchToolBar,

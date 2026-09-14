@@ -24,6 +24,39 @@ suite('OpenIDE background memory capture queue', () => {
 	const unused = () => ({ capture: async () => { throw new Error('Capture should not run.'); } });
 	const finish = (session: string) => (id: string, state: IOpenideMemoryCheckpointState) => ({ capture: async () => { await memory.request({ action: 'checkpoint', session, checkpointId: id, checkpoint: { ...state, status: 'saved' } }); } });
 
+	test('quiesce joins in-flight writes before allowing rollback and leaves other sessions running', async () => {
+		const started = gate(); const release = gate(); let joined = false; let cancelled = false;
+		await queue.enqueue(memory, 'chat', { ...pending('one'), message: 'old' }, (_id, _state, token) => ({ capture: async () => {
+			started.open(); await release.promise; cancelled = token.isCancellationRequested;
+			// Represents a native request already dispatched before cancellation.
+			await memory.request({ action: 'save', topic: 'capture/race', body: 'Captured fact', operationId: 'race', session: 'chat', message: 'old' });
+		} }));
+		await started.promise;
+		const stopped = queue.quiesce('chat').then(() => { joined = true; });
+		await Promise.resolve(); assert.strictEqual(joined, false);
+		await queue.enqueue(memory, 'other', pending('independent'), finish('other'));
+		assert.strictEqual(await queue.resume(memory, 'other', finish('other'), 1000), false);
+		release.open(); await stopped; assert.strictEqual(cancelled, true);
+		const response = await memory.request({ action: 'capture-rollback', session: 'chat', messageIds: ['old'] });
+		assert.strictEqual(response.writeReceipts?.length, 1);
+		assert.strictEqual(await queue.resume(memory, 'chat', unused, 1000), false);
+	});
+
+	test('quiesce still joins persistence surviving a workspace reset', async () => {
+		const started = gate(); const release = gate(); let settled = false;
+		const delayed: IOpenideCheckpointMemory = { ...memory, request: async request => {
+			if (request.checkpoint) { started.open(); await release.promise; }
+			return memory.request(request);
+		} };
+		const enqueued = queue.enqueue(delayed, 'chat', { ...pending('old'), message: 'old' }, unused);
+		await started.promise; queue.reset();
+		const stopped = queue.quiesce('chat').then(() => { settled = true; });
+		await Promise.resolve(); assert.strictEqual(settled, false);
+		release.open(); await enqueued; await stopped;
+		await memory.request({ action: 'capture-rollback', session: 'chat', messageIds: ['old'] });
+		assert.deepStrictEqual((await memory.request({ action: 'checkpoint-list', session: 'chat' })).checkpoints, []);
+	});
+
 	test('enqueue acknowledges only after durable persistence and survives owner restart', async () => {
 		const writing = gate(); const release = gate(); let acknowledged = false;
 		const delayed: IOpenideCheckpointMemory = { ...memory, request: async request => {

@@ -3,14 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, append, clearNode, reset } from '../../../../../../base/browser/dom.js';
+import { $, getWindow, addDisposableListener, append, clearNode, reset } from '../../../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService } from '../../../../../../platform/notification/common/notification.js';
 import { t } from '../../../common/openideStrings.js';
+import { OpenideChatSessions } from '../../openideChatSessions.js';
+import { RunOnceScheduler } from '../../../../../../base/common/async.js';
 import { IOpenideAgentService } from '../../openideAgentService.js';
+import { createChatTray, IOpenideChatTray } from '../openideChatTray.js';
 import { setupChatTooltip } from '../openideChatHover.js';
 import { appendKbd } from '../openideChatKbd.js';
 import { OpenideChatFileRow } from './openideChatFileRow.js';
@@ -31,23 +34,12 @@ export interface IOpenideChatFilesResolved {
 
 const STOP_KEYBINDING = 'Ctrl+Shift+⌫';
 
-/**
- * The turn's changed files: the webview's `files-tray` on workbench
- * DOM.
- *
- * It is not a content part and it is not per-turn state, which is the one thing about it that is
- * easy to get wrong. What it shows is the set of files with a PENDING snapshot — files the agent
- * changed and the user has not accepted or reverted yet — and that set survives runs, restarts and
- * conversation switches (`pendingFileDiffs()` restores it from workspace storage). Modelling it as
- * a row inside the transcript would tie a workspace-wide, still-actionable state to a turn that
- * has already scrolled away.
- *
- * Its rows are the same `OpenideChatFileRow` the edit card uses; the only difference is the type
- * scale and the two hover actions. That is the unification section 6.2 asks for.
- */
+/** Actionable pending files owned exclusively by the selected conversation. Shared-file
+ * receipts remain reviewable through Changes without offering a cross-chat bulk rollback. */
 export class OpenideChatFilesTray extends Disposable {
 
 	readonly domNode: HTMLElement;
+	private readonly _tray: IOpenideChatTray;
 
 	private readonly _onDidChangeHeight = this._register(new Emitter<void>());
 	/** The tray sits between transcript and composer, so appearing and going changes the layout. */
@@ -60,18 +52,18 @@ export class OpenideChatFilesTray extends Disposable {
 	readonly onDidResolveFiles: Event<IOpenideChatFilesResolved> = this._onDidResolveFiles.event;
 
 	private readonly _count: HTMLElement;
-	private readonly _chevron: HTMLElement;
 	private readonly _body: HTMLElement;
 	private readonly _stopButton: HTMLButtonElement;
 	private readonly _undoAllButton: HTMLButtonElement;
 	private readonly _keepAllButton: HTMLButtonElement;
 
 	private readonly _rows = new Map<string, { row: OpenideChatFileRow; store: DisposableStore }>();
-	private _expanded = true;
+	private _expanded = false;
 	private _busy = false;
 
 	constructor(
 		parent: HTMLElement,
+		private readonly sessions: OpenideChatSessions,
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 		@IOpenideAgentService private readonly _agentService: IOpenideAgentService,
 		@INotificationService private readonly _notificationService: INotificationService,
@@ -79,15 +71,12 @@ export class OpenideChatFilesTray extends Disposable {
 	) {
 		super();
 
-		this.domNode = append(parent, $('div.openide-chat-files-tray.hidden'));
-		const head = append(this.domNode, $('div.openide-chat-files-head'));
-
-		const toggle = append(head, $<HTMLButtonElement>('button.openide-chat-files-toggle', { type: 'button' }));
-		this._chevron = append(toggle, $('span.codicon.codicon-chevron-down'));
-		this._count = append(toggle, $('span.openide-chat-files-count'));
+		this._tray = this._register(createChatTray(parent, 'files', 'files'));
+		this.domNode = this._tray.domNode;
+		const { head, toggle } = this._tray;
+		this._count = this._tray.label;
 		this._register(addDisposableListener(toggle, 'click', () => this._toggle()));
 
-		append(head, $('span.openide-chat-files-spacer'));
 		const actions = append(head, $('span.openide-chat-files-actions'));
 
 		this._stopButton = this._createTextButton(actions, 'openide-chat-files-stop', t('chat.files.stop'), () => t('chat.part.filesStop'), () => this._onDidRequestStop.fire());
@@ -96,12 +85,33 @@ export class OpenideChatFilesTray extends Disposable {
 		this._keepAllButton = this._createTextButton(actions, 'openide-chat-files-bulk', t('chat.files.keepAll'), () => t('chat.part.filesKeepAll'), () => this._keepAll());
 		this._createTextButton(actions, 'openide-chat-files-review', t('chat.files.review'), () => t('chat.part.filesReview'), () => this._reviewFirst());
 
-		this._body = append(this.domNode, $('div.openide-chat-files-body'));
+		this._body = this._tray.body;
+		this._register(this._tray.onDidChangeExpanded(expanded => {
+			if (this._expanded === expanded) {
+				return;
+			}
+			this._expanded = expanded;
+			this._onDidChangeHeight.fire();
+		}));
+		this._tray.setExpanded(this._expanded);
 
-		this._register(this._agentService.onDidChangeFileDiff(diff => this.update(diff)));
-		// The snapshot outlives the window: without this the tray is empty after a reload even
-		// though the workspace still has unaccepted changes waiting in it.
-		this.reset(this._agentService.pendingFileDiffs());
+		const refresh = this._register(new RunOnceScheduler(() => this._refresh(), 50));
+		this._register(this._agentService.onDidChangeFileDiff(() => refresh.schedule()));
+		this._register(sessions.onDidChange(() => this._refresh()));
+		this._refresh();
+	}
+
+	private _refreshKey = '';
+	private _refresh(): void {
+		const id = this.sessions.activeSessionId();
+		const diffs = id ? this._agentService.pendingFileDiffs(id) : [];
+		const key = JSON.stringify([id, diffs]);
+		if (key === this._refreshKey) { return; }
+		this._refreshKey = key;
+		const paths = new Set(diffs.map(diff => diff.path));
+		for (const path of this._rows.keys()) { if (!paths.has(path)) { this._removeRow(path); } }
+		for (const diff of diffs) { this.update(diff); }
+		this._syncVisibility();
 	}
 
 	get isEmpty(): boolean {
@@ -177,13 +187,13 @@ export class OpenideChatFilesTray extends Disposable {
 
 	private _toggle(): void {
 		this._expanded = !this._expanded;
-		this._chevron.className = `codicon codicon-${this._expanded ? 'chevron-down' : 'chevron-right'}`;
-		this._body.classList.toggle('hidden', !this._expanded);
+		this._tray.setExpanded(this._expanded);
 		this._onDidChangeHeight.fire();
 	}
 
 	private _openReview(path: string): void {
-		this._agentService.openDiff(path).catch(error => this._reportError(error));
+		if (!this._ownsPending(path)) { this._refresh(); return; }
+		this._agentService.openDiff(path, undefined, getWindow(this._tray.domNode).vscodeWindowId).catch(error => this._reportError(error));
 	}
 
 	private _reviewFirst(): void {
@@ -200,7 +210,13 @@ export class OpenideChatFilesTray extends Disposable {
 	 * flushes a snapshot asynchronously, and a row that lingers invites a second click that
 	 * accepts an already-forgotten baseline.
 	 */
+	private _ownsPending(path: string): boolean {
+		const id = this.sessions.activeSessionId();
+		return !!id && this._agentService.pendingFileDiffs(id).some(file => file.path === path);
+	}
+
 	private _resolve(path: string, signal: 'keep' | 'revert'): void {
+		if (this._busy || !this._ownsPending(path)) { this._refresh(); return; }
 		const operation = signal === 'keep' ? this._agentService.keepEdit(path) : this._agentService.revertEdit(path);
 		operation.catch(error => this._reportError(error));
 		this._onDidResolveFiles.fire({ paths: [path], signal });
@@ -214,7 +230,8 @@ export class OpenideChatFilesTray extends Disposable {
 	 * accepted and half still pending (the removed chat webview makes the same point).
 	 */
 	private _keepAll(): void {
-		const paths = [...this._rows.keys()];
+		if (this._busy) { return; }
+		const paths = [...this._rows.keys()].filter(path => this._ownsPending(path));
 		if (!paths.length) {
 			return;
 		}
@@ -252,6 +269,9 @@ export class OpenideChatFilesTray extends Disposable {
 	}
 
 	private _syncActions(): void {
+		for (const { row } of this._rows.values()) { row.setActionsEnabled(!this._busy); }
+		this._undoAllButton.disabled = this._busy;
+		this._keepAllButton.disabled = this._busy;
 		this._stopButton.classList.toggle('hidden', !this._busy);
 		this._undoAllButton.classList.toggle('hidden', this._busy);
 		this._keepAllButton.classList.toggle('hidden', this._busy);

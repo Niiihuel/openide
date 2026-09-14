@@ -20,6 +20,25 @@
  */
 
 export const OPENIDE_SETTINGS_STRINGS = {
+	'accounts.openProfile': { es: 'Abrir perfil y cuenta', en: 'Open profile and account' },
+	'accounts.profileTitle': { es: 'Perfil', en: 'Profile' },
+	'accounts.profileDescription': { es: 'Tu cuenta conectada y el perfil que usás en OpenIDE.', en: 'Your connected account and the profile you use in OpenIDE.' },
+	'accounts.connectedAccount': { es: 'Cuenta conectada', en: 'Connected account' },
+	'accounts.viewOnGitHub': { es: 'Ver en GitHub', en: 'View on GitHub' },
+	'accounts.permissions': { es: 'Administrar acceso', en: 'Manage access' },
+	'accounts.permissionsDescription': { es: 'Elegí qué extensiones pueden acceder a esta cuenta.', en: 'Choose which extensions can access this account.' },
+	'accounts.localProfile': { es: 'Perfil del IDE', en: 'IDE profile' },
+	'accounts.currentProfile': { es: 'Perfil en uso', en: 'Current profile' },
+	'accounts.switchProfile': { es: 'Usar perfil', en: 'Use profile' },
+	'accounts.profileName': { es: 'Nombre del perfil', en: 'Profile name' },
+	'accounts.profileActions': { es: 'Administrar perfil local', en: 'Manage local profile' },
+	'accounts.renameProfile': { es: 'Guardar nombre', en: 'Save name' },
+	'accounts.removeProfile': { es: 'Eliminar perfil', en: 'Delete profile' },
+	'accounts.confirmRemoveProfile': { es: 'Confirmar eliminación', en: 'Confirm deletion' },
+	'accounts.createProfile': { es: 'Crear perfil', en: 'Create profile' },
+	'accounts.newProfileDescription': { es: 'Crear un perfil local sin cambiar el perfil en uso.', en: 'Create a local profile without switching the current profile.' },
+	'accounts.manageProfile': { es: 'Administrar perfil', en: 'Manage profile' },
+	'accounts.localProfileDescription': { es: 'Ajustes, extensiones y atajos de tu perfil actual.', en: 'Settings, extensions and shortcuts for your current profile.' },
 	// ---- Composer commands
 	'openide.commands.title': { es: 'Comandos del composer', en: 'Composer commands' },
 	'openide.commands.desc': { es: 'Prompts reutilizables: tipeá /nombre en el chat y se expande el markdown del comando ($ARGUMENTS y $1..$9 interpolan lo que escribas después). Proyecto pisa global si el nombre se repite.', en: 'Reusable prompts: type /name in the chat and the command\'s markdown expands ($ARGUMENTS and $1..$9 interpolate whatever you type after it). Project overrides global when the name is repeated.' },

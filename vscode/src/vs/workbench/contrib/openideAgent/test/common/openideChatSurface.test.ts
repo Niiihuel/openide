@@ -39,7 +39,7 @@ suite('OpenIDE chat surface events', () => {
 	}
 
 	function isSurface(event: IOpenideChatSurfaceEvent | AgentLoopEvent): event is IOpenideChatSurfaceEvent {
-		return event.type === 'planDraft' || event.type === 'planCard' || event.type === 'canvasCard' || event.type === 'subagentRunUpdate';
+		return event.type === 'inputResolved' || event.type === 'memoryCapture' || event.type === 'planDraft' || event.type === 'planCard' || event.type === 'canvasCard' || event.type === 'subagentRunUpdate';
 	}
 
 	function contentOf(state: IOpenideChatReducerState): readonly IOpenideChatContent[] {
@@ -52,6 +52,33 @@ suite('OpenIDE chat surface events', () => {
 	}
 
 	const PATH = '.openide/plans/refactor.md';
+
+	test('answers update the matching request only and preserve parallel pending controls', () => {
+		const state = fold([
+			{ type: 'accountChoiceRequest', id: 'account', spentLabel: 'A', candidates: [] },
+			{ type: 'suggestMode', id: 'mode', mode: 'plan', reason: 'Review' },
+			{ type: 'inputResolved', resolution: { kind: 'modeSuggestion', requestId: 'mode', accepted: false } },
+		]);
+		assert.deepStrictEqual(contentOf(state).map(content => content.kind === 'modeSuggestion' ? content.accepted : content.kind === 'accountChoice' ? content.decision : null), [undefined, false]);
+		const answered = applyOpenideChatSurfaceEvent(state, { type: 'inputResolved', resolution: { kind: 'accountChoice', requestId: 'account', decision: 'stop' } });
+		const account = contentOf(answered.state)[0];
+		assert.ok(account.kind === 'accountChoice' && account.decision === 'stop');
+		assert.strictEqual(applyOpenideChatSurfaceEvent(answered.state, { type: 'inputResolved', resolution: { kind: 'accountChoice', requestId: 'missing', decision: 'stop' } }).items, answered.items);
+	});
+
+	test('memory receipt stays where the save happened and later work follows it', () => {
+		const streaming = fold([{ type: 'text', delta: 'Working' }]);
+		const captured = applyOpenideChatSurfaceEvent(streaming, { type: 'memoryCapture', message: 'Memory saved: first.md' });
+		const updated = applyOpenideChatSurfaceEvent(captured.state, { type: 'memoryCapture', message: 'Memory saved: second.md' });
+		const continued = applyAgentEvent(updated.state, { type: 'text', delta: 'Next change' }).state;
+		const reply = continued.items[streaming.activeIndex];
+		assert.ok(isOpenideChatResponseItem(reply));
+		assert.deepStrictEqual(reply.content.map(content => content.kind === 'markdown' ? content.value.value : content.kind), ['Working', 'notice', 'Next change']);
+		assert.strictEqual(continued.items.length, streaming.items.length);
+		assert.deepStrictEqual(captured.state.cursor.tools, streaming.cursor.tools);
+		assert.deepStrictEqual(captured.sessionEffects, []);
+		assert.strictEqual(applyOpenideChatSurfaceEvent(updated.state, { type: 'memoryCapture', message: 'Memory saved: second.md' }).state, updated.state);
+	});
 
 	test('a draft paints one skeleton card and keeps updating it', () => {
 		const state = fold([

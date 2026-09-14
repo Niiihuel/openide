@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append } from '../../../../../../base/browser/dom.js';
+import { $, getWindow, append } from '../../../../../../base/browser/dom.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService } from '../../../../../../platform/notification/common/notification.js';
@@ -47,8 +47,6 @@ export class OpenideChatEditPart extends OpenideChatContentPart {
 	private _isComplete: boolean;
 	private readonly _row: OpenideChatFileRow;
 	private readonly _body: HTMLElement;
-	/** The stand-in bars, while the write has no diff yet. Kept so they are never rebuilt. */
-	private _skeleton: HTMLElement | undefined;
 	private readonly _diff: OpenideDiffBlock;
 
 	constructor(
@@ -77,9 +75,7 @@ export class OpenideChatEditPart extends OpenideChatContentPart {
 		// a bordered card with a filename reads as a label nobody thinks to click.
 		this._row.setActions([{ icon: 'go-to-file', tooltip: () => t('chat.part.reviewEdit'), run: () => this._openReview() }]);
 
-		// The body: the skeleton while the write is in flight, then the shared diff block — the
-		// webview's `.part-body` + `.ediff`, which is also Cursor's edit block: a few lines at
-		// rest, the chevron only on hover and only when there is more underneath.
+		// The body only renders a real diff; the status line owns in-flight activity.
 		this._body = append(this.domNode, $('div.openide-chat-edit-body'));
 		this._diff = this._register(instantiationService.createInstance(OpenideDiffBlock));
 		append(this._body, this._diff.domNode);
@@ -94,7 +90,8 @@ export class OpenideChatEditPart extends OpenideChatContentPart {
 		// card without a diff is a failed or empty write, and must stop pretending to work.
 		const pending = !diff.diffLines && !this._isComplete;
 		this._row.setPending(pending);
-		this._renderPending(pending);
+		// Only actual diffs deserve a card. The shared status line reports the in-flight write.
+		this.domNode.hidden = !diff.diffLines?.length && !this._content.waitingFor;
 		this._renderDiff();
 		// Per-EDIT numbers, not the turn's accumulated ones: the webview header shows
 		// `m.editAdded`/`m.editRemoved` precisely so a card says what
@@ -105,30 +102,6 @@ export class OpenideChatEditPart extends OpenideChatContentPart {
 		this.domNode.classList.toggle('openide-chat-edit-created', !!diff.created);
 	}
 
-	/**
-	 * Bars where the diff will go, while the write is still in flight.
-	 *
-	 * The card used to be a bare filename until the whole diff landed, so a large file looked like
-	 * a row that had stopped — the same reason the plan card fakes its body. Built ONCE and then
-	 * only shown or hidden: rebuilding it on every delta of the write would restart the sweep and
-	 * the bars would never finish one.
-	 */
-	private _renderPending(pending: boolean): void {
-		if (pending && !this._skeleton) {
-			const skeleton = $('div.openide-chat-edit-sk.openide-chat-sk');
-			for (const width of ['w90', 'w55', 'w76']) {
-				append(skeleton, $(`div.openide-chat-sk-line.openide-chat-sk-${width}`));
-			}
-			this._skeleton = skeleton;
-			this._body.insertBefore(skeleton, this._diff.domNode);
-		}
-		this.domNode.classList.toggle('pending', pending);
-		if (!pending && this._skeleton) {
-			this._skeleton.remove();
-			this._skeleton = undefined;
-		}
-	}
-
 	private _renderDiff(): void {
 		const diff = this._content.diff;
 		const lines = diff.diffLines;
@@ -137,7 +110,7 @@ export class OpenideChatEditPart extends OpenideChatContentPart {
 	}
 
 	private _openReview(): void {
-		this._agentService.openDiff(this._content.diff.path).catch(error => {
+		this._agentService.openDiff(this._content.diff.path, undefined, getWindow(this.domNode).vscodeWindowId).catch(error => {
 			// Loud on purpose: a click that resolves to nothing reads as a broken card, and the
 			// common cause (the file moved or the workspace changed) is worth saying out loud.
 			this._notificationService.error(error instanceof Error ? error.message : String(error));
@@ -179,5 +152,6 @@ function sameEdit(a: IOpenideChatEditContent, b: IOpenideChatEditContent): boole
 		&& a.diff.created === b.diff.created
 		&& a.diff.editAdded === b.diff.editAdded
 		&& a.diff.editRemoved === b.diff.editRemoved
-		&& a.diff.diffLines === b.diff.diffLines;
+		&& a.diff.diffLines === b.diff.diffLines
+		&& a.waitingFor === b.waitingFor;
 }

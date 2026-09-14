@@ -1,0 +1,33 @@
+/* Activity is secondary to the assistant's prose; details retain their existing controls. */
+.openide-chat-work-group { margin: 8px 0; }
+.openide-chat-work-group-summary {
+	display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%;
+	padding: 4px 0; color: var(--oi-secondary); cursor: pointer; list-style: none;
+	border-radius: var(--oi-radius-sm);
+}
+.openide-chat-work-group-summary::-webkit-details-marker { display: none; }
+.openide-chat-work-group-summary:hover { color: var(--oi-text); }
+.openide-chat-work-group-summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.openide-chat-work-group-chevron { opacity: 0; transition: transform 120ms ease, opacity 120ms ease; }
+.openide-chat-work-group-summary:hover .openide-chat-work-group-chevron,
+.openide-chat-work-group-summary:focus-visible .openide-chat-work-group-chevron,
+.openide-chat-work-group[open] .openide-chat-work-group-chevron { opacity: 1; }
+.openide-chat-work-group[open] .openide-chat-work-group-chevron { transform: rotate(90deg); }
+.openide-chat-work-group-body { padding: 4px 0 4px 12px; border-left: 1px solid var(--oi-border-soft); }
+.openide-chat-turn-duration { color: var(--oi-secondary); padding: 12px 0; margin-bottom: 16px; border-bottom: 1px solid var(--oi-border-soft); }
+.openide-chat-turn-duration[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .openide-chat-work-group-chevron { transition: none; } }
+
+.openide-chat-part-head:focus:not(:focus-visible) { outline: none; }
+.openide-chat-part-head:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px;
+	border-radius: var(--oi-radius-sm);
+}
+
+/* Worker groups are quiet at rest and keep long task names inside the transcript. */
+.openide-chat-subagent-group > .openide-chat-work-group-summary { min-height: 24px; }
+.openide-chat-subagent-group-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-chat-subagent-group .openide-subagent-avatar { width: 20px; height: 20px; flex-basis: 20px; }
+.openide-chat-subagent-group .openide-chat-work-group-chevron { flex-shrink: 0; }
+.openide-chat-subagent-group > .openide-chat-work-group-body > .openide-chat-delegation { display: none; }
+.openide-chat-sub-avatar { display: flex; flex-shrink: 0; }

@@ -11,6 +11,7 @@
  *  the pure providers (regex/text) plus the remote evidence it receives.
  *--------------------------------------------------------------------------------------------*/
 
+import { NativeCodebase, INativeCodebaseResult, INativeCodebaseSource } from '../../../../platform/openideCodebase/node/openideNativeCodebase.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import * as glob from '../../../../base/common/glob.js';
@@ -20,6 +21,8 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { INDEXER_PROVIDERS, IProviderExtraction, IProviderSourceFile, isTestFilePath, mergeExtractions } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProviders.js';
 import { DEFAULT_CODEBASE_MEMORY_INDEX_OPTIONS, ICodebaseMemoryIndexOptions } from '../../../../platform/openideCodebase/common/openideCodebaseMemoryProtocol.js';
 import { CodebaseMemoryStorage } from './openideCodebaseMemoryStorage.js';
+import { isCodebaseDesignDocument, extractCodebaseDesign } from '../../../../platform/openideCodebase/common/openideCodebaseDesigns.js';
+import { extractCodebaseGoals, isCodebaseGoalDocument } from '../../../../platform/openideCodebase/common/openideCodebaseGoals.js';
 import { extractCodebaseNotes, isCodebaseNotesUri } from '../../../../platform/openideCodebase/common/openideCodebaseNotes.js';
 
 const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|cs|c|h|cpp|hpp|cc)$/;
@@ -95,6 +98,7 @@ export class CodebaseMemoryIndexer extends Disposable {
 	private current: Promise<IIndexProgress> | undefined;
 	private cts: CancellationTokenSource | undefined;
 	private operationQueue: Promise<unknown> = Promise.resolve();
+	readonly native = this._register(new NativeCodebase());
 	private readonly externalExtractions = new Map<string, IProviderExtraction>();
 	private readonly metrics: IIndexMetrics = { filesIndexed: 0, filesSkipped: 0, indexTimeMs: 0, nodes: 0, edges: 0, incrementalUpdates: 0, fullRebuilds: 0 };
 	private options: ICodebaseMemoryIndexOptions = DEFAULT_CODEBASE_MEMORY_INDEX_OPTIONS;
@@ -113,7 +117,7 @@ export class CodebaseMemoryIndexer extends Disposable {
 		super();
 	}
 
-	getMetrics(): IIndexMetrics { return { ...this.metrics }; }
+	getMetrics(): IIndexMetrics & ReturnType<NativeCodebase['getMetrics']> { return { ...this.metrics, ...this.native.getMetrics() }; }
 
 	setOptions(options: ICodebaseMemoryIndexOptions): void {
 		this.options = options;
@@ -137,6 +141,7 @@ export class CodebaseMemoryIndexer extends Disposable {
 		if (!this.options.indexTests && isTestFilePath(relPath)) { return { ok: false, reason: 'test' }; }
 		// The shared memory is a source too: its entries become `note` nodes, which is what lets a
 		// decision about a module come back from the same query that returns the module.
+		if (isCodebaseGoalDocument(`/${relPath}`) || isCodebaseDesignDocument(`/${relPath}`)) { return { ok: true }; }
 		if (isCodebaseNotesUri(`/${relPath}`)) { return this.options.indexNotes === false ? { ok: false, reason: 'excluded' } : { ok: true }; }
 		const extOk = CODE_EXT.test(name) || name === 'package.json';
 		if (this.includePatterns.length) {
@@ -156,12 +161,14 @@ export class CodebaseMemoryIndexer extends Disposable {
 
 	/** A full index. It cancels any indexing already in flight. */
 	rebuildFull(token?: CancellationToken): Promise<IIndexProgress> {
+		if (token?.isCancellationRequested) { return Promise.resolve(this.cancelled(0, 0)); }
 		this.cts?.cancel();
 		const localCts = new CancellationTokenSource(token);
 		this.cts = localCts;
 		const operation = this.operationQueue.then(() => this.runFull(localCts.token));
 		const tracked = operation.finally(() => {
 			localCts.dispose();
+			if (this.cts === localCts) { this.cts = undefined; }
 			if (this.current === tracked) { this.current = undefined; }
 		});
 		this.current = tracked;
@@ -170,6 +177,7 @@ export class CodebaseMemoryIndexer extends Disposable {
 	}
 
 	private async runFull(token: CancellationToken): Promise<IIndexProgress> {
+		if (token.isCancellationRequested) { return this.cancelled(0, 0); }
 		const start = Date.now();
 		const workspaceKey = this.workspaceKey();
 		await this.storage.load(workspaceKey);
@@ -191,10 +199,9 @@ export class CodebaseMemoryIndexer extends Disposable {
 		for (let i = 0; i < files.length; i += BATCH_SIZE) {
 			if (token.isCancellationRequested) { return this.cancelled(processed, files.length); }
 			const batch = files.slice(i, i + BATCH_SIZE);
-			for (const file of batch) {
-				await this.indexOne(file.uri, file.content, workspaceKey, token);
-				processed++;
-			}
+			await this.indexBatch(batch, workspaceKey, token);
+			if (token.isCancellationRequested) { return this.cancelled(processed, files.length); }
+			processed += batch.length;
 			this._onProgress.fire({ phase: 'indexing', processed, total: files.length, current: batch[batch.length - 1]?.uri });
 			await yieldToEventLoop(YIELD_MS);
 		}
@@ -224,28 +231,59 @@ export class CodebaseMemoryIndexer extends Disposable {
 		await this.storage.load(workspaceKey);
 		const start = Date.now();
 		let processed = 0;
-		for (const change of changes) {
+		for (let i = 0; i < changes.length; i += BATCH_SIZE) {
 			if (token.isCancellationRequested) { break; }
-			const uriStr = change.uri.toString();
-			if (change.deleted) {
-				await this.storage.removeFile(uriStr);
-				this.metrics.incrementalUpdates++;
-				processed++;
-				continue;
+			const batch = changes.slice(i, i + BATCH_SIZE);
+			// Preserve the order of delete/recreate events for the same URI within a batch.
+			let pending: { uri: string; content: string }[] = [];
+			const flush = async () => { await this.indexBatch(pending, workspaceKey, token); pending = []; };
+			for (const change of batch) {
+				const uri = change.uri.toString();
+				if (change.deleted) { await flush(); await this.storage.removeFile(uri); }
+				else if (change.content !== undefined) { pending.push({ uri, content: change.content }); }
+				else { continue; }
+				this.metrics.incrementalUpdates++; processed++;
 			}
-			if (change.content === undefined) { continue; }
-			await this.indexOne(uriStr, change.content, workspaceKey, token);
-			this.metrics.incrementalUpdates++;
-			processed++;
+			await flush();
 			await yieldToEventLoop(YIELD_MS);
 		}
 		await this.storage.flush();
 		this.metrics.indexTimeMs += Date.now() - start;
+		if (token.isCancellationRequested) { return this.cancelled(processed, changes.length); }
 		this._onProgress.fire({ phase: 'idle', processed, total: changes.length });
 		return { phase: 'idle', processed, total: changes.length };
 	}
 
-	private async indexOne(uri: string, content: string, workspaceKey: string, token: CancellationToken): Promise<void> {
+	private async indexBatch(files: readonly { uri: string; content: string }[], workspaceKey: string, token: CancellationToken): Promise<void> {
+		let batch: INativeCodebaseSource[] = [];
+		let bytes = 0;
+		const results = new Map<string, INativeCodebaseResult>();
+		const flush = async () => {
+			if (!batch.length) { return; }
+			const extracted = await this.native.extract(batch, this.options.enableRegexFallback, token, this.options.enableTreeSitter === true).catch(error => { if (!token.isCancellationRequested) { throw error; } return undefined; });
+			for (const result of extracted ?? []) { results.set(result.uri, result); }
+			batch = []; bytes = 0;
+		};
+		// Duplicate URIs must observe the preceding write, including the hash fast path.
+		if (new Set(files.map(file => file.uri)).size !== files.length) {
+			for (const file of files) { await this.indexBatch([file], workspaceKey, token); }
+			return;
+		}
+		for (const file of files) {
+			if (token.isCancellationRequested) { return; }
+			const relative = this.relativePath(file.uri);
+			if (isCodebaseDesignDocument(file.uri) || isCodebaseGoalDocument(file.uri) || isCodebaseNotesUri(file.uri) || file.content.length > MAX_FILE_BYTES || looksSecret(file.content) || (relative && !this.fileEligible(relative, relative.split('/').pop() ?? relative).ok)) { continue; }
+			const size = Buffer.byteLength(file.content, 'utf8');
+			if (batch.length >= BATCH_SIZE || bytes + size > 4 * 1024 * 1024) { await flush(); }
+			const meta = this.storage.getFileMeta(file.uri);
+			batch.push({ ...file, workspaceKey, language: languageFromPath(file.uri), knownHash: meta?.status === 'indexed' ? meta.hash : undefined, knownExtractionMode: meta?.extractionMode });
+			bytes += size;
+		}
+		await flush();
+		for (const file of files) { await this.indexOne(file.uri, file.content, workspaceKey, token, results.get(file.uri)); }
+	}
+
+	private async indexOne(uri: string, content: string, workspaceKey: string, token: CancellationToken, native?: INativeCodebaseResult): Promise<void> {
 		if (token.isCancellationRequested) { return; }
 		// A per-file guard: the incremental path does NOT go through walk(). A file that stopped being
 		// eligible (a new setting) is purged from the index instead of reindexed.
@@ -255,15 +293,27 @@ export class CodebaseMemoryIndexer extends Disposable {
 			this.metrics.filesSkipped++;
 			return;
 		}
-		if (content.length > MAX_FILE_BYTES || looksSecret(content)) {
+		if (content.length > (isCodebaseDesignDocument(uri) ? 2_000_000 : MAX_FILE_BYTES) || looksSecret(content)) {
 			await this.storage.removeFile(uri);
 			this.metrics.filesSkipped++;
 			return;
 		}
 		const language = languageFromPath(uri);
-		const hash = simpleHash(content);
+		const hash = native?.hash ?? simpleHash(content);
+		const source: IProviderSourceFile = { uri, content, language, workspaceKey };
+		const extractionMode = native?.extractionMode ?? (this.options.enableRegexFallback && INDEXER_PROVIDERS.some(provider => provider.id === 'regex' && provider.supports(source)) ? 'regex' : 'text');
 		const meta = this.storage.getFileMeta(uri);
-		if (meta && meta.hash === hash && meta.status === 'indexed') { this.metrics.filesSkipped++; return; }
+		const sameMode = meta?.extractionMode === extractionMode || (!meta?.extractionMode && extractionMode !== 'treeSitter');
+		if (meta && meta.hash === hash && meta.status === 'indexed' && sameMode) { this.metrics.filesSkipped++; return; }
+		if (isCodebaseDesignDocument(uri)) {
+			await this.storage.writeFile(uri, hash, 'json', { uri, ...extractCodebaseDesign(workspaceKey, uri, content) }); this.metrics.filesIndexed++; return;
+		}
+		if (isCodebaseGoalDocument(uri)) {
+			const goals = extractCodebaseGoals(workspaceKey, uri, content);
+			await this.storage.writeFile(uri, hash, 'markdown', { uri, ...goals });
+			this.metrics.filesIndexed++;
+			return;
+		}
 		if (isCodebaseNotesUri(uri)) {
 			// Authored prose, not code: the regex/text providers would read its backticks as
 			// symbol definitions and fill the graph with entities that do not exist.
@@ -272,16 +322,23 @@ export class CodebaseMemoryIndexer extends Disposable {
 			this.metrics.filesIndexed++;
 			return;
 		}
-		const source: IProviderSourceFile = { uri, content, language, workspaceKey };
 		const extractions: IProviderExtraction[] = [];
-		for (const provider of INDEXER_PROVIDERS) {
-			if (provider.id === 'regex' && !this.options.enableRegexFallback) { continue; }
-			if (provider.supports(source)) { extractions.push(provider.extract(source)); }
+		if (native?.extraction) { extractions.push(native.extraction); }
+		else {
+			for (const provider of INDEXER_PROVIDERS) {
+				if (provider.id === 'regex' && !this.options.enableRegexFallback) { continue; }
+				if (provider.supports(source)) { extractions.push(provider.extract(source)); }
+			}
 		}
 		const external = this.externalExtractions.get(uri);
 		const merged = mergeExtractions(external ? [...extractions, external] : extractions);
-		await this.storage.writeFile(uri, hash, language, { uri, nodes: [...merged.nodes], edges: [...merged.edges] });
+		await this.storage.writeFile(uri, hash, language, { uri, nodes: [...merged.nodes], edges: [...merged.edges] }, extractionMode);
 		this.metrics.filesIndexed++;
+	}
+
+	override dispose(): void {
+		this.cts?.cancel();
+		super.dispose();
 	}
 
 	private cancelled(processed: number, total: number): IIndexProgress {
@@ -316,7 +373,7 @@ export class CodebaseMemoryIndexer extends Disposable {
 						else if (eligible.reason === 'test') { counters.excludedTests++; }
 						continue;
 					}
-					if ((child.size ?? 0) > MAX_FILE_BYTES) { counters.skippedTooLarge++; continue; }
+					if ((child.size ?? 0) > (child.name === 'design.json' ? 2_000_000 : MAX_FILE_BYTES)) { counters.skippedTooLarge++; continue; }
 					try {
 						const content = (await this.fileService.readFile(child.resource)).value.toString();
 						totalBytes += content.length;

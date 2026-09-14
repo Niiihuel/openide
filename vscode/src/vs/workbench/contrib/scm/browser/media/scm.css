@@ -379,11 +379,11 @@
 }
 
 .scm-view .scm-editor-container .monaco-editor {
-	border-radius: var(--vscode-cornerRadius-medium);
+	border-radius: var(--oi-radius-control, var(--vscode-cornerRadius-small));
 }
 
 .scm-view .scm-editor-container .monaco-editor .overflow-guard {
-	border-radius: var(--vscode-cornerRadius-medium);
+	border-radius: var(--oi-radius-control, var(--vscode-cornerRadius-small));
 }
 
 .scm-view .scm-editor {
@@ -392,9 +392,9 @@
 	display: flex;
 	align-items: flex-start;
 	box-sizing: border-box;
-	border: 1px solid var(--vscode-focusBorder);
+	border: 1px solid var(--oi-border, var(--vscode-input-border, transparent));
 	background-color: var(--vscode-input-background);
-	border-radius: var(--vscode-cornerRadius-medium);
+	border-radius: var(--oi-radius-control, var(--vscode-cornerRadius-small));
 }
 
 .scm-view .scm-editor.synthetic-focus:not(.validation-info):not(.validation-warning):not(.validation-error) {
@@ -1015,4 +1015,24 @@
 }
 .monaco-workbench .part.sidebar .scm-history-view .history-item-load-more .history-item-placeholder.shimmer .monaco-icon-label-container, .monaco-workbench .part.auxiliarybar .scm-history-view .history-item-load-more .history-item-placeholder.shimmer .monaco-icon-label-container {
     height: calc(var(--vscode-workbench-sidebar-font-size) * 1.384615)
+}
+
+/* Commit input is a compound Monaco control. Keep validation outlines and native input height. */
+.monaco-workbench.openide-visual .scm-view .scm-editor {
+	transition: border-color var(--oi-duration-hover) var(--oi-ease);
+}
+.monaco-workbench.openide-visual .scm-view .scm-editor:not(.validation-info):not(.validation-warning):not(.validation-error):hover:not(.synthetic-focus):not(:focus-within) {
+	border-color: var(--vscode-contrastActiveBorder, var(--oi-border-hover));
+}
+.monaco-workbench.openide-visual .scm-view .scm-provider {
+	box-shadow: none;
+}
+/* Validation messages join the input with a flat top seam. */
+.monaco-workbench.openide-visual .scm-editor-validation-container {
+	border-bottom-left-radius: var(--oi-radius-control);
+	border-bottom-right-radius: var(--oi-radius-control);
+}
+
+.monaco-workbench.openide-visual .scm-view .scm-editor:not(.validation-info):not(.validation-warning):not(.validation-error):is(.synthetic-focus, :focus-within) {
+	border-color: var(--vscode-contrastActiveBorder, var(--oi-focus, var(--vscode-focusBorder)));
 }

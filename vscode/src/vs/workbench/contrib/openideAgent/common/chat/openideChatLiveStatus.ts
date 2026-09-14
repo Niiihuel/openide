@@ -22,21 +22,14 @@ import { basenameForChat, compactExploreDetail, getOpenideToolMeta, toolDetailFo
  * `browser/chat/openideChatStatusLine.ts`, and this file is what a test can assert on.
  */
 
-/** Every kind that owns a LIVE surface of its own, so the status line steps aside for it. */
-function ownsItsOwnMotion(content: IOpenideChatContent): boolean {
+/** An unanswered request remains pending even when a parallel tool appends another row. */
+function awaitsResponse(content: IOpenideChatContent): boolean {
 	switch (content.kind) {
-		// Live reasoning is already moving text; a second animated line under it is one motion too
-		// many, and the reasoning card's own summary already shimmers.
-		case 'thinking':
-			return true;
-		// Parked on the user: a status saying the agent is working would be a lie while it waits.
-		case 'ask':
+		case 'ask': return !content.isComplete;
 		case 'confirmation':
-		case 'accountChoice':
-		case 'modeSuggestion':
-			return true;
-		default:
-			return false;
+		case 'accountChoice': return content.decision === undefined;
+		case 'modeSuggestion': return content.accepted === undefined;
+		default: return false;
 	}
 }
 
@@ -67,6 +60,8 @@ export interface IOpenideChatLiveStatus {
 	 * long enough to be a real one — see `openideChatStatusLine.ts`.
 	 */
 	readonly idle: boolean;
+	/** Pending controls keep the line below the transcript, even during parallel activity. */
+	readonly waitingForResponse?: boolean;
 }
 
 function step(text: string): IOpenideChatLiveStatus {
@@ -81,20 +76,22 @@ function waiting(): IOpenideChatLiveStatus {
 /**
  * The live line's state, or `undefined` when nothing should be shown.
  *
- * Only the TAIL of the content is consulted: anything before it already produced its outcome and
- * is on screen as a settled row. `isComplete` is the turn's, not the content's — a finished turn
- * has no live line at all.
+ * Pending user requests take priority; otherwise the tail describes the current step.
+ * `isComplete` is the turn's, not the content's — a finished turn has no live line at all.
  */
 export function openideChatLiveStatusLabel(content: readonly IOpenideChatContent[], isComplete: boolean): IOpenideChatLiveStatus | undefined {
 	if (isComplete) {
 		return undefined;
+	}
+	if (content.some(awaitsResponse)) {
+		return { text: t('chat.working.response'), idle: false, waitingForResponse: true };
 	}
 	const last = content[content.length - 1];
 	// Before the first event of the turn there is nothing else on screen to explain the wait.
 	if (!last) {
 		return { text: t('chat.working.thinking'), idle: true };
 	}
-	if (ownsItsOwnMotion(last)) {
+	if (last.kind === 'thinking' && !last.isComplete) {
 		return undefined;
 	}
 	switch (last.kind) {
@@ -123,6 +120,10 @@ export function openideChatLiveStatusLabel(content: readonly IOpenideChatContent
 			return waiting();
 		}
 		case 'terminal':
+			// Terminal output is a snapshot: later activity may have already answered its prompt.
+			if (last.state === 'awaiting-input') {
+				return { text: t('chat.working.response'), idle: false, waitingForResponse: true };
+			}
 			// A live terminal is a surface with its own output scrolling; only a finished one leaves
 			// the line free to say what comes next.
 			return last.state === 'exited' ? waiting() : undefined;

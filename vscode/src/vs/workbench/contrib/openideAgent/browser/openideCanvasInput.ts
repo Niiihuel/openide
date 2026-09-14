@@ -7,7 +7,7 @@
  *  OpenIDE Canvas editor input — keeps the real .canvas.tsx resource in the editor tab.
  *--------------------------------------------------------------------------------------------*/
 
-import { basename } from '../../../../base/common/resources.js';
+import { basename, dirname } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { EditorInputCapabilities, IUntypedEditorInput } from '../../../common/editor.js';
@@ -18,10 +18,11 @@ export class OpenideCanvasInput extends EditorInput {
 	static readonly ID = 'workbench.input.openideCanvas';
 	static readonly EDITOR_ID = 'openide.canvasEditor';
 	constructor(private readonly _resource: URI) { super(); }
+	override get editorId(): string { return OpenideCanvasInput.EDITOR_ID; }
 	override get typeId(): string { return OpenideCanvasInput.ID; }
 	override get resource(): URI { return this._resource; }
 	override get capabilities(): EditorInputCapabilities { return EditorInputCapabilities.Readonly; }
-	override getName(): string { return basename(this._resource).replace(/\.canvas\.tsx$/, '') || 'Canvas'; }
+	override getName(): string { return this._resource.scheme === 'openide-canvas' ? 'Create Canvas' : this._resource.path.endsWith('/design.json') ? basename(dirname(this._resource)) : basename(this._resource).replace(/\.canvas\.tsx$/, '') || 'Canvas'; }
 	override matches(other: EditorInput | IUntypedEditorInput): boolean { return other instanceof OpenideCanvasInput && other.resource.toString() === this.resource.toString(); }
 }
 

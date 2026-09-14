@@ -5,11 +5,9 @@
 
 import { localize } from '../../../../../nls.js';
 import { $ } from '../../../../../base/browser/dom.js';
-import { renderIcon } from '../../../../../base/browser/ui/iconLabel/iconLabels.js';
-import { Codicon } from '../../../../../base/common/codicons.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
-import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
-import { ChatContextKeys } from '../../../chat/common/actions/chatContextKeys.js';
+import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { OpenideEmptyState } from '../../../../browser/openideEmptyState.js';
 import { IBrowserViewModel } from '../../common/browserView.js';
 import { BrowserEditorInput } from '../../common/browserEditorInput.js';
 import {
@@ -30,29 +28,15 @@ export class BrowserWelcomeFeature extends BrowserEditorContribution {
 
 	constructor(
 		editor: BrowserEditor,
-		@IContextKeyService contextKeyService: IContextKeyService,
+		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super(editor);
 
 		this._container = $('.browser-welcome-container');
-		const content = $('.browser-welcome-content');
-
-		const iconContainer = $('.browser-welcome-icon');
-		iconContainer.appendChild(renderIcon(Codicon.globe));
-		content.appendChild(iconContainer);
-
-		const title = $('.browser-welcome-title');
-		title.textContent = localize('browser.welcomeTitle', "Browser");
-		content.appendChild(title);
-
-		const subtitle = $('.browser-welcome-subtitle');
-		const chatEnabled = contextKeyService.getContextKeyValue<boolean>(ChatContextKeys.enabled.key);
-		subtitle.textContent = chatEnabled
-			? localize('browser.welcomeSubtitleChat', "Use Add Element to Chat to reference UI elements in chat prompts.")
-			: localize('browser.welcomeSubtitle', "Enter a URL above to get started.");
-		content.appendChild(subtitle);
-
-		this._container.appendChild(content);
+		this._register(instantiationService.createInstance(OpenideEmptyState, this._container, {
+			title: localize('browser.welcomeTitle', "Browser"),
+			description: localize('browser.welcomeSubtitle', "Enter a URL above to get started."),
+		}));
 
 		this._widget = { location: BrowserWidgetLocation.ContentArea, element: this._container, order: 50 };
 	}

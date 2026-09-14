@@ -17,11 +17,11 @@ import { IContextKeyService } from '../../../../../platform/contextkey/common/co
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../../platform/instantiation/common/serviceCollection.js';
 import { WorkbenchObjectTree } from '../../../../../platform/list/browser/listService.js';
-import { asCssVariable, buttonBackground, buttonForeground, buttonHoverBackground } from '../../../../../platform/theme/common/colorRegistry.js';
+import { openideRoundButtonStyles } from '../openideControlStyles.js';
 import { isOpenideChatMarkdownContent, isOpenideChatProgressContent } from '../../common/chat/openideChatContent.js';
 import { IOpenideChatItem, IOpenideChatRequestItem, isOpenideChatRequestItem, isOpenideChatResponseItem } from '../../common/chat/openideChatItem.js';
 import { IOpenideChatListDelegateOptions, OpenideChatListDelegate } from './openideChatListDelegate.js';
-import { createStrokeIcon } from './openideChatIcons.js';
+import { createArrowDownIcon } from './openideChatIcons.js';
 
 export interface IOpenideChatListStyles {
 	/** Fed to every list state override so focus/hover/selection are invisible in the transcript. */
@@ -182,29 +182,16 @@ export class OpenideChatListWidget extends Disposable {
 			}
 		));
 
-		// The webview's `#jumpDown` is INVERTED — `background: var(--vscode-foreground); color:
-		// var(--vscode-editor-background)` — and `Button` writes its colours as inline styles, which
-		// no stylesheet can override. So the palette is handed to the widget instead of to CSS.
+		// The native button shares the composer's neutral circular action palette.
 		this._scrollDownButton = this._register(new Button(this._container, {
-			// The product's amber, the same as the composer's send: one filled circle, one colour.
-			buttonBackground: asCssVariable(buttonBackground),
-			buttonForeground: asCssVariable(buttonForeground),
-			buttonHoverBackground: asCssVariable(buttonHoverBackground),
-			buttonSecondaryBackground: undefined,
-			buttonSecondaryForeground: undefined,
-			buttonSecondaryHoverBackground: undefined,
-			buttonSeparator: undefined,
+			...openideRoundButtonStyles,
 			supportIcons: true,
 			// `Button` puts its own title on the workbench hover (`setTitle`), so this is already the
 			// native tip; it only had to stop being an English-only `localize()` default.
 			title: t('chat.list.scrollDown'),
 		}));
-		this._scrollDownButton.element.classList.add('openide-chat-scroll-down');
-		// `arrow-down`, not `chevron-down`: the webview's `#jumpDown` uses the arrow, and the two
-		// glyphs read differently at 14px inside a filled circle.
-		// The same heavy stroke arrow as the composer's send: the codicon glyph at 14px read as a
-		// hairline inside the filled circle.
-		this._scrollDownButton.element.replaceChildren(createStrokeIcon(this._container.ownerDocument, ['M12 5v14', 'm19 12-7 7-7-7'], { strokeWidth: 2.5, size: 14 }));
+		this._scrollDownButton.element.classList.add('openide-chat-scroll-down', 'openide-chat-round-action');
+		this._scrollDownButton.element.replaceChildren(createArrowDownIcon(this._container.ownerDocument));
 		this._register(this._scrollDownButton.onDidClick(() => {
 			this.setFollowTail(true);
 			this.scrollToEnd();

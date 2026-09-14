@@ -23,6 +23,7 @@ import {
 	renderOpenideChatActivityLine,
 } from './openideChatActivityRow.js';
 import '../media/openideChatActivity.css';
+import { webPreviewFromTool } from '../../../common/chat/openideChatWebPreview.js';
 import { t } from '../../../common/openideStrings.js';
 
 /**
@@ -65,6 +66,7 @@ export class OpenideChatToolPart extends OpenideChatContentPart {
 	private _meta: IOpenideToolMeta;
 	/** Whether this call is the turn's trailing step, and so the one the status line is speaking. */
 	private _live = false;
+	private _userToggled = false;
 
 	constructor(
 		content: IOpenideChatToolContent,
@@ -84,10 +86,10 @@ export class OpenideChatToolPart extends OpenideChatContentPart {
 
 		// The body is hidden until the head is clicked, so opening it changes the row's height
 		// without the list knowing — the same reason the thinking card listens to `toggle`.
-		bindOpenideChatActivityToggle(this._row, () => this._onDidChangeHeight.fire());
+		bindOpenideChatActivityToggle(this._row, () => { this._userToggled = true; this._onDidChangeHeight.fire(); });
 		// `openide.chat.tools.defaultExpanded` only sets the STARTING state; the user's own toggle
 		// wins afterwards because updates absorb into this same part without rebuilding it.
-		if (context.toolsDefaultExpanded) {
+		if (context.toolsDefaultExpanded && content.state !== 'error' && content.state !== 'cancelled') {
 			setOpenideChatActivityOpen(this._row, true);
 		}
 
@@ -114,7 +116,7 @@ export class OpenideChatToolPart extends OpenideChatContentPart {
 		const firstLine = (content.resultText ?? '').split(/\r?\n/).map(line => line.trim()).find(line => line.length > 0);
 		note.textContent = content.state === 'cancelled'
 			? t('chatSurface.tool.cancelled')
-			: (firstLine ? firstLine.slice(0, 120) : t('chatSurface.tool.failed'));
+			: (firstLine ? firstLine : t('chatSurface.tool.failed'));
 		note.title = content.resultText?.trim() ?? '';
 		note.classList.remove('hidden');
 	}
@@ -139,14 +141,14 @@ export class OpenideChatToolPart extends OpenideChatContentPart {
 			// `cmd` tools render their target as a command: monospace, 11.5px, stretched. Same node,
 			// different class — a second node would need the head's child order kept in sync twice.
 			this._row.detail.classList.toggle('openide-chat-part-cmd', meta.cmd === true);
-			this._row.detail.classList.toggle('hidden', !detail);
+			this._row.detail.classList.toggle('hidden', !detail || content.state === 'error' || content.state === 'cancelled');
 		}
 
 		this._row.root.classList.toggle(OPENIDE_CHAT_PART_ERROR_CLASS, content.state === 'error');
 		this._row.root.classList.toggle('openide-chat-part-cancelled', content.state === 'cancelled');
 		this._paintNote(content);
 
-		renderOpenideChatActivityResult(this._row, content.resultText, t('chatSurface.tool.result'));
+		renderOpenideChatActivityResult(this._row, content.resultText, t('chatSurface.tool.result'), content.state === 'error');
 		this._applyLive();
 	}
 
@@ -216,9 +218,10 @@ export class OpenideChatToolPart extends OpenideChatContentPart {
 	 * `callId` is a different call and must get its own row.
 	 */
 	tryUpdate(other: IOpenideChatContent, _element: IOpenideChatItem): boolean {
-		if (!isOpenideChatToolContent(other) || other.callId !== this._content.callId) {
+		if (!isOpenideChatToolContent(other) || other.callId !== this._content.callId || webPreviewFromTool(other)) {
 			return false;
 		}
+		if (other.state === 'error' && this._content.state !== 'error' && !this._userToggled) { setOpenideChatActivityOpen(this._row, false); }
 		this._content = other;
 		this._meta = getOpenideToolMeta(other.name);
 		this._render();

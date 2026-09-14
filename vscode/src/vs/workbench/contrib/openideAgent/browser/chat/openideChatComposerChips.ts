@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { createOpenideElement } from '../openideDom.js';
 import { addDisposableListener, append, clearNode } from '../../../../../base/browser/dom.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { basename } from '../../../../../base/common/path.js';
@@ -146,11 +147,11 @@ export class OpenideChatComposerChips extends Disposable {
 	) {
 		super();
 		const document = host.ownerDocument;
-		this._referenceStrip = append(host, document.createElement('div'));
+		this._referenceStrip = append(host, createOpenideElement(document, 'div'));
 		this._referenceStrip.className = 'openide-chat-reference-strip';
-		this._capabilityStrip = append(host, document.createElement('div'));
+		this._capabilityStrip = append(host, createOpenideElement(document, 'div'));
 		this._capabilityStrip.className = 'openide-chat-capability-strip';
-		this._linkStrip = append(host, document.createElement('div'));
+		this._linkStrip = append(host, createOpenideElement(document, 'div'));
 		this._linkStrip.className = 'openide-chat-link-strip';
 		this._render();
 	}
@@ -164,11 +165,15 @@ export class OpenideChatComposerChips extends Disposable {
 		return true;
 	}
 
-	/** Same range twice is one chip; false when the limit is reached, and the caller says so. */
+	/** Reattaching a range refreshes its snapshot; false when a new chip exceeds the limit. */
 	addSnippet(snippet: IComposerSnippet): boolean {
-		if (this._snippets.some(candidate => sameSnippet(candidate, snippet))) { return true; }
-		if (this._snippets.length >= SNIPPET_LIMIT) { return false; }
-		this._snippets.push(snippet);
+		const existing = this._snippets.findIndex(candidate => sameSnippet(candidate, snippet));
+		if (existing >= 0) {
+			this._snippets[existing] = snippet;
+		} else {
+			if (this._snippets.length >= SNIPPET_LIMIT) { return false; }
+			this._snippets.push(snippet);
+		}
 		this._render();
 		return true;
 	}
@@ -220,12 +225,12 @@ export class OpenideChatComposerChips extends Disposable {
 		this._linkStrip.hidden = !this._links.length;
 
 		for (const reference of this._references) {
-			const chip = append(this._referenceStrip, document.createElement('span'));
+			const chip = append(this._referenceStrip, createOpenideElement(document, 'span'));
 			chip.className = 'openide-chat-reference-chip';
 			this._chipStore.add(setupChatTooltip(this.hoverService, chip, () => reference.path, { aria: false }));
-			const icon = append(chip, document.createElement('span'));
+			const icon = append(chip, createOpenideElement(document, 'span'));
 			icon.className = reference.iconClasses ? `openide-chat-file-icon ${reference.iconClasses}` : 'codicon codicon-file';
-			const name = append(chip, document.createElement('span'));
+			const name = append(chip, createOpenideElement(document, 'span'));
 			name.className = 'openide-chat-chip-name';
 			name.textContent = basename(reference.path);
 			this._removeButton(chip, () => t('chat.chip.removeReference'), () => {
@@ -247,9 +252,9 @@ export class OpenideChatComposerChips extends Disposable {
 		for (const capability of this._capabilities) {
 			// Copilot's slash pill: tinted text on `chat.slashCommandBackground`, no icon — the
 			// leading `/` already says what it is (chatColors.ts:36-46).
-			const chip = append(this._capabilityStrip, document.createElement('span'));
+			const chip = append(this._capabilityStrip, createOpenideElement(document, 'span'));
 			chip.className = `openide-chat-capability-chip ${capability.kind}`;
-			const name = append(chip, document.createElement('span'));
+			const name = append(chip, createOpenideElement(document, 'span'));
 			name.className = 'openide-chat-chip-name';
 			name.textContent = `/${capability.name}`;
 			const kindLabel = capability.kind === 'mcp' ? 'MCP' : capability.kind.charAt(0).toUpperCase() + capability.kind.slice(1);
@@ -260,11 +265,11 @@ export class OpenideChatComposerChips extends Disposable {
 		}
 
 		for (const url of this._links) {
-			const chip = append(this._linkStrip, document.createElement('span'));
+			const chip = append(this._linkStrip, createOpenideElement(document, 'span'));
 			chip.className = 'openide-chat-link-chip';
 			this._chipStore.add(setupChatTooltip(this.hoverService, chip, () => url, { aria: false }));
 			chip.appendChild(createCodicon(document, 'link'));
-			const label = append(chip, document.createElement('span'));
+			const label = append(chip, createOpenideElement(document, 'span'));
 			label.className = 'openide-chat-chip-name';
 			label.textContent = linkLabel(url);
 			this._removeButton(chip, () => t('chat.chip.removeLink'), () => {
@@ -276,7 +281,7 @@ export class OpenideChatComposerChips extends Disposable {
 
 	private _removeButton(chip: HTMLElement, title: () => string, remove: () => void): void {
 		const document = chip.ownerDocument;
-		const button = append(chip, document.createElement('button'));
+		const button = append(chip, createOpenideElement(document, 'button'));
 		button.type = 'button';
 		button.className = 'openide-chat-chip-remove';
 		// Per repaint, so it dies with the chip it belongs to.

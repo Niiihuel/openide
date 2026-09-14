@@ -16,7 +16,7 @@
 
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { asText, IRequestService } from '../../../../../platform/request/common/request.js';
-import { AgentStreamEvent, IChatMessage, ILLMProvider, IProviderModelsRequest, IProviderRequest, IProviderResult, IToolCall } from '../openideAgentTypes.js';
+import { AgentStreamEvent, IChatMessage, IFastModeCapability, ILLMProvider, IProviderModelsRequest, IProviderRequest, IProviderResult, IToolCall } from '../openideAgentTypes.js';
 import { chatGptAccountIdFromJwt } from '../openideJwt.js';
 import { stablePromptCacheKey } from '../openideAgentEfficiency.js';
 import { sseDataOf, ssePost } from '../openideSse.js';
@@ -28,11 +28,26 @@ export class CodexProvider implements ILLMProvider {
 
 	readonly id = 'codex';
 
+	private readonly priorityModels = new Map<string, ReadonlySet<string>>();
+
+	private speedCatalogKey(providerId?: string, baseUrl?: string): string {
+		return JSON.stringify([providerId ?? '', baseUrl?.replace(/\/+$/, '') || 'https://chatgpt.com/backend-api/codex']);
+	}
+
+	getFastModeCapability(model: string, providerId?: string, baseUrl?: string): IFastModeCapability {
+		return this.priorityModels.get(this.speedCatalogKey(providerId, baseUrl))?.has(model)
+			? { supported: true, serviceTier: 'priority' } : { supported: false };
+	}
+
+	resetSessionState(): void { this.priorityModels.clear(); }
+
 	constructor(private readonly requestService: IRequestService) { }
 
 	/** The subscription catalog is account-scoped; the public API catalog is not equivalent.
 	 * Wire version verified against openai/codex rust-v0.153.4 (endpoint/models.rs). */
 	async listModels(req: IProviderModelsRequest, token: CancellationToken): Promise<readonly string[]> {
+		const speedKey = this.speedCatalogKey(req.providerId, req.baseUrl);
+		this.priorityModels.delete(speedKey);
 		if (req.credential.kind !== 'oauth') { return []; }
 		const base = req.baseUrl?.replace(/\/+$/, '') || 'https://chatgpt.com/backend-api/codex';
 		const headers: Record<string, string> = {
@@ -49,9 +64,11 @@ export class CodexProvider implements ILLMProvider {
 		}, token);
 		const status = response.res.statusCode ?? 0;
 		if (status < 200 || status >= 300) { throw new Error(`Model discovery HTTP ${status}`); }
-		const data: { models?: { slug?: string; visibility?: string }[] } = JSON.parse(await asText(response) || '{}');
+		const data: { models?: { slug?: string; visibility?: string; service_tiers?: { id?: string }[] }[] } = JSON.parse(await asText(response) || '{}');
 		if (!Array.isArray(data.models)) { throw new Error('Invalid Codex model catalog'); }
-		return [...new Set(data.models.filter(model => model && typeof model.slug === 'string' && model.slug.trim() && model.visibility !== 'hide' && model.visibility !== 'hidden').map(model => model.slug!))];
+		const visible = data.models.filter(model => model && typeof model.slug === 'string' && model.slug.trim() && model.visibility !== 'hide' && model.visibility !== 'hidden');
+		this.priorityModels.set(speedKey, new Set(visible.filter(model => Array.isArray(model.service_tiers) && model.service_tiers.some(tier => tier?.id === 'priority')).map(model => model.slug!)));
+		return [...new Set(visible.map(model => model.slug!))];
 	}
 
 	async streamChat(req: IProviderRequest, onEvent: (e: AgentStreamEvent) => void, token: CancellationToken): Promise<IProviderResult> {
@@ -106,6 +123,9 @@ export class CodexProvider implements ILLMProvider {
 			include: [],
 			prompt_cache_key: stablePromptCacheKey(instructions, JSON.stringify(toolDefs)),
 		};
+		if (req.serviceTier === 'priority' && this.getFastModeCapability(req.model, req.providerId, req.baseUrl).supported) {
+			body.service_tier = 'priority';
+		}
 		if (toolDefs.length) {
 			body.tools = toolDefs;
 			body.tool_choice = 'auto';

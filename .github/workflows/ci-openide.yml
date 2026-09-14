@@ -23,6 +23,17 @@ jobs:
           CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
         run: cargo check --locked --bin code
 
+  codebase-native:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with: { persist-credentials: false }
+      - name: Check native indexer
+        run: |
+          cargo fmt --manifest-path vscode/native/codebase/Cargo.toml --check
+          cargo test --locked --manifest-path vscode/native/codebase/Cargo.toml
+          cargo clippy --locked --manifest-path vscode/native/codebase/Cargo.toml -- -D warnings
+
   compile-and-test:
     runs-on: ubuntu-22.04
     steps:
@@ -92,6 +103,17 @@ jobs:
       - name: Transpile canonical source
         working-directory: vscode
         run: npm run gulp copy-codicons && npm run transpile-client
+
+      - name: Build and verify native codebase integration
+        run: |
+          node dev/build-codebase-native.mjs
+          node dev/test-codebase-native.mjs
+          node dev/test-codebase-native-indexer.mjs
+          node dev/test-codebase-native-graph.mjs
+          node dev/test-codebase-native-query.mjs
+          node dev/test-codebase-native-runtime.mjs
+          node dev/test-codebase-native-syntax.mjs
+          node dev/test-codebase-native-channel.mjs
 
       - name: Build bundled extensions and fetch Electron
         working-directory: vscode

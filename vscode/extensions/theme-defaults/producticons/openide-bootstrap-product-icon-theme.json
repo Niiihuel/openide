@@ -506,26 +506,8 @@
 		"sort-precedence": {
 			"fontCharacter": "\\f575"
 		},
-		"git-commit": {
-			"fontCharacter": "\\f69d"
-		},
-		"git-merge": {
-			"fontCharacter": "\\f69d"
-		},
-		"git-pull-request": {
-			"fontCharacter": "\\f69d"
-		},
-		"git-pull-request-closed": {
-			"fontCharacter": "\\f69d"
-		},
-		"git-pull-request-draft": {
-			"fontCharacter": "\\f69d"
-		},
-		"git-branch": {
-			"fontCharacter": "\\f69d"
-		},
 		"git-compare": {
-			"fontCharacter": "\\f354"
+			"fontCharacter": "\\f12b"
 		},
 		"git-fetch": {
 			"fontCharacter": "\\f295"
@@ -826,6 +808,9 @@
 		},
 		"empty-window": {
 			"fontCharacter": "\\f620"
+		},
+		"developer-tools": {
+			"fontCharacter": "\\f2c7"
 		},
 		"device-desktop": {
 			"fontCharacter": "\\f302"
@@ -1762,12 +1747,6 @@
 		},
 		"git-branch-delete": {
 			"fontCharacter": "\\f5de"
-		},
-		"git-branch-changes": {
-			"fontCharacter": "\\f69d"
-		},
-		"git-branch-staged-changes": {
-			"fontCharacter": "\\f69d"
 		},
 		"git-branch-conflicts": {
 			"fontCharacter": "\\f33b"

@@ -105,6 +105,10 @@ export class NativeAuxiliaryWindow extends AuxiliaryWindow {
 		return this.nativeHostService.positionWindow(bounds, { targetWindowId: this.window.vscodeWindowId });
 	}
 
+	protected override closePreparedWindow(): void {
+		void this.nativeHostService.closeWindow({ targetWindowId: this.window.vscodeWindowId });
+	}
+
 	protected override async handleVetoBeforeClose(e: BeforeUnloadEvent, veto: string): Promise<void> {
 		this.preventUnload(e);
 

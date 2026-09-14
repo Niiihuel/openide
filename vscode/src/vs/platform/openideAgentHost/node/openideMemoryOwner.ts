@@ -9,6 +9,7 @@ import { FileHandle, link, lstat, mkdir, open, readFile, readdir, realpath, rena
 import { dirname, join, relative, resolve } from 'path';
 import { Disposable } from '../../../base/common/lifecycle.js';
 import { IOpenideMemoryCheckpointState, IOpenideMemoryDocument, IOpenideMemoryRecord, IOpenideMemoryRequest, IOpenideMemoryResponse, isMemoryRecordId, MEMORY_MAX_NOTE_BYTES, MEMORY_MAX_NOTES, MEMORY_NOTES_DIRECTORY, MEMORY_SESSIONS_DIRECTORY, memorySourceFingerprint, mutateLegacyMemory, parseMemoryRecord, serializeMemoryRecord } from '../../openideCodebase/common/openideMemoryRecord.js';
+import { OpenideMemoryCaptureJournal } from './openideMemoryCaptureJournal.js';
 import { OpenideMem0Adapter } from './openideMem0Adapter.js';
 import { validateOpenideWorkspacePath } from './openideWorkspacePaths.js';
 
@@ -57,7 +58,9 @@ export class OpenideMemoryOwner extends Disposable {
 		await mkdir(dirname(path), { recursive: true });
 		const temporary = `${path}.${randomUUID()}.tmp`;
 		const file = await open(temporary, 'wx', 0o600);
-		try { await file.writeFile(content, 'utf8'); await this.syncFile(file); } finally { await file.close(); }
+		try { await file.writeFile(content, 'utf8'); await this.syncFile(file); }
+		catch (error) { await unlink(temporary).catch(() => undefined); throw error; }
+		finally { await file.close(); }
 		try {
 			await this.safePath(root, path); this.assertWritable(path);
 			if (await readOptional(path) !== expected) { throw new Error('Memory revision conflict: the file changed during the write.'); }
@@ -173,6 +176,17 @@ export class OpenideMemoryOwner extends Disposable {
 			await write(root, path, updated, before); return { text: updated };
 		}
 		const stateRoot = join(this.userDataPath, 'User', 'globalStorage', 'openide', 'memory', hash(root));
+		const captures = await this.captureJournal(stateRoot, checkScope);
+		if (request.action === 'capture-rollback') {
+			const writeReceipts = await captures.cancel(request.session ?? '', request.messageIds ?? []);
+			// Old versions did not record an exact post-write snapshot. Metadata alone cannot
+			// prove that the user has not edited the body; preserve those files and report it.
+			const messages = new Set(request.messageIds);
+			const tracked = new Set(writeReceipts.map(receipt => receipt.operationId));
+			const legacy = (await this.documents(root)).filter(document => document.record.source_session === request.session && messages.has(document.record.source_message) && document.record.operation_id.startsWith('checkpoint:') && !tracked.has(document.record.operation_id));
+			return { writeReceipts, rollbackWarning: legacy.length ? `Se conservaron ${legacy.length} nota(s) de memoria antiguas sin un recibo verificable de rollback: ${legacy.map(document => document.path).join(', ')}.` : undefined };
+		}
+		if (request.action === 'save' && request.session && request.message && await captures.isCancelled(request.session, request.message)) { throw new Error('Memory capture belongs to a rolled back message.'); }
 		if (request.action === 'checkpoint' || request.action === 'checkpoint-list') { return this.checkpoint(stateRoot, request, checkScope); }
 		const documents = await this.documents(root);
 		if (request.action === 'list') { return { documents }; }
@@ -256,12 +270,23 @@ export class OpenideMemoryOwner extends Disposable {
 			const files = (await readdir(dirname(history))).sort((a, b) => Number(b.split('-')[0]) - Number(a.split('-')[0]));
 			for (const old of files.slice(20)) { await unlink(join(dirname(history), old)); }
 		}
+		if (request.origin !== 'external' && request.session && request.message) {
+			await captures.record(request.session, { operationId: operation, message: request.message, path, beforeContent: before, afterContent: text, time: Date.now() });
+		}
 		await write(root, join(root, path), text, before);
 		return { document: { path, hash: hash(text), record } };
+	}
+	private async captureJournal(stateRoot: string, checkScope: () => void): Promise<OpenideMemoryCaptureJournal> {
+		const profile = await realpath(this.userDataPath);
+		return new OpenideMemoryCaptureJournal(stateRoot, {
+			validate: path => this.safePath(profile, path),
+			write: (path, text, before) => this.atomicWrite(profile, path, text, before, checkScope),
+		});
 	}
 	private async checkpoint(stateRoot: string, request: IOpenideMemoryRequest, checkScope: () => void): Promise<IOpenideMemoryResponse> {
 		if (!request.session || request.session.length > 256 || (request.checkpointId?.length ?? 0) > 256) { throw new Error('Memory checkpoint needs a bounded session and checkpoint identity.'); }
 		const profile = await realpath(this.userDataPath);
+		const captures = await this.captureJournal(stateRoot, checkScope);
 		const directory = join(stateRoot, 'checkpoints', hash(request.session));
 		const legacyPath = `${directory}.json`;
 		const entries = async () => {
@@ -297,7 +322,9 @@ export class OpenideMemoryOwner extends Disposable {
 				if (entry.state.status === 'pending' || entry.state.status === 'deferred') { checkpoints.push(entry); }
 			}
 			checkpoints.sort((a, b) => (a.created ?? 0) - (b.created ?? 0));
-			return { checkpoints: checkpoints.map(({ id, state }) => ({ id, state })) };
+			const active = [];
+			for (const entry of checkpoints) { if (!await captures.isCancelled(request.session, entry.state.message)) { active.push({ id: entry.id, state: entry.state }); } }
+			return { checkpoints: active };
 		}
 		const path = request.checkpointId ? join(directory, `${hash(request.checkpointId)}.json`) : legacyPath;
 		const before = await readState(path);
@@ -307,6 +334,7 @@ export class OpenideMemoryOwner extends Disposable {
 			return { checkpoint };
 		}
 		this.validateCheckpoint(request.checkpoint);
+		if (await captures.isCancelled(request.session, request.checkpoint.message)) { throw new Error('Memory checkpoint belongs to a rolled back message.'); }
 		if (request.checkpointId && !before) {
 			const names = await entries();
 			if (names.length >= 100) {
@@ -314,7 +342,7 @@ export class OpenideMemoryOwner extends Disposable {
 				for (const name of names) {
 					const text = await readState(join(directory, name)); if (!text) { continue; }
 					const state = decode(text, name).state;
-					if (state.status === 'saved' || state.status === 'no_durable_change') { await unlink(join(directory, name)); removed = true; break; }
+					if (state.status === 'saved' || state.status === 'no_durable_change' || await captures.isCancelled(request.session, state.message)) { await unlink(join(directory, name)); removed = true; break; }
 				}
 				if (!removed) { throw new Error('Memory checkpoint queue is full. Recover pending captures first.'); }
 			}

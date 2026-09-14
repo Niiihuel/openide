@@ -48,6 +48,14 @@ suite('OpenIDE chat reducer', () => {
 		timeline: [], childRunIds: [], deliveryState: 'delivered', generation: 1, attemptCount: 1,
 	};
 
+	test('work duration uses event time and stops when the turn completes', () => {
+		const first = applyAgentEvent(armed(), { type: 'text', delta: 'Hello' }, { now: NOW });
+		const done = applyAgentEvent(first.state, { type: 'done' }, { now: NOW + 4200 });
+		const response = done.items[done.items.length - 1];
+		assert.ok(isOpenideChatResponseItem(response));
+		assert.deepStrictEqual([response.startedAt, response.completedAt], [NOW, NOW + 4200]);
+	});
+
 	test('text deltas accumulate into ONE markdown row', () => {
 		// A row per token is the failure mode an index-less reducer produces, and it is invisible
 		// until the transcript is 300 rows long.
@@ -164,6 +172,19 @@ suite('OpenIDE chat reducer', () => {
 	test('background commands stay in the tray and never duplicate a card', () => {
 		const step = run([{ type: 'toolStart', id: 't1', name: 'run_command', argumentsJson: '{"command":"npm run dev","background":true}' }]);
 		assert.deepStrictEqual(kinds(step), []);
+	});
+
+	test('replayed starts and empty edits settle without duplicate pending cards', () => {
+		const start: AgentLoopEvent = { type: 'toolStart', id: 'edit', name: 'edit_file', argumentsJson: '{"path":"a.ts"}' };
+		const result: AgentLoopEvent = { type: 'toolResult', id: 'edit', name: 'edit_file', result: 'No changes', isError: false };
+		const step = run([start, start, result]);
+		assert.deepStrictEqual(kinds(step), ['tool']);
+		const call = contentOf(step)[0];
+		assert.ok(call.kind === 'tool' && call.state === 'success');
+		const late = run([start, result, { type: 'fileDiff', path: 'a.ts', added: 1, removed: 0, diffLines: [{ t: 'add', x: 'real change' }] }]);
+		assert.deepStrictEqual(kinds(late), ['edit']);
+		const failed = run([start, { ...result, result: 'Error: rejected', isError: true }]);
+		assert.ok(contentOf(failed)[0].kind === 'tool');
 	});
 
 	test('edit_file opens a card that fileDiff completes in place', () => {

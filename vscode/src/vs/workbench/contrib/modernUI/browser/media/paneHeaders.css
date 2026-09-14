@@ -62,14 +62,12 @@
 	display: none;
 }
 
-/* DIVERGENCIA DEL FORK (no borrar en el próximo rebase): upstream iguala panes y headers a
- * `sideBar.background`, pero este fork NO pinta el part con ese color — `sidebarPart.ts:176` usa
- * `openide.islandBackground` (el diseño de "islas"). Con un tema que define los dos igual la
- * diferencia no se nota; con uno que no —Dracula deja `openide.islandBackground` en su default,
- * que es `editor.background`— el part queda #282a36 y sus panes #21222c, y la franja que no cubre
- * ningún pane se ve de otro color. Se iguala a la isla, con `sideBar.background` de reserva. */
-.modern-ui :is(.part.sidebar, .part.auxiliarybar) .monaco-pane-view .pane,
-.modern-ui.floating-panels :is(.part.sidebar, .part.auxiliarybar) {
+/* OpenIDE's primary navigation belongs to the shell; auxiliary content uses the canvas.
+ * Pane backgrounds are inline, so this scoped override follows the native Part theme roles. */
+.modern-ui .part.sidebar .monaco-pane-view .pane {
+	background-color: var(--vscode-openide-workbenchBackground, var(--vscode-sideBar-background)) !important;
+}
+.modern-ui .part.auxiliarybar .monaco-pane-view .pane {
 	background-color: var(--vscode-openide-islandBackground, var(--vscode-sideBar-background)) !important;
 }
 
@@ -126,4 +124,81 @@
 
 .modern-ui.monaco-workbench .part > .title > .title-actions .start-debug-action-item {
 	min-width: 36px;
+}
+
+/* OpenIDE's contiguous pane groups use the shared divider, even when a theme leaves the
+ * optional section-header border unset. Preserve the first-header/horizontal exclusions above. */
+.monaco-workbench.openide-visual.modern-ui .monaco-pane-view .pane > .pane-header::before {
+	left: 0;
+	right: 0;
+	height: 1px;
+	background-color: var(--vscode-contrastBorder, var(--oi-divider, var(--oi-border)));
+}
+
+/* OpenIDE dock sections are part of their pane, not floating pills. Keep the native
+ * header height, collapse affordance and action visibility; only change their paint.
+ * The explicit scope wins over Modern UI's inset header and inline theme background. */
+.monaco-workbench.openide-visual.modern-ui .monaco-pane-view .pane > .pane-header {
+	margin: 0;
+	border-radius: 0;
+}
+
+.monaco-workbench.openide-visual.modern-ui .monaco-pane-view .pane > .pane-header:not(:hover) {
+	background-color: transparent !important;
+}
+
+/* Preserve the title's existing x position when removing its two 4px margins.
+ * Collapsed horizontal sections keep the native vertical-label geometry. */
+.monaco-workbench.openide-visual.modern-ui .monaco-pane-view .pane:not(.horizontal) > .pane-header,
+.monaco-workbench.openide-visual.modern-ui .monaco-pane-view .pane.horizontal.expanded > .pane-header {
+	padding-left: calc(2 * var(--vscode-spacing-size40, 4px));
+	padding-right: var(--vscode-spacing-size40, 4px);
+}
+
+.monaco-workbench.openide-visual.modern-ui .monaco-pane-view .pane > .pane-header:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -2px;
+}
+
+/* Dock sections belong to the card surface in floating mode; keep the flat section headers
+ * above and their native collapse behavior inside the rounded outer frame. */
+.monaco-workbench.openide-visual.modern-ui.floating-panels .part:is(.sidebar, .auxiliarybar, .panel) .monaco-pane-view .pane {
+	background-color: var(--oi-canvas) !important;
+}
+
+/* PaneView already reserves a 28px header scaled by the sidebar font ratio. The fork's
+ * native sidebar CSS still uses the classic 22px height: override that rule so painting,
+ * body layout and the full collapse/drag hit target agree with the existing reservation.
+ * Keep 28 in sync with MODERN_UI_PANE_HEADER_SIZE; no extra split-view margin is introduced. */
+.monaco-workbench.openide-visual.modern-ui .monaco-pane-view {
+	--pane-header-size: calc(var(--vscode-workbench-sidebar-font-size, 13px) * 28 / 13);
+}
+.monaco-workbench.openide-visual.modern-ui .part .monaco-pane-view .pane > .pane-header {
+	height: var(--pane-header-size);
+	line-height: var(--pane-header-size);
+	--oi-pane-header-surface: var(--oi-canvas);
+}
+.monaco-workbench.openide-visual.modern-ui:not(.floating-panels) .part.sidebar .monaco-pane-view .pane > .pane-header {
+	--oi-pane-header-surface: var(--oi-shell);
+}
+.monaco-workbench.openide-visual.modern-ui .part .monaco-pane-view .pane.horizontal:not(.expanded) > .pane-header {
+	height: 100%;
+	width: var(--pane-header-size);
+}
+
+/* Two quiet pixels above and below the hover fill separate neighboring sections. Inset
+ * paint sits below title/actions and the separator pseudo, preserving layout, drag bounds,
+ * keyboard outlines and the shared background-color transition. */
+.monaco-workbench.openide-visual.modern-ui .part .monaco-pane-view .pane:not(.horizontal) > .pane-header,
+.monaco-workbench.openide-visual.modern-ui .part .monaco-pane-view .pane.horizontal.expanded > .pane-header {
+	box-shadow: inset 0 2px var(--oi-pane-header-surface), inset 0 -2px var(--oi-pane-header-surface);
+}
+
+/* Give expanded sections a little breathing room before their first tree row. This padding
+ * lives INSIDE the already reserved, border-box header: PaneView's 28px measurement and all
+ * virtual row offsets remain unchanged. Title and actions move together, rather than clipping
+ * just an icon's hover or adding unmeasured padding to the pane body. */
+.monaco-workbench.openide-visual.modern-ui .part .monaco-pane-view .pane:not(.horizontal) > .pane-header.expanded,
+.monaco-workbench.openide-visual.modern-ui .part .monaco-pane-view .pane.horizontal.expanded > .pane-header {
+	padding-bottom: 4px;
 }

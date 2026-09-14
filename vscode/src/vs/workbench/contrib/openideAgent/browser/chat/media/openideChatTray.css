@@ -1,0 +1,124 @@
+/* Copyright (c) OpenIDE. All rights reserved. Licensed under the MIT License. */
+
+.openide-chat-native {
+	--oi-tray-row-height: 24px;
+	--oi-tray-action-size: 22px;
+}
+
+/* One presentation for different owners; no queue, process or diff state lives in this layer. */
+.openide-chat-native .openide-chat-tray {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	width: 100%;
+	min-width: 0;
+	margin: 0;
+	padding: 2px 4px;
+	box-sizing: border-box;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+.openide-chat-native .openide-chat-tray-head { display: flex; align-items: center; gap: 4px; min-height: var(--oi-tray-row-height); flex-wrap: wrap; }
+.openide-chat-native .openide-chat-tray-toggle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 1 1 140px;
+	min-width: 0;
+	min-height: var(--oi-tray-row-height);
+	box-sizing: border-box;
+	padding: 2px 4px;
+	border: 0;
+	border-radius: var(--oi-radius-control);
+	background: transparent;
+	color: var(--oi-text);
+	font: inherit;
+	font-size: 12px;
+	line-height: 18px;
+	font-weight: 400;
+	text-align: left;
+	cursor: pointer;
+}
+.openide-chat-native .openide-chat-tray-toggle:hover { background: var(--oi-hover); }
+.openide-chat-tray-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-chat-tray-chevron { margin-left: auto; color: var(--oi-secondary); }
+.openide-chat-tray.hidden, .openide-chat-tray .hidden { display: none !important; }
+.openide-chat-native .openide-chat-tray-body {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	min-height: 0;
+	max-height: min(220px, 28vh);
+	overflow-y: auto;
+	overflow-x: hidden;
+	scrollbar-gutter: auto;
+	padding: 2px 0;
+	margin: 0;
+}
+.openide-chat-native .openide-chat-tray :is(.openide-chat-queue-row, .openide-chat-terms-row, .openide-chat-files-row) {
+	min-height: var(--oi-tray-row-height);
+	box-sizing: border-box;
+	margin: 0;
+	padding: 1px 4px;
+	border-radius: var(--oi-radius-control);
+	font-size: 12px;
+}
+.openide-chat-native .openide-chat-tray :is(.openide-chat-queue-btn, .openide-chat-terms-stop, .openide-chat-file-action) {
+	width: var(--oi-tray-action-size);
+	height: var(--oi-tray-action-size);
+	min-width: var(--oi-tray-action-size);
+	min-height: var(--oi-tray-action-size);
+	box-sizing: border-box;
+	padding: 0;
+	border: 0;
+	border-radius: var(--oi-radius-control);
+	background: transparent;
+	color: var(--oi-secondary);
+}
+.openide-chat-native .openide-chat-tray :is(.openide-chat-queue-btn, .openide-chat-terms-stop, .openide-chat-terms-row, .openide-chat-files-row):hover {
+	background: var(--oi-hover);
+	color: var(--oi-text);
+}
+.openide-chat-tray :is(.openide-chat-files-actions, .openide-chat-queue-actions) { flex-wrap: wrap; }
+
+.openide-chat-tray .openide-chat-terms-label { border: 0; background: transparent; color: inherit; padding: 0; text-align: left; cursor: pointer; }
+
+/* The same grid fold as questions and todos, with scroll inside the clipped row.
+   Rows stay mounted, so reversing a transition neither rebuilds DOM nor loses scroll position. */
+.openide-chat-tray > .openide-chat-tray-reveal {
+	display: grid;
+	grid-template-rows: 0fr;
+	opacity: 0;
+	transition: grid-template-rows var(--oi-motion-enter, 180ms) var(--oi-ease-out, ease-out),
+		opacity var(--oi-motion-enter, 180ms) var(--oi-ease-out, ease-out);
+}
+.openide-chat-tray-clip { min-height: 0; overflow: hidden; }
+.openide-chat-tray.expanded > .openide-chat-tray-reveal,
+.openide-chat-queue-tray > .openide-chat-tray-reveal { grid-template-rows: 1fr; opacity: 1; }
+.openide-chat-tray-chevron { transition: transform var(--oi-motion-enter, 180ms) var(--oi-ease-out, ease-out); }
+.openide-chat-tray.expanded .openide-chat-tray-chevron { transform: rotate(180deg); }
+.openide-chat-native .openide-chat-goal-body.openide-chat-tray-reveal {
+	animation: openide-chat-goal-reveal var(--oi-motion-enter, 180ms) var(--oi-ease-out, ease-out);
+}
+@keyframes openide-chat-goal-reveal {
+	from { opacity: 0; transform: translateY(-2px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-tray > .openide-chat-tray-reveal, .openide-chat-tray-chevron { transition: none; }
+	.openide-chat-native .openide-chat-goal-body.openide-chat-tray-reveal { animation: none; }
+}
+
+/* Icon metrics match the IDE toolbar. File icons retain their theme-provided glyphs. */
+.monaco-workbench .openide-chat-native .openide-chat-tray .codicon[class*="codicon-"] {
+	font-size: var(--oi-icon-action);
+	width: var(--oi-icon-action);
+	height: var(--oi-icon-action);
+	line-height: var(--oi-icon-action);
+	flex-shrink: 0;
+}
+.monaco-workbench .openide-chat-native .openide-chat-tray button:focus:not(:focus-visible) { outline: none; }
+.monaco-workbench .openide-chat-native .openide-chat-tray button:focus-visible { outline: 1px solid var(--oi-focus); outline-offset: -1px; }

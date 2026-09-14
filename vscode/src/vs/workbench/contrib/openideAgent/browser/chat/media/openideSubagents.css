@@ -1,0 +1,36 @@
+/* Subagents reuse native tabs, hover tokens and transcript renderers. */
+.openide-subagent-avatar { width: 24px; height: 24px; flex: 0 0 24px; object-fit: contain; }
+.openide-subagents-editor { height: 100%; min-height: 0; overflow: hidden; }
+.openide-subagents-editor [hidden] { display: none !important; }
+.openide-subagents-overview { box-sizing: border-box; padding: 16px; }
+.openide-subagents-overview h2 { font-size: 12px; font-weight: 400; color: var(--oi-secondary); margin: 0 0 8px; }
+.openide-subagents-overview h2:not(:first-child) { margin-top: 16px; }
+.openide-subagents-row { display: flex; align-items: center; min-width: 0; border-radius: var(--oi-navigation-row-radius); }
+.openide-subagents-row:hover, .openide-subagents-row:focus-within { background: var(--oi-hover); }
+.openide-subagents-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; min-height: var(--oi-navigation-row-height); box-sizing: border-box; padding: var(--oi-navigation-row-padding); border: 0; border-radius: inherit; background: transparent; color: var(--vscode-foreground); text-align: left; font: inherit; cursor: pointer; }
+.openide-subagents-row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.openide-subagents-row-state, .openide-subagents-row-time { font-size: 11px; color: var(--oi-secondary); white-space: nowrap; }
+.openide-subagents-row > .oi-dock-action { opacity: 0; flex-shrink: 0; }
+.openide-subagents-row:is(:hover, :focus-within) > .oi-dock-action { opacity: 1; }
+.openide-subagents-open:focus-visible, .openide-subagents-work:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.openide-subagents-open:focus:not(:focus-visible), .openide-subagents-work:focus:not(:focus-visible) { outline: none; }
+.openide-subagents-detail { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.openide-subagents-detail-header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--oi-border); }
+.openide-subagents-detail-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.openide-subagents-detail-icon { display: flex; }
+.openide-subagents-work { flex-shrink: 0; display: flex; align-items: center; gap: 8px; margin: 16px 24px 0; padding: 8px 0; color: var(--oi-secondary); font: inherit; border: 0; border-bottom: 1px solid var(--oi-border); background: transparent; cursor: pointer; text-align: left; }
+.openide-subagents-work > .codicon { transition: transform var(--oi-duration-hover) var(--oi-ease); }
+.openide-subagents-work[aria-expanded=false] > .codicon { transform: rotate(-90deg); }
+.openide-subagents-transcript { flex: 1; min-height: 0; }
+.openide-subagents-transcript .openide-agent-conversation-toolbar { display: none; }
+.openide-subagents-transcript .openide-chat-row { padding-inline: 24px; }
+.openide-subagents-fallback { margin: 24px; white-space: pre-wrap; line-height: 1.6; }
+.openide-agent-window-context-row.openide-subagents-summary { gap: 8px; }
+.openide-subagents-summary-icons { display: flex; gap: 2px; flex-shrink: 0; }
+.openide-subagents-summary .openide-agent-window-row-label { color: var(--oi-secondary); }
+@media (prefers-reduced-motion: reduce) { .openide-subagents-work > .codicon { transition: none; } }
+
+.openide-subagents-summary[hidden] { display: none !important; }
+
+.openide-subagents-overview .openide-subagent-avatar,
+.openide-subagents-summary .openide-subagent-avatar { width: 18px; height: 18px; flex-basis: 18px; }

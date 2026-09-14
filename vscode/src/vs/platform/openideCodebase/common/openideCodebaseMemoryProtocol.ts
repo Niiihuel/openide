@@ -8,6 +8,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { DEFAULT_NOTE_LINKING, NoteLinkingMode } from './openideCodebaseNotes.js';
+import { CancellationToken } from '../../../base/common/cancellation.js';
 import { Event } from '../../../base/common/event.js';
 import { ICodebaseIndexVersion, ICodebaseMemoryEdge, ICodebaseMemoryNode } from './openideCodebaseMemoryTypes.js';
 import { IProviderExtraction } from './openideCodebaseMemoryProviders.js';
@@ -34,6 +35,8 @@ export interface ICodebaseMemoryIndexOptions {
 	readonly include: readonly string[];
 	readonly indexTests: boolean;
 	readonly enableRegexFallback: boolean;
+	/** Opt-in incremental native syntax extraction for supported languages. */
+	readonly enableTreeSitter?: boolean;
 	readonly persistIndex: boolean;
 	/**
 	 * Folder the persisted indexes go under, as a file URI string — the IDE's own storage, never
@@ -49,7 +52,7 @@ export interface ICodebaseMemoryIndexOptions {
 }
 
 export const DEFAULT_CODEBASE_MEMORY_INDEX_OPTIONS: ICodebaseMemoryIndexOptions = Object.freeze({
-	exclude: [], include: [], indexTests: true, enableRegexFallback: true, persistIndex: true,
+	exclude: [], include: [], indexTests: true, enableRegexFallback: true, enableTreeSitter: false, persistIndex: true,
 	indexNotes: true, noteLinking: DEFAULT_NOTE_LINKING,
 });
 
@@ -73,6 +76,14 @@ export const CODEBASE_MEMORY_MAX_CHANGE_BYTES = 500 * 1024;
 export const CODEBASE_MEMORY_MAX_EXTRACTION_NODES = 5000;
 export const CODEBASE_MEMORY_MAX_EXTRACTION_EDGES = 10000;
 
+export type CodebaseQueryMethod = 'search' | 'explore' | 'callers' | 'callees' | 'impact' | 'path' | 'relatedTests' | 'communityLabel' | 'pickSeeds';
+export interface ICodebaseQueryRequest {
+	readonly method: CodebaseQueryMethod;
+	readonly arguments: unknown[];
+	readonly includeHeuristic: boolean;
+	readonly maxTraversalDepth: number;
+}
+
 /** IServerChannel/ProxyChannel calls these methods remotely. Every operation is isolated by
  * workspaceKey so several windows never share state by accident. */
 export interface ICodebaseMemoryChannel {
@@ -85,6 +96,7 @@ export interface ICodebaseMemoryChannel {
 	rebuildFull(workspaceKey: string): Promise<ICodebaseIndexProgress>;
 	indexIncremental(workspaceKey: string, changes: ICodebaseMemoryChange[]): Promise<ICodebaseIndexProgress>;
 	getVersion(workspaceKey: string): Promise<ICodebaseIndexVersion | undefined>;
+	query(workspaceKey: string, request: ICodebaseQueryRequest, token?: CancellationToken): Promise<unknown>;
 	getSnapshot(workspaceKey: string): Promise<ICodebaseMemorySnapshotDto | undefined>;
 	getFileNodes(workspaceKey: string, uri: string): Promise<ICodebaseMemoryNode[]>;
 	clear(workspaceKey: string): Promise<void>;

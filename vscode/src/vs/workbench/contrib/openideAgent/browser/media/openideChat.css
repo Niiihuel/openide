@@ -104,7 +104,7 @@
 .openide-usage-refresh:hover { background: var(--oi-hover-strong); color: var(--oi-text); }
 .openide-usage-refresh:focus-visible { outline: 1px solid var(--oi-focus); outline-offset: -1px; }
 .openide-usage-refresh[disabled] { cursor: default; }
-.openide-usage-refresh.loading .codicon { animation: codicon-spin 1.5s steps(30) infinite; }
+/* Loading feedback uses the shared Build ring; the resting refresh glyph stays semantic. */
 /* Same contract as the Project Map's cards (see openideProjectMap.css for the full reasoning):
    DomScrollableElement measures the CONTENT element, so the roster has to be clipped to the
    popover or the slider comes out as tall as its track and the last accounts are unreachable. The
@@ -645,31 +645,11 @@
 	color: var(--openide-red);
 }
 
-/* The ring spinner, shared with the chat's plan card so one running plan looks the same in both
-   places. `currentColor` ties it to the button's own foreground, which is what keeps it readable
-   on the primary fill instead of staying light against it. */
-.openide-chat-plan-spinner {
-	flex: 0 0 auto;
-	width: 12px;
-	height: 12px;
-	border: 2px solid color-mix(in srgb, currentColor 32%, transparent);
-	border-top-color: currentColor;
-	border-radius: 50%;
-	animation: openide-chat-plan-spin 900ms linear infinite;
-}
-
-@keyframes openide-chat-plan-spin {
-	to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.openide-chat-plan-spinner { animation: none; }
-}
-
+/* Loading geometry and motion are shared by OPENIDE_SPINNER_CSS. The compact plan breadcrumb
+   keeps its smaller glyph slot without owning another animation or border recipe. */
 .monaco-workbench .openide-plan-run .openide-chat-plan-spinner {
-	width: 10px;
-	height: 10px;
-	border-width: 1.5px;
+	--oi-spinner-size: 13px;
+	--oi-spinner-stroke: 1.5px;
 }
 
 /* Usage item without data: the brand mark alone, dimmed (the popover explains why). */
@@ -685,7 +665,7 @@
 	   is how the usage mark ended up over "Ln 13, Col 16". */
 	min-width: 23px;
 }
-.monaco-workbench .part.statusbar > .items-container > .statusbar-item:has(> .openide-status-provider-icon) > .statusbar-item-label { padding-left: 23px; }
+.monaco-workbench .part.statusbar > .items-container > .statusbar-item:is(.left, .right):has(> .openide-status-provider-icon) > a.statusbar-item-label { padding-left: 23px; }
 .monaco-workbench .statusbar-item .openide-status-provider-icon {
 	position: absolute;
 	left: 5px;
@@ -713,11 +693,7 @@
 /* Running: the shimmer and the ring take the BUTTON's text colour, not the transcript's. The shared
    shimmer sweeps descriptionForeground → foreground, which on the amber fill went white. */
 .monaco-workbench .openide-plan-run .oi-split.running .openide-chat-shimmer {
-	background-image: linear-gradient(90deg,
-		color-mix(in srgb, var(--vscode-button-foreground) 55%, transparent) 0%,
-		color-mix(in srgb, var(--vscode-button-foreground) 55%, transparent) 30%,
-		var(--vscode-button-foreground) 50%,
-		color-mix(in srgb, var(--vscode-button-foreground) 55%, transparent) 70%,
-		color-mix(in srgb, var(--vscode-button-foreground) 55%, transparent) 100%);
+	--oi-shimmer-base: color-mix(in srgb, var(--vscode-button-foreground) 55%, transparent);
+	--oi-shimmer-highlight: var(--vscode-button-foreground);
 }
 .monaco-workbench .openide-plan-run .oi-split.running .openide-chat-plan-spinner { color: var(--vscode-button-foreground); }

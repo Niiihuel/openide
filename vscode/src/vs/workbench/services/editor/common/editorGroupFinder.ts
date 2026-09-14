@@ -40,6 +40,9 @@ export function findGroup(accessor: ServicesAccessor, editor: EditorInputWithOpt
 function handleGroupResult(group: IEditorGroup, editor: EditorInputWithOptions | IUntypedEditorInput, preferredGroup: PreferredGroup | undefined, editorGroupService: IEditorGroupsService, configurationService: IConfigurationService): FindGroupResult {
 	const modalEditorPart = editorGroupService.activeModalEditorPart;
 	const modalEditorMode = configurationService.getValue<UseModalEditorMode>(USE_MODAL_EDITOR_SETTING);
+	// An explicit modal group is an intentional destination, including another native window.
+	const explicitModalGroup = (preferredGroup === group || preferredGroup === group.id) && 'modalElement' in editorGroupService.getPart(group);
+	if (explicitModalGroup) { return handleGroupActivation(group, editor, preferredGroup, editorGroupService); }
 	const editorInput = isEditorInputWithOptions(editor) ? editor.editor : isEditorInput(editor) ? editor : undefined;
 	// The `RequiresModal` capability is honored unless the user has explicitly
 	// disabled modal editors via `workbench.editor.useModal: 'off'`, in which
@@ -102,6 +105,11 @@ function doFindGroup(input: EditorInputWithOptions | IUntypedEditorInput, prefer
 	let group: Promise<IEditorGroup> | IEditorGroup | undefined;
 	const editor = isEditorInputWithOptions(input) ? input.editor : input;
 	const options = input.options;
+
+	const explicitGroup = typeof preferredGroup === 'object' ? preferredGroup : typeof preferredGroup === 'number' && preferredGroup >= 0 ? editorGroupService.getGroup(preferredGroup) : undefined;
+	if (explicitGroup && 'modalElement' in editorGroupService.getPart(explicitGroup)) {
+		return explicitGroup;
+	}
 
 	// Group: Force modal if the editor has the RequiresModal capability,
 	// but respect `workbench.editor.useModal: 'off'` as an explicit opt-out.

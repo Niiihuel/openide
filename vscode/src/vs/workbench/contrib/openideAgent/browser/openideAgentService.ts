@@ -10,15 +10,20 @@
  *  (models.dev) and automatic history compaction.
  *--------------------------------------------------------------------------------------------*/
 
+import { OpenideCanvasInput } from './openideCanvasInput.js';
+import { OpenidePlanInput } from './openidePlanInput.js';
+import { mainWindow } from '../../../../base/browser/window.js';
+import { IOpenideGoalDriver, IOpenideGoalService } from './openideGoalService.js';
+import { memoryCaptureChangeSets } from '../common/openideMemoryRollback.js';
 import { OpenideMemoryCaptureQueue } from './openideMemoryCaptureQueue.js';
-import { IOpenideMemoryCheckpointState } from '../../../../platform/openideCodebase/common/openideMemoryRecord.js';
+import { IOpenideMemoryCheckpointState, isMemoryRecordUri } from '../../../../platform/openideCodebase/common/openideMemoryRecord.js';
 import { IOpenideCheckpointMemory, OpenideMemoryCheckpoint, MEMORY_CHECKPOINT_SYSTEM } from './openideMemoryCheckpoint.js';
 import { createMemoryTools } from './openideMemoryTools.js';
-import { DeferredPromise } from '../../../../base/common/async.js';
-import { VSBuffer } from '../../../../base/common/buffer.js';
+import { DeferredPromise, raceCancellation } from '../../../../base/common/async.js';
+import { VSBuffer, encodeBase64 } from '../../../../base/common/buffer.js';
 import { CancellationToken,CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Emitter,Event } from '../../../../base/common/event.js';
-import { Disposable,IDisposable } from '../../../../base/common/lifecycle.js';
+import { Disposable,IDisposable,toDisposable } from '../../../../base/common/lifecycle.js';
 import { isMacintosh,isWindows } from '../../../../base/common/platform.js';
 import { basename,joinPath,relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -41,6 +46,7 @@ import { IStorageService,StorageScope,StorageTarget } from '../../../../platform
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
 import { DEFAULT_EDITOR_ASSOCIATION } from '../../../common/editor.js';
+import { getActiveWindow } from '../../../../base/browser/dom.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 import { ISearchService } from '../../../services/search/common/search.js';
@@ -62,6 +68,7 @@ IChatImage,
 IChatMessage,
 ICredential,
 IFileRollbackCheckpoint,
+IFastModeCapability,
 ILLMProvider,
 IMessageChangeSet,
 IMessageRollbackResult,
@@ -76,6 +83,7 @@ ToolApprovalDecision,
 openideAskImageNames,
 } from '../common/openideAgentTypes.js';
 import { parseVideoMarker } from '../common/openideBrowserRecorder.js';
+import { IOpenideChatInputResolution } from '../common/chat/openideChatSurface.js';
 import { repairOpenideChatToolPairs } from '../common/openideChatHistoryRepair.js';
 import { OpenideContextCompactor } from '../common/openideContextCompactor.js';
 import {
@@ -120,7 +128,8 @@ import { IAgentMemorySnapshot,OpenideAgentMemory } from './openideAgentMemory.js
 import { OpenideAgentRules,RuleScope } from './openideAgentRules.js';
 import { ISkillInfo,OpenideAgentSkills } from './openideAgentSkills.js';
 import { OpenideApprovalManager } from './openideApproval.js';
-import { OpenideBrowserAutomation,parseScreenshotMarker } from './openideBrowserTools.js';
+import { OpenideBrowserAutomation, parseScreenshotMarker, screenshotMarker } from './openideBrowserTools.js';
+import { createDesignTools } from './openideDesignTools.js';
 import { IOpenideCanvasService } from './openideCanvasService.js';
 import { IOpenideCodebaseContextService } from './openideCodebaseContextService.js';
 import { IOpenideCodebaseGraph } from './openideCodebaseGraph.js';
@@ -241,6 +250,9 @@ export interface IOpenideAgentService {
 	 * means; the agent loop passes the model it is actually about to call, because a failover can
 	 * be running somewhere else entirely.
 	 */
+	getFastModeCapability(providerId?: string, model?: string): IFastModeCapability;
+	getFastMode(providerId?: string, model?: string): boolean;
+	setFastMode(enabled: boolean, providerId?: string, model?: string): Promise<void>;
 	getReasoningEffort(providerId?: string, model?: string): string;
 	setReasoningEffort(effort: string, providerId?: string, model?: string): Promise<void>;
 	/** Every stored level at once, keyed `<providerId>/<modelId>`. For the picker, which paints a
@@ -279,8 +291,9 @@ export interface IOpenideAgentService {
 	 */
 	externalTools(): readonly IToolDefinition[];
 	invokeExternalTool(name: string, argumentsJson: string, token: CancellationToken): Promise<string>;
-	invokeExternalToolResult(name: string, argumentsJson: string, token: CancellationToken): Promise<{ output: string; isError: boolean }>;
-	readonly onDidChangeMemoryCapture?: Event<{ conversationId: string; event: Extract<AgentLoopEvent, { type: 'info' }> }>;
+	invokeExternalToolResult(name: string, argumentsJson: string, token: CancellationToken, targetWindowId?: number): Promise<{ output: string; isError: boolean }>;
+	readonly onDidResolveChatInput?: Event<IOpenideChatInputResolution>;
+	readonly onDidChangeMemoryCapture?: Event<{ conversationId: string; messageId: string; event: Extract<AgentLoopEvent, { type: 'info' }> }>;
 	/**
 	 * The project memory as it stands. An external agent never sees our system prompt, so unlike
 	 * OpenIDE's own loop it has no way to know what is already written there — and an agent that
@@ -372,6 +385,7 @@ export interface IOpenideAgentService {
 	runAgent(prompt: string, onEvent: (e: AgentLoopEvent) => void, token?: CancellationToken): Promise<void>;
 	/** Like runAgent but with full history (multi-turn): the loop appends to the same array. */
 	runMessages(messages: IChatMessage[], onEvent: (e: AgentLoopEvent) => void, token?: CancellationToken, options?: IAgentRunOptions): Promise<void>;
+	runCliGoal(sessionId: string, run: IOpenideGoalDriver['run'], token: CancellationToken): Promise<void>;
 	/**
 	 * Registers the dock as the source of "which conversations are open" and the delivery point for
 	 * messages between them. Called by whoever mounts the chat.
@@ -395,12 +409,16 @@ export interface IOpenideAgentService {
 	/** Reveals the agent terminal in the IDE panel/dock (the "Send to panel" menu item). */
 	revealAgentTerminalToPanel(): Promise<boolean>;
 	/** Follows a semantic agent location without stealing focus from the chat. */
-	followAgentLocation(location: IAgentLocation, token?: CancellationToken): Promise<void>;
+	followAgentLocation(location: IAgentLocation, token?: CancellationToken, targetWindowId?: number): Promise<void>;
 	/** Follows a background terminal once its stable id already exists. */
 	followBackgroundTerminal(id: string): Promise<void>;
 	/** Opens the inline (integrated) REVIEW of a file edited by the agent: the file in the normal
 	 *  editor with the blocks painted + Undo/Keep per block and per file. */
-	openDiff(path: string): Promise<void>;
+	openDiff(path: string, targetEditorService?: IEditorService, targetWindowId?: number): Promise<void>;
+	/** Routes shared chat review actions into a companion while that window owns focus. */
+	registerDiffEditorTarget(windowId: number, resolve: () => Promise<IEditorService>): IDisposable;
+	/** Resolve the host-captured presentation target; a closed companion has no fallback. */
+	resolveEditorTarget(windowId: number): Promise<IEditorService | undefined>;
 	/**
 	 * The same inline review, for a change the agent did NOT make through its own tools — a
 	 * hosted CLI's write, whose "before" the Agent Changes view captured. The baseline is seeded
@@ -413,6 +431,8 @@ export interface IOpenideAgentService {
 	/** Legacy: restores full snapshots; not used for per-message rollback. */
 	rollbackFiles(checkpoints: readonly IFileRollbackCheckpoint[]): Promise<void>;
 	/** Reverts exclusively the identified change set, with patches and safe conflicts. */
+	/** Stop background memory writers and recover exact durable deltas for discarded turns. */
+	prepareMemoryRollback(conversationId: string, messageIds: readonly string[]): Promise<readonly IMessageChangeSet[]>;
 	rollbackMessage(changeSet: IMessageChangeSet, includeNonConflicting?: boolean): Promise<IMessageRollbackResult>;
 	/** Accepts a file's edits: forgets the baseline (the next edit starts a fresh diff). */
 	keepEdit(path: string): Promise<void>;
@@ -422,7 +442,8 @@ export interface IOpenideAgentService {
 	 *  syncs with this. added=removed=0 ⇒ file resolved. */
 	readonly onDidChangeFileDiff: Event<{ path: string; added: number; removed: number }>;
 	/** Diffs pendientes restaurados del storage del workspace (para reconstruir la bandeja). */
-	pendingFileDiffs(): readonly { path: string; added: number; removed: number }[];
+	pendingFileDiffs(conversationId?: string): readonly { path: string; added: number; removed: number }[];
+	reviewBaseline(path: string): string | undefined;
 	/** Inline review action on the focused editor (keybindings Ctrl+N / Ctrl+Shift+Y / Ctrl+Enter). */
 	reviewAction(action: ReviewAction): void;
 	/** PLAN MODE: the plan_save tool stored a plan in .openide/plans — the chat shows the
@@ -432,6 +453,7 @@ export interface IOpenideAgentService {
 	 *  editor can open with a skeleton and fill in live instead of waiting minutes. */
 	readonly onDidChangePlanDraft: Event<IPlanDraftState>;
 	/** In-flight draft of that plan, if any. undefined ⇒ not being written (or already closed). */
+
 	getPlanDraft(resource: URI): IPlanDraftState | undefined;
 	readonly onDidChangeCanvas: Event<{ path: string; title: string; created: boolean }>;
 	/** Aprueba un plan (.openide/plans/*.md): frontmatter → `status: aprobado`, cambia el modelo
@@ -656,6 +678,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	private readonly netRequests: IOpenideNativeServices['requests'];
 	private readonly browserAutomation: OpenideBrowserAutomation;
 	private readonly tools: OpenideToolRegistry;
+	private readonly goalChangeWrites = new Map<string, Promise<void>>();
 	private readonly mcp: OpenideMcpManager;
 	private readonly hooks: OpenideAgentHooks;
 	/** Stable synthetic id per conversation (identity of the messages array): it correlates the
@@ -668,6 +691,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	private readonly gitFlow: OpenideGitFlow;
 	private readonly approval: OpenideApprovalManager;
 	private readonly diffSnapshot: OpenideDiffSnapshotProvider;
+	private readonly diffEditorTargets = new Map<number, () => Promise<IEditorService>>();
 	private get catalog() { return this.providerService.catalog; }
 	/** Preguntas (ask_user) en vuelo, esperando respuesta del usuario. */
 	private readonly _pendingAsks = new Map<string, DeferredPromise<IOpenideAskAnswer>>();
@@ -719,8 +743,12 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	private readonly conversationMailbox = new OpenideConversationMailbox();
 	private conversationHost: IOpenideConversationHost | undefined;
 
+	private readonly memoryCaptureRoots = new Map<string, URI>();
 	private readonly memoryCaptures = this._register(new OpenideMemoryCaptureQueue());
-	private readonly _onDidChangeMemoryCapture = this._register(new Emitter<{ conversationId: string; event: Extract<AgentLoopEvent, { type: 'info' }> }>());
+	private readonly _onDidResolveChatInput = this._register(new Emitter<IOpenideChatInputResolution>());
+	readonly onDidResolveChatInput = this._onDidResolveChatInput.event;
+
+	private readonly _onDidChangeMemoryCapture = this._register(new Emitter<{ conversationId: string; messageId: string; event: Extract<AgentLoopEvent, { type: 'info' }> }>());
 	readonly onDidChangeMemoryCapture = this._onDidChangeMemoryCapture.event;
 
 	private readonly _onDidChange = this._register(new Emitter<void>());
@@ -770,6 +798,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	private readonly messageChanges: OpenideMessageChangeSetService;
 
 	constructor(
+		@IOpenideGoalService private readonly goals: IOpenideGoalService,
 		@IOpenideProviderService private readonly providerService: IOpenideProviderService,
 		@IOpenidePickerPreferencesService private readonly pickerPreferences: IOpenidePickerPreferencesService,
 		@IOpenideAgentRunStateService private readonly runState: IOpenideAgentRunStateService,
@@ -847,6 +876,16 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		this.tools.registerTool(this.skillSaveTool());
 		this.tools.registerTool(this.subagentSaveTool());
 		this.tools.registerTool(this.ruleManageTool());
+		this.tools.registerTool({
+			risk: 'safe',
+			def: { name: 'goal_get', description: 'Read OpenIDE goals, acceptance criteria and verification state. Native: current conversation. External CLI: goals loaded in this window; pass goal_id to select one. Use when the user asks about objective progress.', parameters: { type: 'object', properties: { goal_id: { type: 'string', description: 'External callers can select an ID returned by goal_get.' } } } },
+			invoke: async (args, _token, context) => JSON.stringify(context?.conversationId ? await this.goals.get(context.conversationId) ?? null : await this.goals.externalGoals(typeof args.goal_id === 'string' ? args.goal_id : undefined)),
+		});
+		this.tools.registerTool({
+			risk: 'safe',
+			def: { name: 'goal_report', description: 'Record a concise goal milestone: what changed, evidence, remaining work and blockers. This never verifies criteria or marks completion. The host evaluates configured checks after the turn. External CLI callers must pass goal_id from goal_get; their reports are explicitly unverified.', parameters: { type: 'object', properties: { goal_id: { type: 'string' }, text: { type: 'string', maxLength: 16000 } }, required: ['text'] } },
+			invoke: async (args, _token, context) => context?.conversationId ? this.goals.report(context.conversationId, String(args.text)) : typeof args.goal_id === 'string' ? this.goals.externalReport(args.goal_id, String(args.text)) : 'Error: goal_id from goal_get is required for an external CLI report.',
+		});
 		this.tools.registerTool(this.planSaveTool());
 		this.tools.registerTool(this.listConversationsTool());
 		this.tools.registerTool(this.messageConversationTool());
@@ -854,6 +893,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		this.tools.registerTool(this.canvasReadTool());
 		this.tools.registerTool(this.canvasListTool());
 		this.tools.registerTool(this.canvasOpenTool());
+		for (const tool of createDesignTools(this.canvasService, async path => screenshotMarker('image/jpeg', encodeBase64((await this.fileService.readFile(URI.file(path))).value), `Canvas editor capture: ${path}`))) { this.tools.registerTool(tool); }
 		for (const tool of new OpenideCodebaseTools(this.codebaseGraph, this.codebasePriorities, this.codebaseQuery, this.codebaseContext, this.codebaseMemory).buildTools()) { this.tools.registerTool(tool); }
 
 
@@ -926,6 +966,10 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	private static readonly STORAGE_PERMISSION = 'openide.agent.permissionMode';
 	getReasoningEfforts(): Readonly<Record<string, string>> { return this.providerService.getReasoningEfforts(); }
 
+	getFastModeCapability(providerId?: string, model?: string): IFastModeCapability { return this.providerService.getFastModeCapability(providerId, model); }
+	getFastMode(providerId?: string, model?: string): boolean { return this.providerService.getFastMode(providerId, model); }
+	setFastMode(enabled: boolean, providerId?: string, model?: string): Promise<void> { return this.providerService.setFastMode(enabled, providerId, model); }
+
 	getReasoningEffort(providerId?: string, model?: string): string { return this.providerService.getReasoningEffort(providerId, model); }
 
 	setReasoningEffort(effort: string, providerId?: string, model?: string): Promise<void> { return this.providerService.setReasoningEffort(effort, providerId, model); }
@@ -986,7 +1030,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		return (await this.invokeExternalToolResult(name, argumentsJson, token)).output;
 	}
 
-	async invokeExternalToolResult(name: string, argumentsJson: string, token: CancellationToken): Promise<{ output: string; isError: boolean }> {
+	async invokeExternalToolResult(name: string, argumentsJson: string, token: CancellationToken, targetWindowId?: number): Promise<{ output: string; isError: boolean }> {
 		const internal = internalToolName(name);
 		// Re-checked here and not only at listing time: `tools/list` is a hint, `tools/call` is
 		// the actual door, and an agent is free to call a name it was never offered.
@@ -1003,11 +1047,11 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		}
 		let output = { output: 'Error: external tool call cancelled.', isError: true };
 		await this.turnCoordinator.run('external-tools', token, async () => { output = await this.withRunJournal('external-tools', journal =>
-			this.tools.invokeExternalResult(internal, JSON.stringify(constrainExternalToolArgs(internal, args)), token, { execution: {
+			this.tools.invokeExternalResult(internal, JSON.stringify(constrainExternalToolArgs(internal, args)), token, { targetWindowId, execution: {
 				runId: journal.runId, origin: 'external', journal, memoryWrite: this.memory.captureMode !== 'off',
 				allowedTools: new Set(this.tools.getDefinitions().filter(def => isExposedToExternalAgents(def.name)).map(def => def.name)),
 				// The dock's MCP exposure is the explicit grant for this limited IDE capability set.
-				authorize: async () => true,
+				authorize: async request => !internal.startsWith('canvas_') || (await this.approval.check(request, undefined, this.getPermissionMode())) !== 'deny',
 			} })); }, () => {});
 		return output;
 	}
@@ -1221,12 +1265,18 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 
 	resolveModeSuggestion(id: string, accepted: boolean): void {
 		const deferred = this._pendingModeSuggestions.get(id);
-		if (deferred && !deferred.isSettled) { deferred.complete(accepted); }
+		if (deferred && !deferred.isSettled) {
+			deferred.complete(accepted);
+			this._onDidResolveChatInput.fire({ kind: 'modeSuggestion', requestId: id, accepted });
+		}
 	}
 
 	resolveAccountChoice(id: string, decision: string): void {
 		const deferred = this._pendingAccountChoices.get(id);
-		if (deferred && !deferred.isSettled) { deferred.complete(decision); }
+		if (deferred && !deferred.isSettled) {
+			deferred.complete(decision);
+			this._onDidResolveChatInput.fire({ kind: 'accountChoice', requestId: id, decision });
+		}
 	}
 
 	resolveApproval(id: string, decision: string): void {
@@ -1406,16 +1456,18 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		return this.tools.revealAgentTerminalToPanel();
 	}
 
-	async followAgentLocation(location: IAgentLocation, token: CancellationToken = CancellationToken.None): Promise<void> {
+	async followAgentLocation(location: IAgentLocation, token: CancellationToken = CancellationToken.None, targetWindowId = mainWindow.vscodeWindowId): Promise<void> {
 		if (!this.planFollowEnabled || token.isCancellationRequested) { return; }
+		const resolve = this.diffEditorTargets.get(targetWindowId);
+		if (targetWindowId !== mainWindow.vscodeWindowId && !resolve) { return; }
 		if (location.kind === 'terminal') {
-			if (!location.background) {
+			if (!location.background && targetWindowId === mainWindow.vscodeWindowId) {
 				await this.tools.followAgentTerminal(undefined, token);
 			}
 			return;
 		}
 		if (location.kind === 'browser') {
-			await this.commandService.executeCommand('openide.browser.open', undefined, { preserveFocus: true });
+			await this.commandService.executeCommand('openide.browser.open', undefined, { preserveFocus: true, targetWindowId });
 			return;
 		}
 		const path = location.path.trim();
@@ -1423,21 +1475,27 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		if (!uri) {
 			return;
 		}
+		const editorService = resolve ? await resolve() : this.editorService;
+		if (token.isCancellationRequested || (resolve && this.diffEditorTargets.get(targetWindowId) !== resolve)) { return; }
 		// Plans are always a visual artifact, even when the edit asks for review:
 		// raw-text review must never win over the plan's visual editor.
 		const isPlan = /(?:^|[\\/])\.openide[\\/]plans[\\/][^\\/]+\.md$/i.test(path);
-		if (location.review && !isPlan) {
-			await this.editReview.openReview(path, true, { startLine: location.line, endLine: location.endLine, token });
+		if (isPlan) {
+			await editorService.openEditor(new OpenidePlanInput(uri), { pinned: true, preserveFocus: true });
 			return;
 		}
-		await this.editorService.openEditor({
+		if (location.review) {
+			await this.editReview.openReview(path, true, { startLine: location.line, endLine: location.endLine, token }, editorService);
+			return;
+		}
+		await editorService.openEditor({
 			resource: uri,
 			options: {
 				preserveFocus: true,
-				pinned: isPlan,
+				pinned: false,
 				revealIfOpened: true,
-				...(isPlan ? { override: 'openide.planEditor' } : { override: DEFAULT_EDITOR_ASSOCIATION.id }),
-				...(!isPlan && location.line ? { selection: { startLineNumber: location.line, startColumn: 1 } } : {}),
+				override: DEFAULT_EDITOR_ASSOCIATION.id,
+				...(location.line ? { selection: { startLineNumber: location.line, startColumn: 1 } } : {}),
 			},
 		});
 	}
@@ -1446,14 +1504,33 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		return this.tools.followBackgroundTerminal(id);
 	}
 
-	async openDiff(path: string): Promise<void> {
+	registerDiffEditorTarget(windowId: number, resolve: () => Promise<IEditorService>): IDisposable {
+		this.diffEditorTargets.set(windowId, resolve);
+		return toDisposable(() => { if (this.diffEditorTargets.get(windowId) === resolve) { this.diffEditorTargets.delete(windowId); } });
+	}
+
+	async resolveEditorTarget(windowId: number): Promise<IEditorService | undefined> {
+		if (windowId === mainWindow.vscodeWindowId) { return this.editorService; }
+		const resolve = this.diffEditorTargets.get(windowId);
+		if (!resolve) { return undefined; }
+		const editors = await resolve();
+		return this.diffEditorTargets.get(windowId) === resolve ? editors : undefined;
+	}
+
+	async openDiff(path: string, targetEditorService?: IEditorService, targetWindowId?: number): Promise<void> {
+		// Capture the caller window before asynchronous editor creation changes focus.
+		const windowId = targetWindowId ?? getActiveWindow().vscodeWindowId;
+		const resolve = targetEditorService ? undefined : this.diffEditorTargets.get(windowId);
+		if (!targetEditorService && windowId !== mainWindow.vscodeWindowId && !resolve) { return; }
+		const editorService = targetEditorService ?? (resolve ? await resolve() : this.editorService);
+		if (resolve && this.diffEditorTargets.get(windowId) !== resolve) { return; }
 		// An accepted historical card may still exist in the transcript, but it no longer has a
 		// pending snapshot. Opening it must show the current file FLAT: rebuilding a baseline
 		// against Git resurrected already-kept changes after every restart.
 		if (!this.diffSnapshot.pendingPaths().includes(path)) {
 			const uri = this.tools.resolveWorkspacePath(path);
 			if (uri) {
-				await this.editorService.openEditor({
+				await editorService.openEditor({
 					resource: uri,
 					options: { pinned: true, override: DEFAULT_EDITOR_ASSOCIATION.id },
 				});
@@ -1462,7 +1539,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		}
 		// integrated inline review: the file in the NORMAL editor with the blocks painted
 		// (side-by-side left half an editor dead and extra scrollbars for this flow)
-		await this.editReview.openReview(path);
+		await this.editReview.openReview(path, false, undefined, editorService);
 	}
 
 	async reviewExternalChange(path: string, baseline?: { readonly content: string; readonly existed: boolean }): Promise<void> {
@@ -1472,8 +1549,10 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		await this.editReview.openReview(path);
 	}
 
-	pendingFileDiffs(): readonly { path: string; added: number; removed: number }[] {
-		return this.diffSnapshot.pendingDiffs();
+	reviewBaseline(path: string): string | undefined { return this.diffSnapshot.getBaseline(path); }
+
+	pendingFileDiffs(conversationId?: string): readonly { path: string; added: number; removed: number }[] {
+		return this.diffSnapshot.pendingDiffs(conversationId);
 	}
 
 	async revertEdit(path: string): Promise<void> {
@@ -1507,6 +1586,15 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		await this.editReview.reloadFromDisk(path);
 	}
 
+	async prepareMemoryRollback(conversationId: string, messageIds: readonly string[]): Promise<readonly IMessageChangeSet[]> {
+		await this.memoryCaptures.quiesce(conversationId);
+		const root = this.memoryCaptureRoots.get(conversationId) ?? this.contextService.getWorkspace().folders[0]?.uri;
+		if (!root || root.scheme !== 'file') { return []; }
+		if (!this.contextService.getWorkspace().folders.some(folder => folder.uri.toString() === root.toString())) { throw new Error('The memory workspace changed during rollback.'); }
+		const response = await this.memory.request({ action: 'capture-rollback', session: conversationId, messageIds }, root);
+		return memoryCaptureChangeSets(root, response, messageIds[0] ?? '');
+	}
+
 	async rollbackMessage(changeSet: IMessageChangeSet, includeNonConflicting = false): Promise<IMessageRollbackResult> {
 		const result = await this.messageChanges.rollback(changeSet, includeNonConflicting);
 		for (const file of result.files) {
@@ -1523,6 +1611,16 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				this._onDidChangeFileDiff.fire({ path: file.uri, added: pending ? counts.added : 0, removed: pending ? counts.removed : 0 });
 			}
 			await this.editReview.reloadFromDisk(file.uri);
+			const memoryUri = this.tools.resolveWorkspacePath(file.uri);
+			if (memoryUri && isMemoryRecordUri(memoryUri.toString())) {
+				const uri = memoryUri;
+				// The explicit transaction receipt refreshes the graph even when the watcher
+				// is disabled. Mem0 retrieval separately intersects every result with Markdown.
+				try {
+					const exists = await this.fileService.exists(uri);
+					await this.codebaseMemory.indexIncremental([{ uri: uri.toString(), ...(exists ? { content: (await this.fileService.readFile(uri)).value.toString() } : { deleted: true }) }]);
+				} catch (error) { this.logService.warn('[openide.memory] rollback committed; graph refresh is pending', error); }
+			}
 		}
 		return result;
 	}
@@ -1978,6 +2076,23 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	}
 
 	/** plan_save: THE CLOSING of plan mode — risk 'safe' (it only writes its own document). */
+	private async openRunCanvas(path: string, targetWindowId?: number): Promise<void> {
+		const uri = this.canvasService.resolve(path);
+		if (!uri) { throw new Error('Invalid canvas, or outside the workspace.'); }
+		await this.openRunArtifact(uri, 'canvas', targetWindowId);
+	}
+
+	/** Presentation is captured with the run; a closed companion never falls back to the IDE. */
+	private async openRunArtifact(resource: URI, kind: 'plan' | 'canvas', targetWindowId = mainWindow.vscodeWindowId): Promise<void> {
+		const editors = await this.resolveEditorTarget(targetWindowId);
+		if (!editors) { return; }
+		if (kind === 'canvas') {
+			await editors.openEditor(editors.findEditors(resource).map(entry => entry.editor).find(editor => editor instanceof OpenideCanvasInput) ?? new OpenideCanvasInput(resource), { pinned: true, preserveFocus: true });
+		} else {
+			await editors.openEditor(editors.findEditors(resource).map(entry => entry.editor).find(editor => editor instanceof OpenidePlanInput) ?? new OpenidePlanInput(resource), { pinned: true, preserveFocus: true });
+		}
+	}
+
 	private planSaveTool() {
 		return {
 			risk: 'safe' as const,
@@ -1993,7 +2108,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 					required: ['title', 'markdown'],
 				},
 			},
-			invoke: (args: any, _token: CancellationToken, context?: IAgentToolContext) => this.savePlan(String(args.title ?? ''), String(args.markdown ?? ''), context?.external === true, context?.conversationId),
+			invoke: (args: any, _token: CancellationToken, context?: IAgentToolContext) => this.savePlan(String(args.title ?? ''), String(args.markdown ?? ''), context?.external === true, context?.conversationId, context?.targetWindowId),
 		};
 	}
 
@@ -2006,11 +2121,11 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				parameters: { type: 'object', properties: { name: { type: 'string', description: 'kebab-case name' }, content: { type: 'string', description: 'Complete TSX source' }, auto_open: { type: 'boolean', description: 'Open when finished' } }, required: ['name', 'content'] },
 			},
 			approvalInfo: (args: any) => ({ title: 'Escribir canvas', detail: String(args.name ?? ''), path: `.openide/canvases/${String(args.name ?? '')}` }),
-			invoke: async (args: any) => {
+			invoke: async (args: any, _token: CancellationToken, context?: IAgentToolContext) => {
 				const out = await this.canvasService.write(String(args.name ?? ''), String(args.content ?? ''));
-				if (args.auto_open) { await this.canvasService.open(out.path); }
+				if (args.auto_open) { await this.openRunCanvas(out.path, context?.targetWindowId); }
 				const uri = this.canvasService.resolve(out.path);
-				return `OK: canvas ${out.created ? 'created' : 'updated'} at ${out.path}.\nCanvas TypeScript check: no errors.\nAbsolute link: ${uri?.fsPath ?? out.path}`;
+				return `OK: canvas ${out.created ? 'created' : 'updated'} at ${out.path}.\nCanvas syntax and SDK import check: no errors. Interactions still require testing.\nAbsolute link: ${uri?.fsPath ?? out.path}`;
 			},
 		};
 	}
@@ -2024,7 +2139,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	}
 
 	private canvasOpenTool() {
-		return { risk: 'safe' as const, def: { name: 'canvas_open', description: 'Open a canvas in the visual editor next to the chat.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } }, invoke: async (args: any) => { await this.canvasService.open(String(args.path ?? '')); return 'OK: canvas opened.'; } };
+		return { risk: 'safe' as const, def: { name: 'canvas_open', description: 'Open a canvas in the visual editor next to the chat.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } }, invoke: async (args: any, _token: CancellationToken, context?: IAgentToolContext) => { await this.openRunCanvas(String(args.path ?? ''), context?.targetWindowId); return 'OK: canvas opened.'; } };
 	}
 
 
@@ -2041,7 +2156,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	 * its own name, the editor opened with the skeleton might not be the file that gets written
 	 * afterwards.
 	 */
-	private onPlanDraftDelta(callId: string, argumentsJson: string, conversationId?: string): void {
+	private onPlanDraftDelta(callId: string, argumentsJson: string, conversationId?: string, targetWindowId?: number): void {
 		const draft = readPlanDraft(argumentsJson);
 		if (!draft.titleComplete || !draft.title.trim()) {
 			return; // sin título cerrado no se puede nombrar el archivo: todavía no hay borrador
@@ -2066,7 +2181,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			this.planDraft = { callId, conversationId, resource: reserved.uri, path: reserved.path, title: draft.title, markdown: draft.markdown, done: false };
 			this._onDidChangePlanDraft.fire(this.planDraft);
 			// The editor opens NOW, empty: it is the one that will show the skeleton while writing.
-			this.commandService.executeCommand('openide.plan.open', reserved.uri).then(undefined, () => { /* sin editor, la card del chat alcanza */ });
+			this.openRunArtifact(reserved.uri, 'plan', targetWindowId).then(undefined, () => { /* sin editor, la card del chat alcanza */ });
 		}, () => { this.planDraftResolving = undefined; });
 	}
 
@@ -2098,7 +2213,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 
 	/** Writes the plan document (frontmatter + markdown), fires the chat's review card
 	 *  (onDidCreatePlan) and opens the native markdown preview beside it. */
-	private async savePlan(title: string, markdown: string, external = false, conversationId?: string): Promise<string> {
+	private async savePlan(title: string, markdown: string, external = false, conversationId?: string, targetWindowId?: number): Promise<string> {
 		if (!title.trim()) {
 			throw new Error('Empty plan title.');
 		}
@@ -2140,7 +2255,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		this._onDidCreatePlan.fire({ path: rel, title: title.trim(), markdown, external, conversationId });
 		// editor de plan PROPIO (openidePlanEditor): markdown lindo + toolbar (modelo / Build) +
 		// interactive tasks — replaces the native preview. The chat card stays in parallel.
-		this.commandService.executeCommand('openide.plan.open', uri).then(undefined, () => { /* el editor no cargó: la card alcanza */ });
+		this.openRunArtifact(uri, 'plan', targetWindowId).then(undefined, () => { /* el editor no cargó: la card alcanza */ });
 		return `OK: plan guardado en ${rel}`;
 	}
 
@@ -2494,13 +2609,13 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 					required: ['url'],
 				},
 			},
-			invoke: async (args: any) => {
+			invoke: async (args: any, _token: CancellationToken, context?: IAgentToolContext) => {
 				const extraHosts = this.configurationService.getValue<string[]>('openide.agent.browserAllowedHosts');
 				const url = normalizeLocalUrl(String(args.url ?? ''), Array.isArray(extraHosts) ? extraHosts : []);
 				if (!url) {
 					return 'Error: URL not allowed — the preview is only for local apps (localhost, 127.0.0.1, *.localhost or the user allowlist).';
 				}
-				await this.commandService.executeCommand('openide.browser.open', url, { preserveFocus: true });
+				await this.commandService.executeCommand('openide.browser.open', url, { preserveFocus: true, targetWindowId: context?.targetWindowId });
 				return `OK: ${url} opened in the IDE preview.`;
 			},
 		};
@@ -2685,19 +2800,76 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		return this.runMessages([{ role: 'user', content: prompt }], onEvent, token);
 	}
 
-	runMessages(messages: IChatMessage[], onEvent: (e: AgentLoopEvent) => void, token: CancellationToken = CancellationToken.None, options?: IAgentRunOptions): Promise<void> {
-		return this.turnCoordinator.run(options?.conversationId, token,
-			() => this.withRunJournal(options?.conversationId ?? this.hookSessionId(messages), async (journal, records) => {
-				applyOpenideJournalRecovery(messages, records);
-				return this.runMessagesInternal(messages, onEvent, token, { ...options, journal });
-			}),
-			() => { if (options?.conversationId) { this.fileClaims.releaseAll(options.conversationId); } },
-		);
+	/** A structured CLI owns model turns; the same host supervisor and permission path own checks. */
+	runCliGoal(sessionId: string, run: IOpenideGoalDriver['run'], token: CancellationToken): Promise<void> {
+		return this.turnCoordinator.run(sessionId, token, () => this.goals.execute(sessionId, token, {
+			pendingWork: () => this.tools.getGoalPendingBackgroundReason(sessionId),
+			run,
+			check: (runId, command, checkToken) => this.withRunJournal(sessionId, async journal => {
+				let receipt: import('./openideTools.js').ShellCaptureResult | undefined;
+				await this.tools.invoke('run_command', JSON.stringify({ command, timeoutSeconds: 120 }), checkToken, {
+					conversationId: sessionId,
+					execution: { runId, origin: 'native', journal, authorize: async request => (await this.approval.check(request, undefined, this.getPermissionMode())) !== 'deny' },
+					onCommandResult: result => { receipt = result; },
+				});
+				return receipt;
+			}, runId),
+		}), () => this.fileClaims.releaseAll(sessionId));
 	}
 
-	private async withRunJournal<T>(sessionId: string, run: (journal: IOpenideJournalContext, records: readonly IOpenideRunJournalRecord[]) => Promise<T>): Promise<T> {
+	runMessages(messages: IChatMessage[], onEvent: (e: AgentLoopEvent) => void, token: CancellationToken = CancellationToken.None, options?: IAgentRunOptions): Promise<void> {
+		options = { ...options, targetWindowId: options?.targetWindowId ?? getActiveWindow().vscodeWindowId };
+		return this.turnCoordinator.run(options?.conversationId, token, async () => {
+			let goalDriven = false;
+			const run = (runId: string, context: string, runToken: CancellationToken) => this.withRunJournal(options?.conversationId ?? this.hookSessionId(messages), async (journal, records) => {
+				applyOpenideJournalRecovery(messages, records);
+				goalDriven ||= !!context;
+				let error: string | undefined; let report = ''; let stop = false;
+				await this.runMessagesInternal(messages, event => {
+					if (event.type === 'text') { report += event.delta; }
+					if (event.type === 'error') { error = event.message; }
+					if (event.type === 'done') { stop = event.reason === 'plan-saved'; if (!context) { onEvent(event); } }
+					else { onEvent(event); }
+				}, runToken, { ...options, goalContext: context, journal });
+				if (context && options?.conversationId) {
+					const pending = this.subagentOrchestration.getRunsForParent(options.conversationId).filter(run => !['completed', 'failed', 'cancelled', 'interrupted'].includes(run.status));
+					if (pending.length) {
+						await this.goals.report(options.conversationId, `Waiting for ${pending.length} delegated task(s) before goal verification.`);
+						const completed = await raceCancellation(Promise.all(pending.map(run => this.subagentOrchestration.awaitResult(run.runId))), runToken);
+						if (!completed) { stop = true; }
+						else if (completed.some(run => run.status !== 'completed')) { error = 'A delegated task did not complete successfully. Review its result before goal verification.'; }
+					}
+				}
+				if (options?.conversationId) { const pending = this.goalChangeWrites.get(options.conversationId); try { await pending; } finally { if (this.goalChangeWrites.get(options.conversationId) === pending) { this.goalChangeWrites.delete(options.conversationId); } } }
+				return { error, report: report.slice(-14000), stop };
+			}, runId);
+			if (!options?.conversationId || options.compactOnly || options.mode === 'plan' || options.mode === 'ask') { await run(generateUuid(), '', token); return; }
+			const sessionId = options.conversationId;
+			await this.goals.execute(sessionId, token, {
+				pendingWork: () => this.tools.getGoalPendingBackgroundReason(sessionId),
+				run,
+				check: (runId, command, checkToken) => this.withRunJournal(sessionId, async journal => {
+					let receipt: import('./openideTools.js').ShellCaptureResult | undefined;
+					const id = generateUuid();
+					onEvent({ type: 'toolStart', id, name: 'run_command', argumentsJson: JSON.stringify({ command, description: 'Verify goal criterion' }) });
+					const output = await this.tools.invoke('run_command', JSON.stringify({ command, timeoutSeconds: 120 }), checkToken, {
+						conversationId: sessionId, messageId: options.messageId,
+						execution: { runId, origin: 'native', journal, authorize: async request => (await this.approval.check(request, (r, sensitive) => this.promptApprovalInline(r, sensitive, onEvent, checkToken), this.getPermissionMode())) !== 'deny' },
+						onCommandResult: result => { receipt = result; },
+					});
+					onEvent({ type: 'toolResult', id, name: 'run_command', result: output, isError: !receipt || receipt.exitCode !== 0 });
+					messages.push({ role: 'assistant', content: '', toolCalls: [{ id, name: 'run_command', argumentsJson: JSON.stringify({ command }) }] });
+					messages.push({ role: 'tool', toolCallId: id, content: output });
+					return receipt;
+				}, runId),
+			});
+			if (goalDriven) { onEvent({ type: 'done', reason: 'goal-evaluated' }); }
+		}, () => { if (options?.conversationId) { this.fileClaims.releaseAll(options.conversationId); } });
+	}
+
+	private async withRunJournal<T>(sessionId: string, run: (journal: IOpenideJournalContext, records: readonly IOpenideRunJournalRecord[]) => Promise<T>, runId = generateUuid()): Promise<T> {
 		const records = await this.agentHost.openRunJournal(sessionId);
-		const journal: IOpenideJournalContext = { runId: generateUuid(), journal: { append: event => this.agentHost.appendRunJournal(sessionId, event) } };
+		const journal: IOpenideJournalContext = { runId, journal: { append: event => this.agentHost.appendRunJournal(sessionId, event) } };
 		try { return await run(journal, records); }
 		finally { await this.agentHost.closeRunJournal(sessionId); }
 	}
@@ -2862,6 +3034,12 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			}
 		}
 		const editSub = this.tools.onDidEdit(e => {
+			if (conversationId && ownerMessageId && e.messageId === ownerMessageId && e.runId === options?.journal?.runId) {
+				const previous = this.goalChangeWrites.get(conversationId) ?? Promise.resolve();
+				const pending = previous.then(() => this.goals.recordChange(conversationId, e));
+				this.goalChangeWrites.set(conversationId, pending);
+				pending.catch(error => this.logService.error('[openide.goal] change capture failed', error));
+			}
 			if (!ownsChangeSet || !ownerMessageId || e.messageId !== ownerMessageId) { return; }
 			this.messageChanges.record(ownerMessageId, e);
 			const openSet = this.messageChanges.snapshot(ownerMessageId);
@@ -2869,7 +3047,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			const oldContent = e.beforeContent ?? '';
 			const newContent = e.afterContent ?? '';
 			const createdByOperation = e.operation === 'create';
-			this.diffSnapshot.setBaselineOnce(e.path, oldContent, !createdByOperation);
+			this.diffSnapshot.setBaselineOnce(e.path, oldContent, !createdByOperation, conversationId);
 			// if the file is already open in Monaco, show the review diff IMMEDIATELY (without
 			// tener que clickear la card del chat).
 			this.editReview.attachIfOpen(e.path);
@@ -2997,6 +3175,10 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			const captureSession = conversationId ?? generateUuid();
 			const captureMessage = ownerMessageId ?? generateUuid();
 			const captureRoot = this.contextService.getWorkspace().folders[0]?.uri;
+			if (captureRoot && conversationId) { this.memoryCaptureRoots.set(conversationId, captureRoot); }
+			const emitCapture = (messageId: string, event: Extract<AgentLoopEvent, { type: 'info' }>) => {
+				if (conversationId) { this._onDidChangeMemoryCapture.fire({ conversationId, messageId, event: { ...event, source: 'memoryCapture', messageId } }); }
+			};
 			const memoryOwner = this.memory;
 			const captureMemory: IOpenideCheckpointMemory = {
 				get captureMode() { return captureRoot?.scheme === 'file' ? memoryOwner.captureMode : 'off'; },
@@ -3006,7 +3188,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			};
 			const captureFactory = (id: string, state: IOpenideMemoryCheckpointState, captureToken: CancellationToken) => {
 				const emit = (event: AgentLoopEvent) => {
-					if (!captureToken.isCancellationRequested && conversationId && event.type === 'info') { this._onDidChangeMemoryCapture.fire({ conversationId, event }); }
+					if (!captureToken.isCancellationRequested && conversationId && event.type === 'info') { emitCapture(state.message ?? captureMessage, event); }
 				};
 				return {
 					capture: async (messages: readonly IChatMessage[], token: CancellationToken, reason: string) => {
@@ -3028,7 +3210,6 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				};
 			};
 			const capturePending = await this.memoryCaptures.resume(captureMemory, captureSession, captureFactory);
-			if (capturePending) { onEvent({ type: 'info', severity: 'info', message: t('memory.captureBarrier') }); }
 			let memorySnapshot: IAgentMemorySnapshot | undefined;
 			try {
 				memorySnapshot = await this.memory.load();
@@ -3093,6 +3274,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				+ (mcpCatalog && !clientToolsUnavailable ? `\n\nCOMPACT MCP CATALOG: call these tools through mcp_call; do not invent names or arguments.\n${mcpCatalog}` : '')
 				+ (clientToolsUnavailable ? '\n\nMODEL CAPABILITY: this model cannot invoke OpenIDE tools. Do not claim to have read, edited or run anything; explain this limitation if the task requires actions.' : '');
 			const runtimeContext = [
+				options?.goalContext,
 				internalModeInstruction ? `INTERNAL MODE-RESUMPTION INSTRUCTION (not a new user message):\n${internalModeInstruction}` : '',
 				capturePending ? 'Project memory capture from an earlier turn is pending; retrieved notes may not yet include its outcome.' : '',
 				handoff,
@@ -3127,11 +3309,11 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			const memoryCheckpoint = new OpenideMemoryCheckpoint(captureMemory, captureSession, captureMessage, async transcript => {
 				const response = await this.streamWithRetry(adapter, { credential, baseUrl, model, extraHeaders: entry.extraHeaders, cloudCodeMetadata: entry.cloudCodeMetadata, system: MEMORY_CHECKPOINT_SYSTEM, messages: [{ role: 'user', content: transcript.slice(0, Math.max(1000, Math.min(14000, (contextLimit - 1500) * 4))) }], maxTokens: 1000 }, () => {}, token, onEvent, options?.journal);
 				return response.message.content ?? '';
-			}, onEvent, options?.journal, `inline:${captureMessage}`);
+			}, event => { if (event.type === 'info') { emitCapture(event.messageId ?? captureMessage, event); } }, options?.journal, `inline:${captureMessage}`);
 			await runOpenideTurn({
 				messages, token, onEvent, contextLimit: displayContextLimit || undefined, runId: execution.runId, messageId: ownerMessageId, runtimeContext, compactOnly: options?.compactOnly,
 				maxIterations: resolveAgentIterationLimit(this.configurationService.getValue<number>('openide.agent.maxAgentIterations')),
-				provider: { credential, providerId: entry.id, baseUrl, model, system, tools: toolDefs, maxTokens, extraHeaders: entry.extraHeaders, cloudCodeMetadata: entry.cloudCodeMetadata, effort: this.getReasoningEffort(entry.id, model) || undefined },
+				provider: { credential, providerId: entry.id, baseUrl, model, system, tools: toolDefs, maxTokens, extraHeaders: entry.extraHeaders, cloudCodeMetadata: entry.cloudCodeMetadata, effort: this.getReasoningEffort(entry.id, model) || undefined, serviceTier: this.getFastMode(entry.id, model) ? 'priority' : undefined },
 			}, {
 				journal: options?.journal?.journal,
 				stream: (request, onStream, journal) => this.streamWithRetry(adapter, request, onStream, token, onEvent, journal),
@@ -3139,15 +3321,17 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				checkpoint: async reason => {
 					if (captureMemory.captureMode !== 'automatic') { return; }
 					try {
-						const pending = await this.memoryCaptures.enqueue(captureMemory, captureSession, await memoryCheckpoint.pendingDelta(messages), captureFactory, reason !== 'interrupted');
+						const pending = await this.memoryCaptures.enqueue(captureMemory, captureSession, await memoryCheckpoint.pendingDelta(messages), captureFactory, false);
 						memoryCheckpoint.resetProjection(messages.length);
-						if (pending && reason !== 'interrupted') { onEvent({ type: 'info', severity: 'info', message: t('memory.capturePending') }); }
+						if (pending && reason !== 'interrupted') {
+							this.memoryCaptures.start(captureMemory, captureSession, captureFactory);
+						}
 					} catch (error) {
-						onEvent({ type: 'info', message: t('memory.captureDeferred', error instanceof Error ? error.message : String(error)) });
+						emitCapture(captureMessage, { type: 'info', severity: 'warning', message: t('memory.captureDeferred', error instanceof Error ? error.message : String(error)) });
 					}
 				},
 				enrichUsage: (event, reported) => this.enrichUsage(event, reported ? budgetSystem : system, toolDefs, messages, displayContextLimit, memoryText, skillsText),
-				planDraft: (id, argumentsJson) => this.onPlanDraftDelta(id, argumentsJson, conversationId),
+				planDraft: (id, argumentsJson) => this.onPlanDraftDelta(id, argumentsJson, conversationId, options?.targetWindowId),
 				stop: () => this.hooks.dispatchObserved('stop', { sessionId: this.hookSessionId(messages) }),
 				executeTools: async (calls, onEvent) => {
 					// Images the user attached to an `ask_user` answer during THIS batch of tool calls.
@@ -3166,7 +3350,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 							sealOrphanToolCalls(messages);
 							return true;
 						}
-						const loopDecision = toolCallGuard.inspect(call.name, call.argumentsJson);
+						const loopDecision = toolCallGuard.inspect(call.name, call.argumentsJson, this.tools.getTool(call.name)?.risk === 'safe');
 						if (loopDecision.warn) {
 							onEvent({ type: 'info', message: t('agentSurface.chat.toolLoopWarning', call.name) });
 						}
@@ -3425,12 +3609,14 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 						let out: string;
 						try {
 							out = await this.invokeSerializingWrites(
-								call.name, call.argumentsJson, token, { messageId: ownerMessageId, conversationId, execution },
+								call.name, call.argumentsJson, token, { messageId: ownerMessageId, conversationId, execution, targetWindowId: options?.targetWindowId },
 								holder => onEvent({ type: 'toolWaiting', id: call.id, holder }),
 							);
 						} finally {
 							shellSub?.dispose();
 						}
+						const toolRisk = this.tools.getTool(call.name)?.risk;
+						if (!out.startsWith('Error') && toolRisk && toolRisk !== 'safe') { toolCallGuard.recordStateChange(); }
 						// Hooks postToolUse (observador, fire-and-forget): result capado a 8k chars.
 						if (await this.hooks.has('postToolUse')) {
 							let hookInput: any = {};
@@ -3477,7 +3663,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 						if ((call.name === 'memory_save' || call.name === 'memory_session_summary') && !out.startsWith('Error')) {
 							try {
 								const receipt = JSON.parse(out) as import('../../../../platform/openideCodebase/common/openideMemoryRecord.js').IOpenideMemoryDocument;
-								if (receipt.path && receipt.record) { onEvent({ type: 'info', severity: 'info', message: this.memory.savedMessage(receipt) }); }
+								if (receipt.path && receipt.record) { emitCapture(captureMessage, { type: 'info', severity: 'info', message: this.memory.savedMessage(receipt) }); }
 							} catch { /* The ordinary tool card retains unexpected output verbatim. */ }
 						}
 						out = compactAgentToolResult(call.name, out, contextLimit);
@@ -3490,6 +3676,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 						// it started implementing without approval until it hit the fact that plan mode has no
 						// write tools, then closed with a confusing message about missing
 						// tools. The plan looked like it approved itself.
+
 						if (call.name === 'plan_save' && !out.startsWith('Error')) {
 							this.hooks.dispatchObserved('stop', { sessionId: this.hookSessionId(messages) });
 							onEvent({ type: 'done', reason: 'plan-saved' });
@@ -3754,7 +3941,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			}
 			const result = await this.streamWithRetry(
 				ctx.adapter,
-				{ credential: ctx.credential, providerId: ctx.entry.id, baseUrl: ctx.baseUrl, model: ctx.model, system, messages, tools: toolDefs, maxTokens: Math.min(ctx.maxTokens ?? budget.maxOutputTokens, budget.maxOutputTokens), extraHeaders: ctx.entry.extraHeaders, cloudCodeMetadata: ctx.entry.cloudCodeMetadata, effort: this.getReasoningEffort(ctx.entry.id, ctx.model) || undefined },
+				{ credential: ctx.credential, providerId: ctx.entry.id, baseUrl: ctx.baseUrl, model: ctx.model, system, messages, tools: toolDefs, maxTokens: Math.min(ctx.maxTokens ?? budget.maxOutputTokens, budget.maxOutputTokens), extraHeaders: ctx.entry.extraHeaders, cloudCodeMetadata: ctx.entry.cloudCodeMetadata, effort: this.getReasoningEffort(ctx.entry.id, ctx.model) || undefined, serviceTier: this.getFastMode(ctx.entry.id, ctx.model) ? 'priority' : undefined },
 				ev => {
 					if (ev.type === 'text') { wrap({ type: 'text', delta: ev.delta }); }
 					if (ev.type === 'info') { wrap(ev); }
@@ -3788,7 +3975,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				}
 				toolCallCount++;
 				const registered = this.tools.getTool(call.name);
-				const loopDecision = toolCallGuard.inspect(call.name, call.argumentsJson);
+				const loopDecision = toolCallGuard.inspect(call.name, call.argumentsJson, this.tools.getTool(call.name)?.risk === 'safe');
 				if (!allowedTools.has(call.name) || !allowedRisks.has(registered?.risk ?? 'write') || toolCallCount > budget.maxToolCalls || loopDecision.block) {
 					const reason = toolCallCount > budget.maxToolCalls
 						? 'tool budget reached'

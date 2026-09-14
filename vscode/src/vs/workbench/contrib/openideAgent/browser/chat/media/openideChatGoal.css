@@ -1,0 +1,40 @@
+/* Copyright (c) OpenIDE. All rights reserved. Licensed under the MIT License. */
+.openide-chat-goal-tray {
+	box-sizing: border-box;
+	flex: 0 0 auto;
+	padding: 2px 4px;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-control);
+	background: var(--vscode-input-background);
+	color: var(--vscode-foreground);
+	font-size: 12px;
+	min-width: 0;
+}
+.openide-chat-goal-tray.hidden { display: none; }
+.openide-chat-goal-heading, .openide-chat-goal-criterion, .openide-chat-goal-actions { display: flex; align-items: center; gap: 6px; }
+.openide-chat-goal-count { margin-left: auto; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
+.openide-chat-goal-objective { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 4px; }
+.openide-chat-goal-body { max-height: 240px; overflow-y: auto; margin-top: 4px; }
+.openide-chat-goal-detail { color: var(--vscode-descriptionForeground); margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.openide-chat-goal-criterion { justify-content: space-between; margin: 4px 0; }
+.openide-chat-goal-criterion > span { overflow-wrap: anywhere; min-width: 0; }
+.openide-chat-goal-actions { flex-wrap: wrap; margin-top: 6px; }
+.openide-chat-goal-tray button { border: 0; border-radius: var(--oi-radius-control); padding: 3px 6px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); font: inherit; cursor: pointer; flex-shrink: 0; }
+.openide-chat-goal-tray button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.openide-chat-goal-tray button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.openide-chat-goal-tray button:disabled { opacity: .6; cursor: default; }
+.openide-chat-goal-tray .openide-chat-goal-toggle { background: transparent; padding-left: 0; font-weight: 600; }
+
+.openide-chat-goal-tray .monaco-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
+.openide-chat-goal-heading { min-height: var(--oi-tray-row-height, 24px); }

@@ -17,6 +17,15 @@ suite('OpenIDE — the compact diff shared by the chat and Agent Changes', () =>
 	});
 
 	suite('countDiff', () => {
+		test('created/deleted line totals exclude only the final newline sentinel', () => {
+			for (const eol of ['\n', '\r\n', '\r']) {
+				assert.deepStrictEqual(countDiff('', `one${eol}two${eol}`), { added: 2, removed: 0 });
+				assert.deepStrictEqual(countDiff(`one${eol}two${eol}`, ''), { added: 0, removed: 2 });
+				assert.deepStrictEqual(countDiff('', eol), { added: 1, removed: 0 });
+			}
+			assert.deepStrictEqual(countDiff('', ''), { added: 0, removed: 0 });
+			assert.deepStrictEqual(countDiff('', 'one\n\n'), { added: 2, removed: 0 });
+		});
 		test('a created file removes nothing', () => {
 			assert.deepStrictEqual(countDiff('', 'a\nb\nc'), { added: 3, removed: 0 });
 		});

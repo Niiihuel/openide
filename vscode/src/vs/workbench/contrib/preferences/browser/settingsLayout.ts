@@ -154,6 +154,7 @@ export const tocData: ITOCEntry<string> = {
 					label: localize('zenMode', "Zen Mode"),
 					settings: ['zenmode.*']
 				},
+				{ id: 'workbench/profile', label: localize('openideProfile', "Profile") },
 				{
 					// OpenIDE: display language (language packs) + the fork's own strings. Rendered by
 					// OpenideLanguageSettingsSection; the label follows `openide.language`.

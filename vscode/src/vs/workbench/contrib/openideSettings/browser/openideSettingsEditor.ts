@@ -55,8 +55,8 @@ import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { openideInputBoxStyles } from '../../openideAgent/browser/openideControlStyles.js';
 import { onDidChangeOpenideLanguage, t } from '../../openideAgent/common/openideStrings.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
-import { IExtensionService } from '../../../services/extensions/common/extensions.js';
-import { IAuthenticationService } from '../../../services/authentication/common/authentication.js';
+import { OpenideProfileSettingsSection } from './openideProfileSettingsSection.js';
+import { OpenideAccountProfile } from './openideAccountProfile.js';
 
 const INITIAL_RENDER_LIMIT = 180;
 
@@ -83,6 +83,7 @@ const SECTION_FACTORIES: ReadonlyMap<string, new (...args: any[]) => IOpenideSet
 	['openideAgent/mcp', OpenideMcpSettingsSection],
 	['openideAgent/providers', OpenideProvidersSettingsSection],
 	['openideAgent/voice', OpenideVoiceSettingsSection],
+	['workbench/profile', OpenideProfileSettingsSection],
 	['workbench/language', OpenideLanguageSettingsSection],
 ]);
 
@@ -98,13 +99,6 @@ export class OpenideSettingsEditor extends EditorPane {
 	private count!: HTMLElement;
 	private _searchClear!: HTMLButtonElement;
 	private _searchHint!: HTMLElement;
-	private profileAvatar!: HTMLElement;
-	private profileName!: HTMLElement;
-	/** Bumped per `renderProfile`, so a slow provider cannot paint over a newer answer. */
-	private profileToken = 0;
-	private profileDetail!: HTMLElement;
-	private profileSignIn!: HTMLButtonElement;
-	private profileSignInLabel!: HTMLElement;
 	private readonly modelListeners = this._register(new DisposableStore());
 	/** Hovers of the current page's rows; cleared on every repaint so hints never outlive a row. */
 	private readonly rowHovers = this._register(new DisposableStore());
@@ -130,15 +124,13 @@ export class OpenideSettingsEditor extends EditorPane {
 		@IStorageService storageService: IStorageService,
 		@IConfigurationService configurationService: IConfigurationService,
 		@IPreferencesService private readonly preferencesService: IPreferencesService,
-		@IUserDataProfileService private readonly userDataProfileService: IUserDataProfileService,
+		@IUserDataProfileService userDataProfileService: IUserDataProfileService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IHoverService private readonly hoverService: IHoverService,
 		@IContextViewService private readonly contextViewService: IContextViewService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
-		@IAuthenticationService private readonly authenticationService: IAuthenticationService,
-		@IExtensionService private readonly extensionService: IExtensionService,
 	) {
 		super(OpenideSettingsEditor.ID, group, telemetryService, themeService, storageService);
 		this.settingsModel = new OpenideSettingsModel(configurationService);
@@ -147,15 +139,12 @@ export class OpenideSettingsEditor extends EditorPane {
 		}));
 		CONTEXT_SETTINGS_EDITOR.bindTo(contextKeyService).set(true);
 		this._register(configurationService.onDidChangeConfiguration(() => { this.settingsModel.invalidate(); this.scheduleRender(false); }));
-		this._register(userDataProfileService.onDidChangeCurrentProfile(() => { this.settingsModel.invalidate(); this.renderProfile(); this.scheduleRender(true); }));
-		// Signing in or out anywhere in the workbench changes what the account block says.
-		this._register(authenticationService.onDidChangeSessions(() => this.renderProfile()));
-		this._register(authenticationService.onDidRegisterAuthenticationProvider(() => this.renderProfile()));
+		this._register(userDataProfileService.onDidChangeCurrentProfile(() => { this.settingsModel.invalidate(); this.scheduleRender(true); }));
 		// `openide.language` repaints the whole shell: nav labels, search, hints, buttons.
 		this._register(onDidChangeOpenideLanguage(() => { this.settingsModel.invalidate(); this.scheduleRender(true); }));
 	}
 
-	override get minimumWidth(): number { return 620; }
+	override get minimumWidth(): number { return 380; }
 	override get minimumHeight(): number { return 420; }
 
 	protected createEditor(parent: HTMLElement): void {
@@ -167,25 +156,17 @@ export class OpenideSettingsEditor extends EditorPane {
 		// look at. The content stays a single reading column, with nothing above it competing.
 		const body = append(this.root, $('.openide-settings-body'));
 		const sidebar = append(body, $('nav.openide-settings-sidebar', { 'aria-label': t('settings.nav.aria') }));
+		const back = append(sidebar, $('button.openide-settings-back', { type: 'button' }));
+		append(back, $('span.codicon.codicon-arrow-left', { 'aria-hidden': 'true' }));
+		const backLabel = append(back, $('span', undefined, t('settings.backToIde')));
+		this._register(onDidChangeOpenideLanguage(() => { backLabel.textContent = t('settings.backToIde'); }));
+		this._register(addDisposableListener(back, 'click', () => {
+			this.contextViewService.hideContextView();
+			if (this.input) { void this.group.closeEditor(this.input); }
+		}));
 
-		// Who the settings belong to, above the map of them: the avatar carries the initial, the
-		// first line the signed-in account (or the product's name when there is none) and the
-		// second the profile these settings are read from. The account comes from the workbench's
-		// own authentication service, so anything an extension signs into shows here.
-		const profileBlock = append(sidebar, $('.openide-settings-profile-block'));
-		const profile = append(profileBlock, $('.openide-settings-profile'));
-		this.profileAvatar = append(profile, $('span.openide-settings-profile-avatar', { 'aria-hidden': 'true' }));
-		const profileCopy = append(profile, $('.openide-settings-profile-copy'));
-		this.profileName = append(profileCopy, $('.openide-settings-profile-name'));
-		this.profileDetail = append(profileCopy, $('.openide-settings-profile-detail'));
-		// The way in, for when there is no account: the block used to name the PRODUCT where the
-		// person goes, which reads as an identity nobody can act on. It runs the same command the
-		// welcome walkthrough's GitHub step does, so there is one sign-in flow, not two.
-		this.profileSignIn = append(profileBlock, $('button.oi-btn.openide-settings-profile-signin.hidden', { type: 'button' })) as HTMLButtonElement;
-		append(this.profileSignIn, $('span.codicon.codicon-github', { 'aria-hidden': 'true' }));
-		this.profileSignInLabel = append(this.profileSignIn, $('span', undefined, t('accounts.signInWithGitHub')));
-		this._register(addDisposableListener(this.profileSignIn, 'click', () => this.signInWithGitHub()));
-		this.renderProfile();
+		const accountProfile = this._register(this.instantiationService.createInstance(OpenideAccountProfile, sidebar));
+		accountProfile.setOpenProfile(() => this.showSettingsCategory('workbench/profile'));
 
 		const searchBlock = append(sidebar, $('.openide-settings-sidebar-block'));
 		// The native widget, not a hand-rolled div: `InputBox` brings the theme's input background,
@@ -255,23 +236,29 @@ export class OpenideSettingsEditor extends EditorPane {
 	private rootContextKeyService(): IContextKeyService { return this.contextKeyService; }
 
 	override async setInput(input: SettingsEditorInput, options: ISettingsEditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
+		const previousState = this.input === input ? { ...this.settingsModel.viewState } : undefined;
 		await super.setInput(input, options, context, token);
 		const model = await input.resolve();
 		if (token.isCancellationRequested || !(model instanceof Settings2EditorModel)) { return; }
 		this.settingsModel.setModel(model);
-		this.settingsModel.setState({ target: options?.target ?? ConfigurationTarget.USER_LOCAL, folderUri: options?.folderUri, query: options?.query || '', category: 'home' });
-		this.search.value = options?.query || '';
+		this.settingsModel.setState({ target: options?.target ?? previousState?.target ?? ConfigurationTarget.USER_LOCAL, folderUri: options?.folderUri ?? previousState?.folderUri, query: options?.query ?? previousState?.query ?? '', category: options?.query !== undefined ? 'home' : previousState?.category ?? 'home' });
+		this.search.value = this.settingsModel.viewState.query;
 		this.modelListeners.clear(); this.modelListeners.add(model.onDidChangeGroups(() => { this.settingsModel.invalidate(); this.scheduleRender(true); }));
 		this.renderAll();
-		if (options?.focusSearch !== false) { this.search.focus(); }
+		if (!options?.preserveFocus && options?.focusSearch !== false) { this.search.focus(); }
 	}
 
 	focusSearch(query?: string): void { if (query !== undefined) { this.search.value = query; this.applySearch(); } this.search.focus(); }
 	clearSearchResults(): void { this.search.value = ''; this.applySearch(); }
 	showSettingsCategory(category: string): void {
-		const found = this.settingsModel.findNavigationEntry(category);
-		this.settingsModel.setState({ category: found?.id || 'home' });
+		const found = this.settingsModel.findNavigationEntry(category) ?? this.sectionNavigationEntry(category);
+		this.searchRender.cancel();
+		this.search.value = '';
+		this._searchClear?.classList.add('hidden');
+		this._searchHint?.classList.remove('hidden');
+		this.settingsModel.setState({ category: found?.id || 'home', query: '' });
 		this.renderAll();
+		this.navigation.querySelector<HTMLElement>('.openide-settings-nav-item.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 	}
 	focusSettings(): void { (this.content.querySelector('button, input, select, textarea') as HTMLElement | null)?.focus(); }
 	focusTOC(): void { (this.navigation.querySelector('button') as HTMLElement | null)?.focus(); }
@@ -292,91 +279,6 @@ export class OpenideSettingsEditor extends EditorPane {
 		if (defer) { this.searchRender.schedule(); } else { this.renderAll(); }
 	}
 
-	/**
-	 * Paints the account block. Synchronous with what is known now, then refined when the
-	 * providers answer: the block must never wait on an extension to draw the sidebar.
-	 *
-	 * GitHub first, and activated on purpose: the user signs into GitHub for the IDE itself (Cursor
-	 * shows that account here), and its authentication extension only registers when something asks
-	 * for it. `onAuthenticationRequest:github` is the activation event the workbench's own account
-	 * menu fires, so this is the same cost the Accounts menu pays. Other providers are asked only if
-	 * already registered. The avatar is GitHub's public image for the login, with the initial as the
-	 * fallback while it loads or if it cannot.
-	 *
-	 * With no account the block does NOT fall back to the product's name: "OpenIDE · Default
-	 * profile" reads like an identity you are signed in as, when in fact there is nothing to act
-	 * on. It says so plainly and offers the way in instead. The button waits for the answer — while
-	 * the providers are still being asked we do not yet know the user is signed out, and offering
-	 * to sign in to an account they already have is the one thing worse than saying nothing.
-	 */
-	private renderProfile(): void {
-		// A session or profile event can arrive before the pane has built its DOM.
-		if (!this.profileName) { return; }
-		const profileName = this.userDataProfileService.currentProfile.name;
-		const paint = (name: string, detail: string, avatarUrl?: string) => {
-			this.profileName.textContent = name;
-			this.profileDetail.textContent = detail;
-			clearNode(this.profileAvatar);
-			this.profileAvatar.textContent = (name.trim().charAt(0) || 'O').toUpperCase();
-			if (avatarUrl) {
-				const image = append(this.profileAvatar, $('img.openide-settings-profile-image')) as HTMLImageElement;
-				image.alt = '';
-				image.referrerPolicy = 'no-referrer';
-				image.addEventListener('error', () => image.remove(), { once: true });
-				image.src = avatarUrl;
-			}
-		};
-		/** No account: a generic mark instead of a product initial, and the sign-in only once the
-		 *  providers have answered. */
-		const paintSignedOut = (offerSignIn: boolean) => {
-			this.profileName.textContent = t('accounts.signedOut');
-			this.profileDetail.textContent = t('accounts.profile', profileName);
-			clearNode(this.profileAvatar);
-			append(this.profileAvatar, $('span.codicon.codicon-account'));
-			this.profileSignIn.classList.toggle('hidden', !offerSignIn);
-		};
-		paintSignedOut(false);
-		const token = ++this.profileToken;
-		void this.extensionService.activateByEvent('onAuthenticationRequest:github').then(async () => {
-			const github = this.authenticationService.declaredProviders.find(provider => provider.id === 'github');
-			const others = this.authenticationService.declaredProviders.filter(provider => provider.id !== 'github' && this.authenticationService.isAuthenticationProviderRegistered(provider.id));
-			const candidates = [...(github && this.authenticationService.isAuthenticationProviderRegistered('github') ? [github] : []), ...others];
-			for (const provider of candidates) {
-				try {
-					const accounts = await this.authenticationService.getAccounts(provider.id);
-					if (!accounts.length) { continue; }
-					if (token !== this.profileToken || this._store.isDisposed) { return; }
-					const login = accounts[0].label;
-					const avatar = provider.id === 'github' ? `https://avatars.githubusercontent.com/${encodeURIComponent(login)}?s=72` : undefined;
-					paint(login, t('accounts.profileWithAccount', provider.label, profileName), avatar);
-					return;
-				} catch {
-					// A provider that fails to answer is skipped; the next one may not.
-				}
-			}
-			if (token !== this.profileToken || this._store.isDisposed) { return; }
-			// Nobody answered with an account. Offer the sign-in only if GitHub is a declared
-			// provider: without the extension the flow has nowhere to go, and a button that can
-			// only fail is worse than no button.
-			paintSignedOut(!!github);
-		});
-	}
-
-	/** The welcome walkthrough's GitHub step, from the sidebar. The account block repaints on its
-	 *  own through `onDidChangeSessions`, so this only has to keep the button honest while the
-	 *  browser flow is out there. */
-	private async signInWithGitHub(): Promise<void> {
-		this.profileSignIn.disabled = true;
-		this.profileSignInLabel.textContent = t('accounts.signingIn');
-		try {
-			await this.commandService.executeCommand('openide.signInWithGitHub');
-		} finally {
-			if (!this._store.isDisposed) {
-				this.profileSignIn.disabled = false;
-				this.profileSignInLabel.textContent = t('accounts.signInWithGitHub');
-			}
-		}
-	}
 	private scheduleRender(reset: boolean): void {
 		if (!this.root || !this.input) { return; }
 		if (reset) { this.renderLimit = INITIAL_RENDER_LIMIT; }

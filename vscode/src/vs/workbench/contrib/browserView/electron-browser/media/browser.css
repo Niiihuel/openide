@@ -34,7 +34,7 @@
 	.browser-navbar {
 		display: flex;
 		align-items: center;
-		padding: 6px 8px 3px 8px;
+		padding: 6px 8px;
 		background-color: var(--vscode-editor-background);
 		flex-shrink: 0;
 		gap: 8px;
@@ -140,8 +140,8 @@
 		gap: 8px;
 		padding: 4px 8px;
 		font-size: 12px;
-		background-color: var(--vscode-editorWidget-background);
-		color: var(--vscode-editorWidget-foreground);
+		background-color: var(--oi-surface);
+		color: var(--oi-text);
 
 		.browser-emulation-toolbar-groups {
 			display: flex;
@@ -150,13 +150,7 @@
 			gap: 4px;
 		}
 
-		.monaco-select-box {
-			height: 22px;
-			padding: 0 22px 0 6px;
-			font-size: inherit;
-			text-overflow: ellipsis;
-			white-space: nowrap;
-		}
+		.openide-settings-dropdown { min-height: 26px; font-size: inherit; }
 
 		.monaco-inputbox > .ibwrapper > input {
 			font-size: inherit;
@@ -180,7 +174,8 @@
 
 		.browser-emulation-toolbar-input {
 			.monaco-inputbox {
-				height: 22px;
+				height: 26px;
+				border-radius: var(--oi-radius-control);
 
 				> .ibwrapper > input {
 					text-align: center;
@@ -452,12 +447,12 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: var(--oi-row-md);
-		height: var(--oi-row-md);
+		width: 30px;
+		height: 30px;
 		flex: 0 0 auto;
 		padding: 0;
 		border: 0;
-		border-radius: var(--oi-radius-md);
+		border-radius: var(--oi-radius-control, 9px);
 		background: transparent;
 		color: var(--oi-text-muted);
 		cursor: pointer;
@@ -483,20 +478,19 @@
 		}
 
 		&:focus-visible {
-			outline: 1px solid var(--vscode-focusBorder);
-			outline-offset: -1px;
+			outline: 2px solid var(--vscode-focusBorder);
+			outline-offset: -2px;
 		}
 	}
 
-	/* Group titles — the components list and every design section — are the same eyebrow: small
-	   caps in the muted colour, the way a section label reads across the fork's surfaces. */
+	/* Quiet section titles preserve the dense inspector hierarchy without uppercase labels. */
 	.browser-inspector-components h2,
 	.browser-inspector-section h3 {
 		margin: 0;
-		font-size: var(--oi-text-xs);
-		font-weight: 600;
-		letter-spacing: .06em;
-		text-transform: uppercase;
+		font-size: 13px;
+		font-weight: 500;
+		letter-spacing: normal;
+		text-transform: none;
 		color: var(--oi-text-muted);
 	}
 
@@ -513,7 +507,7 @@
 
 	.browser-inspector-components-tree {
 		height: 100%;
-		padding: 0 6px 8px;
+		padding: 0 var(--oi-scroll-inset, 6px) 8px;
 	}
 
 	.browser-inspector-components-scroll,
@@ -531,7 +525,7 @@
 		gap: 5px;
 		min-height: 26px;
 		padding-right: 8px;
-		border-radius: var(--oi-radius-md);
+		border-radius: var(--oi-radius-control, 9px);
 		font-family: var(--monaco-monospace-font);
 		font-size: var(--oi-text-xs);
 		white-space: nowrap;
@@ -577,8 +571,8 @@
 		min-width: 0;
 
 		&:focus-visible {
-			outline: 1px solid var(--vscode-focusBorder);
-			outline-offset: -1px;
+			outline: 2px solid var(--vscode-focusBorder);
+			outline-offset: -2px;
 		}
 	}
 
@@ -633,9 +627,9 @@
 		box-sizing: border-box;
 		padding: 0 8px;
 		border: 1px solid var(--oi-border-soft);
-		border-radius: var(--oi-radius-md);
+		border-radius: var(--oi-radius-control, 9px);
 		outline: none;
-		background: var(--vscode-input-background);
+		background: var(--oi-control, var(--vscode-input-background));
 		color: var(--vscode-input-foreground);
 		font: inherit;
 		font-size: var(--oi-text-sm);
@@ -670,7 +664,7 @@
 			justify-items: center;
 			padding: 4px;
 			border: 1px dashed var(--oi-border);
-			border-radius: var(--oi-radius-md);
+			border-radius: var(--oi-radius-control, 9px);
 			background: var(--oi-raised);
 		}
 
@@ -698,7 +692,7 @@
 			width: 100%;
 			height: 22px;
 			border: 1px solid var(--oi-border);
-			border-radius: var(--oi-radius-sm);
+			border-radius: var(--oi-radius-control, 9px);
 		}
 
 		.openide-inspector-box-field {
@@ -707,7 +701,7 @@
 			height: 20px;
 			padding: 0;
 			border: 1px solid transparent;
-			border-radius: var(--oi-radius-sm);
+			border-radius: var(--oi-radius-control, 9px);
 			background: transparent;
 			color: var(--vscode-foreground);
 			font: inherit;
@@ -869,8 +863,8 @@
 				padding: 0;
 
 				&:focus-visible {
-					outline: 1px solid var(--vscode-focusBorder);
-					outline-offset: -1px;
+					outline: 2px solid var(--vscode-focusBorder);
+					outline-offset: -2px;
 				}
 			}
 		}
@@ -932,7 +926,7 @@
 		}
 
 		&:focus-visible {
-			outline: 1px solid var(--vscode-focusBorder);
+			outline: 2px solid var(--vscode-focusBorder);
 			outline-offset: 1px;
 		}
 
@@ -944,7 +938,7 @@
 	.browser-inspector-color-swatch {
 		width: var(--oi-row-md);
 		height: var(--oi-row-md);
-		border-radius: var(--oi-radius-md);
+		border-radius: var(--oi-radius-control, 9px);
 		background-size: 10px 10px;
 		background-position: 0 0, 0 5px, 5px -5px, -5px 0;
 	}
@@ -966,11 +960,7 @@
 		--browser-inspector-checker: color-mix(in srgb, var(--vscode-foreground) 22%, var(--vscode-editor-background));
 		box-sizing: border-box;
 		overflow: hidden;
-		border: 1px solid var(--oi-border);
-		border-radius: var(--oi-radius-lg);
-		background: var(--oi-overlay);
-		color: var(--vscode-foreground);
-		box-shadow: 0 8px 24px var(--vscode-widget-shadow);
+		color: var(--oi-text);
 
 		.colorpicker-widget {
 			width: 100%;
@@ -998,7 +988,7 @@
 			line-height: 24px;
 			margin: 0 -6px;
 			padding: 0 6px;
-			border-radius: var(--oi-radius-md);
+			border-radius: var(--oi-radius-control, 9px);
 			background: transparent !important;
 			color: var(--vscode-foreground) !important;
 			font-family: var(--monaco-monospace-font);
@@ -1015,7 +1005,7 @@
 				height: 16px;
 				box-sizing: border-box;
 				border: 1px solid var(--oi-border);
-				border-radius: var(--oi-radius-sm);
+				border-radius: var(--oi-radius-control, 9px);
 				background-color: var(--vscode-editor-background);
 				background-image:
 					linear-gradient(var(--browser-inspector-picked, transparent), var(--browser-inspector-picked, transparent)),
@@ -1045,7 +1035,7 @@
 			height: 16px;
 			box-sizing: border-box;
 			border: 1px solid var(--oi-border);
-			border-radius: var(--oi-radius-sm);
+			border-radius: var(--oi-radius-control, 9px);
 		}
 
 		.colorpicker-body {
@@ -1054,11 +1044,11 @@
 
 		.colorpicker-body .saturation-wrap {
 			min-width: 0;
-			border-radius: var(--oi-radius-md);
+			border-radius: var(--oi-radius-control, 9px);
 		}
 
 		.colorpicker-body .strip {
-			border-radius: var(--oi-radius-sm);
+			border-radius: var(--oi-radius-control, 9px);
 		}
 	}
 
@@ -1092,7 +1082,7 @@
 	.browser-inspector-token-swatch {
 		width: 18px;
 		height: 18px;
-		border-radius: var(--oi-radius-sm);
+		border-radius: var(--oi-radius-control, 9px);
 		background-size: 8px 8px;
 		background-position: 0 0, 0 4px, 4px -4px, -4px 0;
 	}
@@ -1115,7 +1105,7 @@
 		padding: 0 12px;
 
 		&:focus-visible {
-			outline: 1px solid var(--vscode-focusBorder);
+			outline: 2px solid var(--vscode-focusBorder);
 			outline-offset: 1px;
 		}
 	}
@@ -1479,34 +1469,6 @@
 		align-items: center;
 		justify-content: center;
 		background-color: var(--vscode-editor-background);
-
-		.browser-welcome-content {
-			display: flex;
-			flex-direction: column;
-			align-items: center;
-			padding: 12px;
-		}
-
-		.browser-welcome-icon {
-			min-height: 40px;
-
-			.codicon {
-				font-size: 40px;
-				margin-bottom: 24px;
-				color: var(--vscode-descriptionForeground);
-			}
-		}
-
-		.browser-welcome-title {
-			font-size: 13px;
-			font-weight: 600;
-			color: var(--vscode-foreground);
-			margin-top: 5px;
-			text-align: center;
-			line-height: normal;
-			padding: 0 8px;
-		}
-
 	}
 
 	/* Site info indicator in URL bar */

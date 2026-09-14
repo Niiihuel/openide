@@ -37,7 +37,7 @@ suite('OpenIDE chat tool catalog', () => {
 	test('the catalog still covers the whole built-in surface', () => {
 		// A dropped entry degrades that tool to a nameless generic row, which is the exact symptom
 		// this file exists to prevent. The count is the cheapest tripwire.
-		assert.strictEqual(Object.keys(OPENIDE_TOOL_META).length, 66);
+		assert.strictEqual(Object.keys(OPENIDE_TOOL_META).length, 74);
 		assert.strictEqual(OPENIDE_TOOL_META['read_file'].icon, 'file');
 		assert.strictEqual(OPENIDE_TOOL_META['run_command'].icon, 'terminal');
 		assert.strictEqual(OPENIDE_TOOL_META['delegate_task'].icon, 'run-all');
@@ -57,6 +57,7 @@ suite('OpenIDE chat tool catalog', () => {
 		const runtime = [
 			'batch_read', 'mcp_call', 'skill_view', 'skill_save', 'subagent_save', 'rule_manage',
 			'plan_save', 'list_conversations', 'message_conversation', 'canvas_write', 'canvas_read',
+			'canvas_templates', 'canvas_create', 'canvas_inspect', 'canvas_patch', 'canvas_export', 'canvas_handoff', 'canvas_preview', 'canvas_import',
 			'canvas_list', 'canvas_open', 'codebase_search', 'codebase_explore', 'codebase_callers',
 			'memory_graph_status', 'project_map_query', 'memory_graph_impact', 'memory_graph_path',
 			'memory_graph_related_tests', 'codebase_save_priority', 'git_status', 'git_preflight',

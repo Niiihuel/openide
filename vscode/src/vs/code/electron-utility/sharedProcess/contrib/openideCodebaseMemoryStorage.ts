@@ -155,7 +155,7 @@ export class CodebaseMemoryStorage extends Disposable {
 	}
 
 	/** Writes a file's payload and updates its hash and state in the manifest. */
-	async writeFile(uri: string, hash: string, language: string, payload: IStoredFilePayload): Promise<void> {
+	async writeFile(uri: string, hash: string, language: string, payload: IStoredFilePayload, extractionMode?: ICodebaseIndexedFile['extractionMode']): Promise<void> {
 		if (!this.manifest) { return; }
 		if (this.manifest.workspaceKey === 'empty') { return; }
 		const previousPayload = await this.readFile(uri);
@@ -167,7 +167,7 @@ export class CodebaseMemoryStorage extends Disposable {
 		this.fileCache.set(uri, payload);
 		const nodeCount = payload.nodes.length;
 		const files = this.manifest.files;
-		files[uri] = { uri, hash, language, indexedAt: Date.now(), nodeCount, status: 'indexed' };
+		files[uri] = { uri, hash, language, indexedAt: Date.now(), nodeCount, status: 'indexed', ...(extractionMode ? { extractionMode } : {}) };
 		const deltaNodes = nodeCount - (prev?.nodeCount ?? 0);
 		this.manifest = {
 			...this.manifest,

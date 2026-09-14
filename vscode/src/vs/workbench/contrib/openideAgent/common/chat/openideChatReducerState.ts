@@ -36,7 +36,7 @@ export type IOpenideChatSessionEffect =
 	/** Compaction rewrote the run's history: persist now or a provider switch loses the summary. */
 	| { readonly type: 'saveConversation'; readonly reason: 'compaction' }
 	/** Create the mirror session for a specialist and seed it with its prompt. */
-	| { readonly type: 'subagentSessionStart'; readonly runId: string; readonly title: string; readonly prompt: string }
+	| { readonly type: 'subagentSessionStart'; readonly runId: string; readonly title: string; readonly prompt: string; readonly inLoop?: boolean }
 	/** `mergeText` reproduces the accumulation of consecutive assistant deltas into one message. */
 	| { readonly type: 'subagentSessionMessage'; readonly runId: string; readonly message: IChatMessage; readonly mergeText: boolean }
 	/** Flush to storage. Streamed text deliberately does not trigger one: it would write per token. */
@@ -427,6 +427,7 @@ export function commitOpenideChatDraft(state: IOpenideChatReducerState, draft: I
 			id: `response_${draft.seq + 1}`,
 			requestId: state.requestId,
 			content: draft.content,
+			...(draft.now > 0 ? { startedAt: draft.now, completedAt: draft.complete ? draft.now : undefined } : {}),
 			isComplete: draft.complete ?? false,
 			isCanceled: draft.canceled,
 			errorMessage: draft.errorMessage,
@@ -446,6 +447,7 @@ export function commitOpenideChatDraft(state: IOpenideChatReducerState, draft: I
 	}
 	const advanced = advanceOpenideChatResponseItem(existing, {
 		content: draft.content,
+		...(draft.now > 0 ? { startedAt: existing.startedAt ?? draft.now, completedAt: draft.complete ? draft.now : undefined } : {}),
 		isComplete: draft.complete,
 		isCanceled: draft.canceled,
 		errorMessage: draft.errorMessage,

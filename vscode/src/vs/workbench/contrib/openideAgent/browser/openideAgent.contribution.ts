@@ -9,7 +9,11 @@
  *  The chat UI in the right dock comes later; this is the backend / foundation.
  *--------------------------------------------------------------------------------------------*/
 
+import { IOpenideChatRuntime } from './openideChatRuntime.js';
+import { OpenideWindowSwitcherContribution } from './openideWindowSwitcher.js';
 import './media/openideChat.css';
+import { IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
+import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IOpenideNativeServices } from '../common/openideNativeServices.js';
 import { IWorkingCopyService } from '../../../services/workingCopy/common/workingCopyService.js';
 import { FileAccess } from '../../../../base/common/network.js';
@@ -26,6 +30,8 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { IStorageService, StorageScope, StorageTarget, WillSaveStateReason } from '../../../../platform/storage/common/storage.js';
+import { IsAuxiliaryWindowContext } from '../../../common/contextkeys.js';
+import { TitleBarLeadingActionsGroup } from '../../../browser/parts/titlebar/titlebarActions.js';
 import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
 import { IHostService } from '../../../services/host/browser/host.js';
 import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
@@ -63,6 +69,7 @@ import { OpenideChatViewPane } from './openideChatView.js';
 import { EditorExtensions, IEditorFactoryRegistry } from '../../../common/editor.js';
 import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/editor.js';
 import { IEditorService, MODAL_GROUP } from '../../../services/editor/common/editorService.js';
+import { OpenideFilesEditor, OpenideFilesInput } from './openideFilesEditor.js';
 import { OpenideDiagramEditor } from './diagrams/openideDiagramEditor.js';
 import { OpenideDiagramInput, toOpenideDiagramPayload } from './openideDiagramInput.js';
 import { OpenidePlanEditor } from './plan/openidePlanEditor.js';
@@ -115,6 +122,11 @@ import { ISubagentExecutionService, SubagentExecutionService } from './openideSu
 import { ISubagentOrchestrationService, SubagentOrchestrationService } from './openideSubagentOrchestrationService.js';
 import { ISubagentWorkspaceService, SubagentWorkspaceService } from './openideSubagentWorkspaceService.js';
 import { ISubagentRoutingService, SubagentRoutingService } from './openideSubagentRoutingService.js';
+import { OpenideChangesInput, OpenideChangesEditor } from './openideChangesEditor.js';
+import { attachOpenideSelectionToWindow } from './chat/openideChatWidget.js';
+import { getActiveWindow } from '../../../../base/browser/dom.js';
+import { OpenideAgentConversationInput, OpenideAgentConversationEditor } from './openideAgentConversationEditor.js';
+import { OpenideSubagentsEditor, OpenideSubagentsInput } from './openideSubagentsEditor.js';
 import { OpenideSubagentEditor } from './subagents/openideSubagentEditor.js';
 import { OpenideSubagentInput } from './openideSubagentInput.js';
 import { openideProductIconCodepoints } from '../../../common/openideProductIcons.js';
@@ -215,7 +227,7 @@ class OpenideIdeServerContribution extends Disposable implements IWorkbenchContr
 		]);
 		ideServer.bridgeAgentTools(
 			agentService.externalTools(),
-			(name, args, token) => agentService.invokeExternalToolResult(name, args, token),
+			(name, args, token, targetWindowId) => agentService.invokeExternalToolResult(name, args, token, targetWindowId),
 			completions,
 		);
 		// A read of the shared memory, which has no native counterpart: OpenIDE's own loop gets it
@@ -622,7 +634,7 @@ registerAction2(class extends Action2 {
 		});
 	}
 
-	async run(accessor: ServicesAccessor, urlArg?: string, options?: { readonly preserveFocus?: boolean }): Promise<void> {
+	async run(accessor: ServicesAccessor, urlArg?: string, options?: { readonly preserveFocus?: boolean; readonly targetWindowId?: number }): Promise<void> {
 		// the accessor is only valid synchronously: resolve EVERYTHING before the first await
 		const browserViewService = accessor.get(IBrowserViewWorkbenchService);
 		const extraHosts = accessor.get(IConfigurationService).getValue<string[]>('openide.agent.browserAllowedHosts');
@@ -772,6 +784,11 @@ registerAction2(class extends Action2 {
 	}
 });
 
+Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
+	EditorPaneDescriptor.create(OpenideFilesEditor, OpenideFilesEditor.ID, t('agentWindow.filesTitle')),
+	[new SyncDescriptor(OpenideFilesInput)]
+);
+
 // Full-screen diagram viewer (native MODAL + zoom). The chat opens it with the SVG/HTML
 // already rendered — it replaces the webview's home-made modal (confined to the panel).
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
@@ -812,6 +829,7 @@ registerAction2(class extends Action2 {
 	async run(accessor: ServicesAccessor, section?: string): Promise<void> {
 		const preferencesService = accessor.get(IPreferencesService);
 		const categoryBySection: Record<string, string> = {
+			profile: 'workbench/profile',
 			home: 'commonlyUsed',
 			commonlyUsed: 'commonlyUsed',
 			editor: 'editor',
@@ -892,6 +910,21 @@ class OpenidePlanEditorResolverContribution implements IWorkbenchContribution {
 		void reg; // vive por la vida del workbench
 	}
 }
+PlatformRegistry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
+	EditorPaneDescriptor.create(OpenideChangesEditor, OpenideChangesEditor.ID, 'Changes'),
+	[new SyncDescriptor(OpenideChangesInput)]
+);
+
+Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
+	EditorPaneDescriptor.create(OpenideSubagentsEditor, OpenideSubagentsEditor.ID, t('agentWindow.subagents')),
+	[new SyncDescriptor(OpenideSubagentsInput)]
+);
+
+Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
+	EditorPaneDescriptor.create(OpenideAgentConversationEditor, OpenideAgentConversationEditor.ID, t('chat.part.subagentOpen')),
+	[new SyncDescriptor(OpenideAgentConversationInput)]
+);
+
 PlatformRegistry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench)
 	.registerWorkbenchContribution(OpenidePlanEditorResolverContribution, LifecyclePhase.Restored);
 
@@ -929,34 +962,59 @@ registerAction2(class extends Action2 {
 	async run(accessor: ServicesAccessor, resourceArg?: URI): Promise<void> { const editors = accessor.get(IEditorService); const resource = resourceArg instanceof URI ? resourceArg : editors.activeEditor?.resource; if (resource) { await editors.openEditor({ resource, options: { override: 'default', pinned: true } }); } }
 });
 
+registerAction2(class extends Action2 {
+	constructor() { super({ id: 'openide.canvas.create', title: { value: 'Canvas: Create', original: 'Canvas: Create' }, f1: true }); }
+	async run(accessor: ServicesAccessor): Promise<void> { await accessor.get(IEditorService).openEditor(new OpenideCanvasInput(URI.from({ scheme: 'openide-canvas', path: '/new' })), { pinned: true }); }
+});
+
 // Canvas: editor visual default para el artefacto real .openide/canvases/*.canvas.tsx.
-const CANVAS_GLOB = '**/.openide/canvases/*.canvas.tsx';
+const CANVAS_GLOBS = ['**/.openide/canvases/*.canvas.tsx', '**/.openide/designs/*/design.json'];
 Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(OpenideCanvasInput.ID, OpenideCanvasInputSerializer);
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
 	EditorPaneDescriptor.create(OpenideCanvasEditor, OpenideCanvasEditor.ID, t('chatSurface.editor.canvas')),
 	[new SyncDescriptor(OpenideCanvasInput)]
 );
-class OpenideCanvasEditorResolverContribution implements IWorkbenchContribution {
+class OpenideCanvasEditorResolverContribution extends Disposable implements IWorkbenchContribution {
+	static readonly ID = 'openide.canvas.editorResolver';
 	constructor(@IEditorResolverService editorResolverService: IEditorResolverService) {
-		const reg = editorResolverService.registerEditor(
-			CANVAS_GLOB,
+		super();
+		for (const glob of CANVAS_GLOBS) { this._register(editorResolverService.registerEditor(
+			glob,
 			{ id: OpenideCanvasInput.EDITOR_ID, label: t('contrib.editor.canvasLabel'), priority: RegisteredEditorPriority.default },
-			{ singlePerResource: true, canSupportResource: resource => /\.openide[\/\\]canvases[\/\\][^\/\\]+\.canvas\.tsx$/.test(resource.path) },
+			{ singlePerResource: true, canSupportResource: resource => /\.openide[\/\\](?:canvases[\/\\][^\/\\]+\.canvas\.tsx|designs[\/\\][^\/\\]+[\/\\]design\.json)$/.test(resource.path) },
 			{ createEditorInput: ({ resource }) => ({ editor: new OpenideCanvasInput(resource) }) }
-		);
-		void reg;
+		)); }
 	}
 }
-PlatformRegistry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench)
-	.registerWorkbenchContribution(OpenideCanvasEditorResolverContribution, LifecyclePhase.Restored);
+registerWorkbenchContribution2(OpenideCanvasEditorResolverContribution.ID, OpenideCanvasEditorResolverContribution, WorkbenchPhase.BlockRestore);
 
 registerAction2(class extends Action2 {
 	constructor() { super({ id: 'openide.canvas.open', title: { value: t('contrib.cmd.canvas.open'), original: 'Canvas: Open' }, f1: false }); }
-	async run(accessor: ServicesAccessor, resourceArg?: URI | string): Promise<void> {
-		const editorService = accessor.get(IEditorService);
+	async run(accessor: ServicesAccessor, resourceArg?: URI | string, targetWindowId?: number): Promise<void> {
 		const canvasService = accessor.get(IOpenideCanvasService);
+		const editorService = targetWindowId === undefined ? accessor.get(IEditorService) : await accessor.get(IOpenideAgentService).resolveEditorTarget(targetWindowId);
+		if (!editorService) { return; }
 		const resource = resourceArg instanceof URI ? resourceArg : (typeof resourceArg === 'string' ? canvasService.resolve(resourceArg) : editorService.activeEditor?.resource);
-		if (resource) { await editorService.openEditor({ resource, options: { override: OpenideCanvasInput.EDITOR_ID, pinned: true } }); }
+		if (resource) { await editorService.openEditor(editorService.findEditors(resource).map(entry => entry.editor).find(editor => editor instanceof OpenideCanvasInput) ?? new OpenideCanvasInput(resource), { pinned: true, preserveFocus: targetWindowId !== undefined }); }
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() { super({ id: 'openide.canvas.import', title: 'Canvas: Import', f1: false }); }
+	async run(accessor: ServicesAccessor, request: { path: string; expectedRevision: number; kind: 'image'|'tokens'|'obj'; screenId?: string }) {
+		const chosen=await accessor.get(IFileDialogService).showOpenDialog({canSelectMany:false,canSelectFiles:true,canSelectFolders:false,filters:[{name:request.kind,extensions:request.kind==='image'?['png','jpg','jpeg','svg']:request.kind==='obj'?['obj']:['json']}]});
+		if(!chosen?.[0]){return undefined;}return accessor.get(IOpenideCanvasService).importDesign(request.path,request.expectedRevision,chosen[0].fsPath,request.kind,request.screenId,true);
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() { super({ id: 'openide.canvas.preview', title: 'Canvas: Capture preview', f1: false }); }
+	async run(accessor: ServicesAccessor, resource: URI, targetWindowId?: number): Promise<string> {
+		const editorService = targetWindowId === undefined ? accessor.get(IEditorService) : await accessor.get(IOpenideAgentService).resolveEditorTarget(targetWindowId);
+		if (!editorService) { throw new Error('Canvas preview window has closed.'); }
+		const pane = await editorService.openEditor(editorService.findEditors(resource).map(entry => entry.editor).find(editor => editor instanceof OpenideCanvasInput) ?? new OpenideCanvasInput(resource), { pinned: true, preserveFocus: targetWindowId !== undefined });
+		if (!(pane instanceof OpenideCanvasEditor)) { throw new Error('Canvas preview is unavailable.'); }
+		return pane.capturePreview();
 	}
 });
 
@@ -1073,6 +1131,22 @@ registerAction2(class extends Action2 {
  */
 // Kept in sync by hand with `ASK_IN_NEW_CHAT_COMMAND` in projectMap/openideProjectMapEditor.ts:
 // this file imports that one to register its editor pane, so the id cannot be shared as a symbol.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: 'openide.agent.openAgentWindow', title: { value: t('agentWindow.open'), original: 'OpenIDE Agent: Open Agent Window' }, f1: true, icon: Codicon.commentDiscussion,
+			menu: [{ id: MenuId.MenubarViewMenu, group: '4_tools', order: 10 }, { id: MenuId.TitleBar, group: TitleBarLeadingActionsGroup, order: 1, when: IsAuxiliaryWindowContext.negate() }] });
+	}
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(IOpenideChatRuntime).openAgentWindow();
+	}
+});
+
+CommandsRegistry.registerCommand('openide.agent.createGoalFromPlan', async (accessor, request?: { planPath?: string; objective?: string }) => {
+	if (typeof request?.planPath !== 'string' || typeof request.objective !== 'string') { return; }
+	const view = await accessor.get(IViewsService).openView<OpenideChatViewPane>(OPENIDE_CHAT_VIEW_ID, true);
+	await view?.createGoalFromPlan({ planPath: request.planPath, objective: request.objective });
+});
+
 CommandsRegistry.registerCommand('openide.agent.askInNewChat', async (accessor, prompt?: unknown) => {
 	if (typeof prompt !== 'string' || !prompt.trim()) {
 		return;
@@ -1112,9 +1186,7 @@ registerAction2(class extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
-		const viewsService = accessor.get(IViewsService);
-		const view = await viewsService.openView<OpenideChatViewPane>(OPENIDE_CHAT_VIEW_ID, false);
-		view?.showUsagePopover();
+		accessor.get(IOpenideChatRuntime).showUsagePopover();
 	}
 });
 
@@ -1177,6 +1249,7 @@ registerAction2(class extends Action2 {
 
 	async run(accessor: ServicesAccessor): Promise<void> {
 		const snippet = selectionSnippet(accessor);
+		if (snippet && attachOpenideSelectionToWindow(getActiveWindow(), snippet)) { return; }
 		const viewsService = accessor.get(IViewsService);
 		const view = await viewsService.openView<OpenideChatViewPane>(OPENIDE_CHAT_VIEW_ID, true);
 		if (view && snippet) {
@@ -1193,7 +1266,7 @@ registerAction2(class extends Action2 {
  * that line — what the user sees as "these lines", not the caret's exact offsets.
  */
 function selectionSnippet(accessor: ServicesAccessor): IComposerSnippet | undefined {
-	const editor = accessor.get(ICodeEditorService).getActiveCodeEditor();
+	const editor = accessor.get(ICodeEditorService).getFocusedCodeEditor() ?? accessor.get(ICodeEditorService).getActiveCodeEditor();
 	const model = editor?.getModel();
 	const selection = editor?.getSelection();
 	if (!editor || !model || !selection || selection.isEmpty()) {
@@ -1410,6 +1483,7 @@ configurationRegistry.registerConfiguration({
 		'openide.memory.include': { type: 'array', default: [], order: 34, items: { type: 'string' }, markdownDescription: t('contrib.config.memory.include') },
 		'openide.memory.indexTests': { type: 'boolean', default: true, order: 35, markdownDescription: t('contrib.config.memory.indexTests') },
 		'openide.memory.enableRegexFallback': { type: 'boolean', default: true, order: 36, markdownDescription: t('contrib.config.memory.regex') },
+		'openide.memory.enableTreeSitter': { type: 'boolean', default: false, order: 36.5, markdownDescription: t('contrib.config.memory.treeSitter') },
 		'openide.memory.showHeuristicRelations': { type: 'boolean', default: true, order: 37, markdownDescription: t('contrib.config.memory.showHeuristic') },
 		'openide.agent.contextTokens': {
 			type: 'number',
@@ -2026,7 +2100,7 @@ registerAction2(class extends Action2 {
 	}
 
 	run(accessor: ServicesAccessor): void {
-		const editor = accessor.get(ICodeEditorService).getActiveCodeEditor();
+		const editor = accessor.get(ICodeEditorService).getFocusedCodeEditor() ?? accessor.get(ICodeEditorService).getActiveCodeEditor();
 		if (editor) {
 			OpenideQuickEdit.get(editor)?.start();
 		}
@@ -2188,3 +2262,5 @@ registerAction2(class extends Action2 {
 		} catch (error) { notifications.error(error instanceof Error ? error : String(error)); }
 	}
 });
+
+registerWorkbenchContribution2(OpenideWindowSwitcherContribution.ID, OpenideWindowSwitcherContribution, WorkbenchPhase.BlockRestore);

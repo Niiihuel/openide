@@ -15,6 +15,7 @@
  *  workbench, and tooltips are the workbench hover instead of `<title>` bubbles.
  *--------------------------------------------------------------------------------------------*/
 
+import { mainWindow } from '../../../../../base/browser/window.js';
 import { Dimension } from '../../../../../base/browser/dom.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { IEditorOptions } from '../../../../../platform/editor/common/editor.js';
@@ -75,7 +76,9 @@ export class OpenideDiagramEditor extends EditorPane {
 	}
 
 	private buildContent(payload: OpenideDiagramPayload): HTMLElement | undefined {
-		const doc = this.stage.domNode.ownerDocument;
+		// Auxiliary documents forbid element creation: build in the main realm, then
+		// let the stage adopt the nodes into its owning window.
+		const doc = mainWindow.document;
 		switch (payload.kind) {
 			case 'source': {
 				const render = renderOpenideDiagram(doc, payload.source);

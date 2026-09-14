@@ -210,3 +210,9 @@
 .monaco-modal-editor-block.compact-header .modal-editor-title .monaco-icon-label > .monaco-icon-label-iconpath {
 	display: none;
 }
+
+/* A docked part keeps the same native editor groups, models and tabs as its modal presentation. */
+.monaco-modal-editor-block.embedded-editor { position: absolute; inset: 0; width: 100%; height: 100%; z-index: auto; background: transparent; backdrop-filter: none; }
+.monaco-modal-editor-block.embedded-editor .modal-editor-shadow { box-shadow: none; }
+.monaco-modal-editor-block.embedded-editor .modal-editor-part { border: 0; border-radius: 0; }
+.monaco-modal-editor-block.embedded-editor .modal-editor-header { display: none; }

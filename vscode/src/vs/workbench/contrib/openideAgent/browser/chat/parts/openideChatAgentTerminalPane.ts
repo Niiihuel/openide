@@ -3,7 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, append, clearNode } from '../../../../../../base/browser/dom.js';
+import { CancellationToken } from '../../../../../../base/common/cancellation.js';
+import { IDialogService } from '../../../../../../platform/dialogs/common/dialogs.js';
+import { IOpenideNativeServices } from '../../../common/openideNativeServices.js';
+import { IOpenideCodexGoalResult } from '../../../../../../platform/openideAgentHost/common/openideCodexGoal.js';
+import { $, addDisposableListener, append, clearNode, getWindow } from '../../../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../../base/common/uri.js';
@@ -41,6 +45,7 @@ interface IHostedTerminal {
 	readonly instance: ITerminalInstance;
 	readonly store: DisposableStore;
 	readonly launchedAt: number;
+	structuredGoal?: boolean;
 	status: OpenideCliSessionStatus;
 	/** True once a native hook reported for this session: the heuristic stands down. */
 	hooked: boolean;
@@ -79,6 +84,8 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 
 	readonly domNode: HTMLElement;
 
+	private readonly _opening = new Map<string, { cancelled: boolean; promise?: Promise<void> }>();
+	private _disposed = false;
 	private readonly _terminals = new Map<string, IHostedTerminal>();
 	private _shown: string | undefined;
 	private integrationLabel: HTMLElement | undefined;
@@ -101,6 +108,17 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 	private readonly _onDidResolveProviderSession = this._register(new Emitter<{ readonly sessionId: string; readonly providerSessionId: string }>());
 	readonly onDidResolveProviderSession = this._onDidResolveProviderSession.event;
 
+	private readonly _onDidChangeGoalSupport = this._register(new Emitter<{ sessionId: string; supported: boolean; reason?: string }>());
+	readonly onDidChangeGoalSupport = this._onDidChangeGoalSupport.event;
+	private readonly _onDidInterruptGoal = this._register(new Emitter<{ sessionId: string; reason: string }>());
+	readonly onDidInterruptGoal = this._onDidInterruptGoal.event;
+	supportsGoal(sessionId: string): boolean { return this._terminals.get(sessionId)?.structuredGoal === true; }
+	async runGoalTurn(sessionId: string, runId: string, prompt: string, token: CancellationToken): Promise<IOpenideCodexGoalResult> {
+		if (!this.supportsGoal(sessionId)) { throw new Error('Codex structured goal control is not connected.'); }
+		if (token.isCancellationRequested) { return { report: '', stop: true }; }
+		const cancellation = token.onCancellationRequested(() => { void this.native.host.codexGoalInterrupt(sessionId, runId); });
+		try { return await this.native.host.codexGoalRun(sessionId, runId, prompt); } finally { cancellation.dispose(); }
+	}
 	private readonly _onDidRequestRelaunch = this._register(new Emitter<string>());
 	/** The user asked to reopen an exited session (Enter / the button on the exit banner). */
 	readonly onDidRequestRelaunch: Event<string> = this._onDidRequestRelaunch.event;
@@ -112,12 +130,25 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		@IOpenideCliChangesService private readonly cliChanges: OpenideCliChangesService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
+		@IOpenideNativeServices private readonly native: IOpenideNativeServices,
+		@IDialogService private readonly dialogs: IDialogService,
 		@IOpenideIdeServerService private readonly ideServer: OpenideIdeServerService,
 	) {
 		super();
 		this.domNode = append(parent, $('.openide-chat-agent-terminal.hidden'));
+		this._register(this.native.host.onDidChangeCodexGoal(event => {
+			const hosted = this._terminals.get(event.sessionId); if (!hosted?.structuredGoal) { return; }
+			if (event.kind === 'approval') {
+				void this.dialogs.confirm({ message: t('codexGoal.approval'), detail: `${event.title}\n\n${event.detail}`, primaryButton: t('codexGoal.approve') }).then(result => this.native.host.codexGoalRespond(event.sessionId, event.approvalId, result.confirmed)).catch(() => {});
+			} else {
+				if (event.kind === 'disconnected') { hosted.structuredGoal = false; this._onDidChangeGoalSupport.fire({ sessionId: event.sessionId, supported: false, reason: event.reason }); }
+				this._onDidInterruptGoal.fire({ sessionId: event.sessionId, reason: event.reason });
+			}
+		}));
 		this._register(this.ideServer.onDidChangeIntegration(() => this.renderIntegrationStatus()));
 		this._register(toDisposable(() => {
+			this._disposed = true;
+			for (const id of this._opening.keys()) { this.close(id); }
 			for (const hosted of this._terminals.values()) {
 				this._disposeHosted(hosted);
 			}
@@ -126,7 +157,7 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 	}
 
 	has(sessionId: string): boolean {
-		return this._terminals.has(sessionId);
+		return this._terminals.has(sessionId) || this._opening.get(sessionId)?.cancelled === false;
 	}
 
 	statusOf(sessionId: string): OpenideCliSessionStatus | undefined {
@@ -138,7 +169,25 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 	 * executable through the agent service (login-shell PATH) so a `claude` installed by npm in
 	 * `~/.npm-global/bin` is found even though the IDE's own PATH may not include it.
 	 */
-	async open(session: IChatSessionMeta): Promise<void> {
+	open(session: IChatSessionMeta): Promise<void> {
+		if (this._disposed) { return Promise.resolve(); }
+		const pending = this._opening.get(session.id);
+		if (pending) { return pending.promise!; }
+		const state: { cancelled: boolean; promise?: Promise<void> } = { cancelled: false };
+		this._opening.set(session.id, state);
+		state.promise = this._open(session, state).catch(error => {
+			if (state.cancelled || this._disposed) { return; }
+			this._onDidChangeStatus.fire({ sessionId: session.id, status: 'failed' });
+			if (this._shown === session.id) {
+				this._renderBanner(t('openide.cli.launchFailed', getOpenideCli(session.cliId)?.name ?? session.title, error instanceof Error ? error.message : String(error)), true);
+			}
+			throw error;
+		}).finally(() => { if (this._opening.get(session.id) === state) { this._opening.delete(session.id); } });
+		return state.promise;
+	}
+
+	private async _open(session: IChatSessionMeta, state: { cancelled: boolean }): Promise<void> {
+		const targetWindowId = getWindow(this.domNode).vscodeWindowId;
 		const existing = this._terminals.get(session.id);
 		if (existing) {
 			this.show(session.id);
@@ -151,91 +200,114 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		this.show(session.id);
 		this._renderBanner(t('sessions.cli.launching', cli.name));
 		const executable = await this.agentService.resolveExecutable(cli.binary);
-		if (this._terminals.has(session.id)) {
+		if (state.cancelled || this._disposed || this._terminals.has(session.id)) {
 			return; // a concurrent open won
 		}
 		if (!executable) {
-			this._renderBanner(t('sessions.cli.notFound', cli.binary), true);
+			if (this._shown === session.id) { this._renderBanner(t('sessions.cli.notFound', cli.binary), true); }
 			this._onDidChangeStatus.fire({ sessionId: session.id, status: 'failed' });
 			return;
 		}
 		// OpenIDE's own tools reach the CLI as a normal MCP server, injected for THIS launch only.
 		// Anthropic's extension keeps serving the standard IDE tools; this adds what only OpenIDE
 		// has (browser, diagrams, project map) without either side fighting over the other.
-		const mcpEndpoint = await this.ideServer.mcpEndpointFor(session.id, cli);
-		const launch = buildOpenideCliLaunch(cli, executable, session.providerSessionId, mcpEndpoint);
-		await this.cliChanges.prepareSession({ id: session.id, cliId: cli.id, cwd: session.cwd ?? '', title: session.title });
-		const instance = await this.terminalService.createTerminal({
-			cwd: session.cwd,
-			location: TerminalLocation.Panel,
-			config: {
-				name: t('sessions.cli.title', cli.name),
-				executable: launch.executable,
-				args: launch.args,
+		const mcpEndpoint = await this.ideServer.mcpEndpointFor(session.id, cli, executable, session.cwd, targetWindowId);
+		if (state.cancelled || this._disposed) { return; }
+		let launch = buildOpenideCliLaunch(cli, executable, session.providerSessionId, mcpEndpoint);
+		let structuredGoal = false;
+		let goalSupportReason: string | undefined;
+		if (cli.id === 'codex' && this.native.available && session.cwd) {
+			try {
+				const configuration = mcpEndpoint && cli.mcpInjection ? cli.mcpInjection(mcpEndpoint) : { args: [], env: {} };
+				const connection = await this.native.host.codexGoalPrepare({ sessionId: session.id, executable, cwd: session.cwd, configurationArgs: configuration.args, env: { ...this.ideServer.launchEnvironment(), ...configuration.env }, providerSessionId: session.providerSessionId });
+				if (state.cancelled || this._disposed) { await this.native.host.codexGoalDispose(session.id); return; }
+				launch = { ...launch, args: ['resume', connection.threadId, '--remote', connection.endpoint] };
+				structuredGoal = true;
+				this._onDidResolveProviderSession.fire({ sessionId: session.id, providerSessionId: connection.threadId });
+			} catch (error) {
+				goalSupportReason = error instanceof Error ? error.message : 'Structured Codex control unavailable.';
+				this._onDidChangeGoalSupport.fire({ sessionId: session.id, supported: false, reason: goalSupportReason });
+			}
+		}
+		if (state.cancelled || this._disposed) { return; }
+		try {
+			await this.cliChanges.prepareSession({ id: session.id, cliId: cli.id, cwd: session.cwd ?? '', title: session.title });
+			if (state.cancelled || this._disposed) { if (structuredGoal) { await this.native.host.codexGoalDispose(session.id); } return; }
+			const instance = await this.terminalService.createTerminal({
 				cwd: session.cwd,
-				hideFromUser: true,
-				isFeatureTerminal: true,
-				// The reset goes FIRST: it clears the session marks a `claude` that started the IDE
-				// would otherwise pass down (see OPENIDE_HOSTED_CLI_ENV_RESET), and everything
-				// OpenIDE sets on purpose is layered on top of it.
-				// CLAUDE_CODE_SSE_PORT is what makes the CLI adopt THIS window instead of picking
-				// whichever lockfile in ~/.claude/ide happens to match its cwd — with two OpenIDE
-				// windows on the same repo, the wrong one is a coin flip. Empty when the IDE
-				// server is off or has no folder to publish, which simply means no IDE tools.
-				env: { ...OPENIDE_HOSTED_CLI_ENV_RESET, OPENIDE_SESSION_ID: session.id, OPENIDE_HOOK_OWNER: OPENIDE_CLI_HOOK_OWNER, ...this.ideServer.launchEnvironment(), ...launch.env },
-			},
-		});
-		const store = new DisposableStore();
-		const hosted: IHostedTerminal = { sessionId: session.id, cli, instance, store, launchedAt: Date.now(), status: 'in-progress', hooked: false, quietTimer: undefined, exited: false };
-		this._terminals.set(session.id, hosted);
-		this._onDidChangeStatus.fire({ sessionId: session.id, status: 'in-progress' });
+				location: TerminalLocation.Panel,
+				config: {
+					name: t('sessions.cli.title', cli.name),
+					executable: launch.executable,
+					args: launch.args,
+					cwd: session.cwd,
+					hideFromUser: true,
+					isFeatureTerminal: true,
+					// The reset goes FIRST: it clears the session marks a `claude` that started the IDE
+					// would otherwise pass down (see OPENIDE_HOSTED_CLI_ENV_RESET), and everything
+					// OpenIDE sets on purpose is layered on top of it.
+					// CLAUDE_CODE_SSE_PORT is what makes the CLI adopt THIS window instead of picking
+					// whichever lockfile in ~/.claude/ide happens to match its cwd — with two OpenIDE
+					// windows on the same repo, the wrong one is a coin flip. Empty when the IDE
+					// server is off or has no folder to publish, which simply means no IDE tools.
+					env: { ...OPENIDE_HOSTED_CLI_ENV_RESET, OPENIDE_SESSION_ID: session.id, OPENIDE_HOOK_OWNER: OPENIDE_CLI_HOOK_OWNER, ...this.ideServer.launchEnvironment(), ...launch.env },
+				},
+			});
+			if (state.cancelled || this._disposed) { instance.dispose(); if (structuredGoal) { await this.native.host.codexGoalDispose(session.id); } return; }
+			const store = new DisposableStore();
+			const hosted: IHostedTerminal = { sessionId: session.id, cli, instance, store, launchedAt: Date.now(), status: 'in-progress', hooked: false, quietTimer: undefined, exited: false, structuredGoal };
+			this._terminals.set(session.id, hosted);
+			this._onDidChangeGoalSupport.fire({ sessionId: session.id, supported: structuredGoal, reason: goalSupportReason });
+			this._onDidChangeStatus.fire({ sessionId: session.id, status: 'in-progress' });
 
-		store.add(instance.onData(() => this._apply(hosted, { type: 'output' })));
-		// Keystrokes the user sends INTO the TUI. It decays on its own: nothing tells us when
-		// somebody stopped typing, so a flag that only ever turned on would stick forever.
-		store.add(instance.onDidInputData(() => {
-			if (!hosted.typing) {
-				hosted.typing = true;
-				this._onDidChangeTyping.fire({ sessionId: session.id, typing: true });
+			store.add(instance.onData(() => this._apply(hosted, { type: 'output' })));
+			// Keystrokes the user sends INTO the TUI. It decays on its own: nothing tells us when
+			// somebody stopped typing, so a flag that only ever turned on would stick forever.
+			store.add(instance.onDidInputData(() => {
+				this.ideServer.setSessionWindowId(session.id, getWindow(this.domNode).vscodeWindowId);
+				if (!hosted.typing) {
+					hosted.typing = true;
+					this._onDidChangeTyping.fire({ sessionId: session.id, typing: true });
+				}
+				if (hosted.typingTimer) {
+					clearTimeout(hosted.typingTimer);
+				}
+				hosted.typingTimer = setTimeout(() => {
+					hosted.typingTimer = undefined;
+					hosted.typing = false;
+					this._onDidChangeTyping.fire({ sessionId: session.id, typing: false });
+				}, TYPING_IDLE_MS);
+			}));
+			store.add(instance.onExit(exit => {
+				hosted.exited = true;
+				this.cliChanges.noteExited(session.id);
+				const code = typeof exit === 'number' ? exit : exit?.code;
+				// A resumed session that dies within seconds did not fail: it never started. The
+				// common cause is the CLI refusing to attach to a conversation another process still
+				// holds — codex says `already has an active writer`, and after a window reload the
+				// previous agent can easily still be alive. Leaving a dead pane and a raw error there
+				// makes the user debug a lock they cannot see, so the session is reopened fresh, once,
+				// and told what happened.
+				const stillborn = !!session.providerSessionId && code !== 0 && Date.now() - hosted.launchedAt < RESUME_FAILURE_WINDOW_MS;
+				if (stillborn && !hosted.resumeAbandoned) {
+					hosted.resumeAbandoned = true;
+					this._renderBanner(t('sessions.cli.resumeBusy', cli.name), true);
+					this.forget(session.id);
+					void this.open({ ...session, providerSessionId: undefined });
+					return;
+				}
+				this._apply(hosted, { type: 'exit', code });
+				if (this._shown === session.id) {
+					this._renderExit(hosted, code);
+				}
+			}));
+			if (!structuredGoal && !session.providerSessionId && cli.transcriptDir) {
+				this._pollProviderSessionId(hosted, session.cwd, store);
 			}
-			if (hosted.typingTimer) {
-				clearTimeout(hosted.typingTimer);
-			}
-			hosted.typingTimer = setTimeout(() => {
-				hosted.typingTimer = undefined;
-				hosted.typing = false;
-				this._onDidChangeTyping.fire({ sessionId: session.id, typing: false });
-			}, TYPING_IDLE_MS);
-		}));
-		store.add(instance.onExit(exit => {
-			hosted.exited = true;
-			this.cliChanges.noteExited(session.id);
-			const code = typeof exit === 'number' ? exit : exit?.code;
-			// A resumed session that dies within seconds did not fail: it never started. The
-			// common cause is the CLI refusing to attach to a conversation another process still
-			// holds — codex says `already has an active writer`, and after a window reload the
-			// previous agent can easily still be alive. Leaving a dead pane and a raw error there
-			// makes the user debug a lock they cannot see, so the session is reopened fresh, once,
-			// and told what happened.
-			const stillborn = !!session.providerSessionId && code !== 0 && Date.now() - hosted.launchedAt < RESUME_FAILURE_WINDOW_MS;
-			if (stillborn && !hosted.resumeAbandoned) {
-				hosted.resumeAbandoned = true;
-				this._renderBanner(t('sessions.cli.resumeBusy', cli.name), true);
-				this.forget(session.id);
-				void this.open({ ...session, providerSessionId: undefined });
-				return;
-			}
-			this._apply(hosted, { type: 'exit', code });
 			if (this._shown === session.id) {
-				this._renderExit(hosted, code);
+				this._attach(hosted);
 			}
-		}));
-		if (!session.providerSessionId && cli.transcriptDir) {
-			this._pollProviderSessionId(hosted, session.cwd, store);
-		}
-		if (this._shown === session.id) {
-			this._attach(hosted);
-		}
+		} catch (error) { if (structuredGoal) { await this.native.host.codexGoalDispose(session.id); } throw error; }
 	}
 
 	/** Makes `sessionId` the visible terminal (attaching it) and hides the rest. */
@@ -268,6 +340,8 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 
 	/** Drops the PTY of a session that was closed or deleted. */
 	close(sessionId: string): void {
+		const pending = this._opening.get(sessionId);
+		if (pending) { pending.cancelled = true; void this.native.host.codexGoalDispose(sessionId); }
 		const hosted = this._terminals.get(sessionId);
 		if (!hosted) {
 			return;
@@ -303,6 +377,15 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		this._apply(hosted, event);
 	}
 
+	/** Moves the existing PTY presentation. Reattachment lets xterm adopt the target window. */
+	moveTo(parent: HTMLElement, focus = true): void {
+		if (this.domNode.parentElement === parent) { return; }
+		const hosted = this._shown ? this._terminals.get(this._shown) : undefined;
+		if (hosted && !hosted.exited) { hosted.instance.detachFromElement(); }
+		parent.appendChild(this.domNode);
+		if (hosted && !hosted.exited) { this._attach(hosted, focus); }
+	}
+
 	layout(width: number, height: number): void {
 		this._dimension = { width, height };
 		this.domNode.style.height = `${height}px`;
@@ -317,7 +400,7 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		hosted?.instance.focus(true);
 	}
 
-	private _attach(hosted: IHostedTerminal): void {
+	private _attach(hosted: IHostedTerminal, focus = true): void {
 		clearNode(this.domNode);
 		const details = append(this.domNode, $<HTMLDetailsElement>('details.openide-cli-tools'));
 		const summary = append(details, $('summary', { 'aria-label': t('cli.tools.help') }));
@@ -331,7 +414,7 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		if (this._dimension) {
 			hosted.instance.layout({ width: this._dimension.width, height: Math.max(0, this._dimension.height - 32) });
 		}
-		hosted.instance.focus(true);
+		if (focus) { hosted.instance.focus(true); }
 	}
 
 	private renderIntegrationStatus(): void {
@@ -394,7 +477,7 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		clearNode(this.domNode);
 		const banner = append(this.domNode, $('.openide-chat-agent-terminal-banner'));
 		append(banner, $('span', undefined, t('sessions.cli.exited', hosted.cli.name, code ?? '?')));
-		const button = append(banner, $<HTMLButtonElement>('button.openide-chat-agent-terminal-relaunch', { type: 'button' }, t('sessions.cli.relaunch')));
+		const button = append(banner, $<HTMLButtonElement>('button.openide-chat-agent-terminal-relaunch.oi-btn.primary', { type: 'button' }, t('sessions.cli.relaunch')));
 		hosted.store.add(addDisposableListener(button, 'click', () => this._onDidRequestRelaunch.fire(hosted.sessionId)));
 		button.focus();
 	}
@@ -476,6 +559,7 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 	}
 
 	private _disposeHosted(hosted: IHostedTerminal): void {
+		if (hosted.structuredGoal) { hosted.structuredGoal = false; void this.native.host.codexGoalDispose(hosted.sessionId); this._onDidChangeGoalSupport.fire({ sessionId: hosted.sessionId, supported: false }); }
 		if (hosted.quietTimer) {
 			clearTimeout(hosted.quietTimer);
 		}

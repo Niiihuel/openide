@@ -37,13 +37,13 @@
 	height: 28px;
 	box-sizing: border-box;
 	padding: 2px 6px;
-	border: 1px solid var(--vscode-focusBorder) !important;
-	border-radius: var(--vscode-cornerRadius-medium);
+	border: 1px solid var(--oi-border, var(--vscode-input-border, transparent)) !important;
+	border-radius: var(--oi-radius-control, var(--vscode-cornerRadius-small));
 	outline: 0 !important;
 }
 
 .extensions-viewlet > .header > .extensions-search-container > .suggest-input-container.synthetic-focus {
-	border-color: var(--vscode-focusBorder) !important;
+	border-color: var(--vscode-contrastActiveBorder, var(--oi-focus, var(--vscode-focusBorder))) !important;
 	outline: 0 !important;
 }
 
@@ -273,4 +273,15 @@
 
 .extensions-viewlet .codicon-info::before {
 	color: var(--vscode-editorInfo-foreground);
+}
+
+.monaco-workbench.openide-visual .extensions-viewlet > .header > .extensions-search-container > .suggest-input-container {
+	transition: border-color var(--oi-duration-hover) var(--oi-ease);
+}
+.monaco-workbench.openide-visual .extensions-viewlet > .header > .extensions-search-container > .suggest-input-container:hover:not(.synthetic-focus):not(:focus-within) {
+	border-color: var(--vscode-contrastActiveBorder, var(--oi-border-hover)) !important;
+}
+
+.monaco-workbench.openide-visual .extensions-viewlet > .header > .extensions-search-container > .suggest-input-container:is(.synthetic-focus, :focus-within) {
+	border-color: var(--vscode-contrastActiveBorder, var(--oi-focus, var(--vscode-focusBorder))) !important;
 }

@@ -4,24 +4,21 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, append, clearNode } from '../../../../../base/browser/dom.js';
+import { InputBox } from '../../../../../base/browser/ui/inputbox/inputBox.js';
+import { openideSearchBoxStyles } from '../openideControlStyles.js';
 import { AnchorAlignment, AnchorPosition } from '../../../../../base/browser/ui/contextview/contextview.js';
-import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IOpenideCliDefinition, OPENIDE_CLI_CATALOG, OpenideCliId } from '../../common/openideAgentCliCatalog.js';
 import { t } from '../../common/openideStrings.js';
 import { IOpenideAgentService } from '../openideAgentService.js';
 import { createProviderIcon } from '../openideProviderIcons.js';
-import { menuEmpty, menuRow, menuSection, menuSeparator, OpenideChatMenuPopover } from './openideChatMenuDom.js';
+import { menuEmpty, menuRow, menuSeparator, OpenideChatMenuPopover } from './openideChatMenuDom.js';
 
-/**
- * "New session with…": the local harness plus every external agent the catalog knows, the
- * ones not on PATH greyed out with "not installed" — VS Code's session-type picker
- * (upstream's `sessionTargetPickerActionItem.ts` + `sessionTypeAvailability.ts`) in the dock's own menu
- * language. Availability is resolved once per picker life and refreshed on each open, so an
- * agent installed while the IDE runs shows up without a restart.
- */
+/** The native harness and supported CLIs found on PATH. Availability is cached briefly and
+ * refreshed when opening the picker, so newly installed agents appear without a restart. */
 
-export type OpenideChatSessionKindChoice = { readonly kind: 'native' } | { readonly kind: 'cli'; readonly cli: IOpenideCliDefinition };
+export type OpenideChatSessionKindChoice = ({ readonly kind: 'native' } | { readonly kind: 'cli'; readonly cli: IOpenideCliDefinition }) & { readonly title?: string };
 
 export class OpenideCliAvailability {
 
@@ -77,6 +74,10 @@ export class OpenideCliAvailability {
 
 export class OpenideChatSessionKindPicker extends OpenideChatMenuPopover {
 
+	private titleInput: HTMLInputElement | undefined;
+
+	protected override initialFocus(): HTMLElement | undefined { return this.titleInput; }
+
 	constructor(
 		contextViewService: IContextViewService,
 		private readonly availability: OpenideCliAvailability,
@@ -96,13 +97,18 @@ export class OpenideChatSessionKindPicker extends OpenideChatMenuPopover {
 	}
 
 	protected override renderContent(content: HTMLElement, store: DisposableStore): void {
-		append(content, menuSection(t('sessions.newKind')));
-		const local = menuRow('comment-discussion', t('sessions.kind.local'));
-		append(local.row, $('span.openide-menu-hint', undefined, t('sessions.kind.localDesc')));
+		const title = store.add(new InputBox(content, undefined, {
+			placeholder: t('sessions.kind.title'), ariaLabel: t('sessions.kind.title'), inputBoxStyles: openideSearchBoxStyles,
+		}));
+		this.titleInput = title.inputElement;
+		store.add(toDisposable(() => { this.titleInput = undefined; }));
+		append(content, menuSeparator());
+		const local = menuRow(undefined, t('chat.header.newTitle'));
 		store.add(addDisposableListener(local.row, 'click', event => {
 			event.stopPropagation();
+			const name = title.value.trim() || undefined;
 			this.close();
-			this.choose({ kind: 'native' });
+			this.choose({ kind: 'native', title: name });
 		}));
 		append(content, local.row);
 
@@ -132,8 +138,9 @@ export class OpenideChatSessionKindPicker extends OpenideChatMenuPopover {
 				row.title = path;
 				store.add(addDisposableListener(row, 'click', event => {
 					event.stopPropagation();
+					const name = title.value.trim() || undefined;
 					this.close();
-					this.choose({ kind: 'cli', cli });
+					this.choose({ kind: 'cli', cli, title: name });
 				}));
 				append(host, row);
 			}

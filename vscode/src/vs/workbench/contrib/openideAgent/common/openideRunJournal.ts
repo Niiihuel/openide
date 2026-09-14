@@ -8,7 +8,7 @@ import { IChatMessage, IProviderRequest } from './openideAgentTypes.js';
 
 /** Record the model-facing envelope, never bearer tokens, endpoint query secrets, or transport headers. */
 export function openideRecordedRequest(request: IProviderRequest) {
-	return openideJournalSnapshot({ providerId: request.providerId, model: request.model, effort: request.effort, system: request.system, messages: request.messages, tools: request.tools, maxTokens: request.maxTokens });
+	return openideJournalSnapshot({ providerId: request.providerId, model: request.model, effort: request.effort, serviceTier: request.serviceTier, system: request.system, messages: request.messages, tools: request.tools, maxTokens: request.maxTokens });
 }
 
 /** A crash result is uncertainty, not permission to repeat an effect. Newer user messages are retained. */

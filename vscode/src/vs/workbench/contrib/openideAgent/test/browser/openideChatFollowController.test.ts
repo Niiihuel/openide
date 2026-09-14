@@ -18,13 +18,13 @@ suite('OpenIDE ChatFollowController', () => {
 	function create() {
 		let enabled = true;
 		const changed = store.add(new Emitter<boolean>());
-		const calls: { location: IAgentLocation; token: CancellationToken; done: DeferredPromise<void> }[] = [];
+		const calls: { location: IAgentLocation; token: CancellationToken; targetWindowId?: number; done: DeferredPromise<void> }[] = [];
 		const follow = store.add(new OpenideChatFollowController({
 			onDidChangePlanFollow: changed.event,
 			isPlanFollowEnabled: () => enabled,
-			followAgentLocation: (location, token = CancellationToken.None) => {
+			followAgentLocation: (location, token = CancellationToken.None, targetWindowId) => {
 				const done = new DeferredPromise<void>();
-				calls.push({ location, token, done });
+				calls.push({ location, token, targetWindowId, done });
 				return done.p;
 			},
 		}));
@@ -37,6 +37,16 @@ suite('OpenIDE ChatFollowController', () => {
 		for (let i = 0; i < 10; i++) { await Promise.resolve(); }
 	}
 
+
+	test('queued activity keeps the originating presentation even when another window becomes active', async () => {
+		const { follow, calls } = create();
+		follow.follow('visible', location('a.ts'), 41);
+		follow.follow('visible', location('b.ts'), 41);
+		await calls[0].done.complete();
+		await flush();
+		assert.deepStrictEqual(calls.map(call => call.targetWindowId), [41, 41]);
+		await calls[1].done.complete();
+	});
 	test('Zen off never opens an editor, even when activity keeps arriving', () => {
 		const { follow, calls, toggle } = create();
 		toggle(false);

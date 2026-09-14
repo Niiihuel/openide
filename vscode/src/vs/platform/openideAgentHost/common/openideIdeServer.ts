@@ -432,6 +432,8 @@ export interface IIdeServerInfo {
 /** A `tools/call` parked in main, waiting for the workbench to execute it. */
 export interface IIdeToolRequest {
 	readonly requestId: string;
+	/** Session supplied by the injected launch endpoint, outside model tool arguments. */
+	readonly sessionId?: string;
 	readonly connectionId: string;
 	readonly tool: string;
 	readonly args: unknown;

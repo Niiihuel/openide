@@ -23,11 +23,14 @@ suite('OpenIDE main-process terminal ownership', () => {
 		const ready = store.add(new Emitter<{ id: number; event: { pid: number } }>());
 		const exit = store.add(new Emitter<{ id: number; event: number }>());
 		const killed: number[] = [], recorded: number[] = [];
-		const pty = { onProcessReady: ready.event, onProcessExit: exit.event, getInitialCwd: async () => root, shutdown: async (id: number) => { killed.push(id); } } as unknown as IPtyService;
+		let nativePid: number | undefined;
+		store.add(ready.event(({ event }) => { nativePid = event.pid; }));
+		store.add(exit.event(() => { nativePid = undefined; }));
+		const pty = { onProcessReady: ready.event, onProcessExit: exit.event, getProcessId: async () => nativePid, getInitialCwd: async () => root, shutdown: async (id: number) => { killed.push(id); } } as unknown as IPtyService;
 		const worktrees = { trackShell: async (_root: string, pid: number) => { recorded.push(pid); } } as unknown as OpenideSubagentWorktrees;
 		const owner = new OpenideAgentTerminalOwner(pty, worktrees);
 		const request: IOpenideAgentTerminalRegistration = { terminalId: 71, processId: 701, conversationId: 'child', workspaceRoot: root };
-		return { ready, exit, killed, recorded, pty, worktrees, owner, request };
+		return { ready, exit, killed, recorded, pty, worktrees, owner, request, setNativePid: (pid: number | undefined) => { nativePid = pid; } };
 	}
 
 	test('requires backend process identity and cwd, then records the shell before accepting commands', async () => {
@@ -41,6 +44,39 @@ suite('OpenIDE main-process terminal ownership', () => {
 			assert.deepStrictEqual(f.recorded, [701]);
 			await assert.rejects(f.owner.register({ ...f.request, conversationId: 'foreign' }), /cannot change/);
 		} finally { f.exit.fire({ id: 71, event: 0 }); await f.owner.dispose(); }
+	});
+
+	test('accepts the native PID before the main ready event or when subscribed after ready', async () => {
+		const f = fixture();
+		try {
+			// The backend has started, but ready has only reached the renderer's direct port.
+			f.setNativePid(701);
+			await f.owner.register(f.request);
+			assert.deepStrictEqual(f.recorded, [701]);
+		} finally { f.exit.fire({ id: 71, event: 0 }); await f.owner.dispose(); }
+	});
+
+	test('rejects an exited or replaced process even when an old ready event was observed', async () => {
+		const f = fixture();
+		try {
+			f.ready.fire({ id: 71, event: { pid: 701 } });
+			f.setNativePid(undefined);
+			await assert.rejects(f.owner.register(f.request), /identity/);
+			f.setNativePid(702);
+			await assert.rejects(f.owner.register(f.request), /identity/);
+			assert.deepStrictEqual(f.recorded, []);
+		} finally { await f.owner.dispose(); }
+	});
+
+	test('rechecks the native process after asynchronous workspace registration', async () => {
+		const f = fixture();
+		try {
+			f.setNativePid(701);
+			f.worktrees.trackShell = async () => { f.setNativePid(undefined); };
+			await assert.rejects(f.owner.register(f.request), /changed during registration/);
+			await f.owner.shutdown();
+			assert.deepStrictEqual(f.killed, []);
+		} finally { await f.owner.dispose(); }
 	});
 
 	test('shutdown waits for actual backend exit and renderer disposal retains its listener', async () => {

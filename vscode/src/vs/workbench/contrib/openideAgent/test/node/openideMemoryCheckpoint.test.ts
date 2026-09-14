@@ -36,7 +36,9 @@ suite('OpenIDE durable memory checkpoints', () => {
 		const events: AgentLoopEvent[] = [];
 		await new OpenideMemoryCheckpoint(memory, 'session', 'request', async () => '{"notes":[]}', event => events.push(event)).capture(messages, CancellationToken.None, 'completed');
 		assert.strictEqual((await owner.request({ action: 'checkpoint', session: 'session' })).checkpoint?.status, 'deferred'); assert.strictEqual(events.length, 1);
-		await new OpenideMemoryCheckpoint(memory, 'session', 'request', async () => '{"notes":[],"reason":"No new durable fact"}', () => {}).capture(messages, CancellationToken.None, 'completed');
+		events.length = 0;
+		await new OpenideMemoryCheckpoint(memory, 'session', 'request', async () => '{"notes":[],"reason":"No new durable fact"}', event => events.push(event)).capture(messages, CancellationToken.None, 'completed');
+		assert.strictEqual(events.length, 0, 'a check without a write is silent');
 		assert.strictEqual((await owner.request({ action: 'checkpoint', session: 'session' })).checkpoint?.status, 'no_durable_change');
 	});
 	test('graph search finds a word beyond the shortened note name', async () => {

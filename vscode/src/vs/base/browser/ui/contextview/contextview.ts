@@ -11,6 +11,7 @@ import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../..
 import { AnchorAlignment, AnchorAxisAlignment, AnchorPosition, IRect, layout2d } from '../../../common/layout.js';
 import * as platform from '../../../common/platform.js';
 import { OmitOptional } from '../../../common/types.js';
+import { ContextViewMotion, CONTEXT_VIEW_SHARED_MOTION_CSS } from './contextViewMotion.js';
 import './contextview.css';
 
 export { AnchorAlignment, AnchorAxisAlignment, AnchorPosition } from '../../../common/layout.js';
@@ -85,6 +86,7 @@ export const contextViewMenuCloseAnimation: IContextViewCloseAnimation = {
 
 function getContextViewMenuMotionCss(enabledSelectorPrefix: string): string {
 	return /* css */ `
+	${CONTEXT_VIEW_SHARED_MOTION_CSS}
 	${enabledSelectorPrefix} .context-view.${CONTEXT_VIEW_MENU_MOTION_CLASS} {
 		animation: none;
 		box-shadow: none;
@@ -206,6 +208,7 @@ export class ContextView extends Disposable {
 	private toDisposeOnClean: IDisposable = Disposable.None;
 	private toDisposeOnSetContainer: IDisposable = Disposable.None;
 	private hidingContextView: { readonly disposable: IDisposable; readonly toDispose: IDisposable; readonly className: string } | undefined;
+	private readonly motion: ContextViewMotion;
 	private shadowRoot: ShadowRoot | null = null;
 	private shadowRootHostElement: HTMLElement | null = null;
 
@@ -215,6 +218,7 @@ export class ContextView extends Disposable {
 		ensureContextViewMenuMotionStyleSheet();
 
 		this.view = DOM.$('.context-view');
+		this.motion = this._register(new ContextViewMotion(this.view, () => this.layout()));
 		DOM.hide(this.view);
 
 		this.setContainer(container, domPosition);
@@ -269,13 +273,13 @@ export class ContextView extends Disposable {
 			const toDisposeOnSetContainer = new DisposableStore();
 
 			ContextView.BUBBLE_UP_EVENTS.forEach(event => {
-				toDisposeOnSetContainer.add(DOM.addStandardDisposableListener(this.container!, event, e => {
+				toDisposeOnSetContainer.add(DOM.addDisposableListener(this.container!, event, e => {
 					this.onDOMEvent(e, false);
 				}));
 			});
 
 			ContextView.BUBBLE_DOWN_EVENTS.forEach(event => {
-				toDisposeOnSetContainer.add(DOM.addStandardDisposableListener(this.container!, event, e => {
+				toDisposeOnSetContainer.add(DOM.addDisposableListener(this.container!, event, e => {
 					this.onDOMEvent(e, true);
 				}, true));
 			});
@@ -286,6 +290,8 @@ export class ContextView extends Disposable {
 
 	show(delegate: IDelegate): void {
 		this.completeHideAnimation();
+		this.motion.reset();
+		this.motion.finishClose();
 
 		if (this.isVisible()) {
 			this.hide(undefined, true);
@@ -312,6 +318,9 @@ export class ContextView extends Disposable {
 
 		// Layout
 		this.doLayout();
+
+		// Animate only after native measurements and placement.
+		this.motion.open();
 
 		// Focus
 		this.delegate.focus?.();
@@ -342,6 +351,8 @@ export class ContextView extends Disposable {
 			return;
 		}
 
+		this.motion.beforeLayout();
+
 		// Get anchor
 		const anchor = getAnchorRect(this.delegate!.getAnchor());
 		const containerWindow = this.container ? DOM.getWindow(this.container) : DOM.getActiveWindow();
@@ -364,6 +375,7 @@ export class ContextView extends Disposable {
 		this.view.style.top = `${top - positioningOrigin.top}px`;
 		this.view.style.left = `${left - positioningOrigin.left}px`;
 		this.view.style.width = 'initial';
+		this.motion.afterLayout();
 	}
 
 	hide(data?: unknown, skipAnimation = false): void {
@@ -384,9 +396,12 @@ export class ContextView extends Disposable {
 		const toDispose = this.toDisposeOnClean;
 		this.toDisposeOnClean = Disposable.None;
 
+		const sharedMotion = this.motion.enabled;
+		const exitDuration = this.motion.exitDuration;
+		if (sharedMotion && !skipAnimation) { this.motion.prepareClose(); }
 		delegate.onHide?.(data);
-
-		const closeAnimation = delegate.closeAnimation;
+		this.motion.reset();
+		const closeAnimation = sharedMotion ? { className: 'context-view-shared-closing', duration: exitDuration } : delegate.closeAnimation;
 		if (!skipAnimation && closeAnimation && closeAnimation.duration > 0 && this.hasRequiredAncestorClasses(closeAnimation.requiredAncestorClasses)) {
 			this.view.style.setProperty(CONTEXT_VIEW_CLOSE_ANIMATION_DURATION_VARIABLE, `${closeAnimation.duration}ms`);
 			this.prepareMenuCloseAnimation();
@@ -402,6 +417,7 @@ export class ContextView extends Disposable {
 		}
 
 		toDispose.dispose();
+		this.motion.finishClose();
 		DOM.hide(this.view);
 	}
 
@@ -416,12 +432,14 @@ export class ContextView extends Disposable {
 		}
 
 		this.hidingContextView = undefined;
+		this.motion.finishClose();
 		hidingContextView.disposable.dispose();
 		this.view.classList.remove(hidingContextView.className);
 		this.view.style.removeProperty(CONTEXT_VIEW_CLOSE_ANIMATION_DURATION_VARIABLE);
 		this.view.style.removeProperty(CONTEXT_VIEW_MENU_MOTION_CLOSE_START_OPACITY_VARIABLE);
 		this.view.style.removeProperty(CONTEXT_VIEW_MENU_MOTION_CLOSE_START_TRANSFORM_VARIABLE);
 		hidingContextView.toDispose.dispose();
+		this.motion.finishClose();
 		DOM.hide(this.view);
 		this.view.inert = false;
 	}
@@ -463,10 +481,10 @@ export class ContextView extends Disposable {
 		return false;
 	}
 
-	private onDOMEvent(e: UIEvent, onCapture: boolean): void {
+	private onDOMEvent(e: Event, onCapture: boolean): void {
 		if (this.delegate) {
 			if (this.delegate.onDOMEvent) {
-				this.delegate.onDOMEvent(e, <HTMLElement>DOM.getWindow(e).document.activeElement);
+				this.delegate.onDOMEvent(e, <HTMLElement>DOM.getWindow(this.view).document.activeElement);
 			} else if (onCapture && !DOM.isAncestor(<HTMLElement>e.target, this.container)) {
 				this.hide();
 			}

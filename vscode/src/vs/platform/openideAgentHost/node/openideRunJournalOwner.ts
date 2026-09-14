@@ -16,6 +16,7 @@ interface IJournalLease { readonly owner: OpenideRunJournalOwner; readonly key: 
 export class OpenideRunJournalOwner extends Disposable {
 	private static readonly leases = new Map<string, IJournalLease>();
 	private directory: string | undefined;
+	private journalStore: OpenideRunJournalStore | undefined;
 	private workspaceGeneration = 0;
 	private workspaceReady = false;
 	private readonly sessions = new Map<string, IJournalLease>();
@@ -30,6 +31,7 @@ export class OpenideRunJournalOwner extends Disposable {
 		const directory = join(this.userDataPath, 'User', 'globalStorage', 'openide', 'run-journal', scope);
 		if (this.directory && directory !== this.directory && this.sessions.size) { throw new Error('OpenIDE cannot change journal workspace during an active run'); }
 		if (this._store.isDisposed) { throw new Error('OpenIDE journal owner disconnected'); }
+		if (this.directory !== directory) { this.journalStore = new OpenideRunJournalStore(directory); }
 		this.directory = directory;
 		this.workspaceReady = true;
 	}
@@ -45,7 +47,7 @@ export class OpenideRunJournalOwner extends Disposable {
 		const lease: IJournalLease = { owner: this, key };
 		OpenideRunJournalOwner.leases.set(key, lease); this.sessions.set(session, lease);
 		try {
-			const records = await new OpenideRunJournalStore(this.directory!).recover(session);
+			const records = await this.journalStore!.recover(session);
 			if (this._store.isDisposed || this.sessions.get(session) !== lease || OpenideRunJournalOwner.leases.get(key) !== lease) { throw new Error('OpenIDE journal owner disconnected or replaced'); }
 			return records;
 		} catch (error) { this.release(session, lease); throw error; }
@@ -54,7 +56,7 @@ export class OpenideRunJournalOwner extends Disposable {
 	async append(session: string, event: IOpenideRunJournalEvent): Promise<void> {
 		const lease = this.sessions.get(session);
 		if (!lease || OpenideRunJournalOwner.leases.get(this.key(session)) !== lease) { throw new Error('OpenIDE journal session is not owned by this connection'); }
-		await new OpenideRunJournalStore(this.directory!).append(session, event);
+		await this.journalStore!.append(session, event);
 		if (this.sessions.get(session) !== lease || this._store.isDisposed) { throw new Error('OpenIDE journal owner disconnected or replaced'); }
 	}
 

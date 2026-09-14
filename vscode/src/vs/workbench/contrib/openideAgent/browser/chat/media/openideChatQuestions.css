@@ -7,7 +7,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 /* Lives INSIDE `.openide-chat-block`, above the trays: the block draws the outline, the surface
-   and the working beam for the whole group, so the card paints no frame of its own — only the
+   for the whole group, so the card paints no frame of its own — only the
    interior hairline that separates it from what stacks under it. Top corners clip to the block's
    own radius, same trick as the tray host. */
 .openide-chat-questions-host {
@@ -88,7 +88,7 @@
 	height: 20px;
 	padding: 0;
 	border: none;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: inherit;
 	cursor: pointer;
@@ -167,7 +167,7 @@
 	min-height: 26px;
 	padding: 2px 5px;
 	border: none;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--vscode-foreground);
 	font: inherit;
@@ -186,7 +186,7 @@ button.openide-chat-questions-option:hover { background: var(--oi-hover, var(--o
 	width: 19px;
 	height: 19px;
 	border: var(--vscode-strokeThickness, 1px) solid var(--oi-border-soft, var(--oi-border));
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
 	font-size: 10.5px;
@@ -242,7 +242,7 @@ button.openide-chat-questions-option:hover { background: var(--oi-hover, var(--o
 	gap: 5px;
 	padding: 3px 4px;
 	border: none;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--vscode-foreground);
 	font: inherit;
@@ -260,7 +260,7 @@ button.openide-chat-questions-option:hover { background: var(--oi-hover, var(--o
 	gap: 6px;
 	padding: 3px 10px;
 	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-button-border, transparent);
-	border-radius: var(--oi-radius-md);
+	border-radius: var(--oi-radius-control);
 	background: var(--vscode-button-background);
 	color: var(--vscode-button-foreground);
 	font: inherit;

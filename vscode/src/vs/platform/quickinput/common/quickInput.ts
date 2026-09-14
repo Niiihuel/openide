@@ -218,6 +218,9 @@ export interface IPickOptions<T extends IQuickPickItem> {
 	 */
 	anchorPosition?: 'above' | 'overlay';
 
+	/** Explicit modal backdrop for an anchored dialog. Anchored controls are nonmodal by default. */
+	modal?: boolean;
+
 	onKeyMods?: (keyMods: IKeyMods) => void;
 	onDidFocus?: (entry: T) => void;
 	onDidTriggerItemButton?: (context: IQuickPickItemButtonContext<T>) => void;
@@ -385,6 +388,9 @@ export interface IQuickInput extends IDisposable {
 	 * and auto-sizes its width to match. Defaults to `'above'`.
 	 */
 	anchorPosition?: 'above' | 'overlay';
+
+	/** Explicit modal backdrop for an anchored dialog. Anchored controls are nonmodal by default. */
+	modal?: boolean;
 
 	/**
 	 * Shows the quick input.

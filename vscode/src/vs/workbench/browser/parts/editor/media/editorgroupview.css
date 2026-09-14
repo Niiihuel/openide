@@ -304,44 +304,6 @@
 	display: none;
 }
 
-.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts > .watermark-box {
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
-}
-
-.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts dl {
-	display: flex;
-	justify-content: space-between;
-	margin: 0;
-	padding: 5px 8px;
-	border-radius: 5px;
-	cursor: default;
-	color: var(--vscode-descriptionForeground);
-}
-
-.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts dl:hover {
-	background: var(--vscode-list-hoverBackground);
-	color: var(--vscode-list-hoverForeground, var(--vscode-editor-foreground));
-}
-
-.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts dl:first-of-type {
-	margin-top: 0;
-}
-
-.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts dl:last-of-type {
-	margin-bottom: 0;
-}
-
-.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts dt {
-	letter-spacing: 0.04em;
-}
-
-.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts dd {
-	text-align: left;
-	margin-inline-start: 24px;
-}
-
 /* Title */
 
 .monaco-workbench .part.editor > .content .editor-group-container > .title {

@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IPlaywrightService } from '../../../../platform/browserView/common/playwrightService.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { basename, isEqual } from '../../../../base/common/resources.js';
 import { truncate } from '../../../../base/common/strings.js';
@@ -80,6 +81,7 @@ export class BrowserEditorInput extends EditorInput {
 	private _modelPromise: Promise<IBrowserViewModel> | undefined;
 	private _modelStore = this._register(new DisposableStore());
 
+	private playwrightActive = false;
 	private readonly _onBeforeDispose = this._register(new Emitter<IBeforeDisposeBrowserEditorEvent>());
 	readonly onBeforeDispose: Event<IBeforeDisposeBrowserEditorEvent> = this._onBeforeDispose.event;
 
@@ -89,6 +91,7 @@ export class BrowserEditorInput extends EditorInput {
 	constructor(
 		options: IBrowserEditorInputData,
 		private _resolveModel: () => Promise<IBrowserViewModel>,
+		@IPlaywrightService playwrightService: IPlaywrightService,
 		@IThemeService private readonly themeService: IThemeService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
@@ -98,6 +101,11 @@ export class BrowserEditorInput extends EditorInput {
 		this._id = options.id;
 		this._associatedResource = options.associatedResource;
 		this._initialData = options;
+		this._register(playwrightService.onDidChangeActivity(event => {
+			if (event.pageId !== this.id || event.active === this.playwrightActive) { return; }
+			this.playwrightActive = event.active;
+			this._onDidChangeLabel.fire();
+		}));
 	}
 
 	get model(): IBrowserViewModel | undefined {
@@ -224,6 +232,7 @@ export class BrowserEditorInput extends EditorInput {
 	}
 
 	override getIcon(): ThemeIcon | URI | undefined {
+		if (this.playwrightActive) { return Codicon.beaker; }
 		const defaultIcon = this._associatedResource ? undefined : Codicon.globe;
 
 		if (this._model) {
@@ -242,6 +251,11 @@ export class BrowserEditorInput extends EditorInput {
 	}
 
 	override getName(): string {
+		const name = this.getPageName();
+		return this.playwrightActive ? localize('browser.playwrightActive', "Playwright · {0}", name) : name;
+	}
+
+	private getPageName(): string {
 		if (this.title) {
 			return truncate(this.title!, MAX_TITLE_LENGTH);
 		}
@@ -253,7 +267,7 @@ export class BrowserEditorInput extends EditorInput {
 	override getTitle(verbosity = Verbosity.MEDIUM): string {
 		const description = this.url && this.getURLTitles.get(this.url)[verbosity];
 		const title = this.title ? `${this.title} (${description})` : description;
-		return title || BrowserEditorInput.DEFAULT_LABEL;
+		return this.playwrightActive ? localize('browser.playwrightTitle', "Playwright is controlling this browser — {0}", title || BrowserEditorInput.DEFAULT_LABEL) : title || BrowserEditorInput.DEFAULT_LABEL;
 	}
 
 	override getDescription(verbosity = Verbosity.MEDIUM): string | undefined {

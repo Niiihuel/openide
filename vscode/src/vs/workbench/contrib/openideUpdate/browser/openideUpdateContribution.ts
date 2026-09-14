@@ -19,8 +19,9 @@ import { ICommandService } from '../../../../platform/commands/common/commands.j
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { raceTimeout } from '../../../../base/common/async.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
-import { IWorkbenchContributionsRegistry, Extensions as WorkbenchExtensions } from '../../../common/contributions.js';
-import { LifecyclePhase } from '../../../services/lifecycle/common/lifecycle.js';
+import { IWorkbenchContributionsRegistry, Extensions as WorkbenchExtensions, getWorkbenchContribution } from '../../../common/contributions.js';
+import { ILifecycleService, LifecyclePhase } from '../../../services/lifecycle/common/lifecycle.js';
+import { PostUpdateWidgetContribution } from '../../update/browser/postUpdateWidget.js';
 import { OpenideUpdateNotificationContribution } from './openideUpdateNotification.js';
 
 Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(OpenideUpdateNotificationContribution, LifecyclePhase.Restored);
@@ -94,3 +95,18 @@ class OpenideRecoverUpdateAction extends Action2 {
 }
 
 registerAction2(OpenideCheckForUpdatesAction); registerAction2(OpenideDownloadUpdateAction); registerAction2(OpenideInstallUpdateAction); registerAction2(OpenideRestartUpdateAction); registerAction2(OpenideRecoverUpdateAction);
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: 'openide.update.whatsNew', title: { value: t('openide.whatsNew'), original: "OpenIDE: What's New" }, f1: true,
+			menu: [{ id: MenuId.MenubarHelpMenu, group: '1_welcome', order: 2 }] });
+	}
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const notifications = accessor.get(INotificationService);
+		await accessor.get(ILifecycleService).when(LifecyclePhase.Restored);
+		// Restored contributions are created during idle callbacks. A user command can
+		// arrive first, so obtain the registered instance instead of racing its constructor.
+		const shown = await getWorkbenchContribution<PostUpdateWidgetContribution>(PostUpdateWidgetContribution.ID).showUpdateInfo();
+		if (!shown) { notifications.info(t('openide.whatsNewUnavailable')); }
+	}
+});

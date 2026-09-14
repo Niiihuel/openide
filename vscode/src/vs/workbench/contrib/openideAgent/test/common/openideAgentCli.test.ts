@@ -299,4 +299,13 @@ suite('OpenIDE CLI sessions — catalog, resume, state and grouping', () => {
 			assert.strictEqual(env.CLAUDE_CODE_CHILD_SESSION, null);
 		});
 	});
+	test('Codex launch context uses a private profile name and survives session resume', () => {
+		const endpoint: IOpenideMcpEndpoint = { name: 'openide_1234', url: 'http://127.0.0.1:1234/mcp', token: 'private-token', tokenEnvVar: 'OPENIDE_MCP_TOKEN', contextProfile: 'openide-session' };
+		const launch = buildOpenideCliLaunch(getOpenideCli('codex')!, '/bin/codex', 'saved-session', endpoint);
+		assert.deepStrictEqual(launch.args.slice(0, 2), ['--profile', 'openide-session']);
+		assert.deepStrictEqual(launch.args.slice(-2), ['resume', 'saved-session']);
+		assert.ok(!launch.args.some(arg => arg.includes(endpoint.token) || arg.includes('developer_instructions')));
+		assert.strictEqual(launch.env.OPENIDE_MCP_TOKEN, endpoint.token);
+	});
+
 });

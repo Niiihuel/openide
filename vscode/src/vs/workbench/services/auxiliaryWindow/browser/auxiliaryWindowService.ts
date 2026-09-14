@@ -56,6 +56,8 @@ export interface IAuxiliaryWindowOpenOptions {
 	readonly transparent?: boolean;
 	readonly notResizable?: boolean;
 	readonly disableMaximize?: boolean;
+	/** Keep the shared workbench runtime alive when its editor surface is closed. */
+	readonly keepWorkbenchAlive?: boolean;
 	readonly noBackgroundThrottling?: boolean;
 	readonly backgroundColor?: string;
 }
@@ -73,6 +75,8 @@ export interface IAuxiliaryWindowService {
 
 export interface BeforeAuxiliaryWindowUnloadEvent {
 	veto(reason: string | undefined): void;
+	/** Prepare native editors for closing; false keeps the window open. */
+	join(prepare: () => Promise<boolean>): void;
 }
 
 export interface IAuxiliaryWindow extends IDisposable {
@@ -169,11 +173,21 @@ export class AuxiliaryWindow extends BaseWindow implements IAuxiliaryWindow {
 		}
 	}
 
+	private unloaded = false;
+	private preparingUnload = false;
+	private preparedUnload = false;
+
 	private handleBeforeUnload(e: BeforeUnloadEvent): void {
+		if (this.unloaded || this._store.isDisposed) { return; }
+		if (this.preparingUnload) { this.preventUnload(e); return; }
+		const prepared = this.preparedUnload;
+		this.preparedUnload = false;
+		const preparations: (() => Promise<boolean>)[] = [];
 
 		// Check for veto from a listening component
 		let veto: string | undefined;
 		this._onBeforeUnload.fire({
+			join(prepare) { if (!prepared) { preparations.push(prepare); } },
 			veto(reason) {
 				if (reason) {
 					veto = reason;
@@ -191,8 +205,28 @@ export class AuxiliaryWindow extends BaseWindow implements IAuxiliaryWindow {
 		const confirmBeforeClose = confirmBeforeCloseSetting === 'always' || (confirmBeforeCloseSetting === 'keyboardOnly' && ModifierKeyEmitter.getInstance().isModifierPressed);
 		if (confirmBeforeClose) {
 			this.confirmBeforeClose(e);
+			if (e.defaultPrevented) { return; }
 		}
+
+		if (preparations.length) {
+			this.preventUnload(e);
+			this.preparingUnload = true;
+			void (async () => {
+				try {
+					for (const prepare of preparations) { if (!await prepare()) { return; } }
+					this.preparingUnload = false;
+					this.preparedUnload = true;
+					// Retry after the original beforeunload veto has returned to the host.
+					this.window.setTimeout(() => { if (!this.unloaded && !this._store.isDisposed) { this.closePreparedWindow(); } }, 0);
+				} catch (error) { onUnexpectedError(error); }
+				finally { this.preparingUnload = false; }
+			})();
+			return;
+		}
+
 	}
+
+	protected closePreparedWindow(): void { this.window.close(); }
 
 	protected handleVetoBeforeClose(e: BeforeUnloadEvent, reason: string): void {
 		this.preventUnload(e);
@@ -208,6 +242,7 @@ export class AuxiliaryWindow extends BaseWindow implements IAuxiliaryWindow {
 	}
 
 	private handleUnload(): void {
+		this.unloaded = true;
 
 		// Event
 		this._onUnload.fire();
@@ -381,6 +416,7 @@ export class BrowserAuxiliaryWindowService extends Disposable implements IAuxili
 			options?.notResizable ? 'window-not-resizable=yes' : undefined,
 			options?.disableMaximize ? 'window-disable-maximize=yes' : undefined,
 			options?.noBackgroundThrottling ? 'window-no-background-throttling=yes' : undefined,
+			options?.keepWorkbenchAlive ? 'window-keep-workbench-alive=yes' : undefined,
 			options?.backgroundColor && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(options.backgroundColor) ? `window-background-color=${options.backgroundColor}` : undefined,
 		]);
 

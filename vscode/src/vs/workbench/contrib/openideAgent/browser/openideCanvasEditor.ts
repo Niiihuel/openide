@@ -15,9 +15,13 @@
  *  TSX, so the canvas keeps using it.
  *--------------------------------------------------------------------------------------------*/
 
+import { t } from './../common/openideStrings.js';
+import { timeout } from '../../../../base/common/async.js';
+import { getOpenideDesignHtml } from './openideDesignHtml.js';
+import { DESIGN_TEMPLATES, DesignOperation, DesignTemplate, DesignDocument, DesignFile } from '../common/openideDesign.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
-import { MutableDisposable } from '../../../../base/common/lifecycle.js';
+import { MutableDisposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { joinPath, relativePath } from '../../../../base/common/resources.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
@@ -45,6 +49,10 @@ export class OpenideCanvasEditor extends OpenideOverlayWebviewEditor {
 	protected readonly viewType = 'openideCanvas';
 	protected readonly webviewTitle = 'Canvas';
 	private readonly watcher = this._register(new MutableDisposable());
+	private generation = 0;
+	private documentId = '';
+	private designReady = false;
+	private stateDraft: { documentId: string; revision: number; state: object } | undefined;
 	private stateWrite: Promise<void> = Promise.resolve();
 
 	constructor(
@@ -66,30 +74,96 @@ export class OpenideCanvasEditor extends OpenideOverlayWebviewEditor {
 	protected async buildHtml(): Promise<string> { return this.renderHtml(); }
 
 	override async setInput(input: EditorInput, options: IEditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
+		this.flushStateDraft();
+		const previousDocument = this.documentId;
 		await super.setInput(input, options, context, token);
 		this.armWatcher();
-		await this.reload();
+		if (previousDocument === this.documentId) { await this.reload(); }
 	}
 
 	private armWatcher(): void {
 		const input = this.input;
 		if (!(input instanceof OpenideCanvasInput)) { this.watcher.clear(); return; }
-		this.watcher.value = this.fileService.onDidFilesChange(e => { if (e.contains(input.resource)) { void this.reload(); } });
+		if (input.resource.scheme === 'openide-canvas') { this.watcher.clear(); return; }
+		const store = new DisposableStore();
+		const watch = store.add(this.fileService.createWatcher(input.resource, { recursive: false, excludes: [] }));
+		store.add(watch.onDidChange(e => { if (e.contains(input.resource)) { if (input.resource.path.endsWith('/design.json')) { void this.refreshDesign(input); } else { void this.reload(); } } }));
+		this.watcher.value = store;
 	}
 
 	private async renderHtml(): Promise<string> {
+		const generation = ++this.generation;
+		this.designReady = false;
 		const nonce = generateUuid().replace(/-/g, '');
 		const input = this.input;
 		if (!(input instanceof OpenideCanvasInput)) { return getOpenideCanvasHtml(nonce, undefined, ['No hay un canvas abierto.'], {}); }
+		if (input.resource.scheme === 'openide-canvas') { this.documentId = nonce; return getOpenideDesignHtml(nonce); }
+		if (input.resource.path.endsWith('/design.json')) {
+			try { const html = await this.canvasService.designHtml(input.resource.fsPath, false, nonce); if (generation !== this.generation || input !== this.input) { return ''; } this.documentId = nonce; return html; }
+			catch (error) { return generation === this.generation && input === this.input ? getOpenideCanvasHtml(nonce, undefined, [String(error)], {}) : ''; }
+		}
 		let source = '';
-		try { source = (await this.fileService.readFile(input.resource)).value.toString(); } catch (e) { return getOpenideCanvasHtml(nonce, undefined, [e instanceof Error ? e.message : String(e)], {}); }
+		try { source = (await this.fileService.readFile(input.resource)).value.toString(); } catch (e) { return generation === this.generation && input === this.input ? getOpenideCanvasHtml(nonce, undefined, [e instanceof Error ? e.message : String(e)], {}) : ''; }
 		const compiled = this.canvasService.compile(source);
 		let state: unknown = {};
 		try { state = JSON.parse((await this.fileService.readFile(this.canvasService.stateUri(input.resource))).value.toString()); } catch { /* estado inicial */ }
+		if (generation !== this.generation || input !== this.input) { return ''; }
+		this.documentId = nonce;
 		return getOpenideCanvasHtml(nonce, compiled.code, compiled.errors, state);
 	}
 
-	private async reload(): Promise<void> { this.webview?.setHtml(await this.renderHtml()); }
+	private async reload(): Promise<void> { const html = await this.renderHtml(); if (html) { this.webview?.setHtml(html); } }
+
+	private flushStateDraft(): void { if (this.stateDraft) { this.onMessage({ ...this.stateDraft, type: 'stateWrite' }); } }
+	override dispose(): void { this.flushStateDraft(); super.dispose(); }
+	override clearInput(): void { this.flushStateDraft(); this.generation++; this.documentId = ''; this.watcher.clear(); super.clearInput(); }
+
+	async capturePreview(): Promise<string> {
+		const input = this.input; const deadline = Date.now() + 5000;
+		while (!this.designReady && this.input === input && Date.now() < deadline) { await timeout(25); }
+		if (!this.designReady || this.input !== input || !(input instanceof OpenideCanvasInput) || !input.resource.path.endsWith('/design.json')) { throw new Error('Open the structured Canvas before capturing it.'); }
+		const bounds = this.container?.getBoundingClientRect();
+		if (!bounds || bounds.width < 1 || bounds.height < 1) { throw new Error('Canvas is not visible.'); }
+		const path = await this.commandService.executeCommand<string>('openide.canvas.capture', { path: input.resource.fsPath, rect: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } });
+		if (!path) { throw new Error('Canvas capture is unavailable.'); }
+		return path;
+	}
+	private async refreshDesign(input: OpenideCanvasInput): Promise<void> {
+		const documentId = this.documentId;
+		try { const file = await this.canvasService.readDesign(input.resource.fsPath); const assets = await this.canvasService.designAssets(input.resource.fsPath); if (input === this.input && documentId === this.documentId) { await this.webview?.postMessage({ type: 'designResult', documentId, file, assets }); } }
+		catch (error) { if (input === this.input && documentId === this.documentId) { await this.webview?.postMessage({ type: 'designResult', documentId, error: String(error) }); } }
+	}
+	private async designMessage(msg: { type: string; template?: DesignTemplate; title?: string; details?: string; device?: DesignDocument['device']; expectedRevision?: number; operations?: DesignOperation[] | 'undo' | 'redo'; goal?: boolean; format?: 'html'|'pdf'|'pptx'|'svg'|'obj'; kind?: 'image'|'tokens'|'obj'; screenId?: string }, input: OpenideCanvasInput): Promise<void> {
+		const documentId = this.documentId;
+		try {
+			if (msg.type === 'designRequest' && input.resource.scheme === 'openide-canvas') {
+				const template = DESIGN_TEMPLATES.find(entry => entry.id === msg.template);
+				if (!template || !['desktop', 'tablet', 'mobile'].includes(msg.device ?? '')) { throw new Error('Choose a Canvas format and device.'); }
+				const prompt = [
+					t('openide.canvas.requestPrompt', template.title, msg.device ?? ''),
+					typeof msg.title === 'string' && msg.title.trim() ? t('openide.canvas.requestTitle', msg.title.trim().slice(0, 200)) : '',
+					typeof msg.details === 'string' ? msg.details.trim().slice(0, 3000) : '',
+				].filter(Boolean).join('\n\n');
+				await this.commandService.executeCommand('openide.agent.injectCanvasPrompt', { prompt, send: false });
+				if (input === this.input && documentId === this.documentId) { await this.webview?.postMessage({ type: 'designResult', documentId, message: t('openide.canvas.requestReady') }); }
+				return;
+			}
+			const path = input.resource.fsPath;
+			if (msg.type === 'designChange') { const file = await this.canvasService.patchDesign(path, msg.expectedRevision!, msg.operations!); if (documentId === this.documentId) { await this.webview?.postMessage({ type: 'designResult', documentId, file }); } }
+			else if (msg.type === 'designCapture') { const bounds = this.container?.getBoundingClientRect(); if (bounds) { const path = await this.commandService.executeCommand<string>('openide.canvas.capture', { path: input.resource.fsPath, rect: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } }); if (documentId === this.documentId) { await this.webview?.postMessage({ type: 'designResult', documentId, message: `Captured editor: ${path}` }); } } }
+			else if (msg.type === 'designExport') { const exported = await this.canvasService.exportDesign(path, msg.format); if (documentId === this.documentId) { await this.webview?.postMessage({ type: 'designResult', documentId, message: `Exported revision ${exported.revision}: ${exported.path}` }); } }
+			else if (msg.type === 'designImport') { const file = await this.commandService.executeCommand<DesignFile>('openide.canvas.import', { path, expectedRevision: msg.expectedRevision, kind: msg.kind, screenId: msg.screenId }); if (file && documentId === this.documentId) { await this.webview?.postMessage({ type: 'designResult', documentId, file }); } }
+			else if (msg.type === 'designHandoff') {
+				const handoff = await this.canvasService.handoffDesign(path);
+				const root = this.contextService.getWorkspace().folders[0]?.uri;
+				if (!root || input !== this.input || documentId !== this.documentId) { return; }
+				const plan = joinPath(root, '.openide', 'plans', `design-${generateUuid().slice(0,8)}.md`);
+				await this.fileService.writeFile(plan, VSBuffer.fromString(handoff.markdown));
+				if (msg.goal) { await this.commandService.executeCommand('openide.agent.createGoalFromPlan', { planPath: plan.fsPath, objective: `Implement the design described in ${handoff.path}. Verify its screens, interactions and responsive behavior.` }); }
+				else { await this.commandService.executeCommand('openide.plan.open', plan); }
+			}
+		} catch (error) { if (input === this.input && documentId === this.documentId) { await this.webview?.postMessage({ type: 'designResult', documentId, error: String(error) }); } }
+	}
 
 	/** Path relativo al workspace; si el canvas quedara afuera, cae al fsPath. */
 	private workspaceRelativePath(resource: URI): string {
@@ -100,10 +174,19 @@ export class OpenideCanvasEditor extends OpenideOverlayWebviewEditor {
 
 	protected onMessage(msg: any): void {
 		const input = this.input;
-		if (!(input instanceof OpenideCanvasInput)) { return; }
+		if (!(input instanceof OpenideCanvasInput) || msg.documentId !== this.documentId) { return; }
+		if (msg.type === 'designReady') { this.designReady = true; return; }
+		if (msg.type?.startsWith('design')) { void this.designMessage(msg, input); return; }
+		if (msg.type === 'stateDraft' && msg.state && typeof msg.state === 'object') { this.stateDraft = { documentId: msg.documentId, revision: msg.revision, state: msg.state }; return; }
 		if (msg.type === 'stateWrite' && msg.state && typeof msg.state === 'object') {
+			if (this.stateDraft?.revision === msg.revision) { this.stateDraft = undefined; }
 			const data = JSON.stringify(msg.state, null, 2) + '\n';
-			this.stateWrite = this.stateWrite.then(async () => { await this.fileService.writeFile(this.canvasService.stateUri(input.resource), VSBuffer.fromString(data)); }).catch(() => undefined);
+			const documentId = this.documentId;
+			this.stateWrite = this.stateWrite.then(async () => {
+				if (data.length > 1_000_000) { throw new Error('Canvas state exceeds 1 MB.'); }
+				await this.fileService.writeFile(this.canvasService.stateUri(input.resource), VSBuffer.fromString(data), { atomic: { postfix: '.canvas-state' } });
+				if (documentId === this.documentId) { await this.webview?.postMessage({ type: 'stateSaved', revision: msg.revision }); }
+			}).catch(error => { if (documentId === this.documentId) { void this.webview?.postMessage({ type: 'stateSaved', revision: msg.revision, error: String(error) }); } });
 			return;
 		}
 		if (msg.type !== 'action' || !msg.action || typeof msg.action !== 'object') { return; }

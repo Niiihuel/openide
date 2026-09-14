@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { createOpenideElement } from '../openideDom.js';
 import { addDisposableListener, append, clearNode } from '../../../../../base/browser/dom.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
@@ -71,7 +72,7 @@ export class OpenideChatComposerAttachments extends Disposable {
 		super();
 		this._strip = strip;
 		this._strip.hidden = true;
-		this._input = append(inputHost, inputHost.ownerDocument.createElement('input'));
+		this._input = append(inputHost, createOpenideElement(inputHost.ownerDocument, 'input'));
 		this._input.type = 'file';
 		this._input.accept = ATTACH_ACCEPT;
 		this._input.multiple = true;
@@ -167,16 +168,16 @@ export class OpenideChatComposerAttachments extends Disposable {
 		clearNode(this._strip);
 		this._strip.hidden = !this._images.length;
 		this._images.forEach((image, index) => {
-			const chip = append(this._strip, document.createElement('div'));
+			const chip = append(this._strip, createOpenideElement(document, 'div'));
 			chip.className = 'openide-attach-chip';
 			// While the asset is being read there is nothing to show: an `<img>` with an empty src
 			// paints the broken-image glyph, so the chip stays an empty frame until the bytes land.
 			chip.classList.toggle('pending', !image.data);
 			if (image.data) {
-				const thumbnail = append(chip, document.createElement('img'));
+				const thumbnail = append(chip, createOpenideElement(document, 'img'));
 				thumbnail.src = `data:${image.mimeType};base64,${image.data}`;
 			}
-			const remove = append(chip, document.createElement('button'));
+			const remove = append(chip, createOpenideElement(document, 'button'));
 			remove.type = 'button';
 			remove.className = 'openide-attach-remove';
 			this._chipStore.add(setupChatTooltip(this.hoverService, remove, () => t('chat.attach.remove')));

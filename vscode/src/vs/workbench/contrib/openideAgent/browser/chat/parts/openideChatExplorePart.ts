@@ -80,6 +80,7 @@ export class OpenideChatExplorePart extends OpenideChatContentPart {
 	private _turnComplete: boolean;
 	/** Whether this phase is the turn's trailing content, and so the one the status line is showing. */
 	private _live = false;
+	private _liveExpanded = false;
 	/** `openide.chat.tools.defaultExpanded`: the group starts open instead of folded. */
 	private readonly _defaultExpanded: boolean;
 
@@ -125,6 +126,17 @@ export class OpenideChatExplorePart extends OpenideChatContentPart {
 		}
 		this._live = live;
 		this._details.classList.toggle(OPENIDE_CHAT_PART_LIVE_CLASS, live);
+		this._details.classList.toggle('openide-chat-live-expanded', live && this._liveExpanded);
+		this._onDidChangeHeight.fire();
+	}
+
+	get liveExpanded(): boolean { return this._liveExpanded; }
+
+	/** Explicit user disclosure preserves the same rows and their tooltips during live updates. */
+	setLiveExpanded(expanded: boolean): void {
+		this._liveExpanded = expanded;
+		this._details.open = expanded;
+		this._details.classList.toggle('openide-chat-live-expanded', this._live && expanded);
 		this._onDidChangeHeight.fire();
 	}
 

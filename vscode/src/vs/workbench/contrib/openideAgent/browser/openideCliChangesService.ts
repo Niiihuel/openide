@@ -33,7 +33,9 @@ import { createOpenideRestoreSafety, OpenideRestoreEngine } from './openideResto
 import { createFileChange } from '../common/openideMessageChanges.js';
 import { resolvePathInsideWorkspace } from '../common/openideWorkspacePath.js';
 import { extUriBiasedIgnorePathCase, joinPath } from '../../../../base/common/resources.js';
-import { buildDiffPreview, countDiff, OpenideDiffLine } from '../common/openideDiffPreview.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { IOpenideReviewDiffService } from './openideReviewDiffService.js';
+import { OpenideDiffLine } from '../common/openideDiffPreview.js';
 import {
 	IOpenideCliTurn,
 	IOpenideTurnFile,
@@ -215,6 +217,7 @@ export class OpenideCliChangesService extends Disposable {
 
 	constructor(
 		@IOpenideNativeServices nativeServices: IOpenideNativeServices,
+		@IOpenideReviewDiffService private readonly diffs: IOpenideReviewDiffService,
 		@ILogService private readonly logService: ILogService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IModelService private readonly modelService: IModelService,
@@ -442,17 +445,17 @@ export class OpenideCliChangesService extends Disposable {
 	 * A deleted file has no right side, so it opens as its baseline alone: a diff against nothing
 	 * renders an empty pane and tells the reader less than the file they lost.
 	 */
-	async openDiff(sessionId: string, file: IOpenideTurnFile): Promise<void> {
+	async openDiff(sessionId: string, file: IOpenideTurnFile, targetEditorService: IEditorService = this.editorService): Promise<void> {
 		const entry = this.tracked.get(sessionId);
 		if (!entry) {
 			return;
 		}
 		if (file.status === 'deleted') {
-			await this.editorService.openEditor({ resource: this.baselineUri(sessionId, file.path), options: { pinned: true } });
+			await targetEditorService.openEditor({ resource: this.baselineUri(sessionId, file.path), options: { pinned: true } });
 			return;
 		}
 		await entry.capturing.get(file.path);
-		await this.editorService.openEditor({ original: { resource: this.baselineUri(sessionId, file.path) }, modified: { resource: joinPath(URI.file(entry.cwd), file.path) }, options: { pinned: true } });
+		await targetEditorService.openEditor({ original: { resource: this.baselineUri(sessionId, file.path) }, modified: { resource: joinPath(URI.file(entry.cwd), file.path) }, options: { pinned: true } });
 	}
 
 	/** The URI our content provider answers with the session's baseline for that path. */
@@ -521,10 +524,11 @@ export class OpenideCliChangesService extends Disposable {
 			}
 		}
 
-		const counts = countDiff(before, after);
+		const summary = await this.diffs.summarize(before, after, CancellationToken.None, 400);
+		if (!summary) { return undefined; }
 		// The sidebar has no 120-line cap to honour — that one keeps a persisted transcript small.
 		// Still bounded: a generated file of thousands of lines is scrolled in the editor, not here.
-		return { lines: buildDiffPreview(before, after, 400), added: counts.added, removed: counts.removed, created: baseline ? !baseline.existed : false };
+		return { ...summary, created: baseline ? !baseline.existed : false };
 	}
 
 	/** Every session that has a baseline for this absolute file path, newest first. */

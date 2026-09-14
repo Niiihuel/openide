@@ -17,6 +17,7 @@ import { BaseWindow } from '../../windows/electron-main/windowImpl.js';
 
 export interface IAuxiliaryWindow extends IBaseWindow {
 	readonly parentId: number;
+	readonly keepWorkbenchAlive: boolean;
 }
 
 export class AuxiliaryWindow extends BaseWindow implements IAuxiliaryWindow {
@@ -38,6 +39,7 @@ export class AuxiliaryWindow extends BaseWindow implements IAuxiliaryWindow {
 		private readonly webContents: WebContents,
 		private readonly windowOptions: BrowserWindowConstructorOptions | undefined,
 		private readonly disableMaximize: boolean,
+		readonly keepWorkbenchAlive: boolean,
 		@IEnvironmentMainService environmentMainService: IEnvironmentMainService,
 		@ILogService logService: ILogService,
 		@IConfigurationService configurationService: IConfigurationService,

@@ -12,10 +12,10 @@
 	gap: 9px;
 	min-width: 0;
 	margin: 6px 0;
-	border: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
-	border-radius: var(--oi-chat-card-radius);
-	background: var(--oi-chat-card-bg, var(--oi-tint-1));
-	padding: 8px 10px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	padding: 4px 0;
 	color: var(--vscode-descriptionForeground);
 }
 
@@ -40,7 +40,7 @@
 }
 
 .openide-chat-compaction-title {
-	color: var(--vscode-foreground);
+	color: var(--vscode-descriptionForeground);
 	font-size: 12.5px;
 	line-height: 1.35;
 }
@@ -55,20 +55,16 @@
 .openide-chat-compaction-kind {
 	flex: 0 0 auto;
 	padding: 2px 5px;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	font-size: 9px;
-	font-weight: 650;
-	letter-spacing: 0.035em;
-	text-transform: uppercase;
-	background: var(--oi-border-soft);
+	font-weight: 400;
+	letter-spacing: normal;
+	text-transform: none;
+	background: transparent;
 	color: var(--vscode-descriptionForeground);
 }
 
-/* A failure tints the border and the icon only: the card stays a status card and does not become
-   an error banner, because the run itself carried on. */
-.openide-chat-compaction-card.openide-chat-compaction-failed {
-	border-color: color-mix(in srgb, var(--vscode-errorForeground) 28%, transparent);
-}
+/* Keep a failed compaction distinguishable in the flat status row. */
 
 .openide-chat-compaction-card.openide-chat-compaction-failed .openide-chat-compaction-icon {
 	color: var(--vscode-errorForeground);

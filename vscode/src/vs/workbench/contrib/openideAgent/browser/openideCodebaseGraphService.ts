@@ -9,6 +9,7 @@
  *  scope y la profundidad solicitados.
  *--------------------------------------------------------------------------------------------*/
 
+import { t } from './../common/openideStrings.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
@@ -277,11 +278,12 @@ export class OpenideCodebaseGraphService extends Disposable implements IOpenideC
 		const folders = this.contextService.getWorkspace().folders.map(folder => folder.uri);
 		const normalized = path.replace(/^\/+|\/+$/g, '');
 
-		const files = snapshot.nodes.filter(node => node.kind === 'file');
+		const files = snapshot.nodes.filter(node => node.kind === 'file' || node.kind === 'goal');
 		const inScope = new Map<string, { node: ICodebaseMemoryNode; path: string }>();
 		for (const file of files) {
 			const filePath = relPath(file.uri, folders);
 			if (normalized && filePath !== normalized && !filePath.startsWith(normalized + '/')) { continue; }
+			if (inScope.get(file.uri)?.node.kind === 'goal' && file.kind === 'file') { continue; }
 			inScope.set(file.uri, { node: file, path: filePath });
 		}
 		// Symbol → containing file, to project the edges.
@@ -308,10 +310,10 @@ export class OpenideCodebaseGraphService extends Disposable implements IOpenideC
 		// which resolves by id — with the uri the inspector would always be empty.
 		const nodes: IGraphViewNode[] = kept.map(([uri, entry]) => ({
 			id: entry.node.id,
-			name: entry.path.split('/').pop() || entry.path,
+			name: entry.node.kind === 'goal' ? t('goal.mapName', entry.node.name) : entry.path.split('/').pop() || entry.path,
 			path: entry.path,
 			uri,
-			community: this.snapshot?.communityLabelByUri.get(uri) ?? '(sin módulo)',
+			community: entry.node.kind === 'goal' ? t('goal.mapCommunity') : this.snapshot?.communityLabelByUri.get(uri) ?? '(sin módulo)',
 			degree: degree.get(uri) ?? 0,
 		}));
 		const nodeIdByUri = new Map(kept.map(([uri, entry]) => [uri, entry.node.id] as const));

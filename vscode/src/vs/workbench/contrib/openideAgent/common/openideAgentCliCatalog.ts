@@ -85,6 +85,8 @@ export interface IOpenideMcpEndpoint {
 	readonly configFile?: string;
 	/** Optional launch-only lifecycle guidance; never modifies the user's hook settings. */
 	readonly settingsFile?: string;
+	/** Additive Codex launch profile containing preserved instructions and OpenIDE orientation. */
+	readonly contextProfile?: string;
 }
 
 export interface IOpenideMcpInjectionResult {
@@ -147,6 +149,7 @@ const grokMcpRegisterArgs = (endpoint: IOpenideMcpEndpoint): readonly string[] =
  */
 const codexMcpInjection: OpenideMcpInjection = endpoint => ({
 	args: [
+		...(endpoint.contextProfile ? ['--profile', endpoint.contextProfile] : []),
 		'-c', `mcp_servers.${endpoint.name}.url="${endpoint.url}"`,
 		'-c', `mcp_servers.${endpoint.name}.bearer_token_env_var="${endpoint.tokenEnvVar}"`,
 		'-c', `mcp_servers.${endpoint.name}.tool_timeout_sec=${Math.round(OPENIDE_MCP_TOOL_TIMEOUT_MS / 1000)}`,

@@ -164,7 +164,8 @@ function restoreSubagentRun(draft: IOpenideChatDraft, call: IToolCall, result: s
 		// Falling back to the call id keeps the row identifiable within the turn; it will not match
 		// a stored run, which is exactly right — there is none to open.
 		runId: runId ?? call.id,
-		parentId: call.id,
+		// Match the live reducer: this is the worker parent, not the tool call id.
+		parentId: run?.parentRunId,
 		index: 0,
 		total: 1,
 		title: run?.definitionName || String(args['agent'] ?? '') || 'Especialista',

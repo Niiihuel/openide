@@ -2,11 +2,8 @@
  *  OpenIDE — native chat session header (tab strip + history / new chat / kebab) and the two
  *  popovers it opens.
  *
- *  Every declaration here is transcribed from the webview stylesheet
- *  (its `#header` … `.head-btn`, the `.menu` family and the marquee):
- *  the native chat must be pixel-identical to the webview, so nothing in this file is a new
- *  design decision. Where the webview relies on `body`-level defaults (13px, --vscode-font-family)
- *  the value is restated, because the popovers render inside `.context-view`, outside our root.
+ *  Native tab, history and action geometry. Shared dock variants own hover, selection, focus
+ *  and control paint; this stylesheet retains the dimensions and transcript layout contracts.
  *
  *  Class names carry the `openide-chat-` prefix on purpose: the webview lives in an iframe and can
  *  own bare `.tab` / `.menu` / `.menu-row`, this DOM does not.
@@ -61,39 +58,17 @@
 
 .openide-chat-header .openide-chat-tabs::-webkit-scrollbar { display: none; width: 0; height: 0; } /* outranks the generic chat scrollbar skin */
 
-/* ==== Tabs del dock = tabs del editor ====================================================
- *
- * Un tab del dock es UNA CONVERSACIÓN, igual que un tab del editor es un documento. Por eso
- * hereda la anatomía de `modernUI/tabs.css` y no la de la composite bar: la caja transparente,
- * la píldora interior con radio, y las mismas MEDIDAS POR TOKEN que usa el editor —
- * `padding: 0 spacing-size80 0 spacing-size60`, `cornerRadius-small`, `fontSize-body1`.
- * Antes eran 11px MAYÚSCULAS con colores `panelTitle.*`, que es el tratamiento de un contenedor
- * de vistas: correcto cuando cada tab era una vista (CHAT / CLAUDE CODE), equivocado desde que
- * cada tab es una conversación.
- *
- * Colores de la familia `modernEditorTab.*`, la misma que pinta los tabs del editor, para que un
- * tema los mueva a los dos juntos en vez de que el dock quede atado a otra paleta.
- *
- * Also the HEIGHTS: the row is 32px and the pill 28px, the editor's own two numbers. The row used
- * to be 35px with the pill at 100% of it, and that is what the tab strip of the dock and the tab
- * strip of the editor never lining up came from — a pill flush against the island's rounded top
- * edge on one side of the gap, a pill with 2px of air on the other. The two are tokens
- * (`--openide-chat-head-height` / `--openide-chat-tab-height`) because the sessions panel hangs
- * off the first one.
- *
- * El icono de marca sí es propio y se gana el lugar: identifica al agente que corre esa
- * conversación, y es lo único que queda cuando el título se elide.
- *
- * `max-width` + strip que SCROLLEA es la respuesta de upstream al overflow: los tabs nunca se
- * encogen entre sí, porque dejar que flex reparta el faltante colapsa todos los títulos a la vez.
- */
+/* Conversation tabs use the editor's shared tab/fill/label variants. Their 32px hit target
+   contains a 24px fill with 4px vertical gutters; the fill also owns active/hover theme states.
+   Width sharing, status indicators and overflow remain specific to conversation navigation. */
 .openide-chat-tab {
 	position: relative;
 	display: flex;
 	align-items: center;
 	gap: var(--vscode-spacing-size60, 6px);
-	height: var(--openide-chat-tab-height, 28px);
-	padding: 0 var(--vscode-spacing-size80, 8px) 0 var(--vscode-spacing-size60, 6px);
+	height: var(--openide-chat-head-height, 32px);
+	box-sizing: border-box;
+	padding: 0 var(--vscode-spacing-size80, 8px);
 	/* The tabs SHARE the row: they grow into whatever is free and shrink together down to
 	   `--openide-chat-tab-min` when there is not enough. It was `0 0 auto` — two tabs at a fixed
 	   160px against the ~90px the row has left at the dock's default width, so the second
@@ -110,49 +85,26 @@
 	user-select: none;
 	font-size: var(--vscode-fontSize-body1, 13px);
 	font-weight: var(--vscode-fontWeight-regular, 400);
+	color: var(--vscode-tab-inactiveForeground, var(--oi-secondary));
 	background: transparent;
-	/* `tab.inactiveForeground`, and MEASURED rather than assumed: `modernUI/tabs.css` declares a
-	   `--modern-ui-editor-tab-inactive-foreground` but never applies it to `.tab`, so what actually
-	   paints an inactive editor tab is this token (Dracula: #6272a4). Reaching for the modern-ui one
-	   here would have made the dock the only strip in the IDE honouring it. */
-	color: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground));
-	border: none;
-	border-radius: var(--oi-radius-sm);
+	border: 0;
+	border-block: var(--vscode-spacing-size40, 4px) solid transparent;
+	border-radius: var(--oi-radius-sm));
 }
 
-/* La píldora. El tab del editor la resuelve con un hijo `.tab-fill`; acá no hay ese nodo, así que
-   va en un pseudo-elemento con el mismo `inset: 0 spacing-size20` y el mismo radio. Detrás del
-   contenido (`z-index: 0` contra el 1 del título) para no tapar el texto ni el icono. */
-.openide-chat-tab::before {
-	content: '';
-	position: absolute;
-	inset: 0 var(--vscode-spacing-size20, 2px);
-	z-index: 0;
-	border-radius: var(--oi-radius-sm);
-	background-color: var(--vscode-modernEditorTab-inactiveBackground, transparent);
-	pointer-events: none;
+/* No decorative file/agent icon: use the editor's no-file-icons leading inset. */
+.modern-ui-tabs .openide-chat-tab.modern-ui-editor-tab {
+	--editor-group-tab-height: var(--openide-chat-tab-height, 24px);
+	padding-inline: var(--vscode-spacing-size80, 8px) !important;
 }
-
-.openide-chat-tab > * { position: relative; z-index: 1; }
-
-/* Alto contraste excluido, igual que `modernUI/tabs.css`: ahí el estado se comunica con bordes,
-   no con relleno. */
-.monaco-workbench:not(.hc-black):not(.hc-light) .openide-chat-tab:not(.active):hover::before {
-	background-color: var(--vscode-modernEditorTab-hoverBackground, var(--oi-tint-2));
-}
-.monaco-workbench:not(.hc-black):not(.hc-light) .openide-chat-tab:not(.active):hover {
-	color: var(--vscode-modernEditorTab-hoverForeground, var(--vscode-foreground));
-}
-
-.monaco-workbench:not(.hc-black):not(.hc-light) .openide-chat-tab.active::before {
-	background-color: var(--vscode-modernEditorTab-activeBackground, var(--vscode-tab-activeBackground));
-}
-.openide-chat-tab.active {
-	color: var(--vscode-modernEditorTab-activeForeground, var(--vscode-tab-activeForeground, var(--vscode-foreground)));
-}
-.monaco-workbench:not(.hc-black):not(.hc-light) .openide-chat-tab.active:hover::before {
-	background-color: var(--vscode-modernEditorTab-activeHoverBackground, var(--vscode-modernEditorTab-activeBackground));
-}
+.openide-chat-tab.active { color: var(--modern-ui-editor-tab-active-foreground, var(--oi-text)); }
+.openide-chat-tab:hover { color: var(--modern-ui-editor-tab-hover-foreground, var(--oi-text)); }
+.openide-chat-tab:focus:not(:focus-visible) { outline: none; }
+.openide-chat-tab:focus-visible { outline: 1px solid var(--oi-focus); outline-offset: -4px; }
+.openide-chat-tab > :not(.modern-ui-editor-tab-fill) { position: relative; z-index: 1; }
+/* Native tabs remain usable when the optional modern tabs module is disabled. */
+.monaco-workbench:not(.modern-ui-tabs) .openide-chat-tab.active { background: var(--oi-selected); background-clip: padding-box; }
+.monaco-workbench:not(.modern-ui-tabs) .openide-chat-tab:hover { background: var(--oi-hover); background-clip: padding-box; }
 
 /* When the row is tight the tab you are IN gives up its title last: it shrinks at a fraction of
    the rate of the others, so the shortfall comes out of the conversations you are not reading.
@@ -174,13 +126,7 @@
 }
 
 /* Keep complete titles readable; only overflowing text needs an ellipsis. */
-.openide-chat-tab .openide-chat-conversation-icon {
-	width: var(--vscode-spacing-size160);
-	height: var(--vscode-spacing-size160);
-	flex: 0 0 var(--vscode-spacing-size160);
-	background-color: currentColor;
-	mask: url('./chat-conversation.svg') center / contain no-repeat;
-}
+
 
 .openide-chat-tab-title {
 	flex: 1;
@@ -195,9 +141,6 @@
 	height: 18px;
 	flex: 0 0 auto;
 	border: none;
-	border-radius: var(--oi-radius-sm);
-	background: transparent;
-	color: inherit;
 	cursor: pointer;
 	display: flex;
 	align-items: center;
@@ -207,12 +150,12 @@
 }
 
 .monaco-workbench .openide-chat-native .openide-chat-header .openide-chat-tab-close .codicon[class*="codicon-"] {
-	font-size: 13px;
+	font-size: var(--oi-icon-tab-close, 13px);
 	color: inherit;
 }
 .openide-chat-tab:hover .openide-chat-tab-close,
-.openide-chat-tab.active .openide-chat-tab-close { visibility: visible; }
-.openide-chat-tab-close:hover { background: var(--vscode-toolbar-hoverBackground); }
+.openide-chat-tab.active .openide-chat-tab-close,
+.openide-chat-tab:focus-within .openide-chat-tab-close { visibility: visible; }
 
 .openide-chat-header-actions {
 	display: flex;
@@ -226,9 +169,6 @@
 	width: 24px;
 	height: 24px;
 	border: none;
-	border-radius: var(--oi-radius-md);
-	background: transparent;
-	color: var(--vscode-descriptionForeground);
 	cursor: pointer;
 	display: flex;
 	align-items: center;
@@ -236,13 +176,10 @@
 	padding: 0;
 }
 
-.openide-chat-head-btn:hover {
-	background: var(--vscode-toolbar-hoverBackground);
-	color: var(--vscode-foreground);
-}
 
-.monaco-workbench .openide-chat-native .openide-chat-header .openide-chat-head-btn .codicon[class*="codicon-"] {
-	font-size: 14px;
+
+.monaco-workbench .openide-chat-head-btn .codicon[class*="codicon-"] {
+	font-size: var(--oi-icon-action, 16px);
 	color: inherit;
 }
 
@@ -291,42 +228,38 @@
 }
 .openide-chat-tab.active .openide-chat-tab-close,
 .openide-chat-tab:hover .openide-chat-tab-close,
-.openide-chat-tab-close:focus-visible {
+.openide-chat-tab:focus-within .openide-chat-tab-close {
 	opacity: 1;
 }
 
 /* Drag feedback: the dragged tab dims, the drop side is a 2px focus-colored inset edge — the same
    left/right half-width contract as `drop-target-left/right` in the editor strip. */
 .openide-chat-tab.dragging { opacity: 0.4; }
-.openide-chat-tab.drop-target-left { box-shadow: inset 2px 0 0 var(--vscode-focusBorder); }
-.openide-chat-tab.drop-target-right { box-shadow: inset -2px 0 0 var(--vscode-focusBorder); }
+.openide-chat-tab.drop-target-left > .modern-ui-editor-tab-fill { box-shadow: inset 2px 0 0 var(--vscode-focusBorder); }
+.openide-chat-tab.drop-target-right > .modern-ui-editor-tab-fill { box-shadow: inset -2px 0 0 var(--vscode-focusBorder); }
 
 
 /* ==== Sessions panel (VS Code Agent Sessions, in the dock) + hosted agent terminals ==== */
 
-.openide-chat-tab-dot {
+.openide-chat-session-status {
+	--oi-spinner-size: 13px;
+	--oi-spinner-stroke: 1.5px;
 	flex: 0 0 auto;
-	width: 7px;
-	height: 7px;
-	margin-right: 5px;
-	border-radius: var(--oi-radius-circle);
-	background: var(--vscode-descriptionForeground);
-	opacity: 0.55;
+	width: 13px;
+	height: 13px;
+	font-size: 13px;
+	color: var(--oi-secondary);
 }
-.openide-chat-tab-dot.in-progress { background: var(--openide-green); opacity: 1; box-shadow: 0 0 0 2px color-mix(in srgb, var(--openide-green) 25%, transparent); }
-.openide-chat-tab-dot.needs-input { background: var(--openide-amber); opacity: 1; animation: openide-chat-dot-pulse 1.6s ease-in-out infinite; }
-.openide-chat-tab-dot.failed { background: var(--openide-red); opacity: 1; }
+.openide-chat-session-status.needs-input { color: var(--openide-amber); }
+.openide-chat-session-status.failed { color: var(--openide-red); }
 .openide-chat-tab.unread .openide-chat-tab-title { font-weight: 600; }
-@keyframes openide-chat-dot-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.35); } }
-@media (prefers-reduced-motion: reduce) { .openide-chat-tab-dot.needs-input { animation: none; } }
 
 /* The dock's two vertical constants, declared where the header, the tabs and the sessions panel
-   can all read them. They are the editor's: `modernUI/tabs.css` runs a 32px title row with a 28px
-   pill inside it, and the dock is the island next to that one. */
+   can all read them. Match the editor: 32px hit target and 24px inner fill. */
 .openide-chat-native {
 	position: relative;
 	--openide-chat-head-height: 32px;
-	--openide-chat-tab-height: 28px;
+	--openide-chat-tab-height: 24px;
 	/* How far the tabs shrink before the strip starts scrolling instead. The chrome inside a tab
 	   (mark, gaps, paddings, close box) is ~58px, so this leaves a title with something to say; the
 	   editor's own shrink floor is 80px on the same anatomy. */
@@ -347,51 +280,33 @@
 .openide-chat-sessions-pane.side {
 	left: auto;
 	width: 300px;
-	border-left-color: var(--oi-border-soft);
-	box-shadow: var(--vscode-shadow-md, -4px 0 12px rgba(0, 0, 0, 0.12));
+	border-left-color: var(--oi-divider);
 }
 .openide-chat-sessions-pane.hidden { display: none; }
-/* One row: the search field and the filter, Cursor's panel head. The title, the refresh, the
-   panel toggle and the full-width "New session" button that used to live here were all removed —
-   each of them repeated something the dock's header already does. */
+/* Search and actions retain native widgets; dock roles own their shared paint. */
 .openide-chat-sessions-head {
 	display: flex;
 	align-items: center;
-	gap: 4px;
+	gap: 6px;
 	min-height: 32px;
-	padding: 6px 8px 6px 10px;
+	padding: 8px;
 }
-/* The box is `.monaco-inputbox` now — themed border, background and focus ring come from the
-   native widget. This wrapper only positions it and lays the magnifier over it. */
 .openide-chat-sessions-search {
 	position: relative;
 	flex: 1;
 	min-width: 0;
 }
-.openide-chat-sessions-search .monaco-inputbox {
-	width: 100%;
-	height: 26px;
-	border-radius: var(--oi-radius-sm);
-	/* `defaultInputBoxStyles` pinta el widget con `input.background`, que en varios temas es el
-	   MISMO color que la isla (Dracula: los dos #282a36) — el campo desaparecía contra el dock y
-	   sólo lo separaba su borde. `--oi-raised` se deriva de la superficie, así que contrasta en
-	   cualquier tema. */
-	background-color: var(--oi-raised);
-}
-/* The selector is long on purpose. `inputBox.css:116` pads every input inside `.part.auxiliarybar`
-   from the sidebar font-size scaling with `.monaco-workbench .part.auxiliarybar .monaco-inputbox >
-   .ibwrapper > .input` — six classes, (0,6,0) — which is why shorter attempts kept losing and the
-   magnifier sat on top of the placeholder. This is (0,6,1). Only `padding-left` is overridden, so
-   the vertical padding keeps following that scaling instead of being frozen here. */
-.monaco-workbench .part .openide-chat-sessions-search .monaco-inputbox > .ibwrapper > input.input {
-	height: 24px;
-	padding-left: 24px;
+.openide-chat-sessions-search .monaco-inputbox { width: 100%; height: 30px; }
+/* Match the native sidebar specificity so the magnifier never overlaps the input. */
+.monaco-workbench :is(.part, .openide-agent-window) .openide-chat-sessions-search .monaco-inputbox > .ibwrapper > input.input {
+	height: 28px;
+	padding-left: 28px;
 	font-size: 12px;
 }
 .openide-chat-sessions-search-icon {
 	position: absolute;
 	top: 50%;
-	left: var(--vscode-spacing-size60, 6px);
+	left: 9px;
 	transform: translateY(-50%);
 	pointer-events: none;
 	color: var(--vscode-descriptionForeground);
@@ -403,46 +318,43 @@
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	padding: 8px 6px 3px;
-	font-size: 10.5px;
-	font-weight: 600;
-	letter-spacing: 0.06em;
-	text-transform: uppercase;
-	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	padding: 12px 8px 6px;
+	font-size: 11px;
+	font-weight: 400;
 }
-.openide-chat-sessions-group-count { margin-left: auto; font-weight: 400; font-variant-numeric: tabular-nums; }
-.openide-chat-sessions-empty { padding: 18px 6px; text-align: center; color: var(--vscode-descriptionForeground); font-size: 12px; }
-.openide-chat-sessions-row {
+.openide-chat-sessions-group-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.openide-chat-sessions-row { position: relative; display: flex; align-items: center; min-height: 34px; }
+.openide-chat-sessions-open {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	min-height: 40px;
-	padding: 4px 6px;
-	border-radius: var(--oi-radius-sm);
+	flex: 1;
+	min-width: 0;
+	min-height: 34px;
+	padding: 4px 8px;
+	border: 0;
+	color: var(--oi-text);
+	font: inherit;
+	text-align: left;
 	cursor: pointer;
-	outline: none;
 }
-.openide-chat-sessions-row:hover, .openide-chat-sessions-row:focus-visible { background: var(--oi-hover, var(--vscode-list-hoverBackground)); }
-.openide-chat-sessions-row.active { background: var(--oi-selected, var(--vscode-list-activeSelectionBackground)); }
-.openide-chat-sessions-row .openide-chat-session-dot {
-	flex: 0 0 auto;
-	width: 7px;
-	height: 7px;
-	border-radius: var(--oi-radius-circle);
-	background: var(--vscode-descriptionForeground);
-	opacity: 0.4;
-}
-.openide-chat-sessions-row .openide-chat-session-dot.in-progress { background: var(--openide-green); opacity: 1; }
-.openide-chat-sessions-row .openide-chat-session-dot.needs-input { background: var(--openide-amber); opacity: 1; }
-.openide-chat-sessions-row .openide-chat-session-dot.failed { background: var(--openide-red); opacity: 1; }
 .openide-chat-sessions-kind { display: inline-flex; color: var(--vscode-descriptionForeground); }
-.openide-chat-sessions-kind .codicon { font-size: 14px; }
+.openide-chat-sessions-kind .codicon { font-size: var(--oi-icon-action, 16px); }
 .openide-chat-sessions-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.openide-chat-sessions-row-title { font-size: 12.5px; color: var(--vscode-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.openide-chat-sessions-row-title { font-size: 12.5px; color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .openide-chat-sessions-row.unread .openide-chat-sessions-row-title { font-weight: 600; }
-.openide-chat-sessions-row-meta { font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.openide-chat-sessions-row-actions { display: none; flex: 0 0 auto; gap: 0; }
+.openide-chat-sessions-row-time { flex: 0 0 auto; font-size: 11px; color: var(--oi-secondary); font-variant-numeric: tabular-nums; }
+.openide-chat-sessions-row-actions { position: absolute; right: 4px; display: none; align-items: center; gap: 2px; }
 .openide-chat-sessions-row:hover .openide-chat-sessions-row-actions, .openide-chat-sessions-row:focus-within .openide-chat-sessions-row-actions { display: inline-flex; }
+.openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-open { padding-right: var(--oi-session-actions-width); }
+.openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-row-time { display: none; }
+.openide-chat-sessions-group-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-chat-sessions-group > .codicon { flex: 0 0 auto; font-size: var(--oi-icon-action, 16px); }
+.openide-chat-session-preview { display: flex; flex-direction: column; gap: 8px; width: min(300px, calc(100vw - 48px)); max-width: 300px; padding: 6px; color: var(--oi-text); font-size: var(--oi-text-md); }
+.openide-chat-session-preview-title { line-height: 1.45; overflow-wrap: anywhere; }
+.openide-chat-session-preview-context { display: flex; align-items: flex-start; gap: 6px; color: var(--oi-secondary); }
+.openide-chat-session-preview-context > span:not(.codicon) { min-width: 0; overflow-wrap: anywhere; }
+.openide-chat-session-preview-meta { color: var(--oi-secondary); font-size: 11px; }
 .openide-menu-hint { margin-left: auto; padding-left: 10px; font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
 
 /* The hosted terminal replaces transcript + composer while a CLI session is the active tab. */
@@ -463,18 +375,7 @@
 	color: var(--vscode-descriptionForeground);
 }
 .openide-chat-agent-terminal-banner.error { color: var(--vscode-errorForeground); }
-.openide-chat-agent-terminal-relaunch {
-	height: 24px;
-	padding: 0 10px;
-	border: 1px solid transparent;
-	border-radius: var(--oi-radius-sm);
-	background: var(--vscode-button-background);
-	color: var(--vscode-button-foreground);
-	font: inherit;
-	font-size: 12px;
-	cursor: pointer;
-}
-.openide-chat-agent-terminal-relaunch:hover { background: var(--vscode-button-hoverBackground); }
+.openide-chat-agent-terminal-relaunch { font-size: 12px; }
 
 /* Session-type chip (VS Code's "Local ▾" target picker) in the composer footer slot. */
 .openide-chat-session-kind-chip {
@@ -485,48 +386,41 @@
 	margin: 0 0 4px 10px;
 	padding: 0 6px;
 	border: 0;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	font: inherit;
 	font-size: 11.5px;
 	cursor: pointer;
 }
-.openide-chat-session-kind-chip:hover { background: var(--oi-hover, var(--vscode-toolbar-hoverBackground)); color: var(--vscode-foreground); }
+.openide-chat-session-kind-chip:hover { background: var(--oi-hover, var(--oi-hover)); color: var(--vscode-foreground); }
 .openide-chat-session-kind-chip .codicon { font-size: 13px; }
 .openide-chat-session-kind-chip .codicon-chevron-down { font-size: 11px; }
 
-/* The pane reuses the menu's row-action buttons outside a menu: give them the menu's flat look. */
+/* Icon actions share paint with every dock; only density belongs to this panel. */
 .openide-chat-sessions-pane .openide-menu-row-action {
-	width: 22px;
-	height: 22px;
+	width: 24px;
+	height: 24px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	border: 0;
-	border-radius: var(--oi-radius-sm);
-	background: transparent;
-	color: var(--vscode-descriptionForeground);
 	padding: 0;
 	cursor: pointer;
 }
-.openide-chat-sessions-pane .openide-menu-row-action:hover { background: var(--oi-hover-strong, var(--vscode-toolbar-hoverBackground)); color: var(--vscode-foreground); }
-.openide-chat-sessions-pane .openide-menu-row-action .codicon { font-size: 16px; }
-/* The stripping rules that used to live here (border/outline/padding reset on the raw input) are
-   gone with the hand-rolled box: `.monaco-inputbox` owns the frame now, and resetting its input's
-   padding to 0 was what kept the magnifier sitting on top of the placeholder. */
+.openide-chat-sessions-pane .openide-menu-row-action .codicon { font-size: var(--oi-icon-action, 16px); }
 
 /* ==== Head bar: ONE row (VS Code chat view anatomy, Cursor's chrome economy) ==== */
 .openide-chat-headbar { display: flex; flex-direction: column; flex: 0 0 auto; }
 /* `+ ▾` — `menuEntryActionViewItem.css`'s `.monaco-dropdown-with-primary`: two real buttons that
    share ONE hover surface, so the pair reads as a single control while each half keeps its own
    focus ring and tooltip. */
-.openide-chat-head-split { display: inline-flex; align-items: center; border-radius: var(--oi-radius-md); }
-.openide-chat-head-split:hover { background: var(--vscode-toolbar-hoverBackground); }
+.openide-chat-head-split { display: inline-flex; align-items: center; border-radius: var(--oi-radius-control); }
+.openide-chat-head-split:hover { background: var(--oi-hover); }
 .openide-chat-head-split .openide-chat-head-btn:hover { background: transparent; }
-.openide-chat-headbar .openide-chat-head-split .openide-chat-head-btn { width: 18px; }
-.openide-chat-headbar .openide-chat-head-split .openide-chat-head-split-chevron { width: 14px; }
-.monaco-workbench .openide-chat-native .openide-chat-headbar .openide-chat-head-split-chevron .codicon[class*="codicon-"] { font-size: 12px; }
+.openide-chat-headbar .openide-chat-head-split .openide-chat-head-btn { width: 24px; }
+.openide-chat-headbar .openide-chat-head-split .openide-chat-head-split-chevron { width: 24px; }
+.monaco-workbench .openide-chat-native .openide-chat-headbar .openide-chat-head-split-chevron .codicon[class*="codicon-"] { font-size: var(--oi-icon-action, 16px); }
 
 
 /* ==== Head bar: la fila de 35px con los tabs y la toolbar ====
@@ -546,16 +440,10 @@
 }
 .openide-chat-headbar .openide-chat-tabs { align-items: center; }
 
-.openide-chat-headbar .openide-chat-tab-dot { width: 6px; height: 6px; margin-right: 2px; }
-/* Toolbar metrics are upstream's, not invented: `actionbar.css` gives an action label 3px of
-   padding around a 16px glyph (a 22px hit target) and `auxiliaryBarPart.css` puts 4px between
-   items. Ours ran a 14px glyph inside the same 22px box with 2px gaps — the hover then read as an
-   oversized empty square and the whole cluster looked cramped next to VS Code's. */
-.openide-chat-headbar .openide-chat-header-actions { display: flex; align-items: center; gap: 4px; padding-left: 8px; }
-.openide-chat-headbar .openide-chat-head-btn { width: 22px; height: 22px; color: var(--vscode-icon-foreground, var(--vscode-foreground)); }
-.monaco-workbench .openide-chat-native .openide-chat-headbar .openide-chat-head-btn .codicon[class*="codicon-"] { font-size: 16px; }
-/* Spacing only: the header carries no hairlines (the dock is line-free by request). */
-.openide-chat-head-sep { width: 0; height: 16px; margin: 0 6px; background: transparent; }
+/* Standard actions use the shared 16px glyph inside a 24px target, matching the composer. */
+.openide-chat-headbar .openide-chat-header-actions { display: flex; align-items: center; gap: 2px; padding-left: 4px; }
+.openide-chat-headbar .openide-chat-head-btn { width: 24px; height: 24px; color: var(--vscode-icon-foreground, var(--vscode-foreground)); }
+.monaco-workbench .openide-chat-native .openide-chat-headbar .openide-chat-head-btn .codicon[class*="codicon-"] { font-size: var(--oi-icon-action, 16px); }
 
 /* ==== The foldable cluster ====================================================================
  *
@@ -605,9 +493,9 @@
 	transition: transform 0.15s ease-out;
 }
 
-.openide-chat-headbar .openide-chat-head-collapse { width: 18px; opacity: 0.65; }
+.openide-chat-headbar .openide-chat-head-collapse { width: 24px; opacity: 0.65; }
 .openide-chat-headbar .openide-chat-head-collapse:hover { opacity: 1; }
-.monaco-workbench .openide-chat-native .openide-chat-headbar .openide-chat-head-collapse .codicon[class*="codicon-"] { font-size: 16px; }
+.monaco-workbench .openide-chat-native .openide-chat-headbar .openide-chat-head-collapse .codicon[class*="codicon-"] { font-size: var(--oi-icon-action, 16px); }
 /* One glyph, turned — the tree's twistie, not two icons swapping mid-animation. */
 .openide-chat-headbar .openide-chat-head-collapse.collapsed .codicon { transform: rotate(180deg); }
 
@@ -624,52 +512,6 @@
 	}
 }
 
-/* Sessions panel, agentsessionsviewer.css metrics. */
-.openide-chat-sessions-head { min-height: 35px; border-bottom: 1px solid transparent; }
-.openide-chat-sessions-list { padding: 0 6px 8px; }
-.openide-chat-sessions-group {
-	padding: 6px 6px 2px;
-	font-size: 11px;
-	font-weight: 500;
-	letter-spacing: 0;
-	text-transform: uppercase;
-	color: var(--vscode-descriptionForeground);
-}
-.openide-chat-sessions-group-count { opacity: 0.7; margin-right: 4px; }
-.openide-chat-sessions-row {
-	align-items: flex-start;
-	gap: 0;
-	min-height: 0;
-	padding: 8px 6px;
-	border-radius: var(--oi-radius-md);
-	outline: 1px solid transparent;
-	outline-offset: -1px;
-}
-.openide-chat-sessions-row .openide-chat-session-dot { margin: 5px 0 0; }
-.openide-chat-sessions-row .openide-chat-sessions-kind { display: none; }
-.openide-chat-sessions-body { padding-left: 6px; }
-.openide-chat-sessions-row-title { font-size: 13px; line-height: 17px; padding-bottom: 2px; }
-.openide-chat-sessions-row-meta { font-size: 12px; line-height: 15px; }
-.openide-chat-sessions-row.active {
-	background: var(--vscode-list-activeSelectionBackground);
-	color: var(--vscode-list-activeSelectionForeground);
-	outline-color: var(--vscode-focusBorder);
-}
-.openide-chat-sessions-row.active .openide-chat-sessions-row-title,
-.openide-chat-sessions-row.active .openide-chat-sessions-row-meta { color: var(--vscode-list-activeSelectionForeground); }
-.openide-chat-sessions-row-actions { align-self: center; }
-
-/* Brand mark. It follows the tab's own colour, so an inactive tab's agent dims with its title and
-   the active one comes forward with it — the logo never reads brighter than the tab it names. */
-/* Tabs keep their natural width and the strip clips, upstream's composite-bar behaviour. Letting
-   them shrink was tried and is worse: flex spreads the shortfall over ALL of them, so four views
-   turn into "C… CLAU… C… OPE…" instead of three readable labels and one clipped tail. */
-/* Never shrinks, never hides: see the tab rule above. */
-.openide-chat-tab-icon { width: 14px; height: 14px; flex: 0 0 auto; color: inherit; }
-.monaco-workbench .openide-chat-tab .openide-chat-tab-icon.codicon[class*="codicon-"] { font-size: 14px; color: inherit; }
-.openide-chat-tab .openide-provider-icon.monogram { font-size: 7px; border-radius: var(--vscode-cornerRadius-xSmall, 2px); }
-
-
 /* ==== Sessions panel modes ==== */
 /* `full`: no session open — the list is the body (upstream's stacked AgentSessionsControl),
    between the header and the composer. `side`: a 300px column beside the transcript. */
@@ -680,7 +522,7 @@
 	z-index: 5;
 	border-left: 0;
 	box-shadow: none;
-	background: var(--vscode-editor-background);
+	background: var(--oi-canvas);
 }
 .openide-chat-native.sessions-side > .openide-chat-list-host,
 .openide-chat-native.sessions-side > .openide-chat-notice,
@@ -693,3 +535,106 @@
 .openide-cli-tools summary { height: 32px; line-height: 32px; padding: 0 8px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .openide-cli-tools summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .openide-cli-tools p { margin: 0; padding: 4px 8px 8px; }
+
+.openide-chat-sessions-pane.compact .openide-chat-sessions-head {
+	display: none;
+}
+
+/* Conversation navigation follows the shared dock rows. A reserved trailing slot swaps
+   recency for actions without reflowing the title while the pointer moves through the list. */
+.openide-chat-sessions-pane.compact .openide-chat-sessions-list { padding: 0 0 var(--vscode-spacing-size12, 12px); gap: var(--oi-navigation-row-gap); }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-group {
+	margin-top: var(--vscode-spacing-size12, 12px);
+	min-height: var(--oi-navigation-row-height);
+	padding: var(--vscode-spacing-size4, 4px) var(--vscode-spacing-size8, 8px);
+	gap: var(--vscode-spacing-size8, 8px);
+	font-size: var(--oi-text-sm);
+	color: var(--oi-secondary);
+}
+.openide-chat-sessions-pane.compact .openide-chat-sessions-group:first-child { margin-top: var(--vscode-spacing-size4, 4px); }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-group-title { flex: 1; text-align: left; font-weight: 400; }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-group-count { min-width: 16px; font-size: var(--oi-text-xs); text-align: center; }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-group > .codicon { font-size: var(--oi-icon-action, 16px); }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-group > :last-child { font-size: 12px; opacity: .7; }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row { min-height: var(--oi-navigation-row-height); }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-open {
+	position: relative;
+	min-height: var(--oi-navigation-row-height);
+	box-sizing: border-box;
+	padding: 4px calc(var(--oi-session-actions-width) + 8px) 4px 28px;
+}
+.openide-chat-sessions-pane.compact .openide-chat-sessions-open.selected::before {
+	content: '';
+	position: absolute;
+	left: var(--vscode-spacing-size8, 8px);
+	top: 50%;
+	width: 2px;
+	height: 12px;
+	border-radius: var(--oi-radius-control);
+	background: currentColor;
+	transform: translateY(-50%);
+	opacity: .7;
+}
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row-title { font-size: var(--oi-text-md); }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row-time {
+	display: inline;
+	position: absolute;
+	right: var(--vscode-spacing-size12, 12px);
+	max-width: 34px;
+	overflow: hidden;
+	white-space: nowrap;
+	pointer-events: none;
+	transition: opacity var(--oi-duration-hover) var(--oi-ease);
+}
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row-actions {
+	display: inline-flex;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity var(--oi-duration-hover) var(--oi-ease);
+}
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-row-actions { opacity: 1; pointer-events: auto; }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-row-time,
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row:is(.has-status, .unread) .openide-chat-sessions-row-time { opacity: 0; }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-more { justify-content: flex-start; color: var(--oi-secondary); padding-left: 28px; min-height: var(--oi-navigation-row-height); font-size: var(--oi-text-sm); }
+.openide-chat-sessions-unread { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--vscode-notificationsInfoIcon-foreground, var(--oi-primary)); }
+.openide-chat-sessions-rename .monaco-inputbox { width: 100%; }
+.monaco-reduce-motion .openide-chat-sessions-pane.compact :is(.openide-chat-sessions-row-time, .openide-chat-sessions-row-actions) { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-sessions-pane.compact :is(.openide-chat-sessions-row-time, .openide-chat-sessions-row-actions) { transition: none; }
+}
+
+.openide-chat-session-preview-heading { display: flex; align-items: flex-start; gap: 16px; }
+.openide-chat-session-preview-title { flex: 1; min-width: 0; }
+.openide-chat-session-preview-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-top: 2px; }
+.openide-chat-session-preview-activity { display: flex; align-items: center; gap: 8px; color: var(--oi-secondary); font-size: 12px; }
+.openide-chat-session-preview-activity[hidden] { display: none; }
+
+/* Specialists belong to the conversation directly above, with quieter nested navigation. */
+.openide-chat-sessions-children { display: flex; flex-direction: column; gap: var(--oi-navigation-row-gap); margin: 4px 8px 6px 24px; padding-left: 8px; border-left: 1px solid var(--vscode-tree-indentGuidesStroke); }
+.openide-chat-sessions-children > .oi-btn,
+.openide-chat-sessions-child.oi-btn { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; justify-content: flex-start; padding: var(--oi-navigation-row-padding); min-height: var(--oi-navigation-row-height); border-radius: var(--oi-navigation-row-radius); text-align: left; }
+.openide-chat-sessions-children-toggle.oi-btn { color: var(--oi-secondary); font-size: 12px; }
+.openide-chat-sessions-child.oi-btn { padding-left: 24px; }
+.openide-chat-sessions-child > .openide-subagent-avatar { width: 18px; height: 18px; flex-basis: 18px; }
+.openide-chat-sessions-child-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+.openide-chat-sessions-children .codicon { flex-shrink: 0; font-size: var(--oi-icon-action, 16px); }
+.openide-text-overflowing { mask-image: linear-gradient(to right, black calc(100% - 24px), transparent); text-overflow: clip !important; }
+
+/* Disclosure layout follows the composer's reveal pattern, without rebuilding sibling rows. */
+.openide-chat-sessions-reveal { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 160ms ease, opacity 160ms ease; }
+.openide-chat-sessions-reveal.expanded { grid-template-rows: 1fr; opacity: 1; }
+.openide-chat-sessions-clip { min-height: 0; overflow: hidden; }
+.openide-chat-sessions-branch { display: flex; flex-direction: column; min-width: 0; }
+.openide-chat-sessions-chevron { transition: transform 160ms ease; }
+[aria-expanded="true"] > .openide-chat-sessions-chevron { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-sessions-reveal, .openide-chat-sessions-chevron { transition: none; }
+}
+.monaco-workbench.monaco-reduce-motion .openide-chat-sessions-reveal,
+.monaco-workbench.monaco-reduce-motion .openide-chat-sessions-chevron { transition: none; }
+
+.openide-chat-sessions-pane.compact .openide-chat-sessions-branch { gap: var(--oi-navigation-row-gap); }
+
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row { border-radius: var(--oi-navigation-row-radius); transition: background-color var(--oi-duration-hover) var(--oi-ease); }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row:is(:hover, :focus-within) { background: var(--oi-hover); }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-open:not(.selected) { background: transparent; }

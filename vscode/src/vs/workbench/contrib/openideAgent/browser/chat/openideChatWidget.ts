@@ -3,7 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, append, reset } from '../../../../../base/browser/dom.js';
+import { AgentWindowAction } from '../../common/openideAgentWindowShortcuts.js';
+import { getWindow, $, addDisposableListener, append, reset } from '../../../../../base/browser/dom.js';
+import { OpenideEmptyState } from '../../../../browser/openideEmptyState.js';
+import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
+import { IOpenideGoalService } from '../openideGoalService.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { FuzzyScore } from '../../../../../base/common/filters.js';
 import { Disposable, toDisposable, MutableDisposable } from '../../../../../base/common/lifecycle.js';
@@ -19,6 +23,7 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { IOpenideChatItem, IOpenideChatRequestItem } from '../../common/chat/openideChatItem.js';
 import { IOpenideChatAskContent } from '../../common/chat/openideChatContent.js';
+import { OpenideChatRequestRail } from './openideChatRequestRail.js';
 import { OpenideChatQuestionsCard } from './openideChatQuestionsCard.js';
 import { IOpenideAgentService } from '../openideAgentService.js';
 import { IOpenideProjectMapLearningService } from '../openideProjectMapLearningService.js';
@@ -44,6 +49,7 @@ import { FileKind } from '../../../../../platform/files/common/files.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { OpenideChatHeader } from './openideChatHeader.js';
 import { OpenideChatListWidget } from './openideChatListWidget.js';
+import { OpenideChatPresentation } from './openideChatPresentation.js';
 import { OpenideChatRequestRenderer } from './openideChatRequestRenderer.js';
 import { OpenideChatPinnedRequest } from './openideChatPinnedRequest.js';
 import { OpenideChatResponseRenderer } from './openideChatResponseRenderer.js';
@@ -51,14 +57,19 @@ import { OPENIDE_CHAT_TRANSCRIPT_COPIED, OPENIDE_CHAT_TRANSCRIPT_EMPTY, openideC
 import { creditOpenideChatFileOutcome } from './parts/openideChatEditLearning.js';
 import { OpenideChatFilesTray } from './parts/openideChatFilesTray.js';
 import { OpenideChatAgentTerminalPane } from './parts/openideChatAgentTerminalPane.js';
+import { onUnexpectedError } from '../../../../../base/common/errors.js';
+import { IEditorService } from '../../../../services/editor/common/editorService.js';
+import { OpenideAgentConversationInput } from '../openideAgentConversationEditor.js';
 import { OpenideChatSessionsPane } from './openideChatSessionsPane.js';
 import { OpenideChatSessionKindChoice } from './openideChatSessionKindPicker.js';
 import { OpenideClaudeHooks } from '../openideAgentCliHooks.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { t } from '../../common/openideStrings.js';
+import { OpenideChatGoalTray } from './parts/openideChatGoalTray.js';
 import { OpenideChatTerminalsTray } from './parts/openideChatTerminalsTray.js';
 import './media/openideChatNative.css';
 import './media/openideChatRequest.css';
+import './media/openideChatLayout.css';
 
 /**
  * Same sentence the webview shows when the turn has no `messageId` yet:
@@ -82,7 +93,88 @@ const ROLLBACK_UNREGISTERED = 'Todavía no se puede volver a este mensaje: el tu
 /** The Sessions column beside the transcript (upstream's side-by-side AgentSessionsControl). */
 const SESSIONS_SIDE_WIDTH = 300;
 
+interface IOpenideChatCompanionOptions {
+	readonly primary: OpenideChatWidget;
+	readonly openSubagent?: (runId: string, parentSessionId?: string) => void;
+}
+
+const selectionTargets = new WeakMap<Window, OpenideChatWidget>();
+export function attachOpenideSelectionToWindow(window: Window, snippet: IComposerSnippet): boolean {
+	const target = selectionTargets.get(window);
+	if (!target) { return false; }
+	target.attachSnippet(snippet); return true;
+}
+
+const companionParents = new WeakMap<HTMLElement, IOpenideChatCompanionOptions>();
+
 export class OpenideChatWidget extends Disposable {
+
+	private readonly _companion: IOpenideChatCompanionOptions | undefined;
+	private readonly _companions = new Set<OpenideChatWidget>();
+	private _shownSession: string | undefined;
+	private _terminalMirror: HTMLElement | undefined;
+	private _terminalPresenter: OpenideChatWidget = this;
+	/** Mount only when the regular IDE chat is explicitly opened. */
+	mount(parent: HTMLElement): void { parent.appendChild(this._root); }
+	unmount(): void { this._root.remove(); }
+
+	get sessionStore(): OpenideChatSessions { return this.sessions; }
+	get onDidChangeSessions(): Event<void> { return this.sessions.onDidChange; }
+	get onDidChangeNavigation(): Event<void> { return this.sessions.onDidChange; }
+
+	/** Shares the live runtime. Disposing a presentation never disposes its owner. */
+	pickAttachments(): void { this._composer.pickAttachments(); }
+
+	showConversationMenu(anchor: HTMLElement): void { this._header.showConversationMenu(anchor); }
+
+	createCompanion(parent: HTMLElement, openSubagent?: (runId: string, parentSessionId?: string) => void): OpenideChatWidget {
+		const primary = this._companion?.primary ?? this;
+		companionParents.set(parent, { primary, openSubagent });
+		try {
+			const widget = this._instantiationService.createInstance(OpenideChatWidget, parent, primary.sessions);
+			primary._companions.add(widget);
+			const targetWindow = parent.ownerDocument.defaultView!;
+			selectionTargets.set(targetWindow, widget);
+			widget._register(toDisposable(() => selectionTargets.delete(targetWindow)));
+			widget._composer.setSharedDraft(primary._composer.draft);
+			widget._register(toDisposable(() => {
+				primary._companions.delete(widget);
+				if (!primary._store.isDisposed && primary._terminalPresenter === widget) {
+					primary._presentTerminal(false);
+				}
+			}));
+			return widget;
+		} finally { companionParents.delete(parent); }
+	}
+
+	openSession(id: string): void {
+		const primary = this._companion?.primary ?? this;
+		if (this.sessions.metaOf(id)?.kind === 'cli') { this._presentTerminal(); }
+		primary._header.switchSession(id);
+		if (id === primary._shownSession && !primary._controller.isBusy) {
+			primary._restoreTranscript(id);
+			for (const companion of primary._companions) { companion._restoreTranscript(id); }
+		} else { primary._switchSession(id); }
+	}
+
+	refreshSessions(): void {
+		const primary = this._companion?.primary ?? this;
+		primary._header.afterExternalMutation();
+		primary._reconcileTerminals();
+	}
+
+	closeSession(id: string): void {
+		(this._companion?.primary ?? this)._header.closeTab(id);
+	}
+
+	deleteSession(id: string): Promise<boolean> {
+		return (this._companion?.primary ?? this)._header.deleteSessionWithConfirm(id);
+	}
+
+	createSession(choice: OpenideChatSessionKindChoice): void {
+		this._newSessionOfKind(choice);
+	}
+
 
 	private readonly _root: HTMLElement;
 	private readonly _listHost: HTMLElement;
@@ -92,9 +184,13 @@ export class OpenideChatWidget extends Disposable {
 
 	private readonly _header: OpenideChatHeader;
 	private readonly _list: OpenideChatListWidget;
+	private readonly _presentation = new OpenideChatPresentation();
 	private readonly _filesTray: OpenideChatFilesTray;
 	private readonly _questionsCard: OpenideChatQuestionsCard;
 	private readonly _terminalsTray: OpenideChatTerminalsTray;
+	private readonly _goalTray: OpenideChatGoalTray;
+	private readonly _goalRequests = new Map<string, IOpenideComposerSubmit>();
+	private readonly _cliGoalRuns = new Map<string, CancellationTokenSource>();
 	private readonly _composer: OpenideChatComposer;
 	private readonly _terminalPane: OpenideChatAgentTerminalPane;
 	private readonly _sessionsPane: OpenideChatSessionsPane;
@@ -102,6 +198,7 @@ export class OpenideChatWidget extends Disposable {
 	private _cliActive = false;
 	/** The request held at the top of the transcript, and the host of the inline editor. */
 	private readonly _pinned: OpenideChatPinnedRequest;
+	private readonly _requestRail: OpenideChatRequestRail | undefined;
 	/** The second composer, mounted in the pinned overlay on the first edit. */
 	private _editComposer: OpenideChatComposer | undefined;
 	private readonly _instantiationService: IInstantiationService;
@@ -136,9 +233,11 @@ export class OpenideChatWidget extends Disposable {
 		@ILanguageService private readonly languageService: ILanguageService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
+		@IOpenideGoalService private readonly goalService: IOpenideGoalService,
 	) {
 		super();
 		this._instantiationService = instantiationService;
+		this._companion = companionParents.get(parent);
 
 		// The `--oi-*` tokens the stylesheet is written against live in a TypeScript string that
 		// the webviews inline; on native DOM somebody has to install it, and it is idempotent.
@@ -169,6 +268,7 @@ export class OpenideChatWidget extends Disposable {
 		];
 
 		this._list = this._register(instantiationService.createInstance(OpenideChatListWidget, this._listHost, { renderers }));
+		this._requestRail = this._companion ? this._register(instantiationService.createInstance(OpenideChatRequestRail, parent, this._list)) : undefined;
 		// Over the list, inside its host: the request whose turn is on screen, and the inline editor.
 		this._pinned = this._register(instantiationService.createInstance(OpenideChatPinnedRequest, this._listHost, {
 			rollbackTo: (element: IOpenideChatRequestItem) => this._rollbackTo(element),
@@ -180,7 +280,13 @@ export class OpenideChatWidget extends Disposable {
 		this._register(this._list.onDidScroll(() => this._syncPinnedRequest()));
 		// The live terminal of an external agent session takes the transcript's place (and the
 		// composer's: the TUI has its own prompt) while such a session is the active tab.
-		this._terminalPane = this._register(instantiationService.createInstance(OpenideChatAgentTerminalPane, this._root));
+		this._terminalPane = this._companion?.primary._terminalPane ?? this._register(instantiationService.createInstance(OpenideChatAgentTerminalPane, this._root));
+		this._terminalMirror = append(this._root, $('.openide-chat-agent-terminal.hidden'));
+		const openTerminal = append(this._terminalMirror, $('button.oi-btn', { type: 'button' }, t('openide.companion.terminal')));
+		this._register(addDisposableListener(openTerminal, 'click', () => this._presentTerminal()));
+		this._register(addDisposableListener(this._root, 'focusin', () => {
+			if (this._cliActive && (this._companion?.primary ?? this)._terminalPresenter !== this) { this._presentTerminal(); }
+		}));
 		this._empty = this._buildEmptyState();
 		// Between the transcript and the composer, which is where the webview's dock puts it: the
 		// pending changes are the thing you decide on BEFORE writing the next message.
@@ -191,21 +297,57 @@ export class OpenideChatWidget extends Disposable {
 		// Docked ON the composer, not in the transcript: the run is parked on the answer, so the
 		// card belongs where the user is already looking. The transcript keeps a shimmer line.
 		this._questionsCard = this._register(instantiationService.createInstance(OpenideChatQuestionsCard, this._composer.questionsHost));
-		this._filesTray = this._register(instantiationService.createInstance(OpenideChatFilesTray, this._composer.trayHost));
+		this._filesTray = this._register(instantiationService.createInstance(OpenideChatFilesTray, this._composer.trayHost, sessions));
 		// Stacked UNDER the changed files, which is the order the webview had too (its `#filesStack`
 		// appended `terms` after `files`): the files are a decision waiting for the user,
 		// the terminals are just running — the thing to act on sits closest to the composer.
 		this._terminalsTray = this._register(instantiationService.createInstance(OpenideChatTerminalsTray, this._composer.trayHost));
-		this._controller = this._register(instantiationService.createInstance(OpenideChatController, sessions));
+		this._controller = this._companion?.primary._controller ?? this._register(instantiationService.createInstance(OpenideChatController, sessions));
+		if (this._companion) { this._composer.shareQueueWith(this._companion.primary._composer); }
+		this._goalTray = this._register(instantiationService.createInstance(OpenideChatGoalTray, this._composer.trayHost, async (sessionId: string, objective: string) => {
+			const owner = this._companion?.primary ?? this;
+			if (sessionId !== this.sessions.activeSessionId()) { return false; }
+			if (this._cliActive) {
+				if (!this._terminalPane.supportsGoal(sessionId) || owner._cliGoalRuns.has(sessionId)) { return false; }
+				const cts = new CancellationTokenSource();
+				owner._cliGoalRuns.set(sessionId, cts);
+				void this.agentService.runCliGoal(sessionId, (runId, prompt, token) => this._terminalPane.runGoalTurn(sessionId, runId, prompt, token), cts.token).catch(error => this.notificationService.error(error)).finally(() => {
+					if (owner._cliGoalRuns.get(sessionId) === cts) { owner._cliGoalRuns.delete(sessionId); }
+					cts.dispose();
+				});
+				return true;
+			}
+			if (this._controller.isBusy) { return false; }
+			const request = owner._goalRequests.get(sessionId);
+			return this._controller.send({ ...request, targetWindowId: request?.targetWindowId ?? getWindow(this._root).vscodeWindowId, capabilities: request?.capabilities.filter(item => item.kind !== 'command' || item.name !== 'goal'), text: `Continue working toward the saved OpenIDE goal: ${objective}. Inspect its current criteria and evidence, then complete the remaining work.`, displayText: objective, mode: 'agent' });
+		}));
+		this._register(toDisposable(() => { for (const cts of this._cliGoalRuns.values()) { cts.dispose(true); } this._cliGoalRuns.clear(); }));
+		this._register(this._terminalPane.onDidChangeGoalSupport(event => this._goalTray.setCliSupport(event.sessionId, event.supported, event.reason)));
+		if (!this._companion) {
+			this._register(this._terminalPane.onDidInterruptGoal(event => {
+				const running = this._cliGoalRuns.get(event.sessionId);
+				if (!running) { return; }
+				running.cancel();
+				void this.goalService.pause(event.sessionId).then(() => this.goalService.report(event.sessionId, event.reason)).catch(error => this.notificationService.error(error));
+			}));
+		}
 		// Appended LAST: it overlays everything under the header, so it must paint on top.
 		this._sessionsPane = this._register(instantiationService.createInstance(OpenideChatSessionsPane, this._root, sessions, (id: string) => this._header.deleteSessionWithConfirm(id)));
-		this._hooks = this._register(instantiationService.createInstance(OpenideClaudeHooks));
+		this._hooks = this._companion?.primary._hooks ?? this._register(instantiationService.createInstance(OpenideClaudeHooks));
 		this._wireSessions();
+		this._register(this._composer.onDidChangeDraft(draft => {
+			const primary = this._companion?.primary ?? this;
+			if (primary !== this) { primary._composer.setSharedDraft(draft); }
+			for (const companion of primary._companions) {
+				if (companion !== this) { companion._composer.setSharedDraft(draft); }
+			}
+		}));
 
 		this._register(responseRenderer.onDidChangeItemHeight(event => this._list.updateItemHeight(event.element, event.height)));
 		this._register(requestRenderer.onDidChangeItemHeight(event => this._list.updateItemHeight(event.element, event.height)));
 		this._register(this._controller.onDidChangeItems(() => {
-			this._list.setItems(this._controller.items);
+			this._list.setItems(this._presentation.items(this._controller.activeConversationId ?? '', this._controller.items));
+			this._requestRail?.update();
 			this._syncQuestionsCard();
 			this._syncPinnedRequest();
 			this._syncEmptyState();
@@ -216,6 +358,7 @@ export class OpenideChatWidget extends Disposable {
 		// instead would run it against a `composer.height` that has not seen the tray yet.
 		this._register(this._filesTray.onDidChangeHeight(() => this._composer.remeasure()));
 		this._register(this._terminalsTray.onDidChangeHeight(() => this._composer.remeasure()));
+		this._register(this._goalTray.onDidChangeHeight(() => { this._composer.remeasure(); this._layoutList(); }));
 		this._register(this._filesTray.onDidRequestStop(() => this._controller.abort()));
 		this._register(this._filesTray.onDidResolveFiles(resolved => {
 			// Accepting or reverting is the strongest signal the project map gets about whether the
@@ -226,8 +369,9 @@ export class OpenideChatWidget extends Disposable {
 				this.learningService.recordOutcome(messageIds, resolved.signal);
 			}
 		}));
-		this._register(this._controller.onDidChangeBusy(busy => {
-			this._composer.setBusy(busy);
+		this._register(this._controller.onDidChangeBusy(() => {
+			this._composer.setBusy(this._controller.isBusy);
+			const busy = this._controller.isBusy;
 			this._filesTray.setBusy(busy);
 			// An abort can end the run without a toolResult ever settling the ask content.
 			this._syncQuestionsCard();
@@ -248,39 +392,41 @@ export class OpenideChatWidget extends Disposable {
 		this._register(this._controller.onDidChangeSessions(() => this._header.render()));
 		// The other half of accepting a mode suggestion: the part unblocked the run, the controller
 		// re-runs the request in the new mode. `fork` is the widget's own — it owns the header.
-		this._register(onDidAcceptOpenideChatModeSuggestion(accepted => {
-			if (accepted.mode === 'fork') {
-				this._controller.resumeInMode('fork', undefined);
-				this.forkActiveSession();
-				return;
-			}
-			this._controller.resumeInMode(accepted.mode, accepted.prompt);
-		}));
+		if (!this._companion) {
+			this._register(onDidAcceptOpenideChatModeSuggestion(accepted => {
+				if (accepted.mode === 'fork') {
+					this._controller.resumeInMode('fork', undefined);
+					this.forkActiveSession();
+					return;
+				}
+				this._controller.resumeInMode(accepted.mode, accepted.prompt);
+			}));
+		}
 		this._register(this._controller.onDidResumeInMode(mode => this._composer.setMode(mode)));
-		this._register(onDidRequestOpenideChatSubagentAction(({ runId, action }) => {
-			if (action === 'cancel') {
-				this.agentService.cancelSubagent(runId);
-				return;
-			}
+		this._register(onDidRequestOpenideChatSubagentAction(({ runId, action, sourceWindow, parentSessionId }) => {
+			if (!this._root.isConnected || getWindow(this._root) !== sourceWindow) { return; }
+			if (action === 'cancel') { this.agentService.cancelSubagent(runId); return; }
+			if (this._companion?.openSubagent) { this._companion.openSubagent(runId, parentSessionId); return; }
 			const sessionId = this._controller.subagentSessionOf(runId);
 			if (!sessionId) {
-				// The mirror lives in a Map that does not survive a reload, and the durable path
-				// never opened one to begin with, so this is reachable today. Saying so beats a row
-				// that looks clickable and does nothing.
 				this._showNotice({ severity: 'info', message: t('chat.part.subagentNoSession') });
 				return;
 			}
-			this.sessions.activate(sessionId);
-			this._header.render();
-			this._switchSession(sessionId);
+			this.openSession(sessionId);
 		}));
-		this._register(onDidRequestOpenideChatContinue(() => {
-			if (this._controller.isBusy) { return; }
-			this._composer.value = OPENIDE_CHAT_CONTINUE_PROMPT;
-			this._composer.submit();
-		}));
+		if (!this._companion) {
+			this._register(onDidRequestOpenideChatContinue(() => {
+				if (this._controller.isBusy) { return; }
+				this._composer.value = OPENIDE_CHAT_CONTINUE_PROMPT;
+				this._composer.submit();
+			}));
+		}
 		this._register(this._composer.onDidSubmit(request => this._send(request)));
 		this._register(this._composer.onDidRequestStop(() => this._controller.abort()));
+		this._register(this._composer.onDidRequestGoal(() => {
+			if (this._listMode || !this.sessions.activeSessionId()) { this._header.newSession(); }
+			void this._goalTray.createGoal(this._composer.value).catch(error => this.notificationService.error(error));
+		}));
 		this._register(this._composer.onDidRequestCompact(() => this.compact()));
 		this._register(this._composer.onDidReject(message => this._showNotice({ severity: 'info', message })));
 		this._register(this._composer.onDidFailVoice(message => this._showNotice({ severity: 'warning', message })));
@@ -301,6 +447,13 @@ export class OpenideChatWidget extends Disposable {
 			}
 		}));
 
+		this._register(this.sessions.onDidChange(() => {
+			this._header.render();
+			this._sessionsPane.render();
+			const active = this.sessions.activeSessionId();
+			if (!this._companion && active && active !== this._shownSession) { this._switchSession(active); }
+			if (!this._companion) { this._reconcileTerminals(); }
+		}));
 		this._restoreTranscript();
 	}
 
@@ -333,6 +486,7 @@ export class OpenideChatWidget extends Disposable {
 
 	/** "New chat": a new conversation tab, activated. The header owns the tab strip, so it goes first. */
 	newSession(): void {
+		if (this._companion) { this._companion.primary.newSession(); return; }
 		this._header.newSession();
 	}
 
@@ -369,7 +523,7 @@ export class OpenideChatWidget extends Disposable {
 
 	/** A Canvas choice: lands in the composer and waits for the user. Never sends on its own. */
 	injectCanvasChoice(label: string): void {
-		this._composer.value = label;
+		this._composer.value = [this._composer.value.trim(), label].filter(Boolean).join('\n\n');
 		this._composer.focus();
 	}
 
@@ -396,7 +550,7 @@ export class OpenideChatWidget extends Disposable {
 
 	/** A Canvas button's prompt: fills the composer and, unless told otherwise, sends it. */
 	injectCanvasPrompt(prompt: string, send: boolean): void {
-		this._composer.value = prompt;
+		this._composer.value = send ? prompt : [this._composer.value.trim(), prompt].filter(Boolean).join('\n\n');
 		this._composer.focus();
 		if (send) {
 			this._composer.submit();
@@ -458,10 +612,18 @@ export class OpenideChatWidget extends Disposable {
 	 * user presses on purpose.
 	 */
 	private _switchSession(id: string): void {
+		if (this._companion) { this._companion.primary._switchSession(id); return; }
+		if (id === this._shownSession && !this._listMode) { return; }
 		this._leaveListMode();
 		this._hideNotice();
 		this._composer.value = '';
+		for (const companion of this._companions) {
+			companion._leaveListMode();
+			companion._composer.value = '';
+			companion._composer.setConversation(id);
+		}
 		this._restoreTranscript(id);
+		for (const companion of this._companions) { companion._restoreTranscript(id); }
 	}
 
 	/**
@@ -507,6 +669,9 @@ export class OpenideChatWidget extends Disposable {
 			this._layoutList();
 			this._header.setSessionsOpen(this._sessionsPane.isOpen);
 		}));
+		this._register(this._sessionsPane.onDidOpenSubagent(id => {
+			void this._instantiationService.invokeFunction(accessor => accessor.get(IEditorService).openEditor(new OpenideAgentConversationInput(id, this), { pinned: true })).catch(onUnexpectedError);
+		}));
 		this._register(this._sessionsPane.onDidOpenSession(id => {
 			const wasListMode = this._listMode;
 			this._header.switchSession(id);
@@ -531,6 +696,14 @@ export class OpenideChatWidget extends Disposable {
 			this._reconcileTerminals();
 		}));
 		this._register(this._header.onDidChangeActiveSession(() => this._reconcileTerminals()));
+		if (this._companion) {
+			this._register(this._header.onDidCloseTab(id => {
+				this._controller.abort(id);
+				this.agentService.releaseConversationResources(id);
+				this._companion!.primary._reconcileTerminals();
+			}));
+			return;
+		}
 		// The dock is what the engine asks "who else is open" and hands a message to. It is registered
 		// from here because the widget is what owns a controller and a session store at once.
 		this.agentService.setConversationHost(this._controller.conversationHost());
@@ -539,6 +712,7 @@ export class OpenideChatWidget extends Disposable {
 			// A run outlives a tab CHANGE, not the tab itself: with the conversation off the strip
 			// there is nowhere for its reply to land and nobody to stop it.
 			this._controller.abort(id);
+			this._cliGoalRuns.get(id)?.cancel();
 			// A conversation that left the strip owns no files and has no inbox any more.
 			this.agentService.releaseConversationResources(id);
 			this._reconcileTerminals();
@@ -579,7 +753,7 @@ export class OpenideChatWidget extends Disposable {
 			this._terminalPane.forget(sessionId);
 			const meta = this.sessions.metaOf(sessionId);
 			if (meta) {
-				void this._terminalPane.open(meta);
+				void this._terminalPane.open(meta).catch(error => this.notificationService.error(error));
 			}
 		}));
 		this._register(this._hooks.onDidInstall(() => this.notificationService.info(t('sessions.cli.hooksInstalled'))));
@@ -607,7 +781,8 @@ export class OpenideChatWidget extends Disposable {
 		if (this._listMode) { return; }
 		this._listMode = true;
 		this._header.setListMode(true);
-		this._terminalPane.hide();
+		if (!this._companion) { this._terminalPane.hide(); }
+		this._terminalMirror?.classList.add('hidden');
 		this._cliActive = false;
 		this._root.classList.remove('openide-chat-cli-active');
 		// The transcript host stays in flow (the panel paints over it): removing it would let the
@@ -633,13 +808,17 @@ export class OpenideChatWidget extends Disposable {
 	}
 
 	private _newSessionOfKind(choice: OpenideChatSessionKindChoice): void {
+		if (this._companion) {
+			if (choice.kind === 'cli') { this._presentTerminal(); }
+			this._companion.primary._newSessionOfKind(choice); return;
+		}
 		this._leaveListMode();
 		// Stacked over the transcript, the panel would cover the session it just created.
 		if (this._sessionsPane.isOpen && this._sessionsPane.mode === 'stacked') {
 			this._sessionsPane.setOpen(false);
 		}
 		if (choice.kind === 'native') {
-			this._header.newSession();
+			this._header.newSession(choice.title);
 			return;
 		}
 		const folder = this.contextService.getWorkspace().folders[0];
@@ -647,12 +826,14 @@ export class OpenideChatWidget extends Disposable {
 		// "Claude Code · dnmusic": the folder is what tells two sessions of the same agent apart.
 		const folderName = folder?.name ? ` · ${folder.name}` : '';
 		const id = this.sessions.createCli(choice.cli.id, `${choice.cli.name}${folderName}`, cwd);
+		if (choice.title?.trim()) { this.sessions.rename(id, choice.title.trim()); }
 		this._header.switchSession(id);
 		this._switchSession(id);
 	}
 
 	/** Terminals whose tab was closed (or session deleted) release their PTY. */
 	private _reconcileTerminals(): void {
+		if (this._companion) { return; }
 		const open = new Set(this.sessions.openTabs().map(session => session.id));
 		for (const session of this.sessions.listAll()) {
 			if (!open.has(session.id) && this._terminalPane.has(session.id)) {
@@ -666,12 +847,20 @@ export class OpenideChatWidget extends Disposable {
 		const meta = this.sessions.metaOf(id);
 		const cli = meta?.kind === 'cli';
 		this._cliActive = cli;
+		void this._goalTray.setSession(id, cli, !!id && this._terminalPane.supportsGoal(id));
 		this._root.classList.toggle('openide-chat-cli-active', cli);
+		if (this._companion) {
+			this._terminalMirror?.classList.toggle('hidden', !cli || this._companion.primary._terminalPresenter === this);
+			this._syncEmptyState();
+			this._layoutList();
+			return;
+		}
+		this._terminalMirror?.classList.toggle('hidden', !cli || this._terminalPresenter === this);
 		if (cli && meta) {
 			if (meta.cliId === 'claude') {
 				void this._hooks.ensure();
 			}
-			void this._terminalPane.open(meta);
+			void this._terminalPane.open(meta).catch(error => this.notificationService.error(error));
 		} else {
 			this._terminalPane.hide();
 		}
@@ -679,30 +868,66 @@ export class OpenideChatWidget extends Disposable {
 		this._layoutList();
 	}
 
-	/**
-	 * What an empty transcript says, built once and shown by `_syncEmptyState`.
-	 *
-	 * The same three parts as the workbench's own empty editor — the product mark, one line, and
-	 * the keys worth knowing — because a new chat is the same kind of moment: a surface with
-	 * nothing in it yet, which should say what to do rather than sit blank. The mark is the very
-	 * file the watermark uses, so the two are one picture and not two drawings of a logo.
-	 */
+	private _presentTerminal(focus = true): void {
+		const primary = this._companion?.primary ?? this;
+		primary._terminalPresenter = this;
+		this._terminalPane.moveTo(this._root, focus);
+		for (const surface of [primary, ...primary._companions]) {
+			surface._terminalMirror?.classList.toggle('hidden', !surface._cliActive || surface === this);
+		}
+		this._layoutList();
+		if (focus) { this._terminalPane.focus(); }
+	}
+
+	/** Prepare a starter without submitting, preserving text already in the composer. */
+	prepareStarter(index: number): void {
+		const prompt = (['chat.empty.explorePrompt', 'chat.empty.planPrompt', 'chat.empty.debugPrompt'] as const)[index];
+		if (!prompt || this._cliActive) { return; }
+		const draft = this._composer.value;
+		this._composer.value = draft ? `${draft}\n\n${t(prompt)}` : t(prompt);
+		this._composer.focus();
+	}
+
+	/** A short path into a real task; suggestions only prepare a draft for the user to review. */
 	private _buildEmptyState(): HTMLElement {
 		const root = append(this._listHost, $('.openide-chat-empty.hidden'));
-		append(root, $('.openide-chat-empty-mark'));
-		append(root, $('.openide-chat-empty-title', undefined, t('chat.empty.title')));
-		append(root, $('.openide-chat-empty-text', undefined, t('chat.empty.text')));
-		const hints = append(root, $('.openide-chat-empty-hints'));
+		const actions = [
+			['chat.empty.explore', AgentWindowAction.explore],
+			['chat.empty.plan', AgentWindowAction.plan],
+			['chat.empty.debug', AgentWindowAction.debug],
+		] as const;
+		const draftActions = actions.map(([label, commandId], index) => ({
+			label: t(label), commandId: this._companion ? commandId : undefined,
+			run: () => this.prepareStarter(index),
+		}));
+		const state = this._register(this._instantiationService.createInstance(OpenideEmptyState, root, {
+			title: t('chat.empty.start'), description: t('chat.empty.text'), actions: draftActions,
+		}));
+		const workspace = append(state.contentNode, $('.openide-chat-empty-workspace'));
+		const workspaceName = append(workspace, $('span.openide-chat-empty-workspace-name'));
+		const syncWorkspace = () => {
+			const folders = this.contextService.getWorkspace().folders;
+			workspace.hidden = folders.length === 0;
+			workspaceName.textContent = folders.map(folder => folder.name).join(', ');
+		};
+		syncWorkspace();
+		this._register(this.contextService.onDidChangeWorkspaceFolders(syncWorkspace));
+		const hints = append(state.contentNode, $('.openide-chat-empty-hints'));
 		for (const [key, hint] of [['/', 'chat.empty.hintSlash'], ['@', 'chat.empty.hintAt']] as const) {
 			const row = append(hints, $('.openide-chat-empty-hint'));
-			append(row, $('kbd.openide-chat-empty-key', undefined, key));
+			const keyLabel = append(row, $('span.monaco-keybinding'));
+			append(keyLabel, $('span.monaco-keybinding-key', undefined, key));
 			append(row, $('span', undefined, t(hint)));
 		}
-		// Only once there is something to go back to. It is the other half of the header's toggle:
-		// from the overview that button returns here, and from here this one goes there.
-		const sessions = append(root, $('button.openide-chat-empty-sessions', { type: 'button' })) as HTMLButtonElement;
-		sessions.textContent = t('chat.empty.sessions');
-		this._register(addDisposableListener(sessions, 'click', () => this._enterListMode()));
+		let hasSessions = false;
+		const syncSessions = () => {
+			const available = this.sessions.listAll().some(session => !session.empty);
+			if (available === hasSessions) { return; }
+			hasSessions = available;
+			state.setActions(available ? [...draftActions, { label: t('chat.empty.sessions'), run: () => this._enterListMode() }] : draftActions);
+		};
+		syncSessions();
+		this._register(this.sessions.onDidChange(syncSessions));
 		return root;
 	}
 
@@ -713,10 +938,6 @@ export class OpenideChatWidget extends Disposable {
 	private _syncEmptyState(): void {
 		const empty = !this._listMode && !this._cliActive && this._controller.items.length === 0;
 		this._empty.classList.toggle('hidden', !empty);
-		const sessions = this._empty.querySelector('.openide-chat-empty-sessions') as HTMLElement | null;
-		if (sessions) {
-			sessions.hidden = this.sessions.listAll().length === 0;
-		}
 	}
 
 	/**
@@ -730,7 +951,7 @@ export class OpenideChatWidget extends Disposable {
 	 * in the middle of its own history.
 	 */
 	private _restoreTranscript(id?: string): void {
-		const conversationId = id ?? this.sessions.activeSessionId();
+		const conversationId = id ?? this.sessions.ensureActive();
 		this._syncCliMode(conversationId);
 		this._list.setFollowTail(true);
 		// The queue of messages typed while a run was busy is per conversation: the composer swaps
@@ -739,7 +960,12 @@ export class OpenideChatWidget extends Disposable {
 		// composer still pointing at the queue of the conversation being left, that drain would send
 		// its message into the wrong conversation.
 		this._composer.setConversation(conversationId);
-		this._controller.restore(id);
+		this._shownSession = conversationId;
+		if (!this._companion) { this._controller.restore(id); }
+		this._list.setItems(this._presentation.items(this._controller.activeConversationId ?? '', this._controller.items));
+			this._requestRail?.update();
+		this._composer.setBusy(this._controller.isBusy);
+		this._syncEmptyState();
 		// So does the context: `usage` is per conversation (`usageOf(activeId)`), but nothing pushed
 		// it on a switch — the ring kept showing the PREVIOUS conversation's percentage until that
 		// one's next turn produced a `usage` event, which on an idle conversation is never.
@@ -781,13 +1007,33 @@ export class OpenideChatWidget extends Disposable {
 		this.notificationService.info(OPENIDE_CHAT_TRANSCRIPT_COPIED);
 	}
 
-	private _send(request: IOpenideComposerSubmit): void {
+	/** A plan action captures its path before opening the goal editor. */
+	createGoalFromPlan(request: { planPath: string; objective: string }): void {
+		if (this._listMode || !this.sessions.activeSessionId()) { this._header.newSession(); }
+		void this._goalTray.createGoal(request.objective, request.planPath).catch(error => this.notificationService.error(error));
+	}
+
+	private _send(request: IOpenideComposerSubmit, targetWindowId = request.targetWindowId ?? getWindow(this._root).vscodeWindowId): void {
+		if (this._companion) { this._companion.primary._send(request, targetWindowId); return; }
+		if (/^\/goal(?:\s|$)/i.test(request.text.trim())) {
+			if (this._listMode || !this.sessions.activeSessionId()) { this._header.newSession(); }
+			const sessionId = this.sessions.activeSessionId()!;
+			this._goalRequests.set(sessionId, request);
+			void this._goalTray.createGoal(request.text.trim().replace(/^\/goal\s*/i, '')).then(created => {
+				if (!created && sessionId === this.sessions.activeSessionId() && !this._composer.value) { this._composer.restore(request); }
+			}).catch(error => {
+				if (sessionId === this.sessions.activeSessionId() && !this._composer.value) { this._composer.restore(request); }
+				this.notificationService.error(error);
+			}).finally(() => { if (this._goalRequests.get(sessionId) === request) { this._goalRequests.delete(sessionId); } });
+			return;
+		}
 		// Typing from the sessions overview starts a fresh local conversation, like upstream.
 		if (this._listMode) {
 			this._header.newSession();
 		}
 		this._hideNotice();
 		void this._controller.send({
+			targetWindowId,
 			text: request.text,
 			displayText: request.displayText,
 			images: request.images.length ? request.images : undefined,
@@ -888,6 +1134,7 @@ export class OpenideChatWidget extends Disposable {
 	 * measured, never assumed: the textarea grows with the text and the strip appears and goes.
 	 */
 	private _layoutList(): void {
+		if (this._store.isDisposed) { return; }
 		if (!this._dimension) {
 			return; // the autorun runs once at construction, before the view pane has a size
 		}
@@ -924,7 +1171,7 @@ export class OpenideChatWidget extends Disposable {
 		const composerBlock = this._composer.height.get();
 		this._sessionsPane.layout(width, this._header.height, this._listMode ? composerBlock : 0);
 		if (this._cliActive && !this._listMode) {
-			this._terminalPane.layout(contentWidth, belowHeader);
+			if ((this._companion?.primary ?? this)._terminalPresenter === this) { this._terminalPane.layout(contentWidth, belowHeader); }
 			return;
 		}
 		const listHeight = Math.max(0, belowHeader - composerBlock);
@@ -1070,6 +1317,7 @@ export class OpenideChatWidget extends Disposable {
 
 	focus(): void {
 		if (this._cliActive) {
+			this._presentTerminal();
 			this._terminalPane.focus();
 			return;
 		}

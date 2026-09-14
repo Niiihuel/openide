@@ -11,41 +11,14 @@
  *  is shown here. That was the reported defect, and the catalog has always carried the codicon.
  *--------------------------------------------------------------------------------------------*/
 
-/* the removed chat webview (`.shimmer`). A gradient swept across the TEXT itself via
-   `background-clip: text` — not an opacity pulse of the row. The distinction is the whole effect:
-   a pulsing row reads as something blinking in alarm, a swept label reads as one that is alive.
-   The `openide-chat-shimmer-sweep` keyframe is declared once in openideChatNative.css. */
-.openide-chat-shimmer {
-	/* upstream chat.css `.progress-step` shimmer: 0/30/50/70/100 stops, chat.thinkingShimmer at 50%, 400% width, 2s */
-	background: linear-gradient(90deg,
-		var(--vscode-descriptionForeground) 0%,
-		var(--vscode-descriptionForeground) 30%,
-		var(--vscode-chat-thinkingShimmer, var(--vscode-foreground)) 50%,
-		var(--vscode-descriptionForeground) 70%,
-		var(--vscode-descriptionForeground) 100%);
-	background-size: 400% 100%;
-	-webkit-background-clip: text;
-	background-clip: text;
-	-webkit-text-fill-color: transparent;
-	color: transparent;
-	animation: openide-chat-shimmer-sweep 2s linear infinite;
-	/* No `will-change: background-position`. It is not a compositable property, so the hint buys
-	   nothing to composite and still promotes the element to a layer whose texture is re-uploaded
-	   on every frame. Measured on the running IDE with one label shimmering: 35% of a core with the
-	   hint, 25% without it, 11% with the shimmer off — the same picture, ten points cheaper. */
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.openide-chat-shimmer { animation: none; }
-}
+/* Live text uses OPENIDE_SHIMMER_CSS from the shared Workbench surface. */
 
 /* ---- Skeleton -----------------------------------------------------------------------------
    Bars standing in for content that is still being written. Lives here, beside the shimmer,
    because the plan card and the edit card both show one and two copies drift.
 
-   Its own keyframes and not the shimmer's: that sweep travels 120% → -120% because it is sized
-   for a 400% gradient clipped to glyphs, and against these 200% bands the same numbers leave the
-   highlight off the bar for most of the cycle — which reads as a few frames a second.
+   Skeleton bars keep their own sweep; the shared text shimmer clips a narrow highlight to
+   glyphs and deliberately rests between passes.
 
    The rule that matters more than the CSS: a skeleton must be built ONCE and left alone. Anything
    that rebuilds it on every streamed delta restarts the animation from frame zero, and no sweep
@@ -58,7 +31,7 @@
 
 .openide-chat-sk-line {
 	height: 10px;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: linear-gradient(90deg,
 			var(--oi-border-soft) 25%,
 			var(--oi-border-strong) 37%,
@@ -478,7 +451,7 @@
 	vertical-align: middle;
 	padding: 0 5px 0 3px;
 	border: 1px solid var(--vscode-chat-requestBorder, var(--oi-border));
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
 	color: var(--vscode-foreground);
 	font-size: 12px;
@@ -498,3 +471,20 @@
 }
 .openide-chat-activity-chip-name { overflow: hidden; text-overflow: ellipsis; }
 .openide-chat-part-verb .openide-chat-activity-chip { vertical-align: -3px; }
+
+/* Keep the failure preview to one line, including inside nested work groups. */
+.monaco-workbench .openide-chat-tool-activity .openide-chat-part-head .openide-chat-part-note {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: clip;
+	mask-image: linear-gradient(to right, black calc(100% - 20px), transparent);
+}
+.openide-chat-tool-activity.openide-chat-part-error .openide-chat-part-head,
+.openide-chat-tool-activity.openide-chat-part-cancelled .openide-chat-part-head { flex-wrap: nowrap; }
+.openide-chat-tool-activity.openide-chat-part-error .openide-chat-part-spacer,
+.openide-chat-tool-activity.openide-chat-part-cancelled .openide-chat-part-spacer { display: none; }
+
+.openide-chat-tool-activity.openide-chat-part-error .openide-chat-part-chevron,
+.openide-chat-tool-activity.openide-chat-part-cancelled .openide-chat-part-chevron { display: inline-flex !important; }
+.openide-chat-tool-activity.openide-chat-part-error .openide-chat-part-head,
+.openide-chat-tool-activity.openide-chat-part-cancelled .openide-chat-part-head { cursor: pointer; }

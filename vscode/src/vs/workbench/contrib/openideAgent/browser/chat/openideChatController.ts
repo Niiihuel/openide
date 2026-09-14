@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { getActiveWindow, scheduleAtNextAnimationFrame } from '../../../../../base/browser/dom.js';
+import { mainWindow } from '../../../../../base/browser/window.js';
 import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
@@ -50,6 +51,7 @@ export type { IOpenideChatRollbackOutcome };
  * stores `{displayText, modelText}` — the UI shows what was typed, the model sees the expansion.
  */
 export interface IOpenideChatSendRequest {
+	readonly targetWindowId?: number;
 	readonly text: string;
 	readonly displayText?: string;
 	/** In-memory attachments; persisted to workspace storage before the turn is saved. */
@@ -123,8 +125,11 @@ function planBuildPrompt(path: string): string {
  * `common/openideConversationCoordination.ts`.
  */
 interface IOpenideChatConversation {
+	targetWindowId?: number;
 	/** Items plus the reducer's cursors. Replaced whole on every event: the state is immutable. */
 	state: IOpenideChatReducerState;
+	/** UI-only receipt; survives tab switches without entering model history or storage. */
+	memoryCaptureNotices?: Map<string | undefined, string>;
 	/** True while a run owns the open reply. Guards the image hydration against a live stream. */
 	streaming: boolean;
 	busy: boolean;
@@ -238,9 +243,16 @@ export class OpenideChatController extends Disposable {
 	) {
 		super();
 		this._effects = this._register(instantiationService.createInstance(OpenideChatSessionEffects, sessions));
+		if (agentService.onDidResolveChatInput) {
+			this._register(agentService.onDidResolveChatInput(resolution => {
+				for (const [conversationId, conversation] of this._conversations) {
+					if (conversation.busy) { this.applySurface({ type: 'inputResolved', resolution }, conversationId); }
+				}
+			}));
+		}
 		if (agentService.onDidChangeMemoryCapture) {
-			this._register(agentService.onDidChangeMemoryCapture(({ conversationId, event }) => {
-				if (conversationId === this._activeId) { this.publishNotice(event.severity === 'info' ? 'info' : 'warning', event.message); }
+			this._register(agentService.onDidChangeMemoryCapture(({ conversationId, messageId, event }) => {
+				this.acceptMemoryCapture(conversationId, messageId, event);
 			}));
 		}
 
@@ -328,7 +340,7 @@ export class OpenideChatController extends Disposable {
 		if (conversationId !== this._activeId || this._deferredRepaint) {
 			return;
 		}
-		this._deferredRepaint = scheduleAtNextAnimationFrame(getActiveWindow(), () => {
+		this._deferredRepaint = scheduleAtNextAnimationFrame(mainWindow, () => {
 			this._deferredRepaint = undefined;
 			this._onDidChangeItems.fire();
 		});
@@ -460,7 +472,8 @@ export class OpenideChatController extends Disposable {
 			this.publishNotice('info', ROLLBACK_IN_PROGRESS);
 			return false;
 		}
-		return this._barrier.withSendPreparation(() => this.prepareAndRun(request));
+		const submitted = { ...request, targetWindowId: request.targetWindowId ?? getActiveWindow().vscodeWindowId };
+		return this._barrier.withSendPreparation(() => this.prepareAndRun(submitted));
 	}
 
 	/**
@@ -509,6 +522,7 @@ export class OpenideChatController extends Disposable {
 			this.notificationService.warn(PLAN_BUILD_BUSY);
 			return;
 		}
+		conversation.targetWindowId = getActiveWindow().vscodeWindowId;
 		conversation.planBuild = { resource: request.resource, owner: request.owner };
 
 		this._activeId = conversationId;
@@ -717,6 +731,7 @@ export class OpenideChatController extends Disposable {
 		this.appendItems(conversationId, messageId, { ...request, text: sendText, displayText: displayText ?? (sendText !== text ? text : undefined), images: durableImages, capabilities }, mode, providerOverride, modelOverride);
 		// The run is launched synchronously from here so the preparation window stays open until
 		// `_runPromise` exists — that is exactly what a queued rollback waits for.
+		this.conversation(conversationId).targetWindowId = request.targetWindowId;
 		this.launchRun(conversationId, messages, messageId, mode, providerOverride, modelOverride);
 		return true;
 	}
@@ -884,6 +899,8 @@ export class OpenideChatController extends Disposable {
 		this.repaint(conversationId);
 	}
 
+	getRunWindowId(conversationId: string): number | undefined { return this._conversations.get(conversationId)?.targetWindowId; }
+
 	private launchRun(conversationId: string, messages: IChatMessage[], messageId: string, mode: AgentMode, providerOverride: string, modelOverride: string, modeInstruction?: string): void {
 		const conversation = this.conversation(conversationId);
 		conversation.runCts?.cancel();
@@ -895,7 +912,7 @@ export class OpenideChatController extends Disposable {
 			messages,
 			event => this.handleRunEvent(runCts, conversationId, messages, event),
 			runCts.token,
-			{ mode, messageId, providerOverride, modelOverride, modeInstruction, conversationId },
+			{ mode, messageId, providerOverride, modelOverride, modeInstruction, conversationId, targetWindowId: conversation.targetWindowId },
 		);
 		conversation.runPromise = runPromise;
 		void runPromise.then(() => {
@@ -934,11 +951,15 @@ export class OpenideChatController extends Disposable {
 			this.publishModelRoute(conversationId);
 			return;
 		}
+		if (event.type === 'info' && event.source === 'memoryCapture') {
+			this.acceptMemoryCapture(conversationId, event.messageId ?? conversation.state.requestId, event);
+			return;
+		}
 		const step = applyAgentEvent(conversation.state, event);
 		if (conversation.runCts !== runCts) {
 			// A late callback from a superseded run must not touch the live transcript, but its
 			// storage effects still have to land: those describe work that really happened.
-			this._effects.apply({ conversationId, messages }, step.sessionEffects.filter(isStorageEffect));
+			this._effects.apply({ conversationId, messages, targetWindowId: conversation.targetWindowId }, step.sessionEffects.filter(isStorageEffect));
 			return;
 		}
 		// Whoever is emitting owns the rows that arrive outside the stream (`applySurface`).
@@ -949,7 +970,7 @@ export class OpenideChatController extends Disposable {
 			this._subagentCards.set(event.run.runId, { conversationId, snapshot: '' });
 		}
 		conversation.state = step.state;
-		this._effects.apply({ conversationId, messages }, step.sessionEffects);
+		this._effects.apply({ conversationId, messages, targetWindowId: conversation.targetWindowId }, step.sessionEffects);
 		this.applyRunLifecycle(conversationId, messages, step.sessionEffects);
 		if (!step.dropped) {
 			this.repaintOnNextFrame(conversationId);
@@ -1051,6 +1072,19 @@ export class OpenideChatController extends Disposable {
 		}
 	}
 
+	/** Receipts belong to a concrete turn; late events from discarded turns cannot revive them. */
+	private acceptMemoryCapture(conversationId: string, messageId: string | undefined, event: Extract<AgentLoopEvent, { type: 'info' }>): void {
+		if (!this.sessions.listAll().some(session => session.id === conversationId)) { return; }
+		if (messageId && !this.sessions.messagesOf(conversationId).some(message => message.role === 'user' && message.messageId === messageId)) { return; }
+		if (event.severity === 'warning') {
+			if (conversationId === this._activeId) { this.publishNotice('warning', event.message); }
+			return;
+		}
+		const conversation = this.conversation(conversationId);
+		(conversation.memoryCaptureNotices ??= new Map()).set(messageId, event.message);
+		this.applySurface({ type: 'memoryCapture', message: event.message, messageId }, conversationId);
+	}
+
 	private publishNotice(severity: IOpenideChatNotice['severity'], message: string): void {
 		this._onDidPublishNotice.fire({ severity, message });
 	}
@@ -1064,6 +1098,9 @@ export class OpenideChatController extends Disposable {
 		if (!outcome.committed) {
 			return outcome;
 		}
+		const receipts = this.conversation(conversationId).memoryCaptureNotices;
+		receipts?.delete(undefined);
+		for (const removedId of outcome.removedMessageIds) { receipts?.delete(removedId); }
 		this.setBusy(conversationId, false);
 		this.rebuildItems(conversationId, this.sessions.messagesOf(conversationId));
 		return outcome;
@@ -1094,6 +1131,14 @@ export class OpenideChatController extends Disposable {
 		this.conversation(conversationId).state = createOpenideChatReducerState(
 			buildOpenideChatTranscript(messages, { runs: this.subagentRunsFor(conversationId) }),
 		);
+		const receipts = this.conversation(conversationId).memoryCaptureNotices;
+		for (const [messageId, message] of receipts ?? []) {
+			if (messageId && !messages.some(item => item.role === 'user' && item.messageId === messageId)) {
+				receipts?.delete(messageId);
+				continue;
+			}
+			this.applySurface({ type: 'memoryCapture', message, messageId }, conversationId);
+		}
 		this.releaseStream(conversationId);
 		this.repaint(conversationId);
 	}

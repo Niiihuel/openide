@@ -149,6 +149,21 @@ suite('OpenIDE ChatComposerVoice', () => {
 		assert.deepStrictEqual({ state: h.voice.state, texts: h.texts, errors: h.errors, requestCancelled: h.requestToken()?.isCancellationRequested }, { state: 'idle', texts: [], errors: [], requestCancelled: true });
 	});
 
+	test('explicit stop resolves only after final transcription and reports cancellation or failure', async () => {
+		for (const outcome of ['success', 'cancel', 'failure'] as const) {
+			const response = new DeferredPromise<string>();
+			const h = create({ transcribe: () => response.p });
+			await h.voice.refreshCapability(); h.voice.toggle(); await flush(); h.speak();
+			let completed = false;
+			const stopped = h.voice.stop().then(success => { completed = true; return success; });
+			await flush(); assert.strictEqual(completed, false); assert.strictEqual(h.voice.state, 'busy');
+			if (outcome === 'cancel') { h.voice.cancel(); }
+			if (outcome === 'failure') { await response.error(new Error('Transcription failed')); }
+			else { await response.complete('Ready to send'); }
+			assert.strictEqual(await stopped, outcome === 'success');
+		}
+	});
+
 	test('failed audio setup closes the context and releases the stream', async () => {
 		const h = create({ resume: async () => { throw new Error('Audio context failed'); } });
 		await h.voice.refreshCapability();

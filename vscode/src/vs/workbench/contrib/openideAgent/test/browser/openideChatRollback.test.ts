@@ -42,7 +42,7 @@ function fakeSessions(messages: IChatMessage[], changeSet?: IMessageChangeSet): 
 	const calls: IFakeSessionsCalls = { removed: [], cleared: [], saved: [] };
 	const sessions = {
 		messagesOf: () => messages,
-		changeSetOf: () => changeSet,
+		changeSetOf: (_id: string, messageId: string) => changeSet?.messageId === messageId ? changeSet : undefined,
 		removeChangeSets: (id: string, messageIds: readonly string[]) => { calls.removed.push({ id, messageIds }); },
 		clearUsage: (id: string) => { calls.cleared.push(id); },
 		save: (id: string, saved: IChatMessage[], hasError: boolean) => { calls.saved.push({ id, count: saved.length, hasError }); },
@@ -54,6 +54,7 @@ function fakeAgentService(results: IMessageRollbackResult[]): { agentService: IO
 	const attempts: boolean[] = [];
 	let index = 0;
 	const agentService = {
+		prepareMemoryRollback: async () => [],
 		rollbackMessage: async (_changeSet: IMessageChangeSet, includeNonConflicting = false) => {
 			attempts.push(includeNonConflicting);
 			return results[Math.min(index++, results.length - 1)];

@@ -7,6 +7,7 @@ import { Orientation, Sash, SashState } from '../../../../../base/browser/ui/sas
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { BrowserEditor } from '../browserEditor.js';
+import { createOpenideElement } from '../../../openideAgent/browser/openideDom.js';
 
 /** Shared workbench-native shell for right-hand browser tools. */
 export class BrowserResizableSidePanel extends Disposable {
@@ -24,7 +25,7 @@ export class BrowserResizableSidePanel extends Disposable {
 		private readonly minWidth = 260,
 	) {
 		super();
-		this.element = editor.window.document.createElement('section');
+		this.element = createOpenideElement(editor.window.document, 'section');
 		this.element.className = `browser-side-panel ${className} hidden`;
 		this.width = this.storageService.getNumber(storageKey, StorageScope.PROFILE, defaultWidth);
 

@@ -42,7 +42,7 @@ export interface IOpenideMemoryCheckpointState {
 	readonly candidates?: readonly IOpenideMemoryCandidate[];
 }
 export interface IOpenideMemoryRequest {
-	readonly action: 'list' | 'get' | 'save' | 'forget' | 'legacy' | 'checkpoint' | 'checkpoint-list' | 'semantic';
+	readonly action: 'list' | 'get' | 'save' | 'forget' | 'legacy' | 'checkpoint' | 'checkpoint-list' | 'capture-rollback' | 'semantic';
 	readonly root?: string;
 	readonly semanticEndpoint?: string;
 	readonly query?: string;
@@ -50,6 +50,8 @@ export interface IOpenideMemoryRequest {
 	readonly session?: string;
 	/** Stable identity of a durable capture job within this conversation. */
 	readonly checkpointId?: string;
+	/** Native rollback only: messages whose capture jobs must never resume. */
+	readonly messageIds?: readonly string[];
 	readonly message?: string;
 	readonly origin?: 'native' | 'external' | 'subagent';
 	readonly topic?: string;
@@ -69,7 +71,18 @@ export interface IOpenideMemoryRequest {
 	readonly maxChars?: number;
 	readonly checkpoint?: IOpenideMemoryCheckpointState;
 }
+/** Exact native write-ahead receipt; rollback still validates the current file. */
+export interface IOpenideMemoryWriteReceipt {
+	readonly operationId: string;
+	readonly message: string;
+	readonly path: string;
+	readonly beforeContent?: string;
+	readonly afterContent: string;
+	readonly time: number;
+}
 export interface IOpenideMemoryResponse {
+	readonly writeReceipts?: readonly IOpenideMemoryWriteReceipt[];
+	readonly rollbackWarning?: string;
 	readonly semanticIds?: readonly string[];
 	readonly projectionWarning?: string;
 	readonly documents?: readonly IOpenideMemoryDocument[];

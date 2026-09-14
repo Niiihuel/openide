@@ -9,6 +9,7 @@
  *  instance nor a parallel automation page. The legacy channel is kept only for Pick & Polish.
  *--------------------------------------------------------------------------------------------*/
 
+import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { encodeBase64, VSBuffer } from '../../../../base/common/buffer.js';
 import { joinPath } from '../../../../base/common/resources.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
@@ -19,6 +20,7 @@ import { IOpenideNativeServices } from '../common/openideNativeServices.js';
 import { IOpenideBrowserAutomation } from '../../../../platform/openideBrowser/common/openideBrowserAutomation.js';
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
 import { normalizeLocalUrl } from '../common/openideLocalUrl.js';
+import { openidePlaywrightVisuals } from '../common/openidePlaywrightVisuals.js';
 import { cursorInstallScript, OPENIDE_CURSOR_GLOBAL, stripCursorHost } from '../common/openideBrowserCursor.js';
 import { flowSlug, formatFlowTime, IFlowFrame, IFlowVideoResult, IRecorderStatus, pickKeyFrames, recorderRuntimeSource, videoMarker } from '../common/openideBrowserRecorder.js';
 import { encodeFlowWebm, frameBytes, frameSignatures, renderContactSheet } from './openideFlowVideo.js';
@@ -383,12 +385,12 @@ export class OpenideBrowserAutomation {
 					},
 				},
 				approvalInfo: (args: any) => ({ title: 'Navegar la vista previa', detail: String(args?.url ?? '') }),
-				invoke: async (args: any) => {
+				invoke: async (args: any, _token: CancellationToken, context?: IAgentToolContext) => {
 					const url = normalizeLocalUrl(String(args.url ?? ''), this.extraHosts());
 					if (!url) {
 						return 'Error: URL not allowed — the built-in browser is for local apps only.';
 					}
-					const input = await this.browserViewService.openPreview(url, undefined, { preserveFocus: true });
+					const input = await this.browserViewService.openPreview(url, undefined, { preserveFocus: true, targetWindowId: context?.targetWindowId });
 					const model = await input.resolve();
 					await model.shareWithAgentSession(this.playwrightSessionId);
 					const result = await this.playwrightService.invokeFunctionRaw<{ url: string; title: string }>(this.playwrightSessionId, input.id, `async (page, timeoutMs, cursorScript) => {
@@ -703,18 +705,10 @@ export class OpenideBrowserAutomation {
 						}
 						const { pageId } = await this.getPage();
 						await this.mark(code.replace(/\s+/g, ' ').slice(0, 80), 'playwright');
-						// Here the code is arbitrary and cannot be instrumented step by step; the
-						// overlay covers it anyway by mirroring the real events Playwright generates.
 						const cursorScript = this.cursorScript();
-						if (cursorScript) {
-							await this.playwrightService.invokeFunctionRaw(this.playwrightSessionId, pageId, `async (page, cursorScript) => { await page.evaluate(cursorScript).catch(() => {}); }`, cursorScript).catch(() => { /* decorativo */ });
-						}
-						// engage turns the cursor mirror on only for this execution: that way the
-						// pointer reflects what the model's code does, but the user's mouse does
-						// not move it. The try/finally guarantees release even on return or failure.
-						const engageOn = cursorScript ? `try { await page.evaluate(g => { const c = globalThis[g]; if (c) { c.engage(true); } }, ${JSON.stringify(OPENIDE_CURSOR_GLOBAL)}); } catch (e) {}` : '';
-						const engageOff = cursorScript ? `try { await page.evaluate(g => { const c = globalThis[g]; if (c) { c.engage(false); } }, ${JSON.stringify(OPENIDE_CURSOR_GLOBAL)}); } catch (e) {}` : '';
-						const result = await this.playwrightService.invokeFunction(this.playwrightSessionId, pageId, `async (page) => { ${engageOn} try { ${code} } finally { ${engageOff} } }`, [], Number(args.timeoutMs) || this.actionTimeoutMs());
+						const result = await this.playwrightService.invokeFunction(this.playwrightSessionId, pageId,
+							`async (rawPage) => { const visual = (${openidePlaywrightVisuals.toString()})(rawPage, ${JSON.stringify(cursorScript)}); const page = visual.page; try { ${code} } finally { await visual.dispose(); } }`,
+							[], Number(args.timeoutMs) || this.actionTimeoutMs());
 						return this.formatPlaywrightResult(result);
 					} catch (error) {
 						return `Error: ${error instanceof Error ? error.message : String(error)}`;

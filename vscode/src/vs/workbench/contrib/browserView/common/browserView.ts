@@ -24,7 +24,7 @@ import {
 	IPermissionCategoryState,
 } from '../../../../platform/browserView/common/browserPermissions.js';
 import type { BrowserEditorInput, IBrowserEditorInputData } from './browserEditorInput.js';
-import type { PreferredGroup } from '../../../services/editor/common/editorService.js';
+import type { IEditorService, PreferredGroup } from '../../../services/editor/common/editorService.js';
 import {
 	IBrowserViewBounds,
 	IBrowserViewNavigationEvent,
@@ -278,8 +278,18 @@ export interface IBrowserViewWorkbenchService {
 	 */
 	getKnownBrowserViews(): Map<string, BrowserEditorInput>;
 
-	/** Open or navigate the workspace's single local-app preview. */
-	openPreview(url?: string, initialState?: IBrowserEditorViewState, options?: { readonly preserveFocus?: boolean }): Promise<BrowserEditorInput>;
+	/**
+	 * Open or navigate the workspace's single local-app preview.
+	 * `reveal` reuses an already loaded URL without reloading its page; explicit navigation still reloads.
+	 * `modal` selects full view (true) or the companion's workspace panel (false); omission preserves presentation.
+	 */
+	openPreview(url?: string, initialState?: IBrowserEditorViewState, options?: { readonly preserveFocus?: boolean; readonly targetWindowId?: number; readonly modal?: boolean; readonly reveal?: boolean }): Promise<BrowserEditorInput>;
+
+	/** Reuses the workspace preview without choosing its editor presentation. */
+	getOrCreatePreview(url?: string, initialState?: IBrowserEditorViewState): BrowserEditorInput;
+
+	/** Chooses native preview presentation for actions originating in a companion window. */
+	registerPreviewEditorTarget(windowId: number, resolve: (modal?: boolean) => Promise<IEditorService>): IDisposable;
 
 	/** Get the workspace preview when it has already been created. */
 	getPreview(): BrowserEditorInput | undefined;

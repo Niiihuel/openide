@@ -243,7 +243,9 @@ class WebContentsViewRendererFeature extends BrowserEditorContribution {
 			}
 		} else {
 			void this._doScreenshot();
-			if (this._overlayObscured) {
+			// A minimized pane has no screenshot surface to paint into. Hide its native view
+			// immediately so it cannot cover the conversation during the layout transition.
+			if (this._overlayObscured || !this._editorVisible) {
 				void this._model.setVisible(false);
 				return;
 			}

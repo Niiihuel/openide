@@ -30,7 +30,7 @@
 .openide-settings-navicon > svg {
 	display: block;
 	color: var(--oi-text-muted);
-	transition: color 120ms ease;
+	transition: color var(--oi-motion-exit, 120ms) var(--oi-ease-out, ease);
 }
 
 .openide-settings-nav-item:hover .openide-settings-navicon > svg,
@@ -42,4 +42,8 @@
 .openide-settings-navicon.large {
 	width: 28px;
 	height: 28px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-settings-navicon > svg { transition: none; }
 }

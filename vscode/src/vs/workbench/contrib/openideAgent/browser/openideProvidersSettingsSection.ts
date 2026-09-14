@@ -302,7 +302,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 					icon: 'debug-disconnect',
 					title: t('openide.providers.activeDisconnected', active?.label ?? activeId),
 					text: t('openide.providers.activeDisconnectedText'),
-					actions: active ? [{ label: t('openide.providers.rowConnect'), icon: 'plug', primary: true, run: () => this.navigate?.(providerPageId(active.id)) }] : undefined,
+					actions: active ? [{ label: t('openide.providers.rowConnect'), ghost: true, run: () => this.navigate?.(providerPageId(active.id)) }] : undefined,
 				});
 			}
 
@@ -502,7 +502,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		} else {
 			// Filled, in the product's amber: connecting is THE action of an available provider (Cursor
 			// paints it the same way), and a ghost label read as a hint rather than a button.
-			this.ui.button(value, { label: t('openide.providers.rowConnect'), primary: true, run: open });
+			this.ui.button(value, { label: t('openide.providers.rowConnect'), ghost: true, run: open });
 		}
 		return row;
 	}

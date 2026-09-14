@@ -14,8 +14,7 @@ import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
-import { defaultButtonStyles } from '../../../../platform/theme/browser/defaultStyles.js';
-import { openideInputBoxStyles } from '../../openideAgent/browser/openideControlStyles.js';
+import { openideInputBoxStyles, openideSecondaryButtonStyles } from '../../openideAgent/browser/openideControlStyles.js';
 import { IOpenideSettingItem } from '../common/openideSettingsTypes.js';
 import { SettingValueType } from '../../../services/preferences/common/preferences.js';
 import { t } from '../../openideAgent/common/openideStrings.js';
@@ -107,7 +106,7 @@ export function createSettingControl(item: IOpenideSettingItem, openJson: () => 
 	}
 	// Schemas with no honest widget (objects, arrays of objects) keep sending the user to the JSON.
 	const host = $('.openide-settings-jsonhost');
-	const button = store.add(new Button(host, { ...defaultButtonStyles, secondary: true, title: t('settings.item.editJson') }));
+	const button = store.add(new Button(host, { ...openideSecondaryButtonStyles, secondary: true, title: t('settings.item.editJson') }));
 	// Same primitive as every section button (openideSettingsSectionBuilder.ts): the widget paints
 	// its colours inline, `.oi-btn` gives it the product's height, padding and radius.
 	button.element.classList.add('oi-btn');

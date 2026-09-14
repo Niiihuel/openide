@@ -633,12 +633,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 		}
 	}
 
-	/**
-	 * Always on. Upstream reads `workbench.experimental.modernUI` here; OpenIDE has no such
-	 * experiment, the floating cards ARE the product's layout, and the parts that reserve the
-	 * card insets in code (`PartLayout`, `AbstractPaneCompositePart`, `EditorPart`) rely on this
-	 * answer never changing at runtime.
-	 */
+	/** OpenIDE docks use the native floating layout so margins and sash positions match their cards. */
 	isFloatingPanelsEnabled(): boolean {
 		return true;
 	}

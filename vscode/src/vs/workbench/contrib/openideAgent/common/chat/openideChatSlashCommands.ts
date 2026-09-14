@@ -112,11 +112,13 @@ export function buildOpenideChatSlashSuggestions(
 	const q = query.toLowerCase();
 	const matches = (name: string, description: string) => !q || name.toLowerCase().startsWith(q) || name.toLowerCase().includes(q) || description.toLowerCase().includes(q);
 	const commandItems: IOpenideChatSlashSuggestion[] = commands
-		.filter(c => c.slug !== COMPACT_COMMAND.slug)
+		.filter(c => c.slug !== COMPACT_COMMAND.slug && c.slug !== 'goal')
 		.filter(c => !NATIVE_WORKFLOW_COMMANDS.some(native => native.slug === c.slug))
 		.filter(c => matches(c.slug, c.description))
 		.map(c => ({ kind: 'command', name: c.slug, description: c.description, hint: c.argumentHint }));
+	const goalDescription = t('goal.suggestion');
 	const builtinItems: IOpenideChatSlashSuggestion[] = [
+		...(matches('goal', goalDescription) ? [{ kind: 'command' as const, name: 'goal', description: goalDescription }] : []),
 		// The description is resolved BEFORE matching, so typing "plan" in English finds the command
 		// by the words actually on screen rather than by a Spanish string nobody can see.
 		...NATIVE_WORKFLOW_COMMANDS

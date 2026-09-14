@@ -21,7 +21,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, append, clearNode, isHTMLElement } from '../../../../base/browser/dom.js';
-import { AnchorAlignment } from '../../../../base/browser/ui/contextview/contextview.js';
+import { AnchorAlignment, getAnchorRect } from '../../../../base/browser/ui/contextview/contextview.js';
 import { DomScrollableElement } from '../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { AnchorPosition } from '../../../../base/common/layout.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
@@ -39,6 +39,7 @@ import { t } from '../common/openideStrings.js';
 export class OpenideUsagePopover extends Disposable {
 
 	private contextView: IOpenContextView | undefined;
+	private anchor: HTMLElement | undefined;
 	private list: HTMLElement | undefined;
 	private scrollable: DomScrollableElement | undefined;
 	private updated: HTMLElement | undefined;
@@ -59,9 +60,13 @@ export class OpenideUsagePopover extends Disposable {
 			this.contextView.close();
 			return;
 		}
+		this.anchor = anchor;
 		this.activeProviderId = activeProviderId;
 		this.contextView = this.contextViewService.showContextView({
-			getAnchor: () => anchor,
+			getAnchor: () => {
+				const bounds = getAnchorRect(anchor);
+				return { x: bounds.left, y: bounds.top - 6, width: bounds.width, height: bounds.height + 6 };
+			},
 			anchorAlignment: AnchorAlignment.RIGHT,
 			anchorPosition: AnchorPosition.ABOVE,
 			// The context view's own dismissal tests the workbench CONTAINER, not the view
@@ -70,15 +75,22 @@ export class OpenideUsagePopover extends Disposable {
 			// carry; the anchor is excluded so its own click toggles instead of racing this close.
 			onDOMEvent: event => this.onDOMEvent(event, anchor),
 			render: container => this.render(container),
+			focus: () => this.list?.closest<HTMLElement>('.openide-usage-menu')?.focus(),
 			onHide: () => {
 				this.contextView = undefined;
+				this.anchor = undefined;
 				this.list = undefined;
 				this.scrollable = undefined;
 				this.updated = undefined;
 				this.refreshButton = undefined;
 				if (this.tick) { clearInterval(this.tick); this.tick = undefined; }
 			},
-		});
+		}, anchor.closest<HTMLElement>('.monaco-workbench') ?? anchor.ownerDocument.body);
+	}
+
+	/** Release an overlay before its owning auxiliary document disappears. */
+	closeForDocument(document: Document): void {
+		if (this.anchor?.ownerDocument === document) { this.contextView?.close(); }
 	}
 
 	private render(container: HTMLElement): DisposableStore {
@@ -92,6 +104,7 @@ export class OpenideUsagePopover extends Disposable {
 		const host = container;
 		container = append(host, $('.openide-menu.openide-usage-menu'));
 		container.setAttribute('role', 'dialog');
+		container.tabIndex = -1;
 		container.setAttribute('aria-label', t('chatSurface.usage.title'));
 
 		// `.openide-menu-section` is the family's small muted heading; the freshness line and the
@@ -100,7 +113,7 @@ export class OpenideUsagePopover extends Disposable {
 		append(header, $('span.openide-usage-header-title', undefined, t('chatSurface.usage.title')));
 		this.updated = append(header, $('span.openide-usage-updated'));
 		this.refreshButton = append(header, $('button.openide-usage-refresh', { type: 'button', title: t('chatSurface.usage.refresh') })) as HTMLButtonElement;
-		append(this.refreshButton, menuIcon('refresh'));
+		append(this.refreshButton, menuIcon('loading'));
 		store.add(addDisposableListener(this.refreshButton, 'click', () => void this.monitor.refresh('manual')));
 
 		this.list = $('.openide-usage-list');
@@ -135,7 +148,7 @@ export class OpenideUsagePopover extends Disposable {
 	/** Escape and click-outside, the same contract the rest of the `.openide-menu` family honours. */
 	private onDOMEvent(event: Event, anchor: HTMLElement): void {
 		if (event.type === 'keydown') {
-			if ((event as KeyboardEvent).key === 'Escape') { this.contextView?.close(); }
+			if ((event as KeyboardEvent).key === 'Escape') { this.contextView?.close(); anchor.querySelector<HTMLElement>('a.statusbar-item-label')?.focus(); }
 			return;
 		}
 		if (event.type !== 'click') { return; }

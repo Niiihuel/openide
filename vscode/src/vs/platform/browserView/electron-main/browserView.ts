@@ -82,7 +82,15 @@ export class BrowserView extends Disposable {
 	private readonly _onDidNavigate = this._register(new Emitter<IBrowserViewNavigationEvent>());
 	readonly onDidNavigate: Event<IBrowserViewNavigationEvent> = this._onDidNavigate.event;
 
-	private readonly _onDidChangeLoadingState = this._register(new Emitter<IBrowserViewLoadingEvent>());
+	private readonly _onDidChangeLoadingState = this._register(new Emitter<IBrowserViewLoadingEvent>({
+		// Restoring an editor fetches its snapshot before subscribing over IPC.
+		// A fast localhost failure can land between those two operations. Replay
+		// the current state on subscription so the renderer cannot retain a blank page.
+		onDidAddListener: () => this._onDidChangeLoadingState.fire({
+			loading: this.webContents.isLoading(),
+			error: this._lastError,
+		}),
+	}));
 	readonly onDidChangeLoadingState: Event<IBrowserViewLoadingEvent> = this._onDidChangeLoadingState.event;
 
 	private readonly _onDidChangeFocus = this._register(new Emitter<IBrowserViewFocusEvent>());

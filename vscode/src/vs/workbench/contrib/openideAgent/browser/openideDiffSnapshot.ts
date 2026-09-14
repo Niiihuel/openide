@@ -22,13 +22,13 @@ const MAX_PERSISTED_BASELINE_CHARS = 8_000_000;
 
 interface IPersistedDiffSnapshots {
 	version: 1;
-	entries: Array<{ path: string; content: string; existed: boolean; added: number; removed: number }>;
+	entries: Array<{ path: string; content: string; existed: boolean; added: number; removed: number; conversationId?: string }>;
 }
 
 export class OpenideDiffSnapshotProvider implements ITextModelContentProvider {
 
 	/** path (relative or absolute, exactly as the tool uses it) → baseline (content + whether it existed). */
-	private readonly baselines = new Map<string, { content: string; existed: boolean }>();
+	private readonly baselines = new Map<string, { content: string; existed: boolean; conversationId?: string }>();
 	/** Subset of baselines whose current content still differs. Keeping it apart from the map stops
 	 *  the file stepper from counting snapshots that were captured but are already resolved/unchanged. */
 	private readonly pending = new Set<string>();
@@ -61,7 +61,7 @@ export class OpenideDiffSnapshotProvider implements ITextModelContentProvider {
 				if (total > MAX_PERSISTED_BASELINE_CHARS) {
 					break;
 				}
-				this.baselines.set(entry.path, { content: entry.content, existed: entry.existed });
+				this.baselines.set(entry.path, { content: entry.content, existed: entry.existed, conversationId: entry.conversationId });
 				this.pending.add(entry.path);
 				this.counts.set(entry.path, {
 					added: Math.max(0, Number(entry.added) || 0),
@@ -93,9 +93,11 @@ export class OpenideDiffSnapshotProvider implements ITextModelContentProvider {
 	}
 
 	/** Stores the baseline the FIRST time a path is seen (diff accumulated against that point). */
-	setBaselineOnce(path: string, content: string, existed: boolean = true): void {
+	setBaselineOnce(path: string, content: string, existed: boolean = true, conversationId?: string): void {
 		if (!this.baselines.has(path)) {
-			this.baselines.set(path, { content, existed });
+			this.baselines.set(path, { content, existed, conversationId });
+		} else if (conversationId !== undefined && this.baselines.get(path)!.conversationId !== conversationId) {
+			this.baselines.get(path)!.conversationId = '';
 		}
 	}
 
@@ -112,8 +114,8 @@ export class OpenideDiffSnapshotProvider implements ITextModelContentProvider {
 		return [...this.baselines.keys()].filter(path => this.pending.has(path));
 	}
 
-	pendingDiffs(): Array<{ path: string; added: number; removed: number }> {
-		return this.pendingPaths().map(path => ({ path, ...(this.counts.get(path) ?? { added: 0, removed: 0 }) }));
+	pendingDiffs(conversationId?: string): Array<{ path: string; added: number; removed: number }> {
+		return this.pendingPaths().filter(path => conversationId === undefined || this.baselines.get(path)?.conversationId === conversationId).map(path => ({ path, ...(this.counts.get(path) ?? { added: 0, removed: 0 }) }));
 	}
 
 	/** Updates the live diff signal. The session recomputes it against the model and the agent loop
@@ -135,7 +137,7 @@ export class OpenideDiffSnapshotProvider implements ITextModelContentProvider {
 	 *  counting as a diff). It syncs the `openide-diff` model when it is alive (diff open). */
 	overwriteBaseline(path: string, content: string): void {
 		const prev = this.baselines.get(path);
-		this.baselines.set(path, { content, existed: prev?.existed ?? true });
+		this.baselines.set(path, { content, existed: prev?.existed ?? true, conversationId: prev?.conversationId });
 		this.modelService.getModel(this.uriFor(path))?.setValue(content);
 		this.persist();
 	}

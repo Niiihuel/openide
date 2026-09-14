@@ -136,7 +136,7 @@
 	margin-top: 6px;
 	padding: 3px 10px;
 	border: 1px solid var(--vscode-button-border, transparent);
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: var(--vscode-button-secondaryBackground);
 	color: var(--vscode-button-secondaryForeground);
 	font-size: 12px;
@@ -179,10 +179,28 @@
 	align-items: center;
 	justify-content: center;
 	border: none;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	cursor: pointer;
 	padding: 0;
 }
-.openide-chat-notice-close:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+.openide-chat-notice-close:hover { background: var(--oi-hover); color: var(--vscode-foreground); }
+
+/* Memory is a quiet timeline entry, not a persistent alert card. */
+.openide-chat-native .openide-chat-notice-row.openide-chat-memory-receipt {
+	padding: 4px 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	color: var(--oi-secondary);
+	font-size: var(--oi-text-sm);
+	gap: 6px;
+}
+.openide-chat-native .openide-chat-memory-receipt > .codicon {
+	color: inherit;
+	width: var(--oi-icon-action);
+	height: var(--oi-icon-action);
+	flex-basis: var(--oi-icon-action);
+	font-size: var(--oi-icon-action);
+}

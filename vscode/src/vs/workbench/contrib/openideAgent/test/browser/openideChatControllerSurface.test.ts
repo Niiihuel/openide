@@ -16,6 +16,8 @@ import { stubOpenideChatControllerHostServices } from './openideChatControllerTe
 import { IOpenideAgentService, IPlanDraftState } from '../../browser/openideAgentService.js';
 import { OpenideChatSessions } from '../../browser/openideChatSessions.js';
 import { isOpenideChatResponseItem } from '../../common/chat/openideChatItem.js';
+import { IOpenideChatInputResolution } from '../../common/chat/openideChatSurface.js';
+import { openideChatLiveStatusLabel } from '../../common/chat/openideChatLiveStatus.js';
 import { AgentLoopEvent, IChatMessage } from '../../common/openideAgentTypes.js';
 
 /**
@@ -33,11 +35,14 @@ suite('OpenIDE ChatController — plan and canvas wiring', () => {
 
 	interface IHarness {
 		readonly controller: OpenideChatController;
+		readonly emitAgent: (event: AgentLoopEvent) => void;
+		readonly resolveInput: (resolution: IOpenideChatInputResolution) => void;
 		readonly sessions: OpenideChatSessions;
 		readonly createPlan: (path: string, title: string, markdown: string) => void;
 		readonly changePlanDraft: (draft: IPlanDraftState) => void;
 		readonly changeCanvas: (path: string, title: string, created: boolean) => void;
 		readonly requestPlanBuild: (path: string, resource: URI) => void;
+		readonly memoryCapture: (conversationId: string, message: string, severity?: 'info' | 'warning', messageId?: string) => void;
 		/** Every `runMessages` call the controller made. */
 		readonly runs: { messages: IChatMessage[]; mode: string | undefined; messageId: string | undefined }[];
 		/** Resolves the run in flight, as the engine finishing would. */
@@ -48,6 +53,9 @@ suite('OpenIDE ChatController — plan and canvas wiring', () => {
 	}
 
 	function createHarness(): IHarness {
+		const onDidResolveChatInput = store.add(new Emitter<IOpenideChatInputResolution>());
+		let emitAgent: ((event: AgentLoopEvent) => void) | undefined;
+		const onDidChangeMemoryCapture = store.add(new Emitter<{ conversationId: string; messageId?: string; event: Extract<AgentLoopEvent, { type: 'info' }> }>());
 		const onDidCreatePlan = store.add(new Emitter<{ path: string; title: string; markdown: string }>());
 		const onDidChangePlanDraft = store.add(new Emitter<IPlanDraftState>());
 		const onDidChangeCanvas = store.add(new Emitter<{ path: string; title: string; created: boolean }>());
@@ -60,13 +68,16 @@ suite('OpenIDE ChatController — plan and canvas wiring', () => {
 		let settleRun: ((error?: Error) => void) | undefined;
 
 		const agentService = {
+			onDidResolveChatInput: onDidResolveChatInput.event,
 			onDidChangePlanFollow: store.add(new Emitter<boolean>()).event,
 			isPlanFollowEnabled: () => false,
 			onDidCreatePlan: onDidCreatePlan.event,
+			onDidChangeMemoryCapture: onDidChangeMemoryCapture.event,
 			onDidChangePlanDraft: onDidChangePlanDraft.event,
 			onDidChangeCanvas: onDidChangeCanvas.event,
 			onDidRequestPlanBuild: onDidRequestPlanBuild.event,
 			onDidRequestPlanBuildCancel: store.add(new Emitter<URI>()).event,
+			prepareMemoryRollback: async () => [],
 			getActiveProviderId: () => 'anthropic',
 			getModel: () => 'claude',
 			buildMentionContext: async () => undefined,
@@ -74,6 +85,7 @@ suite('OpenIDE ChatController — plan and canvas wiring', () => {
 			finishPlanBuild: (resource: URI) => { finished.push(resource); },
 			failPlanBuild: (resource: URI) => { failed.push(resource); },
 			runMessages: (messages: IChatMessage[], _onEvent: (e: AgentLoopEvent) => void, _token: unknown, options: { mode?: string; messageId?: string }) => {
+				emitAgent = _onEvent;
 				runs.push({ messages: [...messages], mode: options?.mode, messageId: options?.messageId });
 				return new Promise<void>((resolve, reject) => {
 					settleRun = error => error ? reject(error) : resolve();
@@ -93,6 +105,9 @@ suite('OpenIDE ChatController — plan and canvas wiring', () => {
 
 		return {
 			controller, sessions, runs, finished, failed, warnings,
+			emitAgent: event => emitAgent?.(event),
+			resolveInput: resolution => onDidResolveChatInput.fire(resolution),
+			memoryCapture: (conversationId, message, severity = 'info', messageId) => onDidChangeMemoryCapture.fire({ conversationId, messageId, event: { type: 'info', severity, message } }),
 			createPlan: (path, title, markdown) => onDidCreatePlan.fire({ path, title, markdown }),
 			changePlanDraft: draft => onDidChangePlanDraft.fire(draft),
 			changeCanvas: (path, title, created) => onDidChangeCanvas.fire({ path, title, created }),
@@ -118,6 +133,56 @@ suite('OpenIDE ChatController — plan and canvas wiring', () => {
 	function draft(overrides: Partial<IPlanDraftState> = {}): IPlanDraftState {
 		return { resource: URI.file('/w/' + PLAN), path: PLAN, title: 'Refactor', markdown: '# Ref', done: false, ...overrides };
 	}
+
+	test('background memory stays inline across tabs and never changes model history', () => {
+		const harness = createHarness();
+		harness.controller.restore();
+		const originalId = harness.sessions.ensureActive();
+		const otherId = harness.sessions.createBackground('Other chat', []);
+		const notices: string[] = [];
+		store.add(harness.controller.onDidPublishNotice(notice => notices.push(notice.message)));
+		harness.memoryCapture(originalId, 'Memory saved: first.md');
+		harness.memoryCapture(originalId, 'Memory saved: latest.md');
+		harness.controller.restore(otherId);
+		harness.memoryCapture(originalId, 'Memory saved: background.md');
+		assert.strictEqual(harness.controller.items.length, 0, 'background receipt belongs to its own conversation');
+		harness.controller.restore(originalId);
+		assert.deepStrictEqual({
+			items: harness.controller.items.length,
+			content: contentOf(harness),
+			modelHistory: harness.sessions.messagesOf(originalId),
+			notices,
+		}, {
+			items: 1,
+			content: [{ kind: 'notice', severity: 'info', source: 'memoryCapture', message: 'Memory saved: background.md' }],
+			modelHistory: [], notices: [],
+		});
+		harness.memoryCapture(originalId, 'Memory could not be saved', 'warning');
+		assert.deepStrictEqual(notices, ['Memory could not be saved'], 'actionable warnings remain visible');
+	});
+
+	test('rollback removes only discarded memory receipts and ignores their late background completion', async () => {
+		const harness = createHarness();
+		const id = harness.sessions.ensureActive();
+		harness.sessions.save(id, [
+			{ role: 'user', content: 'First', messageId: 'turn-first' },
+			{ role: 'assistant', content: 'First answer' },
+			{ role: 'user', content: 'Second', messageId: 'turn-second' },
+			{ role: 'assistant', content: 'Second answer' },
+		], false);
+		harness.controller.restore(id);
+		harness.memoryCapture(id, 'Saving first', 'info', 'turn-first');
+		harness.memoryCapture(id, 'Saved first', 'info', 'turn-first');
+		harness.memoryCapture(id, 'Saving second', 'info', 'turn-second');
+		const receipts = () => harness.controller.items.flatMap(item => isOpenideChatResponseItem(item) ? item.content : []).filter(part => part.kind === 'notice' && part.source === 'memoryCapture').map(part => part.kind === 'notice' ? part.message : '');
+		assert.deepStrictEqual(receipts(), ['Saved first', 'Saving second']);
+		const outcome = await harness.controller.rollbackToUserMessage('turn-second');
+		assert.strictEqual(outcome.committed, true);
+		assert.deepStrictEqual(receipts(), ['Saved first']);
+		harness.memoryCapture(id, 'Saved second (late)', 'info', 'turn-second');
+		harness.controller.restore(id);
+		assert.deepStrictEqual(receipts(), ['Saved first']);
+	});
 
 	test('a plan draft reaches the transcript as it is being written', () => {
 		const harness = createHarness();
@@ -186,6 +251,24 @@ suite('OpenIDE ChatController — plan and canvas wiring', () => {
 		assert.strictEqual(turn.hidden, true);
 		assert.ok(turn.content.includes(PLAN));
 		assert.strictEqual(turn.messageId, harness.runs[0].messageId);
+	});
+
+	test('a resolved input updates its background conversation and clears the wait', async () => {
+		const harness = createHarness();
+		harness.controller.restore();
+		const originalId = harness.sessions.ensureActive();
+		harness.requestPlanBuild(PLAN, URI.file('/w/' + PLAN));
+		harness.emitAgent({ type: 'accountChoiceRequest', id: 'choose-account', spentLabel: 'A', candidates: [] });
+		assert.ok(openideChatLiveStatusLabel(contentOf(harness), false)?.waitingForResponse);
+		const otherId = harness.sessions.createBackground('Other', []);
+		harness.controller.restore(otherId);
+		harness.resolveInput({ kind: 'accountChoice', requestId: 'choose-account', decision: 'stop' });
+		assert.strictEqual(harness.controller.items.length, 0);
+		harness.controller.restore(originalId);
+		const choice = contentOf(harness).find(content => content.kind === 'accountChoice');
+		assert.ok(choice?.kind === 'accountChoice' && choice.decision === 'stop');
+		assert.ok(!openideChatLiveStatusLabel(contentOf(harness), false)?.waitingForResponse);
+		await harness.finishRun();
 	});
 
 	test('the plan editor is told when the build finishes', async () => {

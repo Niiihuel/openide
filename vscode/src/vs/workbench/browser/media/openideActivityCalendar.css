@@ -1,0 +1,17 @@
+/* Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License. */
+.openide-activity-calendar { min-width: 0; color: var(--oi-text-muted); font-size: var(--oi-text-sm); }
+.openide-activity-calendar-scroll { overflow-x: auto; padding: 3px; }
+.openide-activity-calendar-chart { min-width: 600px; }
+.openide-activity-calendar-months, .openide-activity-calendar-days { display: grid; gap: 4px; }
+.openide-activity-calendar-months { margin-bottom: 10px; }
+.openide-activity-calendar-days { grid-template-rows: repeat(7, 1fr); }
+.openide-activity-calendar-day { display: block; aspect-ratio: 1; border-radius: 3px; background: var(--oi-tint-2); outline: 1px solid var(--oi-border-soft); outline-offset: -1px; }
+.openide-activity-calendar-day[data-level="1"] { background: color-mix(in srgb, var(--vscode-charts-green) 28%, var(--vscode-editor-background)); }
+.openide-activity-calendar-day[data-level="2"] { background: color-mix(in srgb, var(--vscode-charts-green) 50%, var(--vscode-editor-background)); }
+.openide-activity-calendar-day[data-level="3"] { background: color-mix(in srgb, var(--vscode-charts-green) 75%, var(--vscode-editor-background)); }
+.openide-activity-calendar-day[data-level="4"] { background: var(--vscode-charts-green); }
+.openide-activity-calendar-day:focus-visible { outline: 2px solid var(--oi-focus); outline-offset: 1px; }
+.openide-activity-calendar-day:hover { outline-color: var(--oi-text-muted); }
+.openide-activity-calendar-legend { display: flex; align-items: center; justify-content: flex-end; gap: 5px; margin-top: 12px; }
+.openide-activity-calendar-legend .openide-activity-calendar-day { width: 12px; height: 12px; }
+.hc-black .openide-activity-calendar-day, .hc-light .openide-activity-calendar-day { outline-color: var(--vscode-contrastBorder); }

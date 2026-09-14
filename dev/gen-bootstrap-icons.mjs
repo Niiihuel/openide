@@ -106,8 +106,9 @@ const MAP = [
 	['filter', 'funnel'], ['filter-filled', 'funnel-fill'], ['sort-precedence', 'sort-down'],
 
 	// ---- source control
-	['git-commit', 'git'], ['git-merge', 'git'], ['git-pull-request', 'git'], ['git-pull-request-closed', 'git'], ['git-pull-request-draft', 'git'],
-	['git-branch', 'git'], ['git-compare', 'file-diff'], ['git-fetch', 'cloud-arrow-down'], ['repo', 'journal-code'], ['repo-forked', 'diagram-2'], ['repo-clone', 'copy'],
+	// Branch, commit, merge and pull requests retain their native semantic glyphs.
+	// Bootstrap's Git brand is not an action icon.
+	['git-compare', 'arrow-left-right'], ['git-fetch', 'cloud-arrow-down'], ['repo', 'journal-code'], ['repo-forked', 'diagram-2'], ['repo-clone', 'copy'],
 	['repo-push', 'cloud-arrow-up'], ['repo-pull', 'cloud-arrow-down'], ['diff', 'file-diff'], ['diff-added', 'plus-square'], ['diff-removed', 'dash-square'], ['diff-modified', 'circle-fill'], ['diff-renamed', 'arrow-right-square'],
 	['diff-ignored', 'slash-square'], ['diff-single', 'file-diff'], ['diff-multiple', 'files'],
 	['cloud-upload', 'cloud-arrow-up'], ['cloud-download', 'cloud-arrow-down'], ['cloud', 'cloud'], ['github', 'github'], ['github-inverted', 'github'], ['github-alt', 'github'],
@@ -139,6 +140,7 @@ const MAP = [
 	['chrome-maximize', 'square'], ['chrome-minimize', 'dash-lg'], ['chrome-restore', 'copy'],
 	['pin', 'pin-angle'], ['pinned', 'pin-angle-fill'], ['pinned-dirty', 'pin-fill'],
 	['open-preview', 'file-text'], ['preview', 'eye'], ['link-external', 'box-arrow-up-right'], ['window', 'window'], ['multiple-windows', 'window-stack'], ['browser', 'browser-chrome'], ['empty-window', 'window'],
+	['developer-tools', 'code-square'],
 	['device-desktop', 'display'], ['device-mobile', 'phone'], ['device-camera', 'camera'], ['device-camera-video', 'camera-video'], ['keyboard', 'keyboard'], ['record-keys', 'keyboard'],
 	['vm', 'display'], ['vm-active', 'display'], ['vm-running', 'display'], ['vm-outline', 'display'], ['vm-connect', 'display'],
 	['word-wrap', 'text-wrap'], ['whitespace', 'text-paragraph'], ['case-sensitive', 'type'], ['whole-word', 'type-bold'], ['text-size', 'fonts'],
@@ -231,7 +233,7 @@ const MAP = [
 	['terminal-git-bash', 'terminal'], ['terminal-secure', 'terminal'],
 
 	// ---- git extras
-	['git-branch-create', 'plus-lg'], ['git-branch-delete', 'trash'], ['git-branch-changes', 'git'], ['git-branch-staged-changes', 'git'], ['git-branch-conflicts', 'exclamation-triangle'],
+	['git-branch-create', 'plus-lg'], ['git-branch-delete', 'trash'], ['git-branch-conflicts', 'exclamation-triangle'],
 	['merge', 'union'], ['merge-into', 'union'], ['repo-force-push', 'cloud-arrow-up'], ['repo-fetch', 'cloud-arrow-down'], ['repo-pinned', 'pin-angle'], ['repo-selected', 'journal-check'],
 	['git-pull-request-create', 'git'], ['git-pull-request-milestone', 'flag'], ['git-pull-request-reviewer', 'person'], ['git-pull-request-assignee', 'person'],
 	['git-pull-request-done', 'check-circle'], ['git-pull-request-go-to-changes', 'file-diff'], ['git-pull-request-new-changes', 'file-diff'],

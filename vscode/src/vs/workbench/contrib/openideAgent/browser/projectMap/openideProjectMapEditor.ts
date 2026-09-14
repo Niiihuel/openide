@@ -184,21 +184,21 @@ export class OpenideProjectMapEditor extends EditorPane {
 		searchWrap.classList.add('openide-pmap-search-wrap');
 		searchWrap.insertBefore(icon(Codicon.search), searchWrap.firstChild);
 		this.search = searchCard.addHeadAction($('input.openide-pmap-search-input', { type: 'search', placeholder: t('projectMap.search.placeholder'), spellcheck: 'false', 'aria-label': t('projectMap.search.aria') }) as HTMLInputElement);
-		this.searchClear = searchCard.addHeadAction($('button.openide-pmap-iconbtn.hidden', { type: 'button', title: t('projectMap.search.clear') }) as HTMLButtonElement);
+		this.searchClear = searchCard.addHeadAction($('button.openide-pmap-iconbtn.oi-dock-action.hidden', { type: 'button', title: t('projectMap.search.clear') }) as HTMLButtonElement);
 		append(this.searchClear, icon(Codicon.close));
 		this._register(addDisposableListener(this.search, 'input', () => this.onSearchInput()));
 		this._register(addDisposableListener(this.search, 'keydown', event => { if (event.key === 'Escape') { this.clearSearch(); } }));
 		this._register(addDisposableListener(this.searchClear, 'click', () => this.clearSearch()));
 		// Results live OUTSIDE the collapsible body: typing has to answer even on a folded card.
 		this.results = $('.openide-pmap-results');
-		this.resultsScroll = this._register(new DomScrollableElement(this.results, { vertical: ScrollbarVisibility.Auto, horizontal: ScrollbarVisibility.Hidden, useShadows: false, verticalScrollbarSize: 8 }));
+		this.resultsScroll = this._register(new DomScrollableElement(this.results, { vertical: ScrollbarVisibility.Auto, horizontal: ScrollbarVisibility.Hidden, useShadows: false }));
 		this.resultsScroll.getDomNode().classList.add('openide-pmap-results-scroll', 'hidden');
 		searchCard.card.appendChild(this.resultsScroll.getDomNode());
 		this.crumbs = append(searchCard.body, $('.openide-pmap-crumbs'));
 		const statusRow = append(searchCard.body, $('.openide-pmap-status'));
 		this.statusIcon = append(statusRow, icon(Codicon.check));
 		this.status = append(statusRow, $('span.openide-pmap-status-text', undefined, t('projectMap.loading')));
-		const refresh = append(statusRow, $('button.openide-pmap-iconbtn', { type: 'button', title: t('projectMap.rebuild') })) as HTMLButtonElement;
+		const refresh = append(statusRow, $('button.openide-pmap-iconbtn.oi-dock-action', { type: 'button', title: t('projectMap.rebuild') })) as HTMLButtonElement;
 		append(refresh, icon(Codicon.refresh));
 		this._register(addDisposableListener(refresh, 'click', () => void this.rebuild()));
 
@@ -213,7 +213,7 @@ export class OpenideProjectMapEditor extends EditorPane {
 			expandTitle: t('projectMap.modules.expand'),
 		}, this.storageService));
 		this.modulesCount = modulesCard.addHeadAction($('span.openide-pmap-count'));
-		const all = modulesCard.addHeadAction($('button.openide-pmap-link', { type: 'button', title: t('projectMap.modules.showAll') }, t('projectMap.modules.all')) as HTMLButtonElement);
+		const all = modulesCard.addHeadAction($('button.openide-pmap-link.oi-dock-action', { type: 'button', title: t('projectMap.modules.showAll') }, t('projectMap.modules.all')) as HTMLButtonElement);
 		this._register(addDisposableListener(all, 'click', () => { this.hidden.clear(); this.applyHidden(); }));
 		this.modulesList = $('.openide-pmap-modules-list');
 		this.modulesScroll = this._register(new DomScrollableElement(this.modulesList, { vertical: ScrollbarVisibility.Auto, horizontal: ScrollbarVisibility.Hidden, useShadows: false }));
@@ -236,16 +236,16 @@ export class OpenideProjectMapEditor extends EditorPane {
 		this.inspIcon = inspectorCard.head.appendChild($('span.openide-pmap-insp-icon'));
 		inspectorCard.head.insertBefore(this.inspIcon, inspectorCard.head.firstChild);
 		this.inspTitle = inspectorCard.head.insertBefore($('span.openide-pmap-insp-title'), inspectorCard.headActions);
-		const inspClose = inspectorCard.addHeadAction($('button.openide-pmap-iconbtn', { type: 'button', title: t('projectMap.inspector.close') }) as HTMLButtonElement);
+		const inspClose = inspectorCard.addHeadAction($('button.openide-pmap-iconbtn.oi-dock-action', { type: 'button', title: t('projectMap.inspector.close') }) as HTMLButtonElement);
 		append(inspClose, icon(Codicon.close));
 		this._register(addDisposableListener(inspClose, 'click', () => this.map.select(undefined)));
 		const inspBody = $('.openide-pmap-insp-body');
 		this.inspPath = append(inspBody, $('.openide-pmap-insp-path'));
 		this.inspModule = append(inspBody, $('.openide-pmap-insp-module'));
 		const actions = append(inspBody, $('.openide-pmap-insp-actions'));
-		const open = append(actions, $('button.openide-pmap-btn.primary', { type: 'button' }, t('projectMap.open'))) as HTMLButtonElement;
-		const copy = append(actions, $('button.openide-pmap-btn', { type: 'button' }, t('projectMap.copyPath'))) as HTMLButtonElement;
-		const ask = append(actions, $('button.openide-pmap-btn', { type: 'button' }, t('projectMap.ask'))) as HTMLButtonElement;
+		const open = append(actions, $('button.openide-pmap-btn.oi-btn.primary', { type: 'button' }, t('projectMap.open'))) as HTMLButtonElement;
+		const copy = append(actions, $('button.openide-pmap-btn.oi-btn', { type: 'button' }, t('projectMap.copyPath'))) as HTMLButtonElement;
+		const ask = append(actions, $('button.openide-pmap-btn.oi-btn', { type: 'button' }, t('projectMap.ask'))) as HTMLButtonElement;
 		this._register(addDisposableListener(open, 'click', () => void this.openSelected()));
 		this._register(addDisposableListener(copy, 'click', () => this.copyPath(copy)));
 		this._register(addDisposableListener(ask, 'click', () => this.askAgent()));
@@ -256,14 +256,16 @@ export class OpenideProjectMapEditor extends EditorPane {
 
 		// ---- abajo-derecha: minimapa + zoom
 		const bottomRight = append(this.root, $('.openide-pmap-panel.bottom.right'));
-		const minimap = append(bottomRight, $('.openide-pmap-card.openide-pmap-minimap'));
+		const minimapCard = append(bottomRight, $('.openide-pmap-card.openide-pmap-minimap'));
+		// Canvas measures its host client box; keep card padding outside that viewport.
+		const minimap = append(minimapCard, $('.openide-pmap-minimap-viewport'));
 		const zoom = append(bottomRight, $('.openide-pmap-card.openide-pmap-zoom'));
-		const zoomIn = append(zoom, $('button.openide-pmap-iconbtn', { type: 'button', title: t('projectMap.zoomIn') })) as HTMLButtonElement;
+		const zoomIn = append(zoom, $('button.openide-pmap-iconbtn.oi-dock-action', { type: 'button', title: t('projectMap.zoomIn') })) as HTMLButtonElement;
 		append(zoomIn, icon(Codicon.add));
-		const zoomOut = append(zoom, $('button.openide-pmap-iconbtn', { type: 'button', title: t('projectMap.zoomOut') })) as HTMLButtonElement;
+		const zoomOut = append(zoom, $('button.openide-pmap-iconbtn.oi-dock-action', { type: 'button', title: t('projectMap.zoomOut') })) as HTMLButtonElement;
 		append(zoomOut, icon(Codicon.dash));
-		const fit = append(zoom, $('button.openide-pmap-iconbtn', { type: 'button', title: t('projectMap.fit') })) as HTMLButtonElement;
-		append(fit, icon(Codicon.screenFull));
+		const fit = append(zoom, $('button.openide-pmap-iconbtn.oi-dock-action', { type: 'button', title: t('projectMap.fit') })) as HTMLButtonElement;
+		append(fit, icon(Codicon.screenFull)).classList.add('openide-icon-fit');
 		// Escape anywhere over the map drops the selection, so the inspector can be dismissed without
 		// aiming at its close button.
 		this._register(addDisposableListener(this.root, 'keydown', event => {
@@ -346,7 +348,7 @@ export class OpenideProjectMapEditor extends EditorPane {
 				clearNode(this.empty);
 				append(this.empty, icon(Codicon.map));
 				append(this.empty, $('p', undefined, t('projectMap.empty')));
-				const build = append(this.empty, $('button.openide-pmap-btn.primary', { type: 'button' }, t('projectMap.build'))) as HTMLButtonElement;
+				const build = append(this.empty, $('button.openide-pmap-btn.oi-btn.primary', { type: 'button' }, t('projectMap.build'))) as HTMLButtonElement;
 				this._register(addDisposableListener(build, 'click', () => void this.rebuild()));
 			}
 			const truncated = view.truncated ? t('projectMap.status.truncated', view.truncated) : '';
@@ -384,7 +386,7 @@ export class OpenideProjectMapEditor extends EditorPane {
 		clearNode(this.modulesList);
 		this.modulesCount.textContent = String(view.modules.length);
 		view.modules.forEach((module, index) => {
-			const row = append(this.modulesList, $('button.openide-pmap-module', { type: 'button', title: t('projectMap.module.tip', module.label, module.count) })) as HTMLButtonElement;
+			const row = append(this.modulesList, $('button.openide-pmap-module.oi-dock-row', { type: 'button', title: t('projectMap.module.tip', module.label, module.count) })) as HTMLButtonElement;
 			row.dataset.module = module.label;
 			const swatch = append(row, $('span.openide-pmap-swatch'));
 			swatch.style.background = projectMapColorFor(index);
@@ -415,11 +417,11 @@ export class OpenideProjectMapEditor extends EditorPane {
 
 	private renderCrumbs(items: readonly IArchitectureItem[]): void {
 		clearNode(this.crumbs);
-		const root = append(this.crumbs, $('button.openide-pmap-crumb', { type: 'button' }, t('projectMap.root'))) as HTMLButtonElement;
+		const root = append(this.crumbs, $('button.openide-pmap-crumb.oi-dock-action', { type: 'button' }, t('projectMap.root'))) as HTMLButtonElement;
 		this._register(addDisposableListener(root, 'click', () => { this.currentPath = ''; void this.loadGraph(); }));
 		for (const item of items) {
 			append(this.crumbs, icon(Codicon.chevronRight));
-			const crumb = append(this.crumbs, $('button.openide-pmap-crumb', { type: 'button' }, item.name)) as HTMLButtonElement;
+			const crumb = append(this.crumbs, $('button.openide-pmap-crumb.oi-dock-action', { type: 'button' }, item.name)) as HTMLButtonElement;
 			this._register(addDisposableListener(crumb, 'click', () => { this.currentPath = item.path ?? ''; void this.loadGraph(); }));
 		}
 	}
@@ -476,7 +478,7 @@ export class OpenideProjectMapEditor extends EditorPane {
 			return;
 		}
 		for (const row of rows) {
-			const button = append(this.results, $('button.openide-pmap-result', { type: 'button' })) as HTMLButtonElement;
+			const button = append(this.results, $('button.openide-pmap-result.oi-dock-row', { type: 'button' })) as HTMLButtonElement;
 			append(button, icon(row.kind));
 			append(button, $('span.openide-pmap-result-name', undefined, row.name));
 			append(button, $('span.openide-pmap-result-detail', undefined, row.detail));
@@ -522,6 +524,12 @@ export class OpenideProjectMapEditor extends EditorPane {
 			const groups = await this.graphService.getRelations([node.id], this.maxRelationDepth(), 100, 'both');
 			if (serial !== this.relationsSerial) { return; }
 			this.renderRelations(node, groups);
+			const goal = groups.find(group => group.target.kind === 'goal')?.target;
+			if (goal) {
+				append(this.inspRelations, $('.openide-pmap-insp-section', undefined, t('goal.mapState', String(goal.metadata?.['reportedStatus'] ?? 'unknown'))));
+				append(this.inspRelations, $('div', undefined, t('goal.mapProvenance')));
+				append(this.inspRelations, $('div', undefined, goal.documentation ?? ''));
+			}
 			const authored = (await this.memoryService.getFileNodes(node.uri)).find(item => item.kind === 'note' && item.metadata?.['id']);
 			if (serial !== this.relationsSerial) { return; }
 			if (authored) {
@@ -570,7 +578,7 @@ export class OpenideProjectMapEditor extends EditorPane {
 			if (!items.length) { return; }
 			append(this.inspRelations, $('.openide-pmap-insp-subsection', undefined, `${title} · ${items.length}`));
 			for (const { edge, node: other } of items.slice(0, 60)) {
-				const row = append(this.inspRelations, $('button.openide-pmap-relation', { type: 'button' })) as HTMLButtonElement;
+				const row = append(this.inspRelations, $('button.openide-pmap-relation.oi-dock-row', { type: 'button' })) as HTMLButtonElement;
 				append(row, icon(arrow));
 				append(row, $('span.openide-pmap-relation-name', undefined, other.name || this.relPath(other.uri)));
 				append(row, $('span.openide-pmap-relation-kind', undefined, relationLabel(edge.type)));

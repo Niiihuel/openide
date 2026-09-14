@@ -16,6 +16,7 @@
  *  webview editor.
  *--------------------------------------------------------------------------------------------*/
 
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { $, addDisposableListener, append, clearNode, Dimension } from '../../../../../base/browser/dom.js';
 import { Button } from '../../../../../base/browser/ui/button/button.js';
 import { AnchorAlignment, AnchorPosition } from '../../../../../base/browser/ui/contextview/contextview.js';
@@ -119,6 +120,7 @@ export class OpenideSubagentEditor extends EditorPane {
 		@IContextViewService private readonly contextViewService: IContextViewService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IQuickInputService private readonly quickInputService: IQuickInputService,
+		@IHoverService private readonly hoverService: IHoverService,
 		@INotificationService private readonly notificationService: INotificationService,
 	) {
 		super(OpenideSubagentEditor.ID, group, telemetryService, themeService, storageService);
@@ -274,6 +276,7 @@ export class OpenideSubagentEditor extends EditorPane {
 		this.modelLabel = append(chip, $('span.openide-composer-trigger-label'));
 		append(chip, $('span.codicon.codicon-chevron-down.openide-composer-chevron'));
 		const picker = new OpenideChatModelPicker(this.agentService, this.contextViewService, this.commandService, () => this.paintModel(), {
+			hoverService: this.hoverService,
 			anchorPosition: AnchorPosition.BELOW,
 			anchorAlignment: AnchorAlignment.LEFT,
 			width: 340,

@@ -10,6 +10,7 @@ import { IHoverService } from '../../../../../../platform/hover/browser/hover.js
 import { IBackgroundTerminalEvent } from '../../../common/openideAgentTypes.js';
 import { t } from '../../../common/openideStrings.js';
 import { IOpenideAgentService } from '../../openideAgentService.js';
+import { createChatTray, IOpenideChatTray } from '../openideChatTray.js';
 import { setupChatTooltip } from '../openideChatHover.js';
 import '../media/openideChatTerminals.css';
 
@@ -31,17 +32,17 @@ import '../media/openideChatTerminals.css';
 export class OpenideChatTerminalsTray extends Disposable {
 
 	readonly domNode: HTMLElement;
+	private readonly _tray: IOpenideChatTray;
 
 	private readonly _onDidChangeHeight = this._register(new Emitter<void>());
 	/** The tray sits between transcript and composer, so appearing and going changes the layout. */
 	readonly onDidChangeHeight: Event<void> = this._onDidChangeHeight.event;
 
 	private readonly _count: HTMLElement;
-	private readonly _chevron: HTMLElement;
 	private readonly _body: HTMLElement;
 
 	private readonly _rows = new Map<string, { row: HTMLElement; label: HTMLElement; store: DisposableStore }>();
-	private _expanded = true;
+	private _expanded = false;
 
 	constructor(
 		parent: HTMLElement,
@@ -50,17 +51,21 @@ export class OpenideChatTerminalsTray extends Disposable {
 	) {
 		super();
 
-		this.domNode = append(parent, $('div.openide-chat-terms-tray.hidden'));
-		const head = append(this.domNode, $('div.openide-chat-terms-head'));
-
-		const toggle = append(head, $<HTMLButtonElement>('button.openide-chat-terms-toggle', { type: 'button' }));
-		this._chevron = append(toggle, $('span.codicon.codicon-chevron-down'));
-		// The count shimmers for the same reason the webview's does: every row in here is a process
-		// that is still alive, and the heading is the only part of the tray always on screen.
-		this._count = append(toggle, $('span.openide-chat-terms-count.openide-chat-shimmer'));
+		this._tray = this._register(createChatTray(parent, 'terms', 'terminal'));
+		this.domNode = this._tray.domNode;
+		const { toggle } = this._tray;
+		this._count = this._tray.label;
 		this._register(addDisposableListener(toggle, 'click', () => this._toggle()));
 
-		this._body = append(this.domNode, $('div.openide-chat-terms-body'));
+		this._body = this._tray.body;
+		this._register(this._tray.onDidChangeExpanded(expanded => {
+			if (this._expanded === expanded) {
+				return;
+			}
+			this._expanded = expanded;
+			this._onDidChangeHeight.fire();
+		}));
+		this._tray.setExpanded(this._expanded);
 
 		this._register(this._agentService.onDidChangeBackgroundTerminal(event => this.update(event)));
 	}
@@ -89,7 +94,7 @@ export class OpenideChatTerminalsTray extends Disposable {
 			const row = $('div.openide-chat-terms-row');
 			append(row, $('span.codicon.codicon-terminal'));
 			// Monospace and shimmering: it is a command, and it is running.
-			const label = append(row, $('span.openide-chat-terms-label.openide-chat-shimmer'));
+			const label = append(row, $<HTMLButtonElement>('button.openide-chat-terms-label', { type: 'button' }));
 			// The row store, not `this`: a terminal that exits takes its row with it. The text node
 			// already carries the command, so the hover only un-elides it.
 			store.add(setupChatTooltip(this._hoverService, label, () => label.textContent ?? '', { aria: false }));
@@ -97,7 +102,7 @@ export class OpenideChatTerminalsTray extends Disposable {
 			// user clicked a row in the chat, so the chat is where they are still typing.
 			store.add(addDisposableListener(row, 'click', () => this._reveal(event.id)));
 
-			const stop = append(row, $<HTMLButtonElement>('button.openide-chat-terms-stop', { type: 'button' }));
+			const stop = append(row, $<HTMLButtonElement>('button.openide-chat-terms-stop.oi-dock-action', { type: 'button' }));
 			// Named after the command it kills: the tray can hold several rows, and a column of
 			// buttons all called "Stop" cannot be told apart from the keyboard.
 			store.add(setupChatTooltip(this._hoverService, stop, () => t('chat.part.terminalStopOf', label.textContent ?? '')));
@@ -113,6 +118,7 @@ export class OpenideChatTerminalsTray extends Disposable {
 			this._rows.set(event.id, entry);
 		}
 		entry.label.textContent = event.command;
+		entry.label.setAttribute('aria-label', event.command);
 		this._syncVisibility();
 	}
 
@@ -123,8 +129,7 @@ export class OpenideChatTerminalsTray extends Disposable {
 
 	private _toggle(): void {
 		this._expanded = !this._expanded;
-		this._chevron.className = `codicon codicon-${this._expanded ? 'chevron-down' : 'chevron-right'}`;
-		this._body.classList.toggle('hidden', !this._expanded);
+		this._tray.setExpanded(this._expanded);
 		this._onDidChangeHeight.fire();
 	}
 

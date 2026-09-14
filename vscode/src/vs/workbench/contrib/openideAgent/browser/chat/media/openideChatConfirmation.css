@@ -73,33 +73,21 @@
 	gap: 6px;
 	flex-wrap: wrap;
 }
-.openide-chat-approval-scope {
+.monaco-workbench .openide-chat-approval-scope-trigger {
 	flex: 1 1 120px;
 	min-width: 0;
 	max-width: 200px;
-}
-.openide-chat-approval-scope-select {
-	box-sizing: border-box;
-	max-width: 100%;
-	min-width: 0;
-	height: 22px;
-	padding: 0 4px;
-	border: var(--vscode-strokeThickness, 1px) solid transparent;
-	border-radius: var(--oi-radius-sm);
-	background: transparent;
-	color: var(--vscode-descriptionForeground);
-	font-family: inherit;
+	height: 26px;
+	min-height: 26px;
+	padding: 0 8px;
+	border: 0;
+	justify-content: space-between;
+	color: var(--oi-secondary);
 	font-size: var(--vscode-fontSize-label1, 12px);
-	cursor: pointer;
 }
-.openide-chat-approval-scope-select:hover {
-	background: var(--oi-tint-2);
-	color: var(--vscode-foreground);
-}
-.openide-chat-approval-scope-select option {
-	background: var(--vscode-dropdown-background);
-	color: var(--vscode-dropdown-foreground);
-}
+.openide-chat-approval-scope-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.monaco-workbench .openide-chat-approval-scope-trigger > .codicon { font-size: var(--oi-icon-action); flex: 0 0 auto; }
+.monaco-workbench .openide-chat-approval-scope-trigger:focus:not(:focus-visible) { outline: none; }
 .openide-chat-approval-scope-hint {
 	flex-basis: 100%;
 	color: var(--vscode-descriptionForeground);
@@ -118,7 +106,7 @@
 	height: 22px;
 	padding: 0 8px;
 	border: var(--vscode-strokeThickness, 1px) solid transparent;
-	border-radius: var(--oi-radius-sm);
+	border-radius: var(--oi-radius-control);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	font-family: inherit;
@@ -139,7 +127,7 @@
 }
 .openide-chat-abtn.primary:hover { background: var(--vscode-button-hoverBackground); color: var(--vscode-button-foreground); }
 .openide-chat-abtn:focus-visible,
-.openide-chat-approval-scope-select:focus-visible,
+.openide-chat-approval-scope-trigger:focus-visible,
 .openide-chat-approval-body:focus-visible,
 .openide-chat-approval-status:focus-visible {
 	outline: var(--vscode-strokeThickness, 1px) solid var(--vscode-focusBorder);

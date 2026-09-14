@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { createOpenideElement } from '../openideDom.js';
 import { $, addDisposableListener, append, clearNode } from '../../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
@@ -230,7 +231,7 @@ export class OpenideChatQuestionsCard extends Disposable {
 		// guess at the shape of the answer, and a guess must never be the only way out.
 		const other = append(options, $('.openide-chat-questions-option.openide-chat-questions-other'));
 		append(other, $('span.openide-chat-questions-chip', undefined, String(labels.length + 1)));
-		const input = append(other, other.ownerDocument.createElement('input'));
+		const input = append(other, createOpenideElement(other.ownerDocument, 'input'));
 		input.className = 'openide-chat-questions-other-input';
 		input.type = 'text';
 		input.placeholder = t('chat.ask.other');

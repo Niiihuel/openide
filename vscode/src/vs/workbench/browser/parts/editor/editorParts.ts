@@ -22,7 +22,7 @@ import { IThemeService } from '../../../../platform/theme/common/themeService.js
 import { IAuxiliaryWindowOpenOptions, IAuxiliaryWindowService } from '../../../services/auxiliaryWindow/browser/auxiliaryWindowService.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { ContextKeyValue, IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
-import { getActiveElement, IDimension, isAncestor, isHTMLElement } from '../../../../base/browser/dom.js';
+import { getActiveElement, getActiveWindow, IDimension, isAncestor, isHTMLElement } from '../../../../base/browser/dom.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { DeepPartial } from '../../../../base/common/types.js';
@@ -182,7 +182,7 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 	//#region Modal Editor Part
 
 	private readonly modalEditorParts: IModalEditorPart[] = [];
-	get activeModalEditorPart(): IModalEditorPart | undefined { return this.modalEditorParts.at(-1); }
+	get activeModalEditorPart(): IModalEditorPart | undefined { return this.modalEditorParts.findLast(part => part.windowId === getActiveWindow().vscodeWindowId); }
 
 	private modalEditorMaximized = false;
 	private modalEditorSize: IDimension | undefined;
@@ -192,12 +192,13 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 
 	// Tracks an in-flight creation so concurrent callers await and reuse the
 	// same singleton instance instead of each racing to create their own.
-	private modalEditorPartCreatePromise: Promise<IModalEditorPart> | undefined;
+	private readonly modalEditorPartCreatePromises = new Map<number, Promise<IModalEditorPart>>();
 
 	async createModalEditorPart(options?: IModalEditorPartOptions): Promise<IModalEditorPart> {
 
 		// Reuse existing modal editor part if it exists
-		const activeModalEditorPart = this.activeModalEditorPart;
+		const targetWindowId = options?.targetWindowId ?? mainWindow.vscodeWindowId;
+		const activeModalEditorPart = this.modalEditorParts.findLast(part => part.windowId === targetWindowId);
 		if (activeModalEditorPart && !options?.nested) {
 			activeModalEditorPart.updateOptions(options);
 
@@ -206,17 +207,18 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 
 		// Another creation is already in flight: await it instead of starting
 		// a second one, then apply this call's options to the shared instance
-		if (this.modalEditorPartCreatePromise) {
-			const part = await this.modalEditorPartCreatePromise;
+		const pending = this.modalEditorPartCreatePromises.get(targetWindowId);
+		if (pending) {
+			const part = await pending;
 			part.updateOptions(options);
 
 			return part;
 		}
 
 		const createPromise = this.doCreateModalEditorPart(options).finally(() => {
-			this.modalEditorPartCreatePromise = undefined;
+			this.modalEditorPartCreatePromises.delete(targetWindowId);
 		});
-		this.modalEditorPartCreatePromise = createPromise;
+		this.modalEditorPartCreatePromises.set(targetWindowId, createPromise);
 
 		return createPromise;
 	}
@@ -237,7 +239,7 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 				} : undefined
 			});
 		} catch (error) {
-			this.modalEditorVisibleContext.set(false);
+			this.modalEditorVisibleContext.set(this.modalEditorParts.length > 0);
 			throw error;
 		}
 		const { part, instantiationService, disposables } = result;
@@ -248,7 +250,7 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 
 		// Remember state on dispose to restore when opening next time
 		disposables.add(toDisposable(() => {
-			if (!options?.nested) {
+			if (!options?.nested && part.windowId === mainWindow.vscodeWindowId) {
 				this.modalEditorMaximized = part.maximized;
 				this.modalEditorSize = part.size;
 				this.modalEditorPosition = part.position;
@@ -485,8 +487,8 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 
 	private saveModalState(): void {
 
-		// Also capture state from any currently open modal editor part
-		const activeModalEditorPart = this.activeModalEditorPart;
+		// Persist only the main window modal; auxiliary geometry belongs to its owner.
+		const activeModalEditorPart = this.modalEditorParts.findLast(part => part.windowId === mainWindow.vscodeWindowId);
 		if (activeModalEditorPart) {
 			this.modalEditorMaximized = activeModalEditorPart.maximized;
 			this.modalEditorSize = activeModalEditorPart.size;

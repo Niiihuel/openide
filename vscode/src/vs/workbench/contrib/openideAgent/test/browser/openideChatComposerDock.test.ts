@@ -19,6 +19,47 @@ import '../../browser/chat/media/openideChatNotice.css';
 suite('OpenIDE composer dock layout', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 
+	test('companion shares drafts and queues without dispatching the owner queue twice', () => {
+		const host = document.body.appendChild($('.openide-chat-native'));
+		store.add(toDisposable(() => host.remove()));
+		const instantiation = workbenchInstantiationService(undefined, store);
+		instantiation.stub(IOpenideAgentService, new class extends mock<IOpenideAgentService>() {
+			override onDidChange = Event.None;
+			override onDidChangePlanFollow = Event.None;
+			override onDidPickElement = Event.None;
+			override getPermissionMode() { return 'ask' as const; }
+			override isPlanFollowEnabled() { return false; }
+			override async getVoiceCapability() { return { available: false }; }
+			override async ensureModelCatalog() { }
+			override getActiveProviderId() { return ''; }
+			override findProvider() { return undefined; }
+			override getModel() { return ''; }
+			override getModelReasoning() { return undefined; }
+		});
+		const sources = { queryFiles: async () => [], queryCommands: async () => [] };
+		const owner = store.add(instantiation.createInstance(OpenideChatComposer, host, sources));
+		const companion = store.add(instantiation.createInstance(OpenideChatComposer, host, sources));
+		companion.shareQueueWith(owner);
+		owner.setConversation('shared');
+		companion.setConversation('shared');
+		store.add(owner.onDidChangeDraft(draft => companion.setSharedDraft(draft)));
+		store.add(companion.onDidChangeDraft(draft => owner.setSharedDraft(draft)));
+		const sent: string[] = [];
+		store.add(owner.onDidSubmit(request => sent.push(`owner:${request.text}`)));
+		store.add(companion.onDidSubmit(request => sent.push(`companion:${request.text}`)));
+		owner.value = 'shared draft';
+		assert.strictEqual(companion.value, 'shared draft');
+		companion.value = 'reply while running';
+		owner.setBusy(true);
+		companion.setBusy(true);
+		companion.submit();
+		assert.deepStrictEqual([owner.value, companion.value, owner.queueLength, companion.queueLength], ['', '', 1, 1]);
+		companion.setBusy(false);
+		assert.deepStrictEqual(sent, []);
+		owner.setBusy(false);
+		assert.deepStrictEqual(sent, ['owner:reply while running']);
+	});
+
 	test('notice, questions and trays stay above input and are included once in dock height', async () => {
 		const host = document.body.appendChild($('.openide-chat-native'));
 		host.style.width = '440px';

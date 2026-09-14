@@ -136,6 +136,7 @@ function startEdit(draft: IOpenideChatDraft, path: string, name: string): number
  * that is the whole point of the group.
  */
 export function applyOpenideChatToolStart(draft: IOpenideChatDraft, callId: string, name: string, argumentsJson: string): void {
+	if (draft.tools.has(callId)) { return; }
 	removeOpenideChatRetry(draft);
 	closeOpenideChatMarkdown(draft);
 	finalizeOpenideChatThinking(draft);
@@ -231,10 +232,18 @@ export function applyOpenideChatToolResult(draft: IOpenideChatDraft, callId: str
 		case 'tool': {
 			const tool = getOpenideChatContentAt<IOpenideChatToolContent>(draft, cursor.index, 'tool');
 			if (!tool) { break; }
-			setOpenideChatContentAt(draft, cursor.index, { ...tool, state, resultText: truncateResult(result) });
+			setOpenideChatContentAt(draft, cursor.index, { ...tool, state, resultText: isError ? String(result) : truncateResult(result) });
 			break;
 		}
-		case 'edit':
+		case 'edit': {
+			const edit = getOpenideChatContentAt<IOpenideChatEditContent>(draft, cursor.index, 'edit');
+			if (edit?.diff.diffLines?.length && !isError) { break; }
+			// A settled call without a diff is an activity, never a still-running edit card.
+			setOpenideChatContentAt(draft, cursor.index, {
+				kind: 'tool', callId, name, argumentsJson: cursor.argumentsJson, state, resultText: isError ? String(result) : truncateResult(result),
+			});
+			break;
+		}
 		case 'planUpdate':
 		case 'delegation':
 		case 'silent':
@@ -321,7 +330,7 @@ export function applyOpenideChatFileDiff(draft: IOpenideChatDraft, ev: IOpenideC
 		added: ev.added,
 		removed: ev.removed,
 	};
-	if (existing) {
+	if (existing || (index >= 0 && draft.content[index]?.kind === 'tool')) {
 		setOpenideChatContentAt(draft, index, content);
 		draft.edits.set(ev.path, index);
 		return;

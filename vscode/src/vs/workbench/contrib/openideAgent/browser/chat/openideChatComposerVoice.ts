@@ -122,6 +122,9 @@ export class OpenideChatComposerVoice extends Disposable {
 		void this._start();
 	}
 
+	/** Stops capture and resolves after every phrase; false means cancellation, silence or failure. */
+	stop(): Promise<boolean> { return this._stop(); }
+
 	/**
 	 * Hold-to-talk (the removed chat webview): pointer down starts, pointer up/leave/cancel stops.
 	 * Split from `toggle` because a release while the recorder is still `starting` must not be
@@ -305,10 +308,10 @@ export class OpenideChatComposerVoice extends Disposable {
 		});
 	}
 
-	private async _stop(): Promise<void> {
+	private async _stop(): Promise<boolean> {
 		const recording = this._recording;
 		if (!recording || this._state === 'busy') {
-			return;
+			return false;
 		}
 		this._recording = undefined;
 		const generation = this._generation;
@@ -342,11 +345,13 @@ export class OpenideChatComposerVoice extends Disposable {
 			}
 		} catch (error) {
 			if (generation === this._generation) {
+				this._failed = true;
 				this.onDidFail(`${t('chatSurface.voice.label')}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		} finally {
 			if (generation === this._generation) { this._setState('idle'); }
 		}
+		return generation === this._generation && !this._failed && this._pieces.length > 0;
 	}
 
 	/** Everything this take has transcribed so far, joined the way a reader expects. Kept for the
