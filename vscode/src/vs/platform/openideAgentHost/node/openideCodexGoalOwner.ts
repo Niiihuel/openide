@@ -8,7 +8,7 @@ import { mkdtemp, realpath, rm, stat } from 'fs/promises';
 import { tmpdir } from 'os';
 import { isAbsolute, join, relative } from 'path';
 import { promisify } from 'util';
-import WebSocket from 'ws';
+import type * as wsTypes from 'ws';
 import { Emitter } from '../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../base/common/lifecycle.js';
 import { IOpenideCodexGoalConnection, IOpenideCodexGoalEvent, IOpenideCodexGoalPrepare, IOpenideCodexGoalResult } from '../common/openideCodexGoal.js';
@@ -17,7 +17,7 @@ import { OpenideCodexGoalConnection } from './openideCodexGoalConnection.js';
 interface IOwner {
 	readonly child: ChildProcess;
 	readonly directory: string;
-	readonly socket: WebSocket;
+	readonly socket: wsTypes.WebSocket;
 	readonly connection: OpenideCodexGoalConnection;
 	readonly subscriptions: DisposableStore;
 	readonly endpoint: string;
@@ -53,7 +53,7 @@ export class OpenideCodexGoalOwner extends Disposable {
 		const sessionGeneration = this.sessionGenerations.get(input.sessionId) ?? 0;
 		const isCurrent = () => generation === this.generation && sessionGeneration === (this.sessionGenerations.get(input.sessionId) ?? 0);
 		let stage = 'workspace';
-		let directory: string | undefined, child: ChildProcess | undefined, socket: WebSocket | undefined, subscriptions: DisposableStore | undefined;
+		let directory: string | undefined, child: ChildProcess | undefined, socket: wsTypes.WebSocket | undefined, subscriptions: DisposableStore | undefined;
 		try {
 			const cwd = await realpath(input.cwd);
 			const roots = await Promise.all(this.roots.map(root => realpath(root)));
@@ -80,6 +80,7 @@ export class OpenideCodexGoalOwner extends Disposable {
 			}
 			if (exited || this.stopped || !isCurrent() || Date.now() >= deadline || ((await stat(socketPath)).mode & 0o077) !== 0) { throw new Error('Codex did not open a private control socket.'); }
 			stage = 'websocket';
+			const { default: WebSocket } = await import('ws');
 			socket = new WebSocket(`ws+unix://${socketPath}:/`, { perMessageDeflate: false, maxPayload: 4 * 1024 * 1024, handshakeTimeout: 5000 });
 			const ws = socket;
 			await new Promise<void>((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });

@@ -1,8 +1,7 @@
 // Copyright (c) OpenIDE. Licensed under the MIT License.
 // Differential test and bounded transport benchmark against the production TypeScript providers.
 import assert from 'node:assert/strict';
-import { readFile, mkdir, writeFile, mkdtemp, rm } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
+import { readFile, readdir, mkdir, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +21,19 @@ const files = [
  fixture('export default class A {}\nexport\uFEFFconst B=1;\nfunction $thing(){}\nconst _a=2;\nimport x,{y} from "../a";', 'file:///fixture/main.test.ts'),
  ...['python','rust','csharp','go','java','tsx','jsx','javascript','cpp'].map(language=>fixture('class Example {}\nfn run() {}\nexport const number = 4;\n',`file:///fixture/test_name.${language==='python'?'py':language}`,language)),
 ];
-const paths = execFileSync('rg',['--files','vscode/src/vs/platform/openideCodebase','vscode/src/vs/workbench/contrib/openideAgent','vscode/src/vs/code/electron-utility/sharedProcess/contrib'],{cwd:root,encoding:'utf8'}).trim().split('\n').filter(p=>p.endsWith('.ts')).sort();
+const collectTypeScriptFiles = async directory => {
+ const entries=await readdir(path.join(root,directory),{withFileTypes:true});
+ const nested=await Promise.all(entries.map(entry=>{
+  const relativePath=path.join(directory,entry.name);
+  return entry.isDirectory()?collectTypeScriptFiles(relativePath):entry.isFile()&&entry.name.endsWith('.ts')?[relativePath]:[];
+ }));
+ return nested.flat();
+};
+const paths = (await Promise.all([
+ 'vscode/src/vs/platform/openideCodebase',
+ 'vscode/src/vs/workbench/contrib/openideAgent',
+ 'vscode/src/vs/code/electron-utility/sharedProcess/contrib'
+].map(collectTypeScriptFiles))).flat().sort();
 for(const p of paths) {const content=await readFile(path.join(root,p),'utf8');if(Buffer.byteLength(content)<100_000) files.push(fixture(content,`file:///fixture/${p}`));}
 const native = new NativeCodebase(executable);
 const report = {files:files.length, parity:[], measurements:[], methodology:'Identical production extraction. Rust includes stdio, serialization and deserialization; TS runs providers in process. Warm OS cache. No disk walk, persistence, renderer, total process memory or GUI FPS measured.'};

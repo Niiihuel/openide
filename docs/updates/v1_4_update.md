@@ -1,7 +1,7 @@
 ---
 {
   "badge": "What's new",
-  "title": "OpenIDE 1.4.0",
+  "title": "OpenIDE 1.4.1",
   "features": [
     { "icon": "$(layout)", "title": "Agents Window", "description": "A dedicated workspace for conversations, per-chat changes, terminals, sources and open views." },
     { "icon": "$(organization)", "title": "Subagents at a glance", "description": "Compact live activity, distinct role icons and synchronized history across chat and Environment." },
@@ -14,4 +14,4 @@
   ]
 }
 ---
-OpenIDE 1.4.0 adds the Agents Window, clearer subagent activity, per-conversation changes, richer browser automation feedback, durable goals and native project intelligence.
+OpenIDE 1.4.1 adds the Agents Window, clearer subagent activity, per-conversation changes, richer browser automation feedback, durable goals and native project intelligence.
