@@ -5,19 +5,19 @@
   "platform": "linux",
   "architecture": "x64",
   "target": "appimage",
-  "productVersion": "1.3.0",
-  "buildVersion": "e934a59622e927a18808af0b0ec231d871bdabbb",
+  "productVersion": "1.4.1",
+  "buildVersion": "096dcc9b7b7282628610b5871260e8dffc5b2195",
   "codeOssVersion": "1.136.1",
-  "publishedAt": "2026-09-07T21:22:18.000Z",
+  "publishedAt": "2026-09-15T03:09:05.000Z",
   "minimumUpdaterVersion": 1,
   "artifact": {
-    "url": "https://github.com/Niiihuel/openide/releases/download/v1.3.0/OpenIDE-1.3.0.glibc2.34-x86_64.AppImage",
-    "size": 231032000,
-    "sha256": "5ef81fdf91a88ce93e1d43c61cb5c70698caf834221413289f423980e6310283"
+    "url": "https://github.com/Niiihuel/openide/releases/download/v1.4.1/OpenIDE-1.4.1.glibc2.34-x86_64.AppImage",
+    "size": 232731840,
+    "sha256": "0480ff54ccaa5f4847095d7b31d687a1bf2b7c0cedf8bd4f6ca6e7e9ea4094bf"
   },
-  "releaseNotesUrl": "https://github.com/Niiihuel/openide/releases/tag/v1.3.0",
+  "releaseNotesUrl": "https://github.com/Niiihuel/openide/releases/tag/v1.4.1",
   "rollout": {
     "percentage": 100,
-    "seed": "1.3.0-stable"
+    "seed": "1.4.1-stable"
   }
 }
