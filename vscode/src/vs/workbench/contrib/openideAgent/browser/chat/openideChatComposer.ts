@@ -11,7 +11,7 @@ import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { IObservable, ISettableObservable, observableValue } from '../../../../../base/common/observable.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { ConfigurationTarget, IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IContextMenuService, IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
@@ -30,7 +30,7 @@ import { OpenideChatComposerFooter } from './openideChatComposerFooter.js';
 import { IOpenideChatCapabilityCounts, IOpenideChatContextUsage } from '../../common/chat/openideChatContextBreakdown.js';
 import { IOpenidePickAttachment } from '../../common/openidePickContext.js';
 import { OpenideChatComposerPick } from './openideChatComposerPick.js';
-import { IComposerQueueEntry, OpenideChatComposerQueue, queueFullMessage } from './openideChatComposerQueue.js';
+import { IComposerQueueAction, IComposerQueueEntry, OpenideChatComposerQueue, queueFullMessage } from './openideChatComposerQueue.js';
 import { OPENIDE_CHAT_QUEUE_ENABLED_KEY } from '../../common/chat/openideChatConfig.js';
 
 /** What the composer says instead of queueing when `openide.chat.queue.enabled` is off. */
@@ -104,6 +104,9 @@ export class OpenideChatComposer extends Disposable {
 	/** A bare `/compact`: a local action on the history, never a turn (the removed chat webview). */
 	readonly onDidRequestCompact: Event<void> = this._onDidRequestCompact.event;
 
+	private readonly _onDidRequestOpenInSideChat = this._register(new Emitter<IComposerQueueAction>());
+	readonly onDidRequestOpenInSideChat: Event<IComposerQueueAction> = this._onDidRequestOpenInSideChat.event;
+
 	private readonly _onDidReject = this._register(new Emitter<string>());
 	/** Something the composer refused to do and the user has to hear about (a full queue). */
 	readonly onDidReject: Event<string> = this._onDidReject.event;
@@ -123,9 +126,9 @@ export class OpenideChatComposer extends Disposable {
 	get trayHost(): HTMLElement { return this._trayHost; }
 	/** Notices stay above the composer block and participate in the dock's measured height. */
 	readonly noticeHost: HTMLElement;
-	/** Slot for the ask_user questions card, INSIDE the block above the trays: one silhouette with
-	 *  the prompt, grouped with the prompt by the block itself. */
-	get questionsHost(): HTMLElement { return this._questionsHost; }
+	/** The ask_user card is the first item in the SAME tray stack as Files and Background
+	 *  Terminals, so all docked surfaces share one outline, separator and corner recipe. */
+	get questionsHost(): HTMLElement { return this._trayHost; }
 	/** Left slot of the footer row, for the session-type picker (harness / terminal agents). */
 	get footerHost(): HTMLElement { return this._footer.footerHost; }
 
@@ -149,7 +152,6 @@ export class OpenideChatComposer extends Disposable {
 	private _layoutWidth: number | undefined;
 	private readonly _card: HTMLElement;
 	private readonly _block: HTMLElement;
-	private readonly _questionsHost: HTMLElement;
 	private readonly _footer: OpenideChatComposerFooter;
 	private readonly _trayHost: HTMLElement;
 	private readonly _prompt: HTMLTextAreaElement;
@@ -231,9 +233,9 @@ export class OpenideChatComposer extends Disposable {
 		// composer, like the webview's #filesStack, and not as a sibling
 		// of the dock: the dock is z-index 100 and paints its fade gradient over anything below it,
 		// so a tray mounted outside was rendered dimmed under that gradient.
-		// Trays, questions and prompt share one measured composer block.
+		// Questions, trays and prompt share one measured block. Questions mounts into this same
+		// tray host (before Files/Terminals), rather than into a visually similar sibling.
 		this._block = append(composer, $('.openide-chat-block'));
-		this._questionsHost = append(this._block, $('.openide-chat-questions-host'));
 		this._trayHost = append(this._block, $('.openide-chat-tray-host'));
 		this._card = append(this._block, $('.openide-chat-input-card'));
 		// Upstream's secondary toolbar: outside the card, under it.
@@ -285,9 +287,14 @@ export class OpenideChatComposer extends Disposable {
 		this._register(this._queue.onDidChangeHeight(() => this._measure()));
 		this._register(this._queue.onDidRequestEdit(({ entry }) => this._editQueued(entry)));
 		this._register(this._queue.onDidRequestSendNow(({ entry }) => {
-			// "Send now" while a run is in flight cancels it first (the removed chat webview).
+			// "Steer" while a run is in flight cancels it first, then redirects the conversation.
 			if (this._busy) { this._onDidRequestStop.fire(); }
 			this._dispatch(entry);
+		}));
+		this._register(this._queue.onDidRequestOpenInSideChat(action => this._onDidRequestOpenInSideChat.fire(action)));
+		this._register(this._queue.onDidRequestDisableQueueing(({ entry }) => {
+			void this.configurationService.updateValue(OPENIDE_CHAT_QUEUE_ENABLED_KEY, false, ConfigurationTarget.USER);
+			this._editQueued(entry);
 		}));
 		this._pick = this._register(new OpenideChatComposerPick(
 			pickStrip,
@@ -414,6 +421,11 @@ export class OpenideChatComposer extends Disposable {
 	/** Sends what the composer holds, as if the user pressed Enter (canvas prompts use this). */
 	submit(): void {
 		this._submit();
+	}
+
+	/** Sends a complete queued entry after the widget has opened its destination conversation. */
+	submitQueuedEntry(entry: IComposerQueueEntry): void {
+		this._dispatch(entry);
 	}
 
 	/** `send` (the removed chat webview): the same press sends, queues or stops, depending on state. */

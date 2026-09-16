@@ -491,26 +491,22 @@
 
 /* ---- Model picker skeleton (while `getConnectedModelGroups` answers) ---------------------- */
 /* Same geometry as a real row, so the list does not jump when the models arrive. */
-.openide-mp-skeleton { display: flex; flex-direction: column; }
+.openide-mp-skeleton { display: flex; flex-direction: column; contain: paint; will-change: opacity; animation: openide-mp-skeleton-pulse 1.8s ease-in-out infinite; }
 .openide-mp-skeleton-row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; }
 .openide-mp-skeleton-icon,
 .openide-mp-skeleton-bar {
 	border-radius: var(--oi-radius-item);
 	background: linear-gradient(100deg,
-		color-mix(in srgb, var(--vscode-foreground) 8%, transparent) 40%,
-		color-mix(in srgb, var(--vscode-foreground) 16%, transparent) 50%,
-		color-mix(in srgb, var(--vscode-foreground) 8%, transparent) 60%);
-	background-size: 200% 100%;
-	animation: openide-mp-skeleton-sweep 1.4s ease-in-out infinite;
+		color-mix(in srgb, var(--vscode-foreground) 8%, transparent),
+		color-mix(in srgb, var(--vscode-foreground) 16%, transparent),
+		color-mix(in srgb, var(--vscode-foreground) 8%, transparent));
 }
 .openide-mp-skeleton-icon { width: 16px; height: 16px; flex: 0 0 auto; }
 .openide-mp-skeleton-bar { height: 10px; }
-@keyframes openide-mp-skeleton-sweep {
-	from { background-position: 120% 0; }
-	to { background-position: -80% 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-	.openide-mp-skeleton-icon, .openide-mp-skeleton-bar { animation: none; }
+@keyframes openide-mp-skeleton-pulse { 0%, 100% { opacity: .58; } 50% { opacity: .92; } }
+.monaco-reduce-motion .openide-mp-skeleton { animation: none; opacity: .76; }
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+	.openide-mp-skeleton { animation: none; opacity: .76; }
 }
 
 /* Summary → searchable model list → discrete effort slider, in the same native context view. */

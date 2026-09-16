@@ -15,7 +15,8 @@ import { TestClipboardService } from '../../../../../platform/clipboard/test/com
 import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
 import { workbenchInstantiationService } from '../../../../test/browser/workbenchTestServices.js';
 import { IOpenideChatContentPartContext } from '../../browser/chat/openideChatContentPart.js';
-import { OpenideChatMarkdownRenderer } from '../../browser/chat/openideChatMarkdown.js';
+import { chatWorkspaceFileLink, OpenideChatMarkdownRenderer } from '../../browser/chat/openideChatMarkdown.js';
+import { IOpenideAgentService } from '../../browser/openideAgentService.js';
 import { OPENIDE_CHAT_MARKDOWN_STREAMING_CLASS, OpenideChatMarkdownPart } from '../../browser/chat/parts/openideChatMarkdownPart.js';
 import { IOpenideChatMarkdownContent } from '../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../common/chat/openideChatItem.js';
@@ -37,9 +38,11 @@ suite('OpenIDE ChatMarkdownPart', () => {
 		const instantiationService = workbenchInstantiationService(undefined, store);
 		const opened: string[] = [];
 		const previews: string[] = [];
+		const files: string[] = [];
 		let menu: IContextMenuDelegate | undefined;
 		instantiationService.stub(IBrowserViewWorkbenchService, { openPreview: async (url: string) => { previews.push(url); } } as unknown as IBrowserViewWorkbenchService);
 		instantiationService.stub(IContextMenuService, { showContextMenu: (value: IContextMenuDelegate) => { menu = value; } } as IContextMenuService);
+		instantiationService.stub(IOpenideAgentService, { openDiff: async (path: string) => { files.push(path); } } as unknown as IOpenideAgentService);
 		instantiationService.stub(IOpenerService, {
 			open: (target: URI | string) => { opened.push(String(target)); return Promise.resolve(true); },
 		} as unknown as IOpenerService);
@@ -48,7 +51,7 @@ suite('OpenIDE ChatMarkdownPart', () => {
 		const renderer = instantiationService.createInstance(OpenideChatMarkdownRenderer);
 		const element = { isComplete } as IOpenideChatItem;
 		const part = store.add(new OpenideChatMarkdownPart(markdown(text), { element } as IOpenideChatContentPartContext, renderer));
-		return { part, element, opened, previews, clipboard, renderer, menu: () => menu };
+		return { part, element, opened, previews, files, clipboard, renderer, menu: () => menu };
 	}
 
 	test('a delta keeps the blocks that did not change and swaps the one that did', () => {
@@ -119,6 +122,33 @@ suite('OpenIDE ChatMarkdownPart', () => {
 		}
 		assert.deepStrictEqual(fixture.previews, Array(4).fill('https://example.com/docs'));
 		assert.deepStrictEqual(fixture.opened, []);
+	});
+
+	test('workspace file links open in the clicked window editor target', () => {
+		const fixture = create('See [the source](src/app/main.ts).');
+		fixture.part.domNode.querySelector('a')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+		assert.deepStrictEqual(fixture.files, ['src/app/main.ts']);
+		assert.deepStrictEqual(fixture.previews, []);
+		assert.deepStrictEqual(fixture.opened, []);
+	});
+
+	test('workspace file link detection rejects web and command links', () => {
+		assert.strictEqual(chatWorkspaceFileLink('./src/app/main.ts'), 'src/app/main.ts');
+		assert.strictEqual(chatWorkspaceFileLink('src/app/main.ts#L12'), 'src/app/main.ts');
+		assert.strictEqual(chatWorkspaceFileLink('https://example.com/main.ts'), undefined);
+		assert.strictEqual(chatWorkspaceFileLink('command:workbench.action.files.openFile'), undefined);
+		assert.strictEqual(chatWorkspaceFileLink('plain words'), undefined);
+	});
+
+	test('file link context menu offers panel and copy path actions', async () => {
+		const fixture = create('[source](src/app/main.ts)');
+		fixture.part.domNode.querySelector('a')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+		const actions = fixture.menu()!.getActions();
+		assert.deepStrictEqual(actions.map(action => action.id), ['chat.file.panel', 'vs.actions.separator', 'chat.file.copy']);
+		await actions[2].run();
+		assert.strictEqual(await fixture.clipboard.readText(), 'src/app/main.ts');
+		await actions[0].run();
+		assert.deepStrictEqual(fixture.files, ['src/app/main.ts']);
 	});
 
 	test('GitHub icons survive streaming without decorating spoof hosts or changing the label', () => {

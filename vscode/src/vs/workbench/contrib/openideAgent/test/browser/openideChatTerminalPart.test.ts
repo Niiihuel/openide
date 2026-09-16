@@ -12,7 +12,6 @@ import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { OpenideChatTerminalPart, summarizeCommandExecutables, terminalCardTitle } from '../../browser/chat/parts/openideChatTerminalPart.js';
 import { IOpenideChatContentPartContext } from '../../browser/chat/openideChatContentPart.js';
-import { IOpenideAgentService } from '../../browser/openideAgentService.js';
 import { t } from '../../common/openideStrings.js';
 import '../../browser/chat/media/openideChatNative.css';
 
@@ -71,7 +70,7 @@ suite('OpenIDE ChatTerminalPart — output viewport', () => {
 			background: false, output, state: 'exited', exitCode: 0,
 		}, {} as IOpenideChatContentPartContext, {
 			createInstance: () => ({ dispose() { } }),
-		} as unknown as IInstantiationService, {} as IContextViewService, {} as IOpenideAgentService, {
+		} as unknown as IInstantiationService, {} as IContextViewService, {
 			setupDelayedHover: () => toDisposable(() => { }),
 		} as unknown as IHoverService));
 		host.append(part.domNode);
@@ -97,13 +96,16 @@ suite('OpenIDE ChatTerminalPart — output viewport', () => {
 		assert.strictEqual(mainWindow.getComputedStyle(part.domNode.querySelector('.openide-fold-fade')!).display, 'none');
 	});
 
-	test('long output expands in a separate footer without covering the frame or last visible line', async () => {
+	test('long output shows the terminal tail under a fade and expands like a file diff', async () => {
 		const { part, button, out } = create(Array.from({ length: 40 }, (_, i) => `Build step ${i}`).join('\n'));
 		await layout();
-		assert.ok(button.getBoundingClientRect().top >= out.getBoundingClientRect().bottom);
-		assert.ok(button.getBoundingClientRect().bottom < part.domNode.getBoundingClientRect().bottom);
+		const fade = part.domNode.querySelector<HTMLElement>('.openide-fold-fade')!;
 		assert.strictEqual(out.clientHeight, 108);
+		assert.ok(out.scrollTop > 0, 'the compact viewport follows the newest terminal lines');
+		assert.notStrictEqual(mainWindow.getComputedStyle(fade).display, 'none');
+		assert.ok(button.getBoundingClientRect().bottom <= part.domNode.getBoundingClientRect().bottom);
 		assert.strictEqual(button.getAttribute('aria-label'), t('chat.part.expandOutput'));
+		assert.strictEqual(part.domNode.querySelector('.openide-chat-term-input'), null);
 		button.click();
 		await layout();
 		assert.strictEqual(button.getAttribute('aria-expanded'), 'true');

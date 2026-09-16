@@ -1,5 +1,14 @@
 /* Subagents reuse native tabs, hover tokens and transcript renderers. */
-.openide-subagent-avatar { width: 24px; height: 24px; flex: 0 0 24px; object-fit: contain; }
+.openide-subagent-avatar { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; flex: 0 0 24px; overflow: hidden; color: var(--vscode-descriptionForeground); }
+.openide-subagent-avatar-image { display: none; width: 100%; height: 100%; object-fit: contain; }
+.openide-subagent-avatar-loaded > .openide-subagent-avatar-image { display: block; }
+.openide-subagent-avatar-loaded > .openide-subagent-avatar-fallback { display: none; }
+.openide-subagent-avatar-fallback { font-size: 15px; }
+.openide-subagent-avatar-debugging { color: var(--vscode-debugIcon-startForeground, #89d185); }
+.openide-subagent-avatar-implementation { color: var(--vscode-charts-blue, #75beff); }
+.openide-subagent-avatar-planning { color: var(--vscode-charts-purple, #b180d7); }
+.openide-subagent-avatar-research { color: var(--vscode-charts-cyan, #2aa198); }
+.openide-subagent-avatar-review { color: var(--vscode-charts-orange, #d18616); }
 .openide-subagents-editor { height: 100%; min-height: 0; overflow: hidden; }
 .openide-subagents-editor [hidden] { display: none !important; }
 .openide-subagents-overview { box-sizing: border-box; padding: 16px; }
@@ -24,7 +33,20 @@
 .openide-subagents-transcript { flex: 1; min-height: 0; }
 .openide-subagents-transcript .openide-agent-conversation-toolbar { display: none; }
 .openide-subagents-transcript .openide-chat-row { padding-inline: 24px; }
-.openide-subagents-fallback { margin: 24px; white-space: pre-wrap; line-height: 1.6; }
+.openide-subagents-fallback { flex: 1; min-height: 0; overflow: auto; box-sizing: border-box; margin: 0; padding: 12px 24px 24px; }
+.openide-subagents-fallback-timeline { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.openide-subagents-fallback .openide-chat-sub-tool { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 5px 8px; border-radius: var(--oi-radius-sm); color: var(--oi-secondary); }
+.openide-subagents-fallback .openide-chat-sub-tool:hover { background: var(--oi-hover); color: var(--oi-text); }
+.openide-subagents-fallback .openide-chat-sub-tool-icon { display: flex; flex: 0 0 auto; }
+.openide-subagents-fallback .openide-chat-sub-tool .codicon { font-size: 13px; }
+.openide-subagents-fallback .openide-chat-sub-tool-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-subagents-fallback .openide-chat-sub-tool-error,
+.openide-subagents-fallback .openide-chat-sub-tool-error .codicon,
+.openide-subagents-fallback-error { color: var(--vscode-errorForeground); }
+.openide-subagents-fallback .openide-chat-sub-text,
+.openide-subagents-fallback-result,
+.openide-subagents-fallback-message { padding: 5px 8px; color: var(--oi-secondary); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.openide-subagents-fallback-result { margin-top: 4px; padding-top: 9px; border-top: 1px solid var(--oi-border-soft); color: var(--oi-text); }
 .openide-agent-window-context-row.openide-subagents-summary { gap: 8px; }
 .openide-subagents-summary-icons { display: flex; gap: 2px; flex-shrink: 0; }
 .openide-subagents-summary .openide-agent-window-row-label { color: var(--oi-secondary); }

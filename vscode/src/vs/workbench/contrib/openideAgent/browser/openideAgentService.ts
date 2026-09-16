@@ -19,7 +19,7 @@ import { OpenideMemoryCaptureQueue } from './openideMemoryCaptureQueue.js';
 import { IOpenideMemoryCheckpointState, isMemoryRecordUri } from '../../../../platform/openideCodebase/common/openideMemoryRecord.js';
 import { IOpenideCheckpointMemory, OpenideMemoryCheckpoint, MEMORY_CHECKPOINT_SYSTEM } from './openideMemoryCheckpoint.js';
 import { createMemoryTools } from './openideMemoryTools.js';
-import { DeferredPromise, raceCancellation } from '../../../../base/common/async.js';
+import { DeferredPromise, raceCancellation, raceTimeout } from '../../../../base/common/async.js';
 import { VSBuffer, encodeBase64 } from '../../../../base/common/buffer.js';
 import { CancellationToken,CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Emitter,Event } from '../../../../base/common/event.js';
@@ -114,7 +114,7 @@ import { buildOpenideSystemPrompt } from '../common/openideSystemPrompt.js';
 import { breakdownTotal, computeContextBreakdown, estimateTextTokens } from '../common/openideTokens.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
-import { IOpenideJournalContext, IOpenideRunJournalRecord, appendOpenideJournal, isOpenideRunJournalError } from '../../../../platform/openideAgentHost/common/openideRunJournal.js';
+import { IOpenideJournalContext, IOpenideRunJournalRecord, OpenideRunJournalError, appendOpenideJournal, isOpenideRunJournalError } from '../../../../platform/openideAgentHost/common/openideRunJournal.js';
 import { applyOpenideJournalRecovery } from '../common/openideRunJournal.js';
 import { IOpenideToolExecution, OpenideToolExecutor } from '../common/openideToolExecutor.js';
 import { OpenideToolCallGuard,repairToolArgumentsJson,validateToolArguments } from '../common/openideToolGuardrails.js';
@@ -173,6 +173,7 @@ export interface IComposerCapability {
 	readonly kind: ComposerCapabilityKind;
 	readonly name: string;
 	readonly description: string;
+	readonly origin?: string;
 	readonly risk?: 'safe' | 'write' | 'exec';
 }
 
@@ -203,6 +204,8 @@ export interface IOpenideConversationHost {
  * finish, short enough that the model is not stuck behind a run that went on for minutes.
  */
 const FILE_CLAIM_WAIT_MS = 120_000;
+const RUN_JOURNAL_RPC_TIMEOUT_MS = 15_000;
+const RUN_JOURNAL_OPEN_RPC_TIMEOUT_MS = 120_000;
 
 /** Why a message did not leave, told to the model that tried to send it. */
 const MESSAGE_REFUSALS: Record<string, string> = {
@@ -460,7 +463,7 @@ export interface IOpenideAgentService {
 	 *  active one to the plan's execModel when they differ, and asks the chat to launch the
 	 *  execution run (onDidRequestPlanBuild) — runs live in the chatView with their messages array. */
 	buildPlan(resource: URI): Promise<void>;
-	readonly onDidRequestPlanBuild: Event<{ path: string; title: string; resource: URI; owner: string; providerId: string; model: string }>;
+	readonly onDidRequestPlanBuild: Event<{ path: string; title: string; resource: URI; owner: string; providerId: string; model: string; conversationId?: string }>;
 	readonly onDidChangePlanBuild: Event<{ resource: URI; busy: boolean }>;
 	readonly onDidChangePlanFollow: Event<boolean>;
 	/** The plan editor's Stop: the chat owns the run, so this only ASKS it to abort. */
@@ -778,8 +781,8 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	/** The uri resolves asynchronously (slug collision); meanwhile it need not be resolved again. */
 	private planDraftResolving: string | undefined;
 	get onDidChangeCanvas(): Event<{ path: string; title: string; created: boolean }> { return this.canvasService.onDidChangeCanvas; }
-	private readonly _onDidRequestPlanBuild = this._register(new Emitter<{ path: string; title: string; resource: URI; owner: string; providerId: string; model: string }>());
-	readonly onDidRequestPlanBuild: Event<{ path: string; title: string; resource: URI; owner: string; providerId: string; model: string }> = this._onDidRequestPlanBuild.event;
+	private readonly _onDidRequestPlanBuild = this._register(new Emitter<{ path: string; title: string; resource: URI; owner: string; providerId: string; model: string; conversationId?: string }>());
+	readonly onDidRequestPlanBuild: Event<{ path: string; title: string; resource: URI; owner: string; providerId: string; model: string; conversationId?: string }> = this._onDidRequestPlanBuild.event;
 	private readonly _onDidChangePlanBuild = this._register(new Emitter<{ resource: URI; busy: boolean }>());
 	readonly onDidChangePlanBuild: Event<{ resource: URI; busy: boolean }> = this._onDidChangePlanBuild.event;
 	private readonly _onDidChangePlanFollow = this._register(new Emitter<boolean>());
@@ -1360,7 +1363,10 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		await this.mcp.ensureStarted();
 		const skills = await this.skills.listSkills();
 		const out: IComposerCapability[] = skills.map(skill => ({
-			kind: 'skill', name: skill.name, description: skill.description,
+			kind: 'skill',
+			name: skill.name,
+			description: skill.description,
+			origin: skill.scope === 'global' ? 'Personal' : 'Project',
 		}));
 		for (const def of this.tools.getDefinitions()) {
 			const tool = this.tools.getTool(def.name);
@@ -2245,7 +2251,8 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		}
 		const model = this.getModel();
 		const providerId = this.getActiveProviderId();
-		const doc = `---\ntitle: ${title.trim().replace(/\n+/g, ' ')}\nstatus: borrador\nplanModel: ${model}\nexecProvider: ${providerId}\nexecModel: ${model}\ncreated: ${new Date().toISOString()}\n---\n\n${markdown.trim()}\n`;
+		const conversationOwner = conversationId ? `\nconversationId: ${conversationId}` : '';
+		const doc = `---\ntitle: ${title.trim().replace(/\n+/g, ' ')}\nstatus: borrador\nplanModel: ${model}\nexecProvider: ${providerId}\nexecModel: ${model}${conversationOwner}\ncreated: ${new Date().toISOString()}\n---\n\n${markdown.trim()}\n`;
 		await this.fileService.writeFile(uri, VSBuffer.fromString(doc));
 		// The REAL document is already on disk: close the draft here, not when the turn ends.
 		// Otherwise the editor would keep showing the streamed markdown — similar but without
@@ -2260,7 +2267,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	}
 
 	/** Line-by-line tolerant parser for a plan's frontmatter (same criterion as skills). */
-	private parsePlanFrontmatter(content: string): { title?: string; status?: string; execModel?: string; execProvider?: string } {
+	private parsePlanFrontmatter(content: string): { title?: string; status?: string; execModel?: string; execProvider?: string; conversationId?: string } {
 		if (!content.startsWith('---')) {
 			return {};
 		}
@@ -2268,11 +2275,11 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		if (end < 0) {
 			return {};
 		}
-		const out: { title?: string; status?: string; execModel?: string; execProvider?: string } = {};
+		const out: { title?: string; status?: string; execModel?: string; execProvider?: string; conversationId?: string } = {};
 		for (const line of content.slice(3, end).split('\n')) {
-			const m = line.match(/^(title|status|execModel|execProvider):\s*(.*?)\s*$/);
+			const m = line.match(/^(title|status|execModel|execProvider|conversationId):\s*(.*?)\s*$/);
 			if (m) {
-				out[m[1] as 'title' | 'status' | 'execModel' | 'execProvider'] = m[2].replace(/^['"]|['"]$/g, '');
+				out[m[1] as 'title' | 'status' | 'execModel' | 'execProvider' | 'conversationId'] = m[2].replace(/^['"]|['"]$/g, '');
 			}
 		}
 		return out;
@@ -2448,7 +2455,18 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			const updated = setPlanFrontmatterValue(latest, 'status', 'aprobado');
 			if (updated !== latest) { await this.fileService.writeFile(resource, VSBuffer.fromString(updated), { etag: latestFile.etag, mtime: latestFile.mtime, atomic: { postfix: '.openide-plan' } }); }
 			const rel = relativePath(folder.uri, resource) ?? resource.path;
-			this._onDidRequestPlanBuild.fire({ path: rel, title: fm.title || basename(resource).replace(/\.md$/, ''), resource, owner, providerId: provider.id, model });
+			// Keep the approved plan visible in the artifact pane while its owning chat continues in
+			// the background. `preserveFocus` in openRunArtifact avoids stealing the composer.
+			void this.openRunArtifact(resource, 'plan').then(undefined, () => { /* the chat card still exposes it */ });
+			this._onDidRequestPlanBuild.fire({
+				path: rel,
+				title: fm.title || basename(resource).replace(/\.md$/, ''),
+				resource,
+				owner,
+				providerId: provider.id,
+				model,
+				conversationId: latestFm.conversationId || fm.conversationId,
+			});
 		} catch (error) {
 			this.failPlanBuild(resource, owner);
 			throw error;
@@ -2868,10 +2886,29 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	}
 
 	private async withRunJournal<T>(sessionId: string, run: (journal: IOpenideJournalContext, records: readonly IOpenideRunJournalRecord[]) => Promise<T>, runId = generateUuid()): Promise<T> {
-		const records = await this.agentHost.openRunJournal(sessionId);
-		const journal: IOpenideJournalContext = { runId, journal: { append: event => this.agentHost.appendRunJournal(sessionId, event) } };
-		try { return await run(journal, records); }
-		finally { await this.agentHost.closeRunJournal(sessionId); }
+		const records = await raceTimeout(this.agentHost.openRunJournal(sessionId), RUN_JOURNAL_OPEN_RPC_TIMEOUT_MS);
+		if (!records) {
+			// The open request may still be verifying disk state in the Agent Host.
+			// Release its lease so a timed-out continuation cannot strand the session.
+			void this.agentHost.closeRunJournal(sessionId, false).catch(error => this.logService.warn('[openide.agent] failed to release a timed-out run journal', error));
+			throw new OpenideRunJournalError(t('service.agentHost.journalTimeout'));
+		}
+		const journal: IOpenideJournalContext = { runId, journal: { append: async event => {
+			const appended = await raceTimeout(this.agentHost.appendRunJournal(sessionId, event).then(() => true), RUN_JOURNAL_RPC_TIMEOUT_MS);
+			if (!appended) { throw new OpenideRunJournalError(t('service.agentHost.journalTimeout')); }
+		} } };
+		let completed = false;
+		try {
+			const result = await run(journal, records);
+			completed = true;
+			return result;
+		}
+		finally {
+			try {
+				const closed = await raceTimeout(this.agentHost.closeRunJournal(sessionId, completed).then(() => true), RUN_JOURNAL_RPC_TIMEOUT_MS);
+				if (!closed) { this.logService.warn('[openide.agent] timed out closing the run journal'); }
+			} catch (error) { this.logService.warn('[openide.agent] failed to close the run journal', error); }
+		}
 	}
 
 	/**
@@ -3375,6 +3412,11 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 
 						// "Special" tools intercepted here (they need the UI / the loop, not just a returned string).
 						if (SUBAGENT_TOOL_DEFS.some(def => def.name === call.name)) {
+							// Delegate owns a richer envelope. Await/get/cancel are normal tool activities and
+							// must announce their arguments so replay/dedup keys include the runId.
+							if (call.name !== 'delegate_to_subagent') {
+								onEvent({ type: 'toolStart', id: call.id, name: call.name, argumentsJson: call.argumentsJson });
+							}
 							let parsed: any = {}; try { parsed = JSON.parse(call.argumentsJson || '{}'); } catch { /* validación abajo */ }
 							let output = '';
 							if (call.name === 'delegate_to_subagent') {
@@ -3847,9 +3889,10 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		onEvent({ type: 'delegationStart', id: parentId, total });
 		const results = await Promise.all(tasks.map(async (task, index) => {
 			const subId = `${parentId}-review-${index}`;
+			const delegatedTitle = t('agentSurface.subagent.reviewPrompt');
 			const subCts = new CancellationTokenSource(token);
 			this.subagentRuns.set(subId, subCts);
-			onEvent({ type: 'subagentStart', id: subId, parentId, index, total, status: 'running', title: task.title, prompt: t('agentSurface.subagent.reviewPrompt'), model: ctx.model });
+			onEvent({ type: 'subagentStart', id: subId, parentId, index, total, status: 'running', title: delegatedTitle, prompt: delegatedTitle, model: ctx.model });
 			try {
 				const out = await this.runSubAgent(subId, parentId, index, total, task.prompt, ctx, onEvent, subCts.token, undefined, undefined, undefined, false, 'review');
 				const cancelled = subCts.token.isCancellationRequested;

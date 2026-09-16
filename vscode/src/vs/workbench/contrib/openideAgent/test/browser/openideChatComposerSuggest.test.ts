@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { compactSlashDescription, mentionTokenAt, slashTokenAt } from '../../browser/chat/openideChatComposerSuggest.js';
+import { compactSlashDescription, mentionTokenAt, slashSuggestionIcon, slashTokenAt } from '../../browser/chat/openideChatComposerSuggest.js';
 import { buildOpenideChatSlashSuggestions } from '../../common/chat/openideChatSlashCommands.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 
@@ -53,5 +53,15 @@ suite('OpenIDE ChatComposerSuggest', () => {
 		assert.deepStrictEqual(filtered.map(item => item.name), ['goal', 'verify']);
 		const goals = buildOpenideChatSlashSuggestions('goal', [{ slug: 'goal', description: 'shadowed', argumentHint: '' }], []);
 		assert.deepStrictEqual(goals.map(item => item.name), ['goal']);
+		assert.strictEqual(items.find(item => item.name === 'plan')?.icon, 'checklist');
+		assert.strictEqual(items.find(item => item.name === 'verify')?.icon, 'verified');
+		assert.strictEqual(items.find(item => item.name === 'compact')?.icon, 'fold');
+	});
+
+	test('slash icons remain semantic for dynamic capabilities', () => {
+		assert.strictEqual(slashSuggestionIcon({ kind: 'tool', name: 'browser_navigate', description: '' }, 'tools'), 'globe');
+		assert.strictEqual(slashSuggestionIcon({ kind: 'tool', name: 'read_file', description: '' }, 'tools'), 'file-code');
+		assert.strictEqual(slashSuggestionIcon({ kind: 'mcp', name: 'github', description: '' }, 'tools'), 'plug');
+		assert.strictEqual(slashSuggestionIcon({ kind: 'command', name: 'review', description: '', icon: 'diff' }, 'terminal'), 'diff');
 	});
 });

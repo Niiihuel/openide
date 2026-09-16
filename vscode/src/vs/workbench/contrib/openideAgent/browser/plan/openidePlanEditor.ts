@@ -19,6 +19,7 @@
 
 import { $, addDisposableListener, append, clearNode, Dimension, getWindow, scheduleAtNextAnimationFrame } from '../../../../../base/browser/dom.js';
 import { DomScrollableElement } from '../../../../../base/browser/ui/scrollbar/scrollableElement.js';
+import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
@@ -185,6 +186,7 @@ export class OpenidePlanEditor extends EditorPane {
 	private followHost!: HTMLElement;
 	private mdHost!: HTMLElement;
 	private skeleton!: HTMLElement;
+	private skeletonVariant: 'empty' | 'partial' | undefined;
 	private tasksHost!: HTMLElement;
 
 	private readonly renderer: OpenideChatMarkdownRenderer;
@@ -205,6 +207,12 @@ export class OpenidePlanEditor extends EditorPane {
 	private lastSelfWrite: { uri: string; at: number } | undefined;
 	private taskWriteQueue: Promise<void> = Promise.resolve();
 	private readonly lastMarkdownByResource = new Map<string, string>();
+	private readonly draftRefresh = this._register(new RunOnceScheduler(() => {
+		const input = this.input;
+		if (input instanceof OpenidePlanInput) {
+			void this.refresh(input.resource, this.inputGeneration);
+		}
+	}, 40));
 
 	constructor(
 		group: IEditorGroup,
@@ -276,6 +284,7 @@ export class OpenidePlanEditor extends EditorPane {
 
 	/** Re-reads when the .md changes on disk (model, tasks, or the agent ticking it). */
 	private armWatcher(): void {
+		this.draftRefresh.cancel();
 		this.inputGeneration++;
 		this.inputDisposables.clear();
 		const input = this.input;
@@ -291,7 +300,15 @@ export class OpenidePlanEditor extends EditorPane {
 		});
 		this.inputDisposables.add(this.agentService.onDidChangePlanBuild(event => {
 			if (event.resource.toString() === uri.toString()) {
-				void this.refresh(uri, this.inputGeneration);
+				// Build state changes do not alter the visible document. Updating the status strip in
+				// place avoids parsing and rebuilding the whole plan when Build starts and settles.
+				this.state = {
+					...this.state,
+					buildBusy: event.busy,
+					buildCompleted: this.agentService.isPlanBuildCompleted(uri),
+				};
+				this.renderFollow();
+				this.scrollable.scanDomNode();
 			}
 		}));
 		this.inputDisposables.add(this.agentService.onDidChangePlanFollow(enabled => {
@@ -303,7 +320,9 @@ export class OpenidePlanEditor extends EditorPane {
 		// does not exist on disk yet, so the watcher above sees nothing.
 		this.inputDisposables.add(this.agentService.onDidChangePlanDraft(draft => {
 			if (draft.resource.toString() === uri.toString()) {
-				void this.refresh(uri, this.inputGeneration);
+				// Provider argument chunks can arrive faster than a frame. Always render the newest
+				// draft, but coalesce the burst so markdown/layout are not rebuilt per token.
+				this.draftRefresh.schedule();
 			}
 		}));
 	}
@@ -339,6 +358,8 @@ export class OpenidePlanEditor extends EditorPane {
 		if (stale) {
 			return;
 		}
+		const visibleDocumentUnchanged = !this.state.drafting
+			&& stripPlanFrontmatter(this.state.markdown) === stripPlanFrontmatter(markdown);
 		this.state = {
 			markdown,
 			followAgent: this.agentService.isPlanFollowEnabled(),
@@ -347,6 +368,12 @@ export class OpenidePlanEditor extends EditorPane {
 			buildError: '',
 			drafting: false,
 		};
+		// Build approval/completion only changes frontmatter. The file watcher still records the
+		// latest bytes, but the expensive markdown/task/layout render is unnecessary.
+		if (visibleDocumentUnchanged) {
+			this.renderFollow();
+			return;
+		}
 		this.renderAll();
 	}
 
@@ -498,17 +525,22 @@ export class OpenidePlanEditor extends EditorPane {
 	 * not a cut, it is the same thing filling up.
 	 */
 	private renderSkeleton(): void {
-		clearNode(this.skeleton);
 		if (!this.state.drafting) {
 			this.skeleton.classList.add('hidden');
 			return;
 		}
-		const empty = !stripPlanFrontmatter(this.state.markdown || '').trim();
-		const rows = empty
-			? ['sk-title', 'w95', 'w88', 'w72', 'sk-heading', 'w95', 'w60']
-			: ['w88', 'w95', 'w60'];
-		for (const row of rows) {
-			append(this.skeleton, $(`div.openide-plan-sk-line.${row}`));
+		const variant: 'empty' | 'partial' = !stripPlanFrontmatter(this.state.markdown || '').trim() ? 'empty' : 'partial';
+		// Streaming calls renderAll repeatedly. Preserve the bars and their animation unless their
+		// shape changes; clearing them per delta caused layout work and a visible restart.
+		if (this.skeletonVariant !== variant) {
+			clearNode(this.skeleton);
+			const rows = variant === 'empty'
+				? ['sk-title', 'w95', 'w88', 'w72', 'sk-heading', 'w95', 'w60']
+				: ['w88', 'w95', 'w60'];
+			for (const row of rows) {
+				append(this.skeleton, $(`div.openide-plan-sk-line.${row}`));
+			}
+			this.skeletonVariant = variant;
 		}
 		this.skeleton.classList.remove('hidden');
 	}

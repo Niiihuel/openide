@@ -252,7 +252,8 @@ const commonResourcePatterns = [
 	'vs/workbench/contrib/chat/browser/widget/media/chatPet/**/*.{gif,png}',
 	'vs/sessions/contrib/chat/browser/media/*.svg',
 	'vs/sessions/contrib/welcome/browser/media/themePreviews/*.svg',
-	'vs/workbench/contrib/openideAgent/browser/media/providerIcons/*.{svg,md}'
+	'vs/workbench/contrib/openideAgent/browser/media/providerIcons/*.{svg,md}',
+	'vs/workbench/contrib/openideAgent/browser/chat/media/subagents/*.png'
 ];
 
 // Resources for desktop target

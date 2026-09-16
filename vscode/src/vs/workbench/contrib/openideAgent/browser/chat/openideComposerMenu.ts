@@ -147,6 +147,9 @@ export interface IComposerPopoverOptions {
 	readonly anchorPosition?: AnchorPosition;
 	/** Pins the menu width when no composer header sets `--openide-menu-anchor-width`. */
 	readonly width?: number;
+	/** Overrides the default first-row focus. Autocomplete keeps the textarea focused so the
+	 *  character that opened it can be followed by more query text without a second click. */
+	readonly initialFocus?: () => void;
 	/** Fills the menu. The returned store is disposed when the popover hides. */
 	readonly render: (container: HTMLElement, store: DisposableStore) => void;
 	readonly onHide?: () => void;
@@ -239,6 +242,10 @@ export class OpenideComposerPopover extends Disposable {
 				return store;
 			},
 			focus: () => {
+				if (options.initialFocus) {
+					options.initialFocus();
+					return;
+				}
 				if (!this._container?.contains(this._container.ownerDocument.activeElement)) { this._focusableRows()[0]?.focus({ preventScroll: true }); }
 			},
 			onHide: () => {

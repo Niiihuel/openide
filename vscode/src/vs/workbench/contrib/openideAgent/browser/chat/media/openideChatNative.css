@@ -200,10 +200,23 @@
 	display: flex;
 	align-items: center;
 	gap: var(--vscode-spacing-size8, 8px);
+	width: 100%;
 	margin-bottom: var(--vscode-spacing-size12, 12px);
+	padding: 7px 9px;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-md);
+	background: var(--oi-surface);
+	color: var(--vscode-foreground);
 	font-size: var(--oi-text-sm);
+	text-align: left;
+	cursor: pointer;
 }
+.openide-chat-empty-workspace:hover { background: var(--oi-hover); }
+.openide-chat-empty-workspace:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.openide-chat-empty-workspace > .codicon { color: var(--vscode-textLink-foreground); }
+.openide-chat-empty-workspace-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 1px; }
 .openide-chat-empty-workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-chat-empty-workspace-hint { color: var(--vscode-descriptionForeground); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .openide-chat-empty-hints {
 	display: flex;
 	flex-wrap: wrap;

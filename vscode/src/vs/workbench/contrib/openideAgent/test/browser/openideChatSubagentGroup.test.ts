@@ -47,12 +47,12 @@ suite('OpenIDE compact subagent activity', () => {
 	test('consecutive workers share one quiet row and preserve existing avatars when another arrives', () => {
 		const f = fixture([worker('a', 'Android inputs')]);
 		const summary = f.host.querySelector('summary')!;
-		const firstIcon = summary.querySelector('img');
+		const firstIcon = summary.querySelector('.openide-subagent-avatar');
 		f.append(worker('b', 'Android surfaces'));
 		assert.strictEqual(f.host.querySelectorAll('summary').length, 1);
-		assert.strictEqual(summary.querySelector('img'), firstIcon);
-		assert.strictEqual(summary.querySelectorAll('img').length, 2);
-		assert.ok(summary.textContent?.includes(t('chat.subagents.started', t('chat.subagents.and', 'Android inputs', 'Android surfaces'))));
+		assert.strictEqual(summary.querySelector('.openide-subagent-avatar'), firstIcon);
+		assert.strictEqual(summary.querySelectorAll('.openide-subagent-avatar').length, 2);
+		assert.ok(summary.textContent?.includes(t('chat.subagents.delegating', 2)));
 		assert.strictEqual(f.host.querySelector('details')!.open, false);
 		assert.ok(summary.getBoundingClientRect().right <= f.host.getBoundingClientRect().right + 1);
 	});
@@ -62,7 +62,7 @@ suite('OpenIDE compact subagent activity', () => {
 		const f = fixture(content);
 		const group = f.host.querySelector('details')!;
 		const summary = group.querySelector('summary')!;
-		const icon = summary.querySelector('img');
+		const icon = summary.querySelector('.openide-subagent-avatar');
 		const part = f.parts[1] as OpenideChatSubagentPart;
 		let heightChanges = 0; store.add(part.onDidChangeHeight(() => heightChanges++));
 		const observer = new mainWindow.MutationObserver(() => {}); observer.observe(part.domNode, { subtree: true, attributes: true, childList: true, characterData: true });
@@ -74,9 +74,10 @@ suite('OpenIDE compact subagent activity', () => {
 		assert.deepStrictEqual({ mutations: observer.takeRecords().length, heightChanges }, { mutations: 0, heightChanges: 0 });
 		content[1] = worker('b', 'Review surfaces', 'failed'); part.tryUpdate(content[1], item); f.render();
 		assert.ok(summary.textContent?.includes(t('chat.subagents.failed', 1)));
-		assert.strictEqual(summary.querySelector('img'), icon);
+		assert.strictEqual(summary.querySelector('.openide-subagent-avatar'), icon);
 		group.open = true; group.dispatchEvent(new mainWindow.Event('toggle'));
 		assert.ok(part.domNode.classList.contains('openide-chat-part-error'));
+		assert.strictEqual(group.querySelectorAll(':scope > .openide-chat-work-group-body > .openide-chat-sub').length, 2);
 		assert.strictEqual(f.host.querySelector('details'), group);
 	});
 

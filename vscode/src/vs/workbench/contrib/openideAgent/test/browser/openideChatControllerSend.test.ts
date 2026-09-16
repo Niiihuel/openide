@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { registerWindow } from '../../../../../base/browser/dom.js';
+import { CodeWindow } from '../../../../../base/browser/window.js';
 import { DeferredPromise } from '../../../../../base/common/async.js';
 import { VSBuffer, encodeBase64 } from '../../../../../base/common/buffer.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
@@ -108,6 +110,33 @@ suite('OpenIDE ChatController — send path', () => {
 		h.runs[0].settle();
 		await settle();
 	});
+	test('streaming repaints in the window that submitted the turn before the run settles', async () => {
+		let frame: FrameRequestCallback | undefined;
+		const targetWindow = {
+			vscodeWindowId: 4242,
+			addEventListener: () => { },
+			removeEventListener: () => { },
+			requestAnimationFrame: (callback: FrameRequestCallback) => { frame = callback; return 1; },
+		} as unknown as CodeWindow;
+		store.add(registerWindow(targetWindow));
+
+		const h = createHarness();
+		h.controller.restore();
+		let paints = 0;
+		store.add(h.controller.onDidChangeItems(() => paints++));
+		await h.controller.send({ text: 'trabajo visible', targetWindowId: targetWindow.vscodeWindowId });
+		const paintsAfterSubmit = paints;
+
+		h.runs[0].emit({ type: 'text', delta: 'avance' } as AgentLoopEvent);
+		assert.ok(frame, 'the streamed delta must schedule a frame in the submitting window');
+		frame!(0);
+		assert.strictEqual(paints, paintsAfterSubmit + 1, 'the stream is visible before its promise settles');
+		assert.strictEqual(h.controller.isBusy, true);
+
+		h.runs[0].settle();
+		await settle();
+	});
+
 	test('a native /command expands for the model and keeps what was typed for the transcript', async () => {
 		const h = createHarness();
 		h.controller.restore();

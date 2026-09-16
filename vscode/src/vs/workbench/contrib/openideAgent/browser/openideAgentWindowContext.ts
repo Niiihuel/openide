@@ -38,6 +38,7 @@ interface IAgentWindowContextActions {
 	readonly openTerminal: (instanceId?: number) => void;
 	readonly createTerminal: (cwd: URI) => void | Promise<void>;
 	readonly openFiles: (resource?: URI) => void;
+	readonly openProject: () => void;
 	readonly addSource?: () => void;
 	readonly openResource: (resource: URI) => void;
 	readonly openChanges: (path?: string, resource?: ISCMResource) => void;
@@ -93,7 +94,7 @@ export class OpenideAgentWindowContext extends Disposable {
 		const environment = createContextSection(parent, t('agentWindow.environment'), this._store, hoverService);
 		this.environment = this._register(instantiation.createInstance(OpenideAgentWindowEnvironment, environment,
 			() => source.sessionStore.metaOf(source.sessionStore.activeSessionId()),
-			{ openFiles: actions.openFiles, openTerminal: actions.createTerminal }));
+			{ openFiles: actions.openFiles, openTerminal: actions.createTerminal, openProject: actions.openProject }));
 		const git = this._register(instantiation.createInstance(OpenideAgentWindowGit, parent,
 			{ getRepository: () => this.selectedRepository(), openComparison: actions.openComparison }));
 		this.branch = this.row(environment, t('agentWindow.branch'), 'git-branch', () => { void git.showBranches(); });

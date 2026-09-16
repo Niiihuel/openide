@@ -28,6 +28,7 @@ import './media/openideAgentWindowEnvironment.css';
 export interface IAgentWindowEnvironmentActions {
 	readonly openFiles: (resource: URI) => void | Promise<void>;
 	readonly openTerminal: (cwd: URI) => void | Promise<void>;
+	readonly openProject: () => void | Promise<void>;
 }
 
 /** Uses the conversation directory, never the previously selected native chat's workspace. */
@@ -97,11 +98,15 @@ export class OpenideAgentWindowEnvironment extends Disposable {
 		const environment = resolveAgentWindowEnvironment(session, this.workspace.getWorkspace().folders, [...this.scm.repositories]);
 		const identity = `${session?.id ?? ''}:${environment.cwd?.toString() ?? ''}`;
 		if (identity !== this.sessionIdentity) { this.menu.close(); this.sessionIdentity = identity; }
-		const project = environment.folder?.name ?? (environment.cwd ? basename(environment.cwd) : t('agentWindow.workspace'));
+		const project = environment.folder?.name ?? (environment.cwd ? basename(environment.cwd) : t('agentWindow.noProject'));
 		this.project.querySelector('.openide-agent-window-row-label')!.textContent = project;
 		this.project.setAttribute('aria-label', environment.cwd ? this.labels.getUriLabel(environment.cwd) : project);
+		const projectIcon = this.project.querySelector<HTMLElement>(':scope > .codicon');
+		projectIcon?.classList.toggle('codicon-folder', !!environment.cwd);
+		projectIcon?.classList.toggle('codicon-folder-opened', !environment.cwd);
 		const location = environment.cwd && environment.cwd.scheme !== 'file' ? environment.cwd.authority || environment.cwd.scheme : t('agentWindow.local');
 		const caption = environment.harness ? `${location} · ${environment.harness}` : location;
+		this.location.hidden = !environment.cwd;
 		this.location.querySelector('.openide-agent-window-row-label')!.textContent = caption;
 		this.location.setAttribute('aria-label', caption);
 	}
@@ -113,8 +118,22 @@ export class OpenideAgentWindowEnvironment extends Disposable {
 		append(content, menuSection(t('agentWindow.environment')));
 		const details = append(content, $('dl.openide-agent-window-environment-details'));
 		const detail = (label: string, value: string): HTMLElement => { append(details, $('dt', undefined, label)); return append(details, $('dd', undefined, value)); };
+		const action = (icon: string, label: string, callback: () => void | Promise<void>): void => {
+			const { row } = menuRow(icon, label);
+			row.setAttribute('aria-label', label);
+			store.add(addDisposableListener(row, 'click', () => {
+				this.menu.close();
+				void Promise.resolve().then(callback).catch(error => this.notifications.error(error));
+			}));
+			append(content, row);
+		};
 		const cwd = environment.cwd;
-		if (!cwd) { append(content, menuEmpty(t('agentWindow.environment.noFolder'))); return; }
+		if (!cwd) {
+			append(content, menuEmpty(t('agentWindow.environment.noFolder')));
+			append(content, menuSeparator());
+			action('folder-opened', t('agentWindow.menu.openProject'), this.actions.openProject);
+			return;
+		}
 		detail(t('agentWindow.environment.location'), cwd.scheme === 'file' ? t('agentWindow.local') : cwd.authority || cwd.scheme);
 		detail(t('agentWindow.environment.directory'), this.labels.getUriLabel(cwd));
 		detail(t('agentWindow.environment.harness'), environment.harness ?? 'OpenIDE');
@@ -137,15 +156,6 @@ export class OpenideAgentWindowEnvironment extends Disposable {
 			});
 		}
 		append(content, menuSeparator());
-		const action = (icon: string, label: string, callback: () => void | Promise<void>): void => {
-			const { row } = menuRow(icon, label);
-			row.setAttribute('aria-label', label);
-			store.add(addDisposableListener(row, 'click', () => {
-				this.menu.close();
-				void Promise.resolve().then(callback).catch(error => this.notifications.error(error));
-			}));
-			append(content, row);
-		};
 		action('files', t('agentWindow.environment.openFiles'), () => this.actions.openFiles(cwd));
 		action('terminal', t('agentWindow.environment.openTerminal'), () => this.actions.openTerminal(cwd));
 		action('copy', t('agentWindow.environment.copyPath'), () => this.clipboard.writeText(cwd.scheme === 'file' ? cwd.fsPath : cwd.toString(true)));

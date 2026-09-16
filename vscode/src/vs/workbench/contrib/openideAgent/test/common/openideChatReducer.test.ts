@@ -279,6 +279,20 @@ suite('OpenIDE chat reducer', () => {
 		assert.deepStrictEqual(contentOf(step), [{ kind: 'notice', severity: 'warning', message: 'ojo' }]);
 	});
 
+	test('replayed advisories and exact generic tool calls render once', () => {
+		const step = run([
+			{ type: 'toolStart', id: 'a1', name: 'await_subagent', argumentsJson: '{ "runId": "run_1" }' },
+			{ type: 'toolResult', id: 'a1', name: 'await_subagent', result: '{"status":"working"}', isError: false },
+			{ type: 'info', message: 'same call repeated' },
+			{ type: 'toolStart', id: 'a2', name: 'await_subagent', argumentsJson: '{"runId":"run_1"}' },
+			{ type: 'toolResult', id: 'a2', name: 'await_subagent', result: '{"status":"completed"}', isError: false },
+			{ type: 'info', message: 'same call repeated' },
+		]);
+		assert.deepStrictEqual(kinds(step), ['tool', 'notice']);
+		const tool = contentOf(step)[0] as { callId: string; state: string; resultText?: string };
+		assert.deepStrictEqual([tool.callId, tool.state, tool.resultText], ['a2', 'success', '{"status":"completed"}']);
+	});
+
 	test('compaction is ONE card that changes state, and completion asks for a save', () => {
 		const step = run([
 			{ type: 'compaction', status: 'started', origin: 'automatic', beforeTokens: 100 },

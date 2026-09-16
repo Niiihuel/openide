@@ -66,6 +66,30 @@ suite('OpenIDE agent window environment', () => {
 		assert.strictEqual(await resolveAgentWindowWorktree(URI.file('/project'), files({})), undefined);
 	});
 
+
+	test('empty workspace is explicit and offers project selection', async () => {
+		const parent = mainWindow.document.createElement('div');
+		const popup = mainWindow.document.createElement('div');
+		let renderStore = store.add(new DisposableStore());
+		let opened = 0;
+		const context = upcastPartial<IContextViewService>({
+			showContextView: delegate => { renderStore = store.add(delegate.render(popup) as DisposableStore); return { close: () => { renderStore.dispose(); popup.replaceChildren(); delegate.onHide?.(); } }; },
+			layout: () => {},
+		});
+		store.add(new OpenideAgentWindowEnvironment(parent, () => undefined, {
+			openFiles: () => {}, openTerminal: () => {}, openProject: () => { opened++; },
+		}, upcastPartial<IWorkspaceContextService>({ getWorkspace: () => ({ id: 'empty', folders: [] }), onDidChangeWorkspaceFolders: Event.None }),
+		upcastPartial<ISCMService>({ repositories: [], onDidAddRepository: Event.None, onDidRemoveRepository: Event.None }), context, NullHoverService,
+		upcastPartial<ILabelService>({ getUriLabel: resource => resource.fsPath }), upcastPartial<IClipboardService>({}), files({}), upcastPartial<INotificationService>({ error: () => {} })));
+		const rows = parent.querySelectorAll<HTMLButtonElement>('.openide-agent-window-context-row');
+		assert.strictEqual(rows[0].textContent?.trim(), 'No project');
+		assert.strictEqual(rows[1].hidden, true);
+		rows[0].click();
+		popup.querySelector<HTMLButtonElement>('button[aria-label="Open project…"]')!.click();
+		await Promise.resolve();
+		assert.strictEqual(opened, 1);
+	});
+
 	test('native popover actions use selected cwd and close before dispatch', async () => {
 		const parent = mainWindow.document.createElement('div');
 		const popup = mainWindow.document.createElement('div');
@@ -81,6 +105,7 @@ suite('OpenIDE agent window environment', () => {
 		store.add(new OpenideAgentWindowEnvironment(parent, () => session('/session/cwd'), {
 			openFiles: resource => { assert.ok(closed); opened.push(`files:${resource.fsPath}`); },
 			openTerminal: resource => { assert.ok(closed); opened.push(`terminal:${resource.fsPath}`); },
+			openProject: () => { throw new Error('Project action should not be shown when cwd exists'); },
 		}, upcastPartial<IWorkspaceContextService>({ getWorkspace: () => ({ id: 'workspace', folders: [folder('/project')] }), onDidChangeWorkspaceFolders: Event.None }),
 		upcastPartial<ISCMService>({ repositories: [], onDidAddRepository: Event.None, onDidRemoveRepository: Event.None }), context, NullHoverService,
 		upcastPartial<ILabelService>({ getUriLabel: resource => resource.fsPath }), upcastPartial<IClipboardService>({ writeText: async value => { copied = value; } }), files({}),

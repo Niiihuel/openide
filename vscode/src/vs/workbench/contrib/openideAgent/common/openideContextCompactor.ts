@@ -77,9 +77,10 @@ export class OpenideContextCompactor {
 			await ports.beforeCompact?.();
 			const emergency = buildEmergencyCompaction(messages, projectionBudget);
 			if (!emergency || token.isCancellationRequested || JSON.stringify(messages) !== original) { return false; }
-			await appendOpenideJournal(request.journal, 'compaction', { origin, before: JSON.parse(original), after: emergency, state: 'prepared', sourceProjectionHash: await hashAsync(original), deterministic: true });
+			const sourceProjectionHash = await hashAsync(original);
 			if (token.isCancellationRequested || JSON.stringify(messages) !== original) { return false; }
 			messages.splice(0, messages.length, ...emergency);
+			await appendOpenideJournal(request.journal, 'compaction', { origin, after: emergency, state: 'committed', sourceProjectionHash, deterministic: true });
 			onEvent({ type: 'compaction', status: 'completed', origin, beforeTokens: used, afterTokens: fixedTokens + estimateConversationTokens(emergency) });
 			return true;
 		}
@@ -179,10 +180,10 @@ export class OpenideContextCompactor {
 		};
 		if (token.isCancellationRequested) { return false; }
 		if (JSON.stringify(messages) !== original) { return false; }
-		// Keep the original history independently of its smaller model projection.
-		await appendOpenideJournal(request.journal, 'compaction', { origin, before: JSON.parse(original), after: compacted, state: 'prepared', sourceProjectionHash: await hashAsync(original) });
+		const sourceProjectionHash = await hashAsync(original);
 		if (token.isCancellationRequested || JSON.stringify(messages) !== original) { return false; }
 		messages.splice(0, messages.length, ...compacted);
+		await appendOpenideJournal(request.journal, 'compaction', { origin, after: compacted, state: 'committed', sourceProjectionHash });
 		state.failures = 0;
 		state.lowSavings = 0;
 		state.cooldownUntil = 0;

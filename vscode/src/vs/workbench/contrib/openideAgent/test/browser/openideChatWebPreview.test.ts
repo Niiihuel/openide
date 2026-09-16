@@ -52,6 +52,9 @@ suite('OpenIDE chat web preview', () => {
 		assert.equal(host.querySelector('.openide-chat-resource-card'), card);
 		assert.equal(opens.length, 0);
 		assert.equal(card.querySelector('.openide-chat-resource-full'), null);
+		assert.equal(card.querySelector('.openide-chat-resource-compact-status')?.textContent, 'Opening');
+		assert.equal(card.querySelector('.openide-chat-resource-description')?.textContent, 'http://localhost:8091/sign-in');
+		assert.ok(card.querySelector('.openide-chat-resource-compact-icon.codicon-globe'));
 		assert.ok(card.querySelector('.oi-split-more'));
 		(card.querySelector('.oi-split-main') as HTMLElement).click();
 		await Promise.resolve();

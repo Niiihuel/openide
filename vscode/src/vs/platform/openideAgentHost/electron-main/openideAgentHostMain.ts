@@ -537,7 +537,7 @@ export class OpenideAgentHostMainService extends Disposable implements IOpenideA
 	}
 	openRunJournal(sessionId: string) { return this.runJournal.open(sessionId); }
 	appendRunJournal(sessionId: string, event: IOpenideRunJournalEvent) { return this.runJournal.append(sessionId, event); }
-	async closeRunJournal(sessionId: string): Promise<void> { this.runJournal.close(sessionId); }
+	closeRunJournal(sessionId: string, completed = false): Promise<void> { return this.runJournal.close(sessionId, completed); }
 	registerAgentTerminal(request: IOpenideAgentTerminalRegistration) { return this.agentTerminals.register(request); }
 	shutdownAgentTerminals(conversationId: string) { return this.agentTerminals.shutdown(conversationId); }
 	processIsolationStatus() { return this.processIsolation.status(); }

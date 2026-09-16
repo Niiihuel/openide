@@ -40,11 +40,12 @@ export class OpenideAgentWindowMotion extends Disposable {
 		return { bounds, display: style.display, visible: bounds.width > 0 && bounds.height > 0, opacity: Number(style.opacity) };
 	}
 
-	run(change: () => void, animate: boolean): void {
+	/** Returns whether surfaces are still moving and native editor content must remain hidden. */
+	run(change: () => void, animate: boolean): boolean {
 		const before = animate ? this.surfaces.map(surface => this.read(surface)) : [];
 		this.finish();
 		change();
-		if (!animate) { return; }
+		if (!animate) { return false; }
 		const after = this.surfaces.map(surface => this.read(surface));
 		for (let i = 0; i < this.surfaces.length; i++) {
 			const surface = this.surfaces[i], previous = before[i], next = after[i];
@@ -99,7 +100,9 @@ export class OpenideAgentWindowMotion extends Disposable {
 			this.animations.push(animation);
 		}
 		const last = this.animations.at(-1);
-		if (last) { last.onfinish = () => this.finish(); } else { this.finish(); }
+		if (last) { last.onfinish = () => this.finish(); return true; }
+		this.finish();
+		return false;
 	}
 
 	override dispose(): void { this.finish(); super.dispose(); }

@@ -99,7 +99,7 @@ export async function runOpenideTurn(request: IOpenideTurnRequest, ports: IOpeni
 			}
 			let iterationEmitted = false;
 			let result: IProviderResult;
-			await appendOpenideJournal(journal, 'model/request', { phase: 'dispatch', iteration, projection: messages, request: openideRecordedRequest({ ...provider, messages: wireMessages }) });
+			await appendOpenideJournal(journal, 'model/request', { phase: 'dispatch', iteration, request: openideRecordedRequest({ ...provider, messages: wireMessages }) });
 			if (token.isCancellationRequested) { return 'cancelled'; }
 			try {
 				result = await ports.stream({ ...provider, messages: wireMessages }, event => {

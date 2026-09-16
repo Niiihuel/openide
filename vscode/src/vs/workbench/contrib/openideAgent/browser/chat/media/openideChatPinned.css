@@ -38,6 +38,12 @@
 /* The row's card colour is a translucent tint; here it sits on the island, which is what the row
    sits on too, so the two compute to the same colour. */
 .openide-chat-pinned > .openide-chat-request-bubble.hidden { display: none; }
+.openide-chat-pinned > .openide-chat-request-bubble {
+	/* The sticky request and both composer positions share one visual frame. */
+	background: var(--oi-conversation-panel);
+	border-color: var(--oi-border);
+	border-radius: var(--oi-radius-composer);
+}
 
 /* ---- The inline editor ---- */
 .openide-chat-pinned-edit.hidden { display: none; }

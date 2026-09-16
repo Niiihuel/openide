@@ -28,7 +28,7 @@ interface ISuggestMeta {
 /** `SUGGEST_META`, transcribed verbatim (the removed chat webview). */
 const SUGGEST_META: Readonly<Record<string, ISuggestMeta>> = {
 	agent: { icon: 'openide-mode-agent', label: 'Agent', verb: 'Cambiar a modo Agent' },
-	plan: { icon: 'openide-mode-plan', label: 'Plan', verb: 'Cambiar a modo Plan' },
+	plan: { icon: 'checklist', label: 'Plan', verb: 'Cambiar a modo Plan' },
 	ask: { icon: 'openide-mode-ask', label: 'Ask', verb: 'Cambiar a modo Ask' },
 	debug: { icon: 'debug', label: 'Debug', verb: 'Usar modo Debug' },
 	fork: { icon: 'repo-forked', label: 'Fork', verb: 'Abrir una rama (fork)' },

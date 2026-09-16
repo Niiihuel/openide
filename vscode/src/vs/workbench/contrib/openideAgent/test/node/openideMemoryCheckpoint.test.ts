@@ -41,6 +41,19 @@ suite('OpenIDE durable memory checkpoints', () => {
 		assert.strictEqual(events.length, 0, 'a check without a write is silent');
 		assert.strictEqual((await owner.request({ action: 'checkpoint', session: 'session' })).checkpoint?.status, 'no_durable_change');
 	});
+	test('automatic capture drops unsafe related references and saves the durable note', async () => {
+		const events: AgentLoopEvent[] = [];
+		const summarize = async () => JSON.stringify({ notes: [{
+			topic_key: 'retry/locations', body: 'Retry policy lives in the payment service.', kind: 'discovery',
+			related: ['/tmp/private.ts', '../outside.ts', 'https://example.com/file.ts', 'src/pay.ts#retry'],
+		}] });
+		await new OpenideMemoryCheckpoint(memory, 'session', 'request', summarize, event => events.push(event)).capture(messages, CancellationToken.None, 'completed');
+		const documents = await memory.list();
+		assert.deepStrictEqual(documents[0].record.related, ['src/pay.ts#retry']);
+		assert.strictEqual((await owner.request({ action: 'checkpoint', session: 'session' })).checkpoint?.status, 'saved');
+		assert.ok(!events.some(event => event.type === 'info' && event.severity === 'warning'));
+	});
+
 	test('graph search finds a word beyond the shortened note name', async () => {
 		const memory: Pick<ICodebaseMemoryService, 'onDidChange' | 'getSnapshot'> = { onDidChange: Event.None, getSnapshot: async () => ({ version: { workspaceKey: 'w', version: 1, builtAt: 0, staleCount: 0, nodeCount: 1, edgeCount: 0 }, nodes: [{ id: 'note', kind: 'note' as const, name: 'A long introductory label', uri: 'file:///repo/.openide/MEMORY.md', degree: 0, evidence: makeEvidence('authored'), documentation: 'Ordinary text '.repeat(20) + 'QuasarRecovery' }], edges: [], dirtyUris: [] }) };
 		const query = new OpenideCodebaseQueryService(memory as ICodebaseMemoryService, new TestConfigurationService());

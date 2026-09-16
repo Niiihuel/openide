@@ -232,6 +232,7 @@ export class OpenideChangesEditor extends EditorPane {
 		append(filterNode, $('span.codicon.codicon-search', { 'aria-hidden': 'true' }));
 		const clear = append(filterNode, $('button.openide-chat-head-btn.oi-dock-action.openide-changes-clear', { type: 'button', 'aria-label': t('openide.review.clear') }));
 		append(clear, $('span.codicon.codicon-close', { 'aria-hidden': 'true' })); clear.hidden = true;
+		this._register(setupChatTooltip(this.hovers, clear, () => t('openide.review.clear')));
 		this._register(addDisposableListener(clear, 'click', () => { this.filter.value = ''; this.filter.focus(); }));
 		this._register(addDisposableListener(this.filter.inputElement, 'keydown', event => { if (event.key === 'Escape' && this.filter.value) { event.stopPropagation(); this.filter.value = ''; } }));
 		this.body = append(this.root, $('.openide-changes-body'));

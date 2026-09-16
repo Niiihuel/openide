@@ -36,6 +36,19 @@ import { applyOpenideSurfaceCss } from './openideSurfaceStyle.js';
 import { IOpenideUsageAccount, IOpenideUsageMonitor, IOpenideUsageSnapshot } from './openideUsageMonitor.js';
 import { t } from '../common/openideStrings.js';
 
+const PASSIVE_ACCOUNT_FAILURES = new Set(['missing-credentials', 'stale-token', 'usage-unavailable', 'not-onboarded']);
+
+/**
+ * Expired CLI credentials are account-management state, not a live usage failure. Keep the active
+ * provider and real transport/server errors visible, but do not turn every old CLI login into a
+ * permanent red row each time the user checks the account that is actually running.
+ */
+export function shouldShowUsageAccount(account: IOpenideUsageAccount, activeProviderId: string): boolean {
+	if (account.entry.id === activeProviderId || account.fetching || usageStatusOf(account.usage) === 'ok') { return true; }
+	if (usageStatusOf(account.usage) === 'unavailable') { return false; }
+	return !PASSIVE_ACCOUNT_FAILURES.has(account.usage?.failureKind ?? 'unknown');
+}
+
 export class OpenideUsagePopover extends Disposable {
 
 	private contextView: IOpenContextView | undefined;
@@ -181,8 +194,12 @@ export class OpenideUsagePopover extends Disposable {
 				? t('chatSurface.usage.loading')
 				: t('chatSurface.usage.noAccounts')));
 		} else {
-			for (const account of snapshot.accounts) {
+			const visibleAccounts = snapshot.accounts.filter(account => shouldShowUsageAccount(account, this.activeProviderId));
+			for (const account of visibleAccounts) {
 				this.list.appendChild(this.renderAccount(account));
+			}
+			if (!visibleAccounts.length) {
+				append(this.list, $('.openide-menu-empty.openide-usage-empty', undefined, t('chatSurface.usage.noActiveData')));
 			}
 		}
 		this.scrollable?.scanDomNode();

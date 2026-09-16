@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, append, clearNode, Dimension, scheduleAtNextAnimationFrame } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, clearNode, scheduleAtNextAnimationFrame } from '../../../../base/browser/dom.js';
 import { MenuId, MenuRegistry } from '../../../../platform/actions/common/actions.js';
 import { BaseMenuActionViewItem } from '../../../../base/browser/ui/menu/menu.js';
 import { defaultMenuStyles } from '../../../../platform/theme/browser/defaultStyles.js';
@@ -36,7 +36,6 @@ import { IStatusbarService } from '../../../services/statusbar/browser/statusbar
 import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { hasCustomTitlebar } from '../../../../platform/window/common/window.js';
-import { CustomMenubarControl } from '../../../browser/parts/titlebar/menubarControl.js';
 import { Sash, Orientation, SashState } from '../../../../base/browser/ui/sash/sash.js';
 import { URI } from '../../../../base/common/uri.js';
 import { onUnexpectedError } from '../../../../base/common/errors.js';
@@ -130,18 +129,17 @@ export class OpenideAgentWindow extends Disposable {
 		});
 		if (await Promise.race([closed, auxiliary.whenStylesHaveLoaded.then(() => false)]) || this._store.isDisposed) { return; }
 		const workspace = this.workspaceContextService.getWorkspace();
-		const project = workspace.folders.map(folder => folder.name).join(', ') || t('agentWindow.workspace');
+		const project = workspace.folders.map(folder => folder.name).join(', ') || t('agentWindow.noProject');
 		auxiliary.window.document.title = `${project} — OpenIDE Agent`;
 		const titlebar = customTitle ? store.add(this.titleService.createAuxiliaryTitlebarPart(auxiliary.container, this.editorGroupsService.mainPart, this.instantiationService)) : undefined;
-		let menubar: CustomMenubarControl | undefined;
+		let menubar: HTMLElement | undefined;
 		titlebar?.container.classList.add('openide-agent-titlebar');
 		if (titlebar) {
-			// The native auxiliary titlebar owns drag regions and OS controls. Install the IDE's
-			// real menu control because this shell also exposes workspace operations.
+			// This companion has a smaller command surface than the IDE. A dedicated menubar keeps
+			// file/project selection visible without exposing editor-only Selection, Go and Run menus.
 			const left = titlebar.container.querySelector<HTMLElement>('.titlebar-left');
-			if (left && !left.querySelector('.menubar')) {
-				menubar = store.add(this.instantiationService.createInstance(CustomMenubarControl));
-				menubar.create(append(left, $('.menubar', { role: 'menubar' })));
+			if (left && !left.querySelector('.openide-agent-menubar')) {
+				menubar = append(left, $('.openide-agent-menubar', { role: 'menubar', 'aria-label': t('agentWindow.menu.label') }));
 			}
 		}
 		const editors = store.add(this.instantiationService.createInstance(OpenideAgentWindowEditors, auxiliary.window.vscodeWindowId));
@@ -242,8 +240,6 @@ export class OpenideAgentWindow extends Disposable {
 		const title = append(header, $('.openide-agent-window-title'));
 		const harnessLabel = append(header, $('span.openide-agent-window-harness-label'));
 		const more = this.button(header, t('chat.header.more'), 'ellipsis', () => companion.showConversationMenu(more), store);
-		const terminalToggle = this.button(topActions, t('agentWindow.terminal'), 'terminal', () => { if (terminalHost.hidden) { void openTerminal().catch(onUnexpectedError); } else { closeTerminal(); } }, store, AgentWindowAction.terminal);
-		
 		const openReview = () => {
 			const summary = context.querySelector<HTMLButtonElement>('.openide-agent-window-review-summary');
 			if (summary && !summary.disabled) { summary.click(); return; }
@@ -302,6 +298,7 @@ export class OpenideAgentWindow extends Disposable {
 			terminalHost.hidden = false; layout(); await terminal.reveal(instanceId); layout();
 		};
 		const closeTerminal = () => { terminal.hide(); terminalHost.hidden = true; layout(); };
+		const toggleTerminal = () => { if (terminalHost.hidden) { void openTerminal().catch(onUnexpectedError); } else { closeTerminal(); } };
 		const contextViewport = $('.openide-agent-window-context-viewport');
 		const contextScroll = store.add(new DomScrollableElement(contextViewport, { horizontal: ScrollbarVisibility.Hidden, vertical: ScrollbarVisibility.Auto, verticalScrollbarSize: 6, useShadows: false }));
 		const contextHost = append(conversationBody, contextScroll.getDomNode());
@@ -325,6 +322,7 @@ export class OpenideAgentWindow extends Disposable {
 				if (open && input) { void editors.openEditor(input, { pinned: true }).catch(onUnexpectedError); }
 			},
 			openTerminal: (id?: number) => void openTerminal(id).catch(onUnexpectedError), openFiles: (resource?: URI) => void openFiles(resource).catch(onUnexpectedError),
+			openProject: () => void this.commandService.executeCommand('workbench.action.files.openFolder').catch(onUnexpectedError),
 			createTerminal: async (cwd: URI) => { terminalHost.hidden = false; layout(); await terminal.create({ cwd }); layout(); },
 			openSubagents: () => void openSubagents().catch(onUnexpectedError),
 			openComparison: async input => { await editors.openEditor(input); },
@@ -413,10 +411,64 @@ export class OpenideAgentWindow extends Disposable {
 			openTerminal: () => void openTerminal().catch(onUnexpectedError),
 			openBrowser: () => void openBrowser().catch(onUnexpectedError)
 		}));
+		const runCommand = (id: string) => void this.commandService.executeCommand(id).catch(onUnexpectedError);
+		const showTitleMenu = (anchor: HTMLButtonElement, actions: readonly (Action | Separator)[]) => {
+			const menuStore = new DisposableStore();
+			for (const action of actions) { if (!(action instanceof Separator)) { menuStore.add(action); } }
+			anchor.setAttribute('aria-expanded', 'true');
+			this.contextMenuService.showContextMenu({
+				getAnchor: () => anchor,
+				anchorAlignment: AnchorAlignment.LEFT,
+				domForShadowRoot: anchor,
+				useWindowContainerForShadowRoot: true,
+				getActions: () => actions,
+				getActionViewItem: action => new BaseMenuActionViewItem(undefined, action, { icon: true, label: true }, defaultMenuStyles),
+				getKeyBinding: action => this.keybindingService.lookupKeybinding(action.id),
+				onHide: cancelled => {
+					anchor.setAttribute('aria-expanded', 'false');
+					menuStore.dispose();
+					if (cancelled && anchor.isConnected) { anchor.focus(); }
+				},
+			});
+		};
+		const titleAction = (id: string, label: string, icon: string, run: () => void) => new Action(id, label, `codicon codicon-${icon}`, true, async () => run());
+		const addTitleMenu = (label: string, actions: () => readonly (Action | Separator)[]) => {
+			if (!menubar) { return; }
+			const button = append(menubar, $<HTMLButtonElement>('button.openide-agent-menubar-button', {
+				type: 'button', role: 'menuitem', 'aria-haspopup': 'menu', 'aria-expanded': 'false'
+			}, label));
+			store.add(addDisposableListener(button, 'pointerdown', event => event.stopPropagation()));
+			store.add(addDisposableListener(button, 'click', event => {
+				event.preventDefault();
+				event.stopPropagation();
+				showTitleMenu(button, actions());
+			}));
+		};
+		addTitleMenu(t('agentWindow.menu.file'), () => [
+			titleAction(AgentWindowAction.newChat, t('agentWindow.menu.newChat'), 'edit', () => { this.source.newSession(); companion.focus(); }),
+			new Separator(),
+			titleAction('workbench.action.quickOpen', t('agentWindow.menu.openFile'), 'file', () => search.showFiles()),
+			titleAction('workbench.action.files.openFolder', t('agentWindow.menu.openProject'), 'folder-opened', () => runCommand('workbench.action.files.openFolder')),
+			titleAction('workbench.action.openRecent', t('agentWindow.menu.openRecent'), 'history', () => runCommand('workbench.action.openRecent')),
+			new Separator(),
+			titleAction('openide.agent.backToIde', t('agentWindow.menu.backToIde'), 'arrow-left', () => void this.focusIde().catch(onUnexpectedError)),
+		]);
+		addTitleMenu(t('agentWindow.menu.view'), () => [
+			titleAction('openide.workspace.conversations', t('agentWindow.conversations'), 'comment-discussion', () => { root.classList.remove('sidebar-hidden'); layout(); }),
+			titleAction('openide.workspace.environment', t('agentWindow.environment'), 'settings', () => openEnvironment()),
+			new Separator(),
+			titleAction(AgentWindowAction.review, t('agentWindow.reviewChanges'), 'diff', () => openReview()),
+			titleAction(AgentWindowAction.files, t('agentWindow.filesTitle'), 'files', () => void openFiles().catch(onUnexpectedError)),
+			titleAction(AgentWindowAction.browser, t('agentWindow.browser'), 'globe', () => void openBrowser().catch(onUnexpectedError)),
+			titleAction(AgentWindowAction.terminal, t('agentWindow.terminal'), 'terminal', () => toggleTerminal()),
+		]);
+		addTitleMenu(t('agentWindow.menu.help'), () => [
+			titleAction('workbench.action.openSettings', t('agentWindow.settings'), 'settings-gear', () => void editors.openSettings(this.instantiationService.createInstance(SettingsEditorInput)).catch(onUnexpectedError)),
+			titleAction('workbench.action.openGlobalKeybindings', t('agentWindow.menu.keyboardShortcuts'), 'keyboard', () => runCommand('workbench.action.openGlobalKeybindings')),
+		]);
 		sidebarToggle.setAttribute('aria-controls', sidebar.id);
 		contextToggle.setAttribute('aria-controls', workspacePanel.id);
 		environmentToggle.setAttribute('aria-controls', context.id);
-		terminalToggle.setAttribute('aria-controls', terminalHost.id);
 		const refresh = () => {
 			sessions.render();
 			const id = this.source.sessionStore.activeSessionId();
@@ -496,11 +548,13 @@ export class OpenideAgentWindow extends Disposable {
 				contextHost.hidden = !visible;
 				applyLayout(visible);
 			};
-			if (changed) { motion.run(commit, animate && environmentVisible !== undefined && !reducedMotion.matches); }
-			else { applyLayout(visible); }
-			// Chromium's native surface cannot follow DOM transforms. Hide it immediately;
-			// its existing screenshot remains inside the animated editor host.
-			editors.setDockVisible(!contextHidden);
+			const moving = changed
+				? motion.run(commit, animate && environmentVisible !== undefined && !reducedMotion.matches)
+				: (applyLayout(visible), false);
+			// Chromium's native surface is a window child and cannot follow or be clipped by DOM
+			// transforms. Keep it hidden for the complete FLIP transition; the editor's screenshot
+			// stays in the moving dock and motion reveals the native surface only after settling.
+			editors.setDockVisible(!contextHidden && !moving);
 		};
 		const applyLayout = (visible: boolean) => {
 			environmentToggle.setAttribute('aria-expanded', String(visible));
@@ -509,7 +563,6 @@ export class OpenideAgentWindow extends Disposable {
 			if (width !== chromeWidth || height !== chromeHeight || titleHeight !== chromeTitleHeight || statusHeight !== chromeStatusHeight) {
 				chromeWidth = width; chromeHeight = height; chromeTitleHeight = titleHeight; chromeStatusHeight = statusHeight;
 				titlebar?.layout(width, titleHeight, 0, 0);
-				menubar?.layout(new Dimension(0, titleHeight));
 				statusbar.layout(width, statusHeight, height - statusHeight, 0);
 			}
 			root.style.height = `${Math.max(0, height - titleHeight - statusHeight)}px`;
@@ -522,7 +575,6 @@ export class OpenideAgentWindow extends Disposable {
 			terminalHost.style.height = `${Math.min(terminalHeight, center.clientHeight * 0.7)}px`;
 			updateToggle(sidebarToggle, sideVisible, sideVisible ? 'layout-sidebar-left' : 'layout-sidebar-left-off');
 			updateToggle(contextToggle, contextVisible, contextVisible ? 'layout-sidebar-right' : 'layout-sidebar-right-off');
-			updateToggle(terminalToggle, !terminalHost.hidden, 'terminal');
 			// The embedded editor observes its host size; a manual layout here duplicates that pass.
 			// Read the host, never the previously laid out child. Unchanged siblings need no work.
 			// Layout uses untransformed dimensions so unrelated updates cannot feed the visual
@@ -585,15 +637,15 @@ export class OpenideAgentWindow extends Disposable {
 			[AgentWindowAction.review, () => openReview()],
 			[AgentWindowAction.browser, () => openBrowser()],
 			[AgentWindowAction.files, () => openFiles()],
-			[AgentWindowAction.terminal, () => terminalToggle.click()],
+			[AgentWindowAction.terminal, () => toggleTerminal()],
 			[AgentWindowAction.focusChat, () => companion.focus()],
 			[AgentWindowAction.sidebar, () => sidebarToggle.click()],
 			[AgentWindowAction.workspace, () => contextToggle.click()],
 			[AgentWindowAction.explore, () => companion.prepareStarter(0)],
 			[AgentWindowAction.plan, () => companion.prepareStarter(1)],
 			[AgentWindowAction.debug, () => companion.prepareStarter(2)],
-			['workbench.action.togglePanel', () => terminalToggle.click()],
-			['workbench.action.terminal.toggleTerminal', () => terminalToggle.click()],
+			['workbench.action.togglePanel', () => toggleTerminal()],
+			['workbench.action.terminal.toggleTerminal', () => toggleTerminal()],
 			['workbench.action.toggleSidebarVisibility', () => sidebarToggle.click()],
 			['workbench.action.toggleAuxiliaryBar', () => contextToggle.click()],
 			['workbench.action.findInFiles', () => search.show()],

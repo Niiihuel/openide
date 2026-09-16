@@ -6,23 +6,13 @@
  *  through grid-template-rows so no height is ever measured.
  *--------------------------------------------------------------------------------------------*/
 
-/* Lives INSIDE `.openide-chat-block`, above the trays: the block draws the outline, the surface
-   for the whole group, so the card paints no frame of its own — only the
-   interior hairline that separates it from what stacks under it. Top corners clip to the block's
-   own radius, same trick as the tray host. */
-.openide-chat-questions-host {
-	width: 100%;
-	box-sizing: border-box;
-	border-radius: var(--oi-chat-card-radius) var(--oi-chat-card-radius) 0 0;
-	overflow: hidden;
-}
-
+/* Direct child of `.openide-chat-tray-host`, before Files and Background Terminals. The
+   shared composer rules own the frame, separators and corners; this component only draws content. */
 .openide-chat-questions {
 	display: flex;
 	flex-direction: column;
 	box-sizing: border-box;
 	width: 100%;
-	border-bottom: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
 	background: transparent;
 }
 

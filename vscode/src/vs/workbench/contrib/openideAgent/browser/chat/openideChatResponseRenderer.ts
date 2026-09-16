@@ -328,10 +328,10 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		if (isOpenideChatToolContent(content)) {
 			const preview = webPreviewFromTool(content);
 			if (preview) { return this._instantiationService.createInstance(OpenideChatWebPreviewPart, preview); }
-			return new OpenideChatToolPart(content, context, this._hoverService);
+			return this._instantiationService.createInstance(OpenideChatToolPart, content, context);
 		}
 		if (isOpenideChatContentOfKind(content, 'explore')) {
-			return new OpenideChatExplorePart(content, context, this._hoverService);
+			return this._instantiationService.createInstance(OpenideChatExplorePart, content, context);
 		}
 		if (isOpenideChatContentOfKind(content, 'subagent')) {
 			return new OpenideChatSubagentPart(content, context, this._hoverService);

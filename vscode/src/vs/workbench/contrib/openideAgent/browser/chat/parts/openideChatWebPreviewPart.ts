@@ -42,6 +42,7 @@ export class OpenideChatWebPreviewPart extends OpenideChatContentPart {
 		};
 		const card = this._register(new OpenideChatResourceCard({
 			compact: true,
+			compactStatus: t('chatSurface.resource.opening'),
 			title: preview.title || t('chatSurface.resource.web'),
 			description: preview.url,
 			icon: Codicon.globe,

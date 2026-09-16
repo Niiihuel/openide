@@ -181,7 +181,7 @@ export interface IOpenideAgentHostService {
 	setRestoreWorkspace(roots: readonly string[], workspaceId?: string): Promise<void>;
 	openRunJournal(sessionId: string): Promise<IOpenideRunJournalRecord[]>;
 	appendRunJournal(sessionId: string, event: IOpenideRunJournalEvent): Promise<void>;
-	closeRunJournal(sessionId: string): Promise<void>;
+	closeRunJournal(sessionId: string, completed?: boolean): Promise<void>;
 	readonly onDidChangeCodexGoal: Event<IOpenideCodexGoalEvent>;
 	codexGoalPrepare(input: IOpenideCodexGoalPrepare): Promise<IOpenideCodexGoalConnection>;
 	codexGoalRun(sessionId: string, runId: string, prompt: string): Promise<IOpenideCodexGoalResult>;

@@ -22,7 +22,7 @@ export interface IAgentModeEntry {
 /** The four modes of the webview, in its order. `debug` borrows the workbench's own debug glyph. */
 export const OPENIDE_AGENT_MODES: readonly IAgentModeEntry[] = [
 	{ id: 'agent', icon: 'openide-mode-agent', label: 'Agent', description: t('chatSurface.mode.agent') },
-	{ id: 'plan', icon: 'openide-mode-plan', label: 'Plan', description: t('chatSurface.mode.plan') },
+	{ id: 'plan', icon: 'checklist', label: 'Plan', description: t('chatSurface.mode.plan') },
 	{ id: 'ask', icon: 'openide-mode-ask', label: 'Ask', description: t('chatSurface.mode.ask') },
 	{ id: 'debug', icon: 'debug', label: 'Debug', description: t('chatSurface.mode.debug') },
 ];

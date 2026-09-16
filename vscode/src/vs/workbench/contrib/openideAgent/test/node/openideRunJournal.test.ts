@@ -43,9 +43,15 @@ suite('OpenIDE journal runtime composition (real disk)', () => {
 		const attempts = records.filter(record => record.event.kind === 'model/request' && record.event.payload['phase'] === 'attempt');
 		assert.strictEqual(attempts.length, 2);
 		for (const record of attempts) {
-			const envelope = reconstructOpenideJournalRequest(records, record.seq) as unknown as { messages: IChatMessage[] };
-			assert.deepStrictEqual(envelope.messages, requests[0].messages);
-			assert.strictEqual(envelope.messages[0].content, 'task\n\nretrieved source');
+			const envelope = reconstructOpenideJournalRequest(records, record.seq) as unknown as {
+				messageCount: number;
+				messages: { role: string; content: { chars: number; preview: string } }[];
+			};
+			assert.strictEqual(envelope.messageCount, requests[0].messages.length);
+			assert.strictEqual(envelope.messages[0].role, 'user');
+			assert.strictEqual(envelope.messages[0].content.preview, 'task\n\nretrieved source');
+			assert.ok(envelope.messages[0].content.chars >= envelope.messages[0].content.preview.length);
+			assert.ok(JSON.stringify(record).length < 20_000, 'a request retry must stay bounded');
 		}
 		assert.ok(!JSON.stringify(records).includes('never-store-this'));
 		assert.strictEqual(records.filter(record => record.event.kind === 'model/retry').length, 1);
@@ -118,7 +124,7 @@ suite('OpenIDE journal runtime composition (real disk)', () => {
 		assert.strictEqual(await readFile(join(root, 'effect'), 'utf8'), 'once');
 	});
 
-	test('compaction preserves original history on disk and rejects a changed projection', async () => {
+	test('compaction checkpoints the committed projection and rejects a changed source', async () => {
 		const store = new OpenideRunJournalStore(root);
 		const messages: IChatMessage[] = Array.from({ length: 24 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user', content: `Message ${index} ${'source detail '.repeat(200)}` }));
 		const before = structuredClone(messages);
@@ -129,7 +135,11 @@ suite('OpenIDE journal runtime composition (real disk)', () => {
 		assert.strictEqual(await compactor.compact(request, { stream: (...args) => stream.stream(...args), auxiliary: async () => undefined }), true);
 		assert.ok(messages.length < before.length);
 		const records = await new OpenideRunJournalStore(root).read('session');
-		assert.deepStrictEqual(records.find(record => record.event.kind === 'compaction')?.event.payload['before'], before);
+		const compaction = records.find(record => record.event.kind === 'compaction')?.event.payload;
+		assert.strictEqual(compaction?.['state'], 'committed');
+		assert.strictEqual(compaction?.['before'], undefined);
+		assert.deepStrictEqual(compaction?.['after'], messages);
+		assert.deepStrictEqual(reconstructOpenideJournalMessages(records), messages);
 		const concurrent = structuredClone(before);
 		assert.strictEqual(await compactor.compact({ ...request, messages: concurrent }, { auxiliary: async () => undefined, stream: async () => { concurrent.push({ role: 'user', content: 'new steering' }); return adapter.streamChat({ ...provider, messages: [] }, () => {}, CancellationToken.None); } }), false);
 		assert.strictEqual(concurrent.at(-1)?.content, 'new steering');

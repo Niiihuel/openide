@@ -12,6 +12,15 @@ import { activeMemoryDocuments } from '../common/openideMemoryRecall.js';
 import { t } from '../common/openideStrings.js';
 import { OpenideAgentMemory } from './openideAgentMemory.js';
 
+function sanitizeCheckpointRelated(related: readonly string[] | undefined): string[] | undefined {
+	if (!related) { return undefined; }
+	const bounded = [...new Set(related.map(reference => reference.trim()).filter(reference => {
+		if (!reference || reference.length > 500 || reference.includes('|') || reference.startsWith('/') || /^[a-zA-Z]:/.test(reference) || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(reference)) { return false; }
+		return !reference.split('#')[0].split(/[\\/]/).includes('..');
+	}))];
+	return bounded.length ? bounded : undefined;
+}
+
 /** A bounded save-only pass. Pending candidates survive interruption independently of projection. */
 export type IOpenideCheckpointMemory = Pick<OpenideAgentMemory, 'captureMode' | 'request' | 'list' | 'savedMessage'>;
 
@@ -81,7 +90,14 @@ export class OpenideMemoryCheckpoint {
 				state = { ...state, candidates };
 				await this.persist(state, reason);
 			}
-			for (const note of candidates) {
+			const sourceCandidates = candidates ?? [];
+			const normalized: IOpenideMemoryCandidate[] = sourceCandidates.map(note => ({ ...note, related: sanitizeCheckpointRelated(note.related) }));
+			if (normalized.some((note, index) => JSON.stringify(note.related) !== JSON.stringify(sourceCandidates[index].related))) {
+				state = { ...state, candidates: normalized };
+				await this.persist(state, reason);
+			}
+			candidates = normalized;
+			for (const note of normalized) {
 				if (token.isCancellationRequested) { return; }
 				if (typeof note.topic_key !== 'string' || typeof note.body !== 'string') { throw new Error('Invalid checkpoint note.'); }
 				const operationId = `checkpoint:${state.watermark}:${await hashAsync(note.topic_key)}`;
@@ -93,7 +109,7 @@ export class OpenideMemoryCheckpoint {
 					session: this.session, message: state.message ?? this.message, origin: 'native', operationId });
 				this.emit({ type: 'info', source: 'memoryCapture', messageId: state.message ?? this.message, severity: 'info', message: saved.document ? this.memory.savedMessage(saved.document) : t('memory.saved', note.topic_key) });
 			}
-			await this.persist({ watermark: state.watermark, message: state.message, status: candidates.length ? 'saved' : 'no_durable_change' }, reason);
+			await this.persist({ watermark: state.watermark, message: state.message, status: normalized.length ? 'saved' : 'no_durable_change' }, reason);
 			if (!pending || pending.watermark === delta?.watermark) { this.cursor = messages.length; }
 			else if (delta) { state = delta; durable = false; await this.persist(delta, 'next-delta'); durable = true; }
 		} catch (error) {

@@ -19,6 +19,7 @@ import './media/openideChatResourceCard.css';
 
 export interface IOpenideChatResourceCardOptions {
 	readonly compact?: boolean;
+	readonly compactStatus?: string;
 	readonly title: string;
 	readonly description: string;
 	readonly icon: ThemeIcon;
@@ -34,6 +35,15 @@ export class OpenideChatResourceCard extends Disposable {
 		super();
 		if (options.compact) {
 			this.domNode.classList.add('openide-chat-resource-compact');
+			if (options.compactStatus) {
+				const info = append(this.domNode, $('span.openide-chat-resource-compact-info'));
+				const icon = append(info, $('span.openide-chat-resource-compact-icon'));
+				icon.classList.add(...ThemeIcon.asClassNameArray(options.icon));
+				icon.setAttribute('aria-hidden', 'true');
+				const text = append(info, $('span.openide-chat-resource-compact-text'));
+				append(text, $('span.openide-chat-resource-compact-status')).textContent = options.compactStatus;
+				append(text, $('span.openide-chat-resource-description')).textContent = options.description;
+			}
 			const split = append(this.domNode, $('span.oi-split.oi-split-secondary'));
 			const open = append(split, $('button.oi-split-main', { type: 'button', 'aria-label': `${t('chatSurface.resource.open')}: ${options.title}` }));
 			open.textContent = t('chatSurface.resource.open');
@@ -41,6 +51,7 @@ export class OpenideChatResourceCard extends Disposable {
 			this._register(setupChatTooltip(hover, open, () => `${options.title}\n${options.description}`));
 			const more = append(split, $('button.oi-split-more', { type: 'button', 'aria-label': t('chatSurface.resource.openIn'), 'aria-haspopup': 'menu', 'aria-expanded': 'false' }));
 			append(more, $('span.codicon.codicon-chevron-down', { 'aria-hidden': 'true' }));
+			this._register(setupChatTooltip(hover, more, () => t('chatSurface.resource.openIn')));
 			this._register(addDisposableListener(more, 'click', () => {
 				more.setAttribute('aria-expanded', 'true');
 				menus.showContextMenu({
@@ -77,6 +88,7 @@ export class OpenideChatResourceCard extends Disposable {
 		menu.label = `${t('chatSurface.resource.openIn')} $(chevron-down)`;
 		menu.element.setAttribute('aria-haspopup', 'menu');
 		menu.element.setAttribute('aria-expanded', 'false');
+		this._register(setupChatTooltip(hover, menu.element, () => t('chatSurface.resource.openIn')));
 		this._register(menu.onDidClick(() => {
 			menu.element.setAttribute('aria-expanded', 'true');
 			menus.showContextMenu({

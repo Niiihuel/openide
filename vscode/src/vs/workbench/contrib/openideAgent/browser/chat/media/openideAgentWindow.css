@@ -88,7 +88,17 @@
 .openide-agent-window-chat { isolation: isolate; flex: 1; min-width: 0; min-height: 0; position: relative; }
 .openide-agent-window-chat > .openide-chat-native { height: 100%; }
 .openide-agent-window-chat .openide-chat-headbar { display: none; }
-.openide-agent-window-context { align-self: start; box-sizing: border-box; max-height: none; overflow: visible; padding: 8px; background: var(--oi-conversation-panel); }
+.openide-agent-window-context {
+	align-self: start;
+	box-sizing: border-box;
+	max-height: none;
+	overflow: visible;
+	padding: 8px;
+	/* Same frame as the lower composer: one conversation surface, hairline and radius. */
+	background: var(--oi-conversation-panel);
+	border-color: var(--oi-border);
+	border-radius: var(--oi-radius-composer);
+}
 .openide-agent-window-context-header { display: flex; align-items: center; justify-content: space-between; min-height: 24px; padding: 0 8px; }
 .openide-agent-window-context-section { padding: 6px 0; }
 .openide-agent-window-context-section ~ .openide-agent-window-context-section { border-top: 1px solid var(--oi-border); }
@@ -141,8 +151,17 @@
 
 /* Window-wide actions stay in the native titlebar; pane toggles flank the conversation. */
 .openide-agent-titlebar .action-toolbar-container { display: none !important; }
+.openide-agent-titlebar .window-appicon { display: none !important; }
+.openide-agent-menubar { display: flex; align-items: center; gap: 2px; height: 100%; padding-inline: 4px; -webkit-app-region: no-drag; }
+.openide-agent-menubar-button {
+	appearance: none; border: 0; outline: 0; min-height: 26px; padding: 0 8px;
+	border-radius: var(--oi-radius-sm); background: transparent;
+	color: var(--vscode-titleBar-activeForeground); font: inherit; cursor: default;
+}
+.openide-agent-menubar-button:hover,
+.openide-agent-menubar-button[aria-expanded="true"] { background: var(--vscode-menubar-selectionBackground, var(--oi-hover)); color: var(--vscode-menubar-selectionForeground, var(--oi-text)); }
+.openide-agent-menubar-button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .openide-agent-window-actions { display: flex; align-items: center; gap: 2px; padding: 0 6px; position: relative; z-index: 2500; -webkit-app-region: no-drag; }
-.openide-agent-window-actions > button > span:last-child { display: none; }
 
 .openide-agent-window-harness-icon { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 16px; }
 .openide-agent-window-harness-icon > .openide-provider-icon { width: 16px; height: 16px; }

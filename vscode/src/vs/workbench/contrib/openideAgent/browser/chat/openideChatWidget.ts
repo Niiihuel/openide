@@ -19,6 +19,7 @@ import { autorun, ISettableObservable, observableValue } from '../../../../../ba
 import { ITreeRenderer } from '../../../../../base/browser/ui/tree/tree.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { IOpenideChatItem, IOpenideChatRequestItem } from '../../common/chat/openideChatItem.js';
@@ -32,6 +33,7 @@ import { IOpenideCliChangesService, OpenideCliChangesService } from '../openideC
 import { applyOpenideSurfaceCss } from '../openideSurfaceStyle.js';
 import { IOpenideChatNotice, OpenideChatController } from './openideChatController.js';
 import { IOpenideComposerSubmit, OpenideChatComposer } from './openideChatComposer.js';
+import { IComposerQueueEntry } from './openideChatComposerQueue.js';
 import { IComposerSnippet } from '../../common/chat/openideChatSnippet.js';
 
 /** Whether a selection sent while a hosted CLI's tab is active goes into that CLI's prompt. */
@@ -233,6 +235,7 @@ export class OpenideChatWidget extends Disposable {
 		@ILanguageService private readonly languageService: ILanguageService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
+		@ICommandService private readonly commandService: ICommandService,
 		@IOpenideGoalService private readonly goalService: IOpenideGoalService,
 	) {
 		super();
@@ -422,6 +425,7 @@ export class OpenideChatWidget extends Disposable {
 			}));
 		}
 		this._register(this._composer.onDidSubmit(request => this._send(request)));
+		this._register(this._composer.onDidRequestOpenInSideChat(({ entry }) => this._openQueuedInSideChat(entry)));
 		this._register(this._composer.onDidRequestStop(() => this._controller.abort()));
 		this._register(this._composer.onDidRequestGoal(() => {
 			if (this._listMode || !this.sessions.activeSessionId()) { this._header.newSession(); }
@@ -546,6 +550,16 @@ export class OpenideChatWidget extends Disposable {
 		this._composer.value = prompt;
 		this._composer.focus();
 		this._composer.submit();
+	}
+
+	private _openQueuedInSideChat(entry: IComposerQueueEntry): void {
+		this.newSession();
+		this._composer.submitQueuedEntry(entry);
+		// On wide layouts the sessions panel is a real side rail. Showing it keeps both the source
+		// conversation and the new destination one click away without covering the new transcript.
+		if (this._sessionsPane.mode === 'side') {
+			this._sessionsPane.setOpen(true);
+		}
 	}
 
 	/** A Canvas button's prompt: fills the composer and, unless told otherwise, sends it. */
@@ -903,12 +917,21 @@ export class OpenideChatWidget extends Disposable {
 		const state = this._register(this._instantiationService.createInstance(OpenideEmptyState, root, {
 			title: t('chat.empty.start'), description: t('chat.empty.text'), actions: draftActions,
 		}));
-		const workspace = append(state.contentNode, $('.openide-chat-empty-workspace'));
-		const workspaceName = append(workspace, $('span.openide-chat-empty-workspace-name'));
+		const workspace = append(state.contentNode, $<HTMLButtonElement>('button.openide-chat-empty-workspace', { type: 'button' }));
+		append(workspace, $('span.codicon.codicon-folder-opened', { 'aria-hidden': 'true' }));
+		const workspaceCopy = append(workspace, $('.openide-chat-empty-workspace-copy'));
+		const workspaceName = append(workspaceCopy, $('span.openide-chat-empty-workspace-name'));
+		const workspaceHint = append(workspaceCopy, $('span.openide-chat-empty-workspace-hint'));
+		this._register(addDisposableListener(workspace, 'click', () => {
+			void this.commandService.executeCommand('workbench.action.files.openFolder').catch(onUnexpectedError);
+		}));
 		const syncWorkspace = () => {
 			const folders = this.contextService.getWorkspace().folders;
-			workspace.hidden = folders.length === 0;
-			workspaceName.textContent = folders.map(folder => folder.name).join(', ');
+			const hasProject = folders.length > 0;
+			workspace.classList.toggle('empty', !hasProject);
+			workspaceName.textContent = hasProject ? folders.map(folder => folder.name).join(', ') : t('chat.empty.chooseProject');
+			workspaceHint.textContent = t(hasProject ? 'chat.empty.changeProjectHint' : 'chat.empty.chooseProjectHint');
+			workspace.setAttribute('aria-label', workspaceName.textContent);
 		};
 		syncWorkspace();
 		this._register(this.contextService.onDidChangeWorkspaceFolders(syncWorkspace));

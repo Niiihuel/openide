@@ -60,9 +60,14 @@ export class OpenideRunJournalOwner extends Disposable {
 		if (this.sessions.get(session) !== lease || this._store.isDisposed) { throw new Error('OpenIDE journal owner disconnected or replaced'); }
 	}
 
-	close(session: string): void {
+	async close(session: string, completed = false): Promise<void> {
 		const lease = this.sessions.get(session);
-		if (lease) { this.release(session, lease); }
+		if (!lease) { return; }
+		try {
+			if (completed) { await this.journalStore!.reset(session); }
+		} finally {
+			this.release(session, lease);
+		}
 	}
 
 	private release(session: string, lease: IJournalLease): void {
@@ -70,5 +75,5 @@ export class OpenideRunJournalOwner extends Disposable {
 		if (this.sessions.get(session) === lease) { this.sessions.delete(session); }
 	}
 
-	override dispose(): void { this.workspaceGeneration++; this.workspaceReady = false; for (const session of this.sessions.keys()) { this.close(session); } super.dispose(); }
+	override dispose(): void { this.workspaceGeneration++; this.workspaceReady = false; for (const session of this.sessions.keys()) { void this.close(session); } super.dispose(); }
 }

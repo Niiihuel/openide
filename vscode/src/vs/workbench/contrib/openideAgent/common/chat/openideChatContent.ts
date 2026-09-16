@@ -215,6 +215,8 @@ export interface IOpenideChatSubagentContent {
 	readonly index: number;
 	readonly total: number;
 	readonly title: string;
+	/** The delegated prompt; used to present a useful task title instead of a technical worker label. */
+	readonly prompt?: string;
 	readonly model?: string;
 	/**
 	 * Model of the turn that delegated this specialist, so the row can name the specialist's model

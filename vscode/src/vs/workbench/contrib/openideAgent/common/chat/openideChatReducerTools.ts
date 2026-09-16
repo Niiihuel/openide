@@ -31,6 +31,35 @@ function truncateResult(result: string): string {
 	return value.length > MAX_RESULT_CHARS ? `${value.slice(0, MAX_RESULT_CHARS)}\n…` : value;
 }
 
+
+function canonicalToolArguments(argumentsJson: string): string {
+	const sort = (value: unknown): unknown => Array.isArray(value)
+		? value.map(sort)
+		: value && typeof value === 'object'
+			? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, sort(child)]))
+			: value;
+	try { return JSON.stringify(sort(JSON.parse(argumentsJson || '{}'))); }
+	catch { return argumentsJson.trim().replace(/\s+/g, ' '); }
+}
+
+/**
+ * Returns the latest matching generic row, looking through advisory notices only. Providers can
+ * replay a call with a fresh id and models sometimes repeat an observation verbatim; both are one
+ * activity for presentation even though every call/result remains in provider history.
+ */
+function repeatedGenericToolIndex(draft: IOpenideChatDraft, name: string, argumentsJson: string): number {
+	const signature = canonicalToolArguments(argumentsJson);
+	for (let index = draft.content.length - 1; index >= 0; index--) {
+		const content = draft.content[index];
+		if (content.kind === 'notice') { continue; }
+		if (content.kind !== 'tool') { return OPENIDE_CHAT_NO_INDEX; }
+		return content.name === name && canonicalToolArguments(content.argumentsJson) === signature
+			? index
+			: OPENIDE_CHAT_NO_INDEX;
+	}
+	return OPENIDE_CHAT_NO_INDEX;
+}
+
 /** What an unanswered question contributes to the blob; every ask surface writes the same word. */
 export const OPENIDE_CHAT_ASK_SKIPPED = '(omitida)';
 const ASK_ANSWER_PREFIX = /R:\s*([\s\S]*)$/;
@@ -165,9 +194,17 @@ export function applyOpenideChatToolStart(draft: IOpenideChatDraft, callId: stri
 		case 'explore':
 			index = startExploreEntry(draft, callId, name, argumentsJson);
 			break;
-		case 'tool':
-			index = pushOpenideChatContent(draft, { kind: 'tool', callId, name, argumentsJson, state: 'running' });
+		case 'tool': {
+			const repeated = repeatedGenericToolIndex(draft, name, argumentsJson);
+			if (repeated !== OPENIDE_CHAT_NO_INDEX) {
+				const existing = getOpenideChatContentAt<IOpenideChatToolContent>(draft, repeated, 'tool')!;
+				index = repeated;
+				setOpenideChatContentAt(draft, index, { ...existing, callId, argumentsJson, state: 'running', resultText: undefined });
+			} else {
+				index = pushOpenideChatContent(draft, { kind: 'tool', callId, name, argumentsJson, state: 'running' });
+			}
 			break;
+		}
 	}
 	draft.tools.set(callId, { name, route, index, argumentsJson, detail });
 }

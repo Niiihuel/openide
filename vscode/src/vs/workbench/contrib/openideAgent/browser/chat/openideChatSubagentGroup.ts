@@ -20,7 +20,7 @@ export class OpenideChatSubagentGroup extends Disposable {
 	private readonly label = append(this.heading, $('span.openide-chat-subagent-group-label'));
 	readonly body: HTMLElement;
 	private parts: readonly OpenideChatSubagentPart[] = [];
-	private readonly icons = new Map<string, { kind: string; node: HTMLImageElement }>();
+	private readonly icons = new Map<string, { kind: string; node: HTMLElement }>();
 
 	constructor() {
 		super();
@@ -32,7 +32,7 @@ export class OpenideChatSubagentGroup extends Disposable {
 	update(members: readonly IOpenideChatSubagentContent[], parts: readonly OpenideChatSubagentPart[]): void {
 		this.parts = parts;
 		this.updateVisibility();
-		const titles = members.slice(0, 2).map(member => subagentTaskTitle(member.run?.task ?? member.title, member.title));
+		const titles = members.slice(0, 2).map(member => subagentTaskTitle(member.run?.task ?? member.prompt ?? member.title, member.title));
 		const names = members.length > 2 ? t('chat.subagents.more', titles.join(', '), members.length - 2)
 			: titles.length === 2 ? t('chat.subagents.and', titles[0], titles[1]) : titles[0];
 		const counts = { running: 0, completed: 0, failed: 0, cancelled: 0 };
@@ -43,9 +43,9 @@ export class OpenideChatSubagentGroup extends Disposable {
 			counts.failed ? t('chat.subagents.failed', counts.failed) : '',
 			counts.cancelled ? t('chat.subagents.cancelled', counts.cancelled) : '',
 		].filter(Boolean).join(' · ');
-		const text = counts.running === members.length ? t(members.length === 1 ? 'chat.subagents.startedOne' : 'chat.subagents.started', names)
-			: counts.completed === members.length ? t(members.length === 1 ? 'chat.subagents.doneOne' : 'chat.subagents.done', names)
-				: t('chat.subagents.status', names, status);
+		const text = counts.running === members.length
+			? t(members.length === 1 ? 'chat.subagents.delegatingOne' : 'chat.subagents.delegating', members.length)
+			: t('chat.subagents.overview', status);
 		if (this.label.textContent !== text) { this.label.textContent = text; }
 		const accessible = t('chat.subagents.status', names, status);
 		if (this.heading.getAttribute('aria-label') !== accessible) { this.heading.setAttribute('aria-label', accessible); }
@@ -57,7 +57,7 @@ export class OpenideChatSubagentGroup extends Disposable {
 			if (!used.has(id)) { icon.node.remove(); this.icons.delete(id); }
 		}
 		for (const [index, member] of visible.entries()) {
-			const task = member.run ?? { task: member.title };
+			const task = member.run ?? { task: member.prompt ?? member.title };
 			const kind = subagentAvatarKind(task);
 			let icon = this.icons.get(member.runId);
 			if (!icon || icon.kind !== kind) {

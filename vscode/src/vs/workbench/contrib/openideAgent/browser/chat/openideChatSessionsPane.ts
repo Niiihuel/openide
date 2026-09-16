@@ -80,7 +80,7 @@ export function sessionProjectContext(session: IChatSessionMeta, folders: readon
 		: folders.length === 1 ? folders[0] : undefined;
 	if (folder) { return { id: folder.uri.toString(), label: folder.name, path: folder.uri.fsPath }; }
 	if (cwd) { return { id: cwd.toString(), label: cwd.path.replace(/\/+$/, '').split('/').pop() || session.cwd!, path: session.cwd }; }
-	return { id: 'workspace', label: t('sessions.group.workspace') };
+	return { id: 'no-project', label: t('sessions.group.noProject') };
 }
 
 /** Below this dock width the panel stacks over the transcript instead of sitting beside it. */
@@ -182,7 +182,7 @@ export class OpenideChatSessionsPane extends Disposable {
 	private _query = '';
 	private _renderKey: string | undefined;
 	private readonly _subagentTasks = new Map<string, SubagentAvatarTask | undefined>();
-	private readonly _subagentIcons = new Map<string, { node: HTMLImageElement; kind: string }>();
+	private readonly _subagentIcons = new Map<string, { node: HTMLElement; kind: string }>();
 	private _open = false;
 	private _full = false;
 	private _lastWidth = 0;
@@ -496,7 +496,7 @@ export class OpenideChatSessionsPane extends Disposable {
 		return { task: run.task, profile: run.profile ?? run.routingDecision?.profile, readonly: run.readonly };
 	}
 
-	private _subagentAvatar(child: IChatSessionMeta): HTMLImageElement {
+	private _subagentAvatar(child: IChatSessionMeta): HTMLElement {
 		const runId = child.subagentRunId!;
 		if (!this._subagentTasks.has(runId)) {
 			const run = this.subagentRuns.get(runId);

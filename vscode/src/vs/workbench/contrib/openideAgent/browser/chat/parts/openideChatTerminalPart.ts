@@ -11,7 +11,6 @@ import { IInstantiationService } from '../../../../../../platform/instantiation/
 import { IOpenideChatContent, IOpenideChatTerminalContent, isOpenideChatContentOfKind } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
 import { t } from '../../../common/openideStrings.js';
-import { IOpenideAgentService } from '../../openideAgentService.js';
 import { setupChatTooltip } from '../openideChatHover.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
 import { OpenideFold } from '../../openideFold.js';
@@ -23,13 +22,10 @@ import '../media/openideChatTerminal.css';
  * `finishTermCard`, rebuilt as a content part.
  *
  * Three things make it more than a pretty log:
- *  - it STREAMS. `terminalData` produces a new content object per chunk, so the part absorbs the
- *    update line by line through `tryUpdate` instead of rebuilding the card and losing the caret.
- *  - it takes STDIN. While the process is alive the input line writes straight into the agent's
- *    pty, which is the only way to answer a `y/N` prompt without killing the run.
- *  - it has the `awaiting-input` state, where the tool ALREADY returned but the process is still
- *    blocked on a prompt. That state keeps the card open and the input line visible; treating it
- *    as "exited" is what used to strand the run with no visible way to unblock it.
+ *  - it streams terminal output incrementally, updating only changed lines.
+ *  - it stays read-only in chat; input belongs to the real terminal so a transcript cannot submit
+ *    text into the wrong process.
+ *  - it reports the awaiting-input state in the header and keeps the newest output visible.
  *
  * The header is ONE line, always: terminal glyph, a short title, and the executables the command
  * chains ("cd, bun"). The full command lives in the body as `$ command` and in the title's hover;
@@ -51,7 +47,6 @@ export class OpenideChatTerminalPart extends OpenideChatContentPart {
 	private readonly _exit: HTMLElement;
 	private readonly _out: HTMLElement;
 	private readonly _fold: OpenideFold;
-	private readonly _input: HTMLInputElement;
 	private readonly _menu: OpenideChatTerminalMenu;
 	/** Output lines currently in the DOM, so a delta only touches the lines that changed. */
 	private readonly _lines: HTMLElement[] = [];
@@ -66,7 +61,6 @@ export class OpenideChatTerminalPart extends OpenideChatContentPart {
 		_context: IOpenideChatContentPartContext,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IContextViewService contextViewService: IContextViewService,
-		@IOpenideAgentService private readonly _agentService: IOpenideAgentService,
 		@IHoverService hoverService: IHoverService,
 	) {
 		super();
@@ -95,12 +89,13 @@ export class OpenideChatTerminalPart extends OpenideChatContentPart {
 		append(dots, $('span.codicon.codicon-ellipsis'));
 
 		const body = append(this.domNode, $('div.openide-chat-term-body'));
-		// Keep expansion in its own footer, outside the output viewport and the card's border.
-		// Collapsed output shows six complete lines; expanded output follows the terminal's tail.
+		// Use the same inline fade and expansion affordance as file diffs. The compact view shows
+		// six lines from the terminal tail; expanded output remains scrollable.
 		const fold = append(body, $('div.openide-chat-term-fold'));
 		this._out = append(fold, $('div.openide-chat-term-out'));
 		this._fold = this._register(new OpenideFold(fold, hoverService, {
 			collapsed: 108, // Six complete 18px lines, matching the viewport CSS.
+			fadeEdge: 'top',
 			measure: () => this._out.scrollHeight,
 			label: open => t(open ? 'chat.part.collapseOutput' : 'chat.part.expandOutput'),
 		}));
@@ -114,12 +109,6 @@ export class OpenideChatTerminalPart extends OpenideChatContentPart {
 		const commandLine = append(this._out, $('div.openide-chat-term-line.openide-chat-term-line-cmd'));
 		append(commandLine, $('span.openide-chat-term-dollar')).textContent = '$';
 		append(commandLine, $('span.openide-chat-term-cmd')).textContent = content.command;
-
-		const inputRow = append(body, $('div.openide-chat-term-in'));
-		append(inputRow, $('span.openide-chat-term-caret')).textContent = '>';
-		this._input = append(inputRow, $<HTMLInputElement>('input.openide-chat-term-input', {
-			type: 'text', placeholder: 'Escribir en la terminal…', spellcheck: false,
-		}));
 
 		this._menu = this._register(instantiationService.createInstance(
 			OpenideChatTerminalMenu, contextViewService, () => this._content.command,
@@ -146,32 +135,8 @@ export class OpenideChatTerminalPart extends OpenideChatContentPart {
 			event.stopPropagation();
 			this._menu.toggle(dots, dots);
 		}));
-		this._register(addDisposableListener(this._input, 'keydown', event => {
-			if (event.key !== 'Enter') {
-				return;
-			}
-			// Stopped as well as prevented: the list is a tree, and a bubbling Enter would activate
-			// the focused row instead of submitting the line.
-			event.preventDefault();
-			event.stopPropagation();
-			this._submitInput();
-		}));
-		// A click on the input must not reach the head's toggle, which would collapse the body the
-		// user is about to type into.
-		this._register(addDisposableListener(this._input, 'click', event => event.stopPropagation()));
 
 		this._render();
-	}
-
-	private _submitInput(): void {
-		const value = this._input.value;
-		if (!value) {
-			return;
-		}
-		this._input.value = '';
-		// Same cap the webview host enforces before forwarding (openideChatView.ts:1003): a pasted
-		// file into a pty is never a deliberate keystroke.
-		this._agentService.writeToolTerminal(value.slice(0, 2000));
 	}
 
 	private _setOpen(open: boolean): void {
@@ -242,11 +207,9 @@ export class OpenideChatTerminalPart extends OpenideChatContentPart {
 		this._fold.measure();
 		this._pinToBottom.value = scheduleAtNextAnimationFrame(getWindow(this._out), () => {
 			this._pinToBottom.value = undefined;
-			// Folded, the box shows the first lines under a fade, so scrolling it to the tail would
-			// hide the only lines it shows; the tail is followed once the reader opened it.
-			if (this._fold.isOpen) {
-				this._out.scrollTop = this._out.scrollHeight;
-			}
+			// A terminal is read from its tail. The compact preview follows the newest lines under
+			// a top fade; expanded output keeps following while the command streams.
+			this._out.scrollTop = this._out.scrollHeight;
 		});
 	}
 
@@ -265,8 +228,7 @@ export class OpenideChatTerminalPart extends OpenideChatContentPart {
 	 * Absorbs every update of the SAME command.
 	 *
 	 * This is the part that most depends on `tryUpdate` existing: a `npm install` produces hundreds
-	 * of content objects, and recreating the card on each one would blank the stdin field the user is
-	 * typing into and drop the ⋯ menu while it is open. A different `callId` is a different command
+	 * of content objects, and recreating the card on each one would reset the compact viewport and drop the menu while it is open. A different `callId` is a different command
 	 * and must get its own card.
 	 */
 	tryUpdate(other: IOpenideChatContent, _element: IOpenideChatItem): boolean {

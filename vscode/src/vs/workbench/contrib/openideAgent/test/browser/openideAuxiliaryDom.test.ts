@@ -67,6 +67,29 @@ suite('OpenIDE auxiliary window DOM', () => {
 		}, { references: 1, capabilities: 1, links: 1, voiceControls: 3, modelRows: 1, owned: true });
 	});
 
+	test('composer autocomplete can keep keyboard focus in its textarea', () => {
+		const document = mainWindow.document;
+		const host = createOpenideElement(document, 'div');
+		host.className = 'monaco-workbench';
+		document.body.appendChild(host);
+		const anchor = createOpenideElement(document, 'div');
+		const prompt = createOpenideElement(document, 'textarea');
+		anchor.appendChild(prompt);
+		host.appendChild(anchor);
+		store.add({ dispose: () => host.remove() });
+		let focusDelegate: (() => void) | undefined;
+		const service = upcastPartial<IContextViewService>({
+			showContextView: delegate => {
+				focusDelegate = delegate.focus;
+				return { close: () => delegate.onHide?.() };
+			},
+		});
+		const popover = store.add(new OpenideComposerPopover(service));
+		popover.show(anchor, { initialFocus: () => prompt.focus({ preventScroll: true }), render: () => undefined });
+		focusDelegate?.();
+		assert.strictEqual(document.activeElement, prompt);
+	});
+
 	test('popover uses the anchor workbench even when another window has focus', () => {
 		const document = auxiliaryDocument();
 		const workbench = createOpenideElement(document, 'div');

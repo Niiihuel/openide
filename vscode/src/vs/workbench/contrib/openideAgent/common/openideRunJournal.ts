@@ -6,9 +6,41 @@
 import { IOpenideRunJournalRecord, OPENIDE_UNKNOWN_TOOL_OUTCOME, openideJournalSnapshot } from '../../../../platform/openideAgentHost/common/openideRunJournal.js';
 import { IChatMessage, IProviderRequest } from './openideAgentTypes.js';
 
-/** Record the model-facing envelope, never bearer tokens, endpoint query secrets, or transport headers. */
+const JOURNAL_TEXT_PREVIEW = 2048;
+const JOURNAL_MESSAGE_TAIL = 12;
+const JOURNAL_TOOL_NAMES = 64;
+
+function recordedText(value: string | undefined): { readonly chars: number; readonly preview: string } {
+	const text = value ?? '';
+	return { chars: text.length, preview: text.slice(0, JOURNAL_TEXT_PREVIEW) };
+}
+
+/**
+ * Record bounded diagnostics for the model-facing envelope. The durable conversation projection is
+ * already checkpointed by run/start, model/result, tool/result and committed compaction events;
+ * copying every message and image again for dispatch and retry made long journals grow by gigabytes.
+ */
 export function openideRecordedRequest(request: IProviderRequest) {
-	return openideJournalSnapshot({ providerId: request.providerId, model: request.model, effort: request.effort, serviceTier: request.serviceTier, system: request.system, messages: request.messages, tools: request.tools, maxTokens: request.maxTokens });
+	const tail = request.messages.slice(-JOURNAL_MESSAGE_TAIL).map(message => ({
+		role: message.role,
+		content: recordedText(message.content),
+		imageCount: message.images?.length ?? 0,
+		toolCallId: message.toolCallId,
+		toolCalls: message.toolCalls?.map(call => ({ id: call.id, name: call.name, argumentsChars: call.argumentsJson.length })),
+	}));
+	return openideJournalSnapshot({
+		providerId: request.providerId,
+		model: request.model,
+		effort: request.effort,
+		serviceTier: request.serviceTier,
+		system: recordedText(request.system),
+		messageCount: request.messages.length,
+		omittedMessages: Math.max(0, request.messages.length - tail.length),
+		messages: tail,
+		toolCount: request.tools?.length ?? 0,
+		tools: request.tools?.slice(0, JOURNAL_TOOL_NAMES).map(tool => tool.name),
+		maxTokens: request.maxTokens,
+	});
 }
 
 /** A crash result is uncertainty, not permission to repeat an effect. Newer user messages are retained. */
@@ -52,7 +84,13 @@ export function applyOpenideJournalRecovery(messages: IChatMessage[], records: r
 export function reconstructOpenideJournalMessages(records: readonly IOpenideRunJournalRecord[]): IChatMessage[] | undefined {
 	let messages: IChatMessage[] | undefined;
 	for (const { event } of records) {
-		const snapshot = event.kind === 'run/start' || event.kind === 'run/end' ? event.payload['messages'] : event.kind === 'model/request' ? event.payload['projection'] : undefined;
+		const snapshot = event.kind === 'run/start' || event.kind === 'run/end'
+			? event.payload['messages']
+			: event.kind === 'model/request'
+				? event.payload['projection'] // Legacy journals before bounded request records.
+				: event.kind === 'compaction' && event.payload['state'] === 'committed'
+					? event.payload['after']
+					: undefined;
 		if (Array.isArray(snapshot)) { messages = structuredClone(snapshot) as unknown as IChatMessage[]; }
 		if (!messages) { continue; }
 		if (event.kind === 'model/result') {

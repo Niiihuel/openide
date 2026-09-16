@@ -291,6 +291,10 @@ suite('OpenIDE agent common', () => {
 		assert.strictEqual(guard.inspect('read_file', '{"path":"a"}').block, false);
 		assert.strictEqual(guard.inspect('read_file', '{"path":"a"}').warn, true);
 		assert.strictEqual(guard.inspect('read_file', '{"path":"a"}').block, true);
+		const semantic = new OpenideToolCallGuard();
+		semantic.inspect('await_subagent', '{"runId":"run_1","verbose":false}');
+		semantic.inspect('await_subagent', '{ "verbose": false, "runId": "run_1" }');
+		assert.strictEqual(semantic.inspect('await_subagent', '{"runId":"run_1","verbose":false}').warn, true);
 		assert.deepStrictEqual(validateToolArguments({
 			type: 'object',
 			required: ['path'],

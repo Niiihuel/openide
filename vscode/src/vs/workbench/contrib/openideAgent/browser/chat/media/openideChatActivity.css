@@ -27,30 +27,31 @@
 	display: flex;
 	flex-direction: column;
 	gap: 9px;
+	contain: paint;
+	will-change: opacity;
+	animation: openide-chat-sk-pulse 1.8s ease-in-out infinite;
 }
 
+/* The bars stay painted. Pulsing their single container is compositor-only; animating a gradient
+   on every line repainted all of them on every frame when chat and plan editor were both open. */
 .openide-chat-sk-line {
 	height: 10px;
 	border-radius: var(--oi-radius-control);
-	background: linear-gradient(90deg,
-			var(--oi-border-soft) 25%,
-			var(--oi-border-strong) 37%,
-			var(--oi-border-soft) 63%);
-	background-size: 200% 100%;
-	animation: openide-chat-sk-sweep 1.6s linear infinite;
+	background: linear-gradient(90deg, var(--oi-border-soft), var(--oi-border-strong), var(--oi-border-soft));
 }
 
 .openide-chat-sk-w90 { width: 90%; }
 .openide-chat-sk-w76 { width: 76%; }
 .openide-chat-sk-w55 { width: 55%; }
 
-@keyframes openide-chat-sk-sweep {
-	from { background-position: 100% 0; }
-	to { background-position: -100% 0; }
+@keyframes openide-chat-sk-pulse {
+	0%, 100% { opacity: .58; }
+	50% { opacity: .92; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-	.openide-chat-sk-line { animation: none; }
+.monaco-reduce-motion .openide-chat-sk { animation: none; opacity: .76; }
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+	.openide-chat-sk { animation: none; opacity: .76; }
 }
 
 /* ====================== reasoning / thinking =============================
@@ -468,6 +469,17 @@
 	font-size: 14px;
 	line-height: 14px;
 	display: inline-block;
+}
+.openide-chat-activity-chip-link {
+	cursor: pointer;
+	text-decoration: underline dotted;
+	text-underline-offset: 3px;
+}
+.openide-chat-activity-chip-link:hover,
+.openide-chat-activity-chip-link:focus-visible {
+	color: var(--vscode-textLink-activeForeground);
+	border-color: var(--vscode-focusBorder);
+	outline: none;
 }
 .openide-chat-activity-chip-name { overflow: hidden; text-overflow: ellipsis; }
 .openide-chat-part-verb .openide-chat-activity-chip { vertical-align: -3px; }

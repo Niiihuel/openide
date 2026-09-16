@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $ } from '../../../../../../base/browser/dom.js';
+import { $, getWindow } from '../../../../../../base/browser/dom.js';
+import { onUnexpectedError } from '../../../../../../base/common/errors.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IOpenideChatContent, IOpenideChatToolContent, isOpenideChatToolContent } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
@@ -25,6 +26,7 @@ import {
 import '../media/openideChatActivity.css';
 import { webPreviewFromTool } from '../../../common/chat/openideChatWebPreview.js';
 import { t } from '../../../common/openideStrings.js';
+import { IOpenideAgentService } from '../../openideAgentService.js';
 
 /**
  * Verb shown for a call, by state.
@@ -71,7 +73,8 @@ export class OpenideChatToolPart extends OpenideChatContentPart {
 	constructor(
 		content: IOpenideChatToolContent,
 		context: IOpenideChatContentPartContext,
-		hoverService: IHoverService,
+		@IHoverService hoverService: IHoverService,
+		@IOpenideAgentService private readonly _agentService: IOpenideAgentService,
 	) {
 		super();
 
@@ -133,7 +136,12 @@ export class OpenideChatToolPart extends OpenideChatContentPart {
 		const detail = toolDetailFor(meta, content.argumentsJson);
 		// A path-like target joins the verb as a file chip (upstream's "Generating patch in
 		// [README.md]"); a command or free-form argument stays out of the line, as before.
-		renderOpenideChatActivityLine(this._row.verb, verb, !meta.cmd && detail && /\.[A-Za-z0-9]+(\s|$)/.test(detail) ? detail : '');
+		renderOpenideChatActivityLine(
+			this._row.verb,
+			verb,
+			!meta.cmd && detail && /\.[A-Za-z0-9]+(\s|$)/.test(detail) ? detail : '',
+			path => void this._agentService.openDiff(path, undefined, getWindow(this.domNode).vscodeWindowId).catch(onUnexpectedError),
+		);
 		setOpenideChatShimmer(this._row.verb, content.state === 'running');
 
 		if (this._row.detail) {

@@ -653,17 +653,22 @@
 .openide-menu.openide-chat-suggest-menu {
 	min-width: var(--openide-menu-anchor-width, 0);
 	max-width: var(--openide-menu-anchor-width, calc(100vw - 16px));
+	border-radius: 18px;
 }
 /* Shorter than the menu's own 420px ceiling: the popover opens over the transcript, so every pixel
    of it is a pixel of the conversation you cannot see while you pick. Seven entries is enough to
    choose from -- past that you are typing to filter, not scanning. */
-.openide-chat-suggest .openide-menu-content { padding: 4px; max-height: min(300px, 42vh); }
+.openide-chat-suggest .openide-menu-content {
+	gap: 2px;
+	padding: 5px;
+	max-height: min(286px, 40vh);
+}
 .openide-chat-suggest .openide-menu-row.focus {
-	/* The suggest widget marks the focused completion with an inset outline, not only a fill. */
-	outline: 1px solid var(--vscode-editorSuggestWidget-focusOutline, transparent);
+	/* Keep keyboard selection on the same neutral pill as hover, like Codex's composer menu. */
+	outline: 1px solid var(--vscode-menu-selectionBorder, transparent);
 	outline-offset: -1px;
-	background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground)));
-	color: var(--vscode-editorSuggestWidget-selectedForeground, var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground, #fff)));
+	background: var(--oi-hover);
+	color: var(--vscode-menu-foreground, var(--vscode-foreground));
 }
 .openide-chat-suggest .openide-menu-label {
 	font-family: var(--vscode-editor-font-family, monospace);
@@ -681,13 +686,18 @@
 }
 .openide-chat-suggest .openide-menu-row.focus .openide-chat-suggest-file-dir { color: inherit; opacity: 0.75; }
 .openide-chat-suggest .openide-menu-row-icon .openide-chat-file-icon { width: 16px; height: 16px; display: inline-block; background-size: 16px; }
+.openide-chat-suggest-section {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
 .openide-chat-suggest-section + .openide-chat-suggest-section { border-top: 1px solid var(--oi-border-soft); margin-top: 4px; padding-top: 4px; }
 /* The group heading scrolls with its group. Pinning it with `position: sticky` had Chromium
    repainting rows OUTSIDE the panel's rounded clip -- a row would appear above the heading, past
    the border, which no layout can produce. What tells you the list is scrolled is the shadow
    below, the way it does everywhere else in the workbench. */
 .openide-chat-suggest-section .openide-menu-section {
-	padding: 5px 8px 3px 8px;
+	padding: 4px 8px 2px;
 	font-size: 10px;
 	font-weight: 600;
 	letter-spacing: 0.06em;
@@ -711,81 +721,82 @@
 	box-shadow: var(--vscode-scrollbar-shadow, rgba(0, 0, 0, 0.36)) 0 6px 6px -6px inset;
 }
 .openide-chat-suggest-shadow.visible { opacity: 1; }
-/* Two lines per entry: what you type on the first, what it does on the second. On one line the
-   name, its signature and its description shared the dock's ~330px and every one of them ended in
-   an ellipsis. Colours come from the `editorSuggestWidget.*` tokens rather than the menu's, because
-   this IS a suggest widget and a theme that restyles completions should restyle these too. */
+/* Codex-style command palette: one compact line with name, description and source. */
 .openide-chat-suggest-section .openide-menu-row {
-	min-height: 0;
-	align-items: flex-start;
-	padding: 3px 10px 4px 4px;
+	min-height: 32px;
+	align-items: center;
+	padding: 3px 9px 3px 7px;
+	gap: 7px;
+	border-radius: 10px;
 	color: var(--vscode-editorSuggestWidget-foreground, var(--vscode-menu-foreground, var(--vscode-foreground)));
 }
-/* The icon lines up with the first line's text, not with the middle of a two-line row. */
-.openide-chat-suggest-section .openide-menu-row > .openide-menu-row-icon { height: 17px; align-items: center; }
+.openide-chat-suggest-section .openide-menu-row > .openide-menu-row-icon {
+	height: 18px;
+	width: 18px;
+	align-items: center;
+	justify-content: center;
+}
 .openide-chat-suggest-text {
 	flex: 1 1 auto;
 	min-width: 0;
 	display: flex;
-	flex-direction: column;
-	gap: 1px;
-}
-.openide-chat-suggest-title {
-	display: flex;
 	align-items: baseline;
 	gap: 6px;
-	min-width: 0;
-	line-height: 17px;
+	overflow: hidden;
+	white-space: nowrap;
 }
-/* The name holds its ground; the signature after it yields first. */
 .openide-chat-suggest-name {
 	flex: 0 1 auto;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	font-family: var(--vscode-editor-font-family, monospace);
-	font-size: 12.5px;
-}
-.openide-chat-suggest-hint {
-	flex: 0 1 auto;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	font-family: var(--vscode-editor-font-family, monospace);
-	font-size: 12px;
-	opacity: 0.55;
-}
-/* The description, in the UI font: a monospace second line would read as more code, when the point
-   of the line is that it is prose. */
-.openide-chat-suggest-desc {
+	max-width: 42%;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	font-weight: 500;
+}
+.openide-chat-suggest-hint {
+	flex: 0 2 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11px;
+	opacity: 0.58;
+}
+.openide-chat-suggest-desc {
+	flex: 1 1 auto;
+	min-width: 20px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--vscode-font-family);
 	font-size: 11.5px;
-	line-height: 15px;
 	color: var(--vscode-descriptionForeground);
 }
-/* The typed characters. Upstream bolds them and tints them; without it nothing says why a row
-   matched. */
 .openide-chat-suggest-hit {
-	font-weight: 600;
+	font-weight: 650;
 	color: var(--vscode-editorSuggestWidget-highlightForeground, var(--vscode-list-highlightForeground));
 }
 .openide-chat-suggest .openide-menu-row.focus .openide-chat-suggest-hit {
 	color: var(--vscode-editorSuggestWidget-focusHighlightForeground, inherit);
 }
 .openide-chat-suggest .openide-menu-row.focus .openide-chat-suggest-desc,
-.openide-chat-suggest .openide-menu-row.focus .openide-menu-detail { color: inherit; opacity: 0.72; }
-.openide-chat-suggest-risk {
+.openide-chat-suggest .openide-menu-row.focus .openide-chat-suggest-hint,
+.openide-chat-suggest .openide-menu-row.focus .openide-chat-suggest-origin { color: inherit; opacity: 0.72; }
+.openide-chat-suggest-risk,
+.openide-chat-suggest-origin {
 	flex: 0 0 auto;
+	font-size: 11.5px;
+	white-space: nowrap;
+	color: var(--vscode-descriptionForeground);
+}
+.openide-chat-suggest-risk {
 	font-size: 9.5px;
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
-	color: var(--vscode-descriptionForeground);
 }
 .openide-chat-suggest-risk.exec { color: var(--vscode-errorForeground); }
 .openide-chat-suggest-risk.write { color: var(--vscode-editorWarning-foreground); }
@@ -921,9 +932,9 @@
 	background: var(--oi-conversation-panel);
 }
 .openide-chat-queue-host .openide-chat-tray-head[hidden] { display: none; }
-.openide-chat-native .openide-chat-queue-host .openide-chat-queue-row { min-height: 32px; }
+.openide-chat-native .openide-chat-queue-host .openide-chat-queue-row { min-height: 38px; }
 .openide-chat-queue-thumb { width: 28px; height: 28px; object-fit: cover; flex-shrink: 0; border-radius: var(--oi-radius-control); border: 1px solid var(--oi-border); }
 .openide-chat-queue-main { gap: 8px; }
-.openide-chat-native .openide-chat-tray .openide-chat-queue-send { width: auto; gap: 4px; padding-inline: 4px; }
+.openide-chat-native .openide-chat-tray .openide-chat-queue-send { width: auto; gap: 5px; padding-inline: 6px; }
 .openide-chat-queue-send-label { font-size: 12px; white-space: nowrap; }
 @container (max-width: 480px) { .openide-chat-queue-send-label { display: none; } }

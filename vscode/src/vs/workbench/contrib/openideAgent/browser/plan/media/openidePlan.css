@@ -203,18 +203,24 @@
 @keyframes openide-plan-pop-out { 0% { transform: scale(1.2); } 100% { transform: scale(1); } }
 @keyframes openide-plan-slide { 0% { opacity: 0; transform: translateY(-6px); } 100% { opacity: 1; transform: none; } }
 
-/* ---- drafting: skeleton bars with shimmer + writing caret ---- */
-@keyframes openide-plan-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-.openide-plan-skeleton { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 4px; }
+/* ---- drafting: one compositor-only pulse for every skeleton bar ---- */
+@keyframes openide-plan-skeleton-pulse { 0%, 100% { opacity: .58; } 50% { opacity: .92; } }
+.openide-plan-skeleton {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	margin: 14px 0 4px;
+	contain: paint;
+	will-change: opacity;
+	animation: openide-plan-skeleton-pulse 1.8s ease-in-out infinite;
+}
 .openide-plan-sk-line {
 	height: 11px;
 	border-radius: var(--oi-radius-sm);
 	background: linear-gradient(90deg,
-		var(--vscode-editorWidget-border, var(--oi-border-soft)) 25%,
-		var(--vscode-editor-inactiveSelectionBackground, var(--oi-border-strong)) 37%,
-		var(--vscode-editorWidget-border, var(--oi-border-soft)) 63%);
-	background-size: 200% 100%;
-	animation: openide-plan-shimmer 1.9s linear infinite;
+		var(--vscode-editorWidget-border, var(--oi-border-soft)),
+		var(--vscode-editor-inactiveSelectionBackground, var(--oi-border-strong)),
+		var(--vscode-editorWidget-border, var(--oi-border-soft)));
 }
 /* The title is taller and shorter: without it the skeleton does not read as a document. */
 .openide-plan-sk-line.sk-title { height: 22px; width: 62%; border-radius: var(--oi-radius-sm); margin-bottom: 6px; }
@@ -236,10 +242,10 @@
 }
 @keyframes openide-plan-caret { 0%, 49% { opacity: .75; } 50%, 100% { opacity: 0; } }
 
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
 	.openide-plan-task.tk-just-done, .openide-plan-task.tk-just-undone, .openide-plan-task.tk-just-added,
 	.openide-plan-task.tk-just-done .openide-plan-task-circle .codicon, .openide-plan-task.tk-just-undone .openide-plan-task-circle .codicon { animation-duration: 1ms; }
-	.openide-plan-sk-line { animation: none; }
+	.openide-plan-skeleton { animation: none; opacity: .76; }
 	.openide-plan-caret { animation: none; }
 }
 

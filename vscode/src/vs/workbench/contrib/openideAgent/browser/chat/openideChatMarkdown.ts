@@ -38,6 +38,7 @@ import { IOpenerService } from '../../../../../platform/opener/common/opener.js'
 import product from '../../../../../platform/product/common/product.js';
 import { t } from '../../common/openideStrings.js';
 import { setupChatTooltip } from './openideChatHover.js';
+import { IOpenideAgentService } from '../openideAgentService.js';
 
 /**
  * Tags an assistant turn may produce.
@@ -255,6 +256,7 @@ export class OpenideChatMarkdownRenderer implements IMarkdownRenderer {
 		@IOpenerService private readonly _openerService: IOpenerService,
 		@IContextMenuService private readonly _menus: IContextMenuService,
 		@IBrowserViewWorkbenchService private readonly _browsers: IBrowserViewWorkbenchService,
+		@IOpenideAgentService private readonly _agentService: IOpenideAgentService,
 		@ILanguageService languageService: ILanguageService,
 		@IConfigurationService configurationService: IConfigurationService,
 	) {
@@ -383,26 +385,46 @@ export class OpenideChatMarkdownRenderer implements IMarkdownRenderer {
 		store.add(addDisposableListener(host, 'contextmenu', (event: MouseEvent) => {
 			const target = isHTMLElement(event.target) ? event.target.closest<HTMLElement>('a[data-href]') : null;
 			const href = target?.dataset['href'];
-			if (!target || !href || !chatWebLink(href)) { return; }
-			event.preventDefault(); event.stopPropagation();
-			this._menus.showContextMenu({
-				getAnchor: () => new StandardMouseEvent(getWindow(host), event),
-				getActions: () => [
+			if (!target || !href) { return; }
+			const web = chatWebLink(href);
+			const file = chatWorkspaceFileLink(href);
+			if (!web && !file) { return; }
+			event.preventDefault();
+			event.stopPropagation();
+			const actions = web
+				? [
 					toAction({ id: 'chat.link.browser', label: t('chatSurface.link.browser'), run: () => this._openLink(href, target) }),
 					toAction({ id: 'chat.link.external', label: t('chatSurface.resource.external'), run: () => this._openerService.open(URI.parse(href), { openExternal: true, allowCommands: false }) }),
 					new Separator(),
 					toAction({ id: 'chat.link.copy', label: t('chatSurface.resource.copy'), run: () => this._clipboardService.writeText(href) }),
-				],
-				domForShadowRoot: host, useWindowContainerForShadowRoot: true,
+				]
+				: [
+					toAction({ id: 'chat.file.panel', label: t('chatSurface.resource.openFile'), run: () => this._openLink(href, target) }),
+					new Separator(),
+					toAction({ id: 'chat.file.copy', label: t('chatSurface.resource.copyPath'), run: () => this._clipboardService.writeText(file!) }),
+				];
+			this._menus.showContextMenu({
+				getAnchor: () => new StandardMouseEvent(getWindow(host), event),
+				getActions: () => actions,
+				domForShadowRoot: host,
+				useWindowContainerForShadowRoot: true,
 			});
 		}));
 		return store;
 	}
 
 	private async _openLink(href: string, anchor: HTMLElement): Promise<void> {
+		const targetWindowId = getWindow(anchor).vscodeWindowId;
 		if (chatWebLink(href)) {
-			await this._browsers.openPreview(href, undefined, { targetWindowId: getWindow(anchor).vscodeWindowId, reveal: true });
-		} else { await openLinkFromMarkdown(this._openerService, href, false); }
+			await this._browsers.openPreview(href, undefined, { targetWindowId, reveal: true });
+			return;
+		}
+		const file = chatWorkspaceFileLink(href);
+		if (file) {
+			await this._agentService.openDiff(file, undefined, targetWindowId);
+			return;
+		}
+		await openLinkFromMarkdown(this._openerService, href, false);
 	}
 
 	/**
@@ -455,4 +477,27 @@ export class OpenideChatMarkdownRenderer implements IMarkdownRenderer {
 
 function chatWebLink(href: string): URL | undefined {
 	try { const url = new URL(href); return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password ? url : undefined; } catch { return undefined; }
+}
+
+/**
+ * Returns a workspace path for file links produced by the agent.
+ *
+ * Unknown URI schemes stay with the regular markdown opener. File URIs and relative paths with
+ * a filename extension use the agent service, whose workspace resolver rejects paths outside the
+ * active project before opening them in the editor registered for the clicked window.
+ */
+export function chatWorkspaceFileLink(href: string): string | undefined {
+	const value = href.trim();
+	if (!value) { return undefined; }
+	try {
+		const uri = URI.parse(value);
+		if (uri.scheme === 'file') { return uri.fsPath; }
+		if (uri.scheme) { return undefined; }
+	} catch {
+		return undefined;
+	}
+	let path = value.split(/[?#]/, 1)[0];
+	try { path = decodeURIComponent(path); } catch { return undefined; }
+	path = path.replace(/^\.\//, '');
+	return /^(?:[\w.@+-]+\/)*[\w.@+-]+\.[A-Za-z0-9]+$/.test(path) ? path : undefined;
 }

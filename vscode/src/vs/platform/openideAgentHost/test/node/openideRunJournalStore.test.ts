@@ -60,6 +60,21 @@ suite('OpenIDE durable run journal (real disk)', () => {
 		assert.strictEqual(records[2].previousHash, records[1].hash);
 	});
 
+	test('retires completed history and restarts the durable sequence', async () => {
+		const store = new OpenideRunJournalStore(root, { segmentRecords: 1 });
+		await store.append('a', event(0));
+		await store.append('a', event(1));
+		await store.append('a', event(2));
+		assert.strictEqual((await readdir(root)).length, 3);
+		await store.reset('a');
+		assert.deepStrictEqual(await store.read('a'), []);
+		assert.strictEqual((await readdir(root)).length, 1);
+		await store.append('a', event(3));
+		const records = await store.read('a');
+		assert.deepStrictEqual(records.map(record => record.seq), [0]);
+		assert.deepStrictEqual(records.map(record => record.event.runId), ['run-3']);
+	});
+
 	test('record bounds still fail without altering the accepted prefix', async () => {
 		const store = new OpenideRunJournalStore(root, { recordBytes: 400 });
 		await store.append('a', event(0));
@@ -74,6 +89,19 @@ suite('OpenIDE durable run journal (real disk)', () => {
 		assert.deepStrictEqual(recovered.map(record => record.event.kind), ['tool/intent', 'tool/unknown']);
 		assert.strictEqual((await store.recover('a')).length, 2);
 		assert.strictEqual((await readdir(root)).length, 2);
+	});
+
+	test('large recovery verifies all segments but returns only the latest anchor and unresolved effects', async () => {
+		const store = new OpenideRunJournalStore(root, { segmentRecords: 1, recoveryTransferBytes: 1 });
+		await store.append('a', { kind: 'run/start', runId: 'old', payload: { messages: [{ role: 'user', content: 'old history' }] } });
+		await store.append('a', { kind: 'tool/intent', runId: 'old', payload: { operationId: 'old:call', callId: 'call', name: 'write_file' } });
+		await store.append('a', { kind: 'run/start', runId: 'new', payload: { messages: [{ role: 'user', content: 'current task' }] } });
+		await store.append('a', { kind: 'model/result', runId: 'new', payload: { message: { role: 'assistant', content: 'working' } } });
+		const recovered = await store.recover('a');
+		assert.deepStrictEqual(recovered.map(record => record.event.kind), ['run/start', 'model/result', 'tool/unknown']);
+		assert.strictEqual(recovered[0].event.runId, 'new');
+		assert.strictEqual(recovered[2].event.payload['operationId'], 'old:call');
+		assert.strictEqual(recovered[2].event.payload['outcome'], OPENIDE_UNKNOWN_TOOL_OUTCOME);
 	});
 
 	test('failed rotation checkpoint preserves history and retries the empty final segment', async () => {
@@ -133,7 +161,7 @@ await store.append('session', {kind:'tool/intent',runId:'run',payload:{operation
 await writeFile(${JSON.stringify(effect)}, 'performed once');
 process.stdout.write('effect-ready\\n');
 setInterval(() => {}, 1000);`;
-		const child = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'pipe', 'pipe'] });
+		const child = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
 		let stderr = '';
 		child.stderr.on('data', chunk => { stderr += chunk; });
 		const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => { child.once('error', reject); child.once('exit', (code, signal) => resolve({ code, signal })); });

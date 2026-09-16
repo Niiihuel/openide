@@ -41,10 +41,19 @@
 .openide-chat-resource-card .openide-chat-resource-menu { padding: 5px 8px; gap: 4px; }
 
 .openide-chat-resource-card.openide-chat-resource-compact {
- padding: 0;
+ width: 100%;
+ box-sizing: border-box;
+ padding: 6px 0;
  border: 0;
  background: transparent;
 }
+.openide-chat-resource-compact-info { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.openide-chat-resource-compact-icon { display: flex; flex: 0 0 auto; color: var(--vscode-textLink-foreground); }
+.openide-chat-resource-compact-icon.codicon { font-size: 16px; }
+.openide-chat-resource-compact-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.openide-chat-resource-compact-status { color: var(--vscode-foreground); font-size: 12px; }
+.openide-chat-resource-compact .openide-chat-resource-description { color: var(--vscode-textLink-foreground); }
+.openide-chat-resource-compact > .oi-split { flex: 0 0 auto; margin-left: auto; }
 .openide-chat-resource-card[hidden], .openide-chat-edit-card[hidden] { display: none !important; }
 
 .openide-chat-resource-compact .oi-split {

@@ -31,3 +31,8 @@
 .openide-chat-subagent-group .openide-chat-work-group-chevron { flex-shrink: 0; }
 .openide-chat-subagent-group > .openide-chat-work-group-body > .openide-chat-delegation { display: none; }
 .openide-chat-sub-avatar { display: flex; flex-shrink: 0; }
+.openide-chat-subagent-group:not([open]) > .openide-chat-work-group-body { display: none; }
+.openide-chat-subagent-group[open] > .openide-chat-work-group-body { display: flex; flex-direction: column; gap: 0; padding-block: 3px; }
+.openide-chat-subagent-group > .openide-chat-work-group-body > .openide-chat-sub { margin: 0; padding: 3px 6px; border-radius: var(--oi-radius-sm); }
+.openide-chat-subagent-group > .openide-chat-work-group-body > .openide-chat-sub + .openide-chat-sub { border-top: 1px solid var(--oi-border-soft); border-top-left-radius: 0; border-top-right-radius: 0; }
+.openide-chat-subagent-group > .openide-chat-work-group-body > .openide-chat-sub:hover { background: var(--oi-hover); }

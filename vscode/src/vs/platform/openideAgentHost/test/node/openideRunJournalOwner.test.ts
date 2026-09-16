@@ -31,6 +31,17 @@ suite('OpenIDE run journal connection ownership', () => {
 		second.close('session');
 	});
 
+	test('completed close retires recovery history before releasing ownership', async () => {
+		const first = disposables.add(new OpenideRunJournalOwner(root));
+		const second = disposables.add(new OpenideRunJournalOwner(root));
+		await Promise.all([first.setWorkspace('workspace', []), second.setWorkspace('workspace', [])]);
+		await first.open('session');
+		await first.append('session', event);
+		await first.close('session', true);
+		assert.deepStrictEqual(await second.open('session'), []);
+		await second.close('session');
+	});
+
 	test('an old open continuation cannot release its replacement on the same connection', async () => {
 		const owner = disposables.add(new OpenideRunJournalOwner(root));
 		await owner.setWorkspace('workspace', []);

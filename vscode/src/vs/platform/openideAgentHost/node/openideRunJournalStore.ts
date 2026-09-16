@@ -5,7 +5,7 @@
 
 import { createHash } from 'crypto';
 import { constants, Stats } from 'fs';
-import { FileHandle, lstat, mkdir, open, readdir } from 'fs/promises';
+import { FileHandle, lstat, mkdir, open, readdir, unlink } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
 import { IOpenideRunJournalEvent, IOpenideRunJournalRecord, openideJournalSnapshot, openideUnknownToolEvents } from '../common/openideRunJournal.js';
 
@@ -17,6 +17,8 @@ export interface IOpenideRunJournalLimits {
 	/** Rotation thresholds, not a lifetime limit on a conversation. */
 	readonly segmentBytes?: number;
 	readonly segmentRecords?: number;
+	/** Maximum verified history returned over IPC during recovery. Older valid records are streamed past. */
+	readonly recoveryTransferBytes?: number;
 }
 
 interface IJournalTip { readonly seq: number; readonly hash: string }
@@ -84,6 +86,19 @@ export class OpenideRunJournalStore {
 		const names = (await readdir(this.directory)).filter(name => name === `${prefix}.jsonl` || name.startsWith(`${prefix}.`) && name.endsWith('.jsonl'));
 		if (!names.length) { const handle = await this.handle(base, true); await handle.close(); return [base]; }
 		const numbered = names.filter(name => name !== `${prefix}.jsonl`).sort();
+		// A durable empty base is the reset marker written after a completed run.
+		// Numbered files can remain when the process stopped between committing the
+		// marker and deleting the obsolete segments. Ignore and finish that cleanup
+		// instead of trying to replay a chain which has deliberately been retired.
+		if (names.includes(`${prefix}.jsonl`) && numbered.length) {
+			const baseHandle = await this.handle(base);
+			let reset = false;
+			try { reset = (await baseHandle.stat()).size === 0; } finally { await baseHandle.close(); }
+			if (reset) {
+				for (const name of numbered) { try { await unlink(join(this.directory, name)); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; } } }
+				return [base];
+			}
+		}
 		if (!names.includes(`${prefix}.jsonl`) || numbered.some((name, index) => name !== `${prefix}.${String(index + 1).padStart(8, '0')}.jsonl`)) {
 			throw new Error('OpenIDE journal segments are missing or invalid; refusing to replay or append');
 		}
@@ -96,7 +111,7 @@ export class OpenideRunJournalStore {
 		this.verified.set(path, entry);
 	}
 
-	private async readHandle(path: string, handle: FileHandle, start: IJournalTip, final: boolean, collect?: IOpenideRunJournalRecord[]): Promise<IVerifiedSegment> {
+	private async readHandle(path: string, handle: FileHandle, start: IJournalTip, final: boolean, collect?: IOpenideRunJournalRecord[] | ((record: IOpenideRunJournalRecord) => void)): Promise<IVerifiedSegment> {
 		const before = await handle.stat();
 		const cached = this.verified.get(path);
 		if (!collect && cached?.stamp === stamp(before) && cached.start.seq === start.seq && cached.start.hash === start.hash && (final || cached.count > 0)) { return cached; }
@@ -109,14 +124,22 @@ export class OpenideRunJournalStore {
 		const end = bytes.lastIndexOf(10) + 1;
 		let tip = start;
 		let count = 0;
+		let workSinceYield = 0;
 		for (const line of bytes.subarray(0, end).toString('utf8').split('\n').slice(0, -1)) {
 			if (Buffer.byteLength(line) > (this.limits.recordBytes ?? 16 * 1024 * 1024)) { throw new Error('OpenIDE journal record limit exceeded'); }
 			const record = JSON.parse(line) as IOpenideRunJournalRecord;
 			const { hash: digest, ...body } = record;
 			if (record.version !== 1 || record.seq !== tip.seq || record.previousHash !== tip.hash || digest !== hash(JSON.stringify(body)) || !kinds.has(record.event?.kind) || typeof record.event.runId !== 'string' || !record.event.payload || Array.isArray(record.event.payload) || typeof record.event.payload !== 'object') { throw new Error('OpenIDE journal is corrupt; refusing to replay or append'); }
-			collect?.push(record);
+			if (Array.isArray(collect)) { collect.push(record); } else { collect?.(record); }
 			tip = { seq: record.seq + 1, hash: digest };
 			count++;
+			workSinceYield += Buffer.byteLength(line);
+			// Journal recovery runs in Electron's main process. Yield periodically so
+			// a large crash journal cannot freeze window painting and input dispatch.
+			if (workSinceYield >= 1024 * 1024) {
+				workSinceYield = 0;
+				await new Promise<void>(resolve => setImmediate(resolve));
+			}
 			if (count > Math.max(this.limits.segmentRecords ?? 10000, 10000)) { throw new Error('OpenIDE journal segment record count exceeded'); }
 		}
 		if (stamp(await handle.stat()) !== stamp(before)) { throw new Error('OpenIDE journal changed while reading'); }
@@ -128,7 +151,7 @@ export class OpenideRunJournalStore {
 		return entry;
 	}
 
-	private async load(paths: readonly string[], collect?: IOpenideRunJournalRecord[]): Promise<IVerifiedSegment> {
+	private async load(paths: readonly string[], collect?: IOpenideRunJournalRecord[] | ((record: IOpenideRunJournalRecord) => void)): Promise<IVerifiedSegment> {
 		let state: IVerifiedSegment = { start: { seq: 0, hash: '' }, tip: { seq: 0, hash: '' }, count: 0, stamp: '' };
 		for (const [index, path] of paths.entries()) {
 			const handle = await this.handle(path);
@@ -179,10 +202,46 @@ export class OpenideRunJournalStore {
 	/** Call only after the prior session owner has stopped. This records uncertainty, never executes work. */
 	recover(sessionId: string): Promise<IOpenideRunJournalRecord[]> {
 		return this.serialize(sessionId, async () => {
+			const paths = await this.segments(sessionId);
+			const bytes = (await Promise.all(paths.map(path => lstat(path)))).reduce((total, stat) => total + stat.size, 0);
+			const bounded = bytes > (this.limits.recoveryTransferBytes ?? 64 * 1024 * 1024);
 			const records: IOpenideRunJournalRecord[] = [];
-			await this.load(await this.segments(sessionId), records);
-			for (const event of openideUnknownToolEvents(records)) { records.push(await this.appendEvent(sessionId, event)); }
+			const toolRecords: IOpenideRunJournalRecord[] = [];
+			const collect = bounded ? (record: IOpenideRunJournalRecord) => {
+				if (record.event.kind === 'tool/intent' || record.event.kind === 'tool/result' || record.event.kind === 'tool/unknown') { toolRecords.push(record); }
+				const payload = record.event.payload;
+				const anchor = record.event.kind === 'run/start'
+					|| record.event.kind === 'model/request' && Array.isArray(payload['projection'])
+					|| record.event.kind === 'compaction' && payload['state'] === 'committed' && Array.isArray(payload['after']);
+				if (anchor) { records.length = 0; }
+				records.push(record);
+			} : records;
+			await this.load(paths, collect);
+			for (const event of openideUnknownToolEvents(bounded ? toolRecords : records)) { records.push(await this.appendEvent(sessionId, event)); }
 			return records;
+		});
+	}
+
+	/**
+	 * Retire the recovery history after a run completed successfully.
+	 *
+	 * Truncating and fsyncing the base first acts as a durable reset marker. If
+	 * the process stops while obsolete numbered segments are being removed,
+	 * `segments()` recognizes the marker and completes cleanup on the next open.
+	 */
+	reset(sessionId: string): Promise<void> {
+		return this.serialize(sessionId, async () => {
+			await this.prepareDirectory();
+			const base = this.path(sessionId);
+			const prefix = hash(sessionId);
+			const baseHandle = await this.handle(base, true);
+			try { await baseHandle.truncate(0); await this.checkpoint(baseHandle); }
+			finally { await baseHandle.close(); }
+			for (const name of await readdir(this.directory)) {
+				if (!name.startsWith(`${prefix}.`) || !name.endsWith('.jsonl')) { continue; }
+				try { await unlink(join(this.directory, name)); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; } }
+			}
+			for (const path of [...this.verified.keys()]) { if (path === base || path.startsWith(join(this.directory, `${prefix}.`))) { this.verified.delete(path); } }
 		});
 	}
 }

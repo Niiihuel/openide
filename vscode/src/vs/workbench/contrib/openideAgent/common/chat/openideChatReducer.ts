@@ -142,12 +142,15 @@ function reduceRootEvent(draft: IOpenideChatDraft, ev: AgentLoopEvent): void {
 				kind: 'accountChoice', requestId: ev.id, spentLabel: ev.spentLabel, candidates: ev.candidates,
 			});
 			return;
-		case 'info':
-			// The engine's `info` is an advisory, not a status line: the webview paints it with the
-			// warning glyph, and downgrading it to 'info' here would make it disappear into the prose.
+		case 'info': {
+			// Journal/live overlap and provider retries can deliver the same advisory twice. Unlike
+			// prose it has no event id, so its stable identity is severity + exact message.
+			const severity = ev.severity ?? 'warning';
+			if (draft.content.some(content => content.kind === 'notice' && content.severity === severity && content.message === ev.message)) { return; }
 			interrupt(draft);
-			pushOpenideChatContent(draft, { kind: 'notice', severity: ev.severity ?? 'warning', message: ev.message });
+			pushOpenideChatContent(draft, { kind: 'notice', severity, message: ev.message });
 			return;
+		}
 		case 'compaction': applyCompaction(draft, ev); return;
 		case 'retry': applyRetry(draft, ev); return;
 		case 'todos': applyTodos(draft, ev.items); return;
@@ -297,7 +300,7 @@ function applySubagentStart(draft: IOpenideChatDraft, ev: Extract<AgentLoopEvent
 	ensureOpenideChatDelegation(draft, ev.parentId, ev.total);
 	const index = pushOpenideChatContent(draft, {
 		kind: 'subagent', runId: ev.id, parentId: ev.parentId, index: ev.index, total: ev.total,
-		title: ev.title, model: ev.model, parentModel: draft.parentModel, status: 'running', timeline: [],
+		title: ev.title, prompt: ev.prompt, model: ev.model, parentModel: draft.parentModel, status: 'running', timeline: [],
 	});
 	draft.subagents.set(ev.id, index);
 	// R7: the mirror session is created by the controller. The reducer only says it must exist.

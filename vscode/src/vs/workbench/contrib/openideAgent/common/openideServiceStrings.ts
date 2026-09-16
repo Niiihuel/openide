@@ -69,6 +69,7 @@ export const OPENIDE_SERVICE_STRINGS = {
 	// ---- Project Map index (openideCodebaseMemoryService.ts). {0} is the Rebuild button's own
 	// label, so the message always names the button the user actually sees.
 	'service.projectMap.initTimeout': { es: 'El índice del Project Map no respondió a tiempo. Reintentá con "{0}".', en: 'The Project Map index did not answer in time. Retry with "{0}".' },
+	'service.agentHost.journalTimeout': { es: 'El Agent Host no respondió al preparar la ejecución. Reintentá el mensaje; tus providers y credenciales se conservaron.', en: 'The Agent Host did not respond while preparing the run. Retry the message; your providers and credentials were preserved.' },
 
 	// ---- Hook consent picker and hook block reason (openideAgentHooks.ts).
 	'service.hooks.blockedDefault': { es: 'bloqueado por un hook del usuario', en: 'blocked by a user hook' },

@@ -772,7 +772,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-insetrow-trail .openide-settings-field-label { display: none; }
 
 /* ---- Skeleton rows (index/detail while statuses stream in) --------------------------------- */
-.openide-settings-skeleton { display: flex; flex-direction: column; gap: 6px; padding: 2px 0; }
+.openide-settings-skeleton { display: flex; flex-direction: column; gap: 6px; padding: 2px 0; contain: paint; will-change: opacity; animation: openide-settings-skeleton-pulse 1.8s ease-in-out infinite; }
 .openide-settings-skeleton-row {
 	display: flex;
 	align-items: center;
@@ -790,17 +790,13 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 		color-mix(in srgb, var(--vscode-foreground) 8%, transparent) 40%,
 		color-mix(in srgb, var(--vscode-foreground) 15%, transparent) 50%,
 		color-mix(in srgb, var(--vscode-foreground) 8%, transparent) 60%);
-	background-size: 200% 100%;
-	animation: openide-settings-skeleton-sweep 1.4s ease-in-out infinite;
 }
 .openide-settings-skeleton-icon { width: 22px; height: 22px; flex: 0 0 auto; border-radius: var(--oi-radius-md); }
 .openide-settings-skeleton-bar { height: 11px; }
-@keyframes openide-settings-skeleton-sweep {
-	from { background-position: 120% 0; }
-	to { background-position: -80% 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-	.openide-settings-skeleton-icon, .openide-settings-skeleton-bar { animation: none; }
+@keyframes openide-settings-skeleton-pulse { 0%, 100% { opacity: .58; } 50% { opacity: .92; } }
+.monaco-reduce-motion .openide-settings-skeleton { animation: none; opacity: .76; }
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+	.openide-settings-skeleton { animation: none; opacity: .76; }
 }
 
 

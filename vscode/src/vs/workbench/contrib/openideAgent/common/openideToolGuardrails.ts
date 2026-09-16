@@ -15,8 +15,23 @@ export interface IToolLoopDecision {
 
 const IGNORED_REPEAT_TOOLS = new Set(['update_todos']);
 
+function canonicalJson(value: unknown): unknown {
+	if (Array.isArray(value)) { return value.map(canonicalJson); }
+	if (value && typeof value === 'object') {
+		return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([key, child]) => [key, canonicalJson(child)]));
+	}
+	return value;
+}
+
 function stableSignature(name: string, argumentsJson: string): string {
-	return `${name}\u0000${argumentsJson.trim().replace(/\s+/g, ' ')}`;
+	const raw = argumentsJson.trim();
+	try {
+		return `${name}\u0000${JSON.stringify(canonicalJson(JSON.parse(raw || '{}')))}`;
+	} catch {
+		return `${name}\u0000${raw.replace(/\s+/g, ' ')}`;
+	}
 }
 
 export class OpenideToolCallGuard {

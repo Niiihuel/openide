@@ -199,32 +199,10 @@
 	line-height: 18px;
 }
 
-/* The output viewport owns clipping. Its control occupies a separate row, so neither the
-   command's last line nor the rounded frame is covered by a gradient or a floating button. */
+/* Terminal and diff share the same fold: compact output keeps its newest lines visible, fades
+   toward the hidden history, and reveals the chevron only when there is more to expand. */
 .openide-chat-term-fold > .openide-fold-fade {
-	display: none;
-}
-
-.openide-chat-term-fold > .openide-fold-expand {
-	position: static;
-	transform: none;
-	width: 100%;
-	height: 24px;
-	border: 0;
-	border-top: var(--vscode-strokeThickness, 1px) solid var(--oi-chat-card-border, var(--oi-border));
-	border-radius: 0;
-	background: transparent;
-	opacity: 1;
-	pointer-events: auto;
-}
-
-.openide-chat-term-fold > .openide-fold-expand:hover {
-	background: var(--oi-hover);
-}
-
-.openide-chat-term-fold > .openide-fold-expand:focus-visible {
-	outline: 1px solid var(--vscode-focusBorder);
-	outline-offset: -2px;
+	background: linear-gradient(to bottom, var(--oi-chat-card-bg, var(--oi-tint-1)), transparent);
 }
 
 .openide-chat-term-line {
@@ -245,54 +223,17 @@
 	color: color-mix(in srgb, var(--vscode-terminal-ansiYellow, var(--vscode-charts-yellow)) 70%, var(--vscode-foreground));
 }
 
-/* ---- stdin --------------------------------------------------------------------------------- */
-
-.openide-chat-term-in {
-	display: none;
-	align-items: center;
-	gap: 7px;
-	padding: 0 10px 8px;
-}
-
-/* stdin only exists while the process can still read it: a finished command with a live input line
-   would silently swallow whatever the user types. */
-.openide-chat-term-card.openide-chat-term-running.openide-chat-term-open .openide-chat-term-in,
-.openide-chat-term-card.openide-chat-term-awaiting.openide-chat-term-open .openide-chat-term-in {
-	display: flex;
-}
 
 .openide-chat-term-card.openide-chat-term-awaiting {
 	border-color: color-mix(in srgb, var(--vscode-charts-orange) 55%, var(--oi-chat-card-border, var(--oi-border)));
 }
 
-/* Blocked on a prompt: said once, after the executables, in the same warm tone as the border. */
+/* Input is handled in the real terminal. The chat card only reports where attention is needed. */
 .openide-chat-term-card.openide-chat-term-awaiting .openide-chat-term-summary::after {
-	content: ' · esperando input';
+	content: ' · esperando input en terminal';
 	color: var(--vscode-charts-orange);
 	font-weight: 500;
 	font-size: 11px;
-}
-
-.openide-chat-term-caret {
-	user-select: none;
-	color: var(--vscode-descriptionForeground);
-	font-family: var(--oi-font-mono);
-	font-size: 12px;
-}
-
-.openide-chat-term-input {
-	flex: 1;
-	min-width: 0;
-	border: none;
-	outline: none;
-	background: transparent;
-	color: var(--vscode-foreground);
-	font-family: var(--oi-font-mono);
-	font-size: 12px;
-}
-
-.openide-chat-term-input::placeholder {
-	color: var(--vscode-descriptionForeground);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -194,7 +194,7 @@ const FILE_TARGET = /^((?:[\w.@-]+\/)*[\w.@-]+\.[A-Za-z0-9]+)(\s.*)?$/;
  * chatInlineAnchorWidget). The classes mirror `getIconClasses` for a FILE (name + extension keys),
  * built here because parts have no DI: the icon theme keys on those class names, not on a service.
  */
-export function renderOpenideChatActivityLine(verb: HTMLElement, verbText: string, target: string): void {
+export function renderOpenideChatActivityLine(verb: HTMLElement, verbText: string, target: string, openFile?: (path: string) => void): void {
 	clearNode(verb);
 	verb.append(document.createTextNode(target ? `${verbText} ` : verbText));
 	if (!target) {
@@ -208,6 +208,23 @@ export function renderOpenideChatActivityLine(verb: HTMLElement, verbText: strin
 	const path = match[1];
 	const name = path.slice(path.lastIndexOf('/') + 1);
 	const chip = append(verb, $('span.openide-chat-activity-chip'));
+	if (openFile) {
+		chip.classList.add('openide-chat-activity-chip-link');
+		chip.setAttribute('role', 'link');
+		chip.tabIndex = 0;
+		chip.setAttribute('aria-label', path);
+		const activate = (event: Event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			openFile(path);
+		};
+		chip.addEventListener('click', activate);
+		chip.addEventListener('keydown', event => {
+			if (event.key === 'Enter' || event.key === ' ') {
+				activate(event);
+			}
+		});
+	}
 	const icon = append(chip, $('span.openide-chat-activity-chip-icon.file-icon.name-file-icon.ext-file-icon'));
 	const lower = name.toLowerCase();
 	icon.classList.add(`${cssEscape(lower)}-name-file-icon`);

@@ -46,7 +46,7 @@ export class OpenideAgentWindowStatusbar extends Disposable {
 	) {
 		super();
 		this.popover = this._register(new OpenideUsagePopover(usage, context, commands));
-		const handlers: Record<string, () => void> = { environment: actions.openEnvironment, terminal: actions.openTerminal, browser: actions.openBrowser, usage: () => this.showUsage(), refresh: () => { void usage.refresh('manual'); } };
+		const handlers: Record<string, () => void> = { environment: actions.openEnvironment, terminal: actions.openTerminal, browser: actions.openBrowser, usage: () => this.showUsage() };
 		for (const [name, run] of Object.entries(handlers)) {
 			const id = `openide.agent.footer.${getWindow(document.body).vscodeWindowId}.${name}`;
 			this.commands.set(name, id);
@@ -103,7 +103,6 @@ export class OpenideAgentWindowStatusbar extends Disposable {
 		const usageLabel = t('chatSurface.usage.title');
 		if (!visible.length) { roster.textContent = usageLabel; }
 		this.update('openide.agent.usage', { name: usageLabel, text: usageLabel, content: roster, ariaLabel: [usageLabel, ...descriptions].join('\n'), tooltip: [usageLabel, ...descriptions].join('\n'), command: this.commands.get('usage') }, StatusbarAlignment.LEFT, 100);
-		this.update('openide.agent.footer.refresh', { name: t('chatSurface.usage.refresh'), text: snapshot.fetching ? '$(loading~spin)' : '$(loading)', ariaLabel: t('chatSurface.usage.refresh'), tooltip: t('chatSurface.usage.refresh'), command: snapshot.fetching ? undefined : this.commands.get('refresh') }, StatusbarAlignment.LEFT, 99);
 		const session = this.source.sessionStore.metaOf(this.source.sessionStore.activeSessionId());
 		const environment = resolveAgentWindowEnvironment(session, this.workspace.getWorkspace().folders, []);
 		const project = environment.folder?.name || (environment.cwd ? basename(environment.cwd) : t('agentWindow.workspace'));

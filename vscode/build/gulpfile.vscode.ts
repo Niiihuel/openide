@@ -114,6 +114,7 @@ const vscodeResourceIncludes = [
 
 	// OpenIDE provider marks (native status bar + isolated webviews)
 	'out-build/vs/workbench/contrib/openideAgent/browser/media/providerIcons/*.{svg,md}',
+	'out-build/vs/workbench/contrib/openideAgent/browser/chat/media/subagents/*.png',
 
 	// Webview
 	'out-build/vs/workbench/contrib/webview/browser/pre/*.{js,html}',

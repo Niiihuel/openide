@@ -79,6 +79,14 @@ export class OpenideChatComposerQueue extends Disposable {
 	/** The entry left the queue and should be sent, cancelling the run in flight. */
 	readonly onDidRequestSendNow: Event<IComposerQueueAction> = this._onDidRequestSendNow.event;
 
+	private readonly _onDidRequestOpenInSideChat = this._register(new Emitter<IComposerQueueAction>());
+	/** The entry left the queue and should start a separate conversation. */
+	readonly onDidRequestOpenInSideChat: Event<IComposerQueueAction> = this._onDidRequestOpenInSideChat.event;
+
+	private readonly _onDidRequestDisableQueueing = this._register(new Emitter<IComposerQueueAction>());
+	/** Queueing should be disabled and this entry restored to the composer. */
+	readonly onDidRequestDisableQueueing: Event<IComposerQueueAction> = this._onDidRequestDisableQueueing.event;
+
 	readonly domNode: HTMLElement;
 	private readonly _tray: IOpenideChatTray;
 	private readonly _body: HTMLElement;
@@ -98,7 +106,7 @@ export class OpenideChatComposerQueue extends Disposable {
 	) {
 		super();
 		this._queues = this._load();
-		this._tray = this._register(createChatTray(host, 'queue', 'list-ordered'));
+		this._tray = this._register(createChatTray(host, 'queue', 'list-selection'));
 		this.domNode = this._tray.domNode;
 		const { toggle } = this._tray;
 		this._count = this._tray.label;
@@ -225,7 +233,7 @@ export class OpenideChatComposerQueue extends Disposable {
 		if (!hidden) {
 			(this._expanded ? queue : queue.slice(0, 1)).forEach((entry, index) => {
 				const row = append(this._body, $('div.openide-chat-queue-row'));
-				append(row, $('span.codicon.codicon-list-ordered', { 'aria-hidden': 'true' }));
+				append(row, $('span.codicon.codicon-list-selection', { 'aria-hidden': 'true' }));
 				const main = append(row, $('span.openide-chat-queue-main'));
 				const image = entry.images[0];
 				if (image) {
@@ -245,17 +253,29 @@ export class OpenideChatComposerQueue extends Disposable {
 					const removed = this._removeAt(index);
 					if (removed) { this._onDidRequestEdit.fire({ entry: removed }); }
 				};
+				const openInSideChat = () => {
+					const removed = this._removeAt(index);
+					if (removed) { this._onDidRequestOpenInSideChat.fire({ entry: removed }); }
+				};
+				const disableQueueing = () => {
+					const removed = this._removeAt(index);
+					if (removed) { this._onDidRequestDisableQueueing.fire({ entry: removed }); }
+				};
 				const send = this._action(actions, 'arrow-up', () => t(entry.mode === 'plan' ? 'chat.queue.nowPlan' : 'chat.queue.now'), () => {
 					const removed = this._removeAt(index);
 					if (removed) { this._onDidRequestSendNow.fire({ entry: removed }); }
 				});
 				send.classList.add('openide-chat-queue-send');
-				append(send, $('span.openide-chat-queue-send-label', undefined, t('chat.queue.now')));
+				append(send, $('span.openide-chat-queue-send-label', undefined, t('chat.queue.steer')));
 				this._action(actions, 'trash', () => t('chat.queue.remove'), () => this._removeAt(index));
 				if (this.menuService) {
 					const more = this._action(actions, 'ellipsis', () => t('chat.header.more'), () => {
-						const action = new Action('openide.queue.edit', t('chat.queue.edit'), 'codicon codicon-edit', true, async () => edit());
-						this.menuService!.showContextMenu({ getAnchor: () => more, getActions: () => [action], anchorAlignment: AnchorAlignment.RIGHT, domForShadowRoot: more, useWindowContainerForShadowRoot: true, onHide: cancelled => { action.dispose(); if (cancelled && more.isConnected) { more.focus(); } } });
+						const menuActions = [
+							new Action('openide.queue.edit', t('chat.queue.editMessage'), 'codicon codicon-edit', true, async () => edit()),
+							new Action('openide.queue.openInSideChat', t('chat.queue.openInSideChat'), 'codicon codicon-comment-discussion', true, async () => openInSideChat()),
+							new Action('openide.queue.disable', t('chat.queue.disable'), 'codicon codicon-list-filter', true, async () => disableQueueing()),
+						];
+						this.menuService!.showContextMenu({ getAnchor: () => more, getActions: () => menuActions, anchorAlignment: AnchorAlignment.RIGHT, domForShadowRoot: more, useWindowContainerForShadowRoot: true, onHide: cancelled => { menuActions.forEach(action => action.dispose()); if (cancelled && more.isConnected) { more.focus(); } } });
 					});
 				} else { this._action(actions, 'edit', () => t('chat.queue.edit'), edit); }
 			});

@@ -206,11 +206,11 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 		const content = this._content;
 		const running = content.status === 'running';
 
-		const task = content.run ?? { task: content.title };
+		const task = content.run ?? { task: content.prompt ?? content.title };
 		const kind = subagentAvatarKind(task);
 		if (this._avatarKind !== kind) { this._avatarKind = kind; this._statusIcon.replaceChildren(createSubagentAvatar(task)); }
 
-		const title = subagentTaskTitle(content.run?.task ?? content.title, content.title) || t('chat.part.subagentDefault');
+		const title = subagentTaskTitle(content.run?.task ?? content.prompt ?? content.title, content.title) || t('chat.part.subagentDefault');
 		this._title.textContent = title;
 
 		const badge = subagentModelBadge(content.model, content.parentModel);
@@ -281,6 +281,7 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 		return other.runId === this._content.runId
 			&& other.status === this._content.status
 			&& other.title === this._content.title
+			&& other.prompt === this._content.prompt
 			&& other.run?.task === this._content.run?.task
 			&& other.run?.profile === this._content.run?.profile
 			&& other.run?.routingDecision?.profile === this._content.run?.routingDecision?.profile

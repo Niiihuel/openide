@@ -72,13 +72,24 @@ suite('OpenIDE plan build contract', () => {
 		// settles on both edges (the promise and the failure handler) and only the first may
 		// resolve the editor's pending Build.
 		const body = controller.slice(controller.indexOf('private settlePlanBuild('));
-		const block = body.slice(0, 520);
+		const block = body.slice(0, body.indexOf('/** Mirror the agent'));
 		assert.strictEqual(/conversation\.planBuild = undefined;/.test(block), true, 'it has to clear the state before reporting');
 		assert.strictEqual(block.includes('this.agentService.failPlanBuild('), true, 'the failure is reported to the service');
 		assert.strictEqual(block.includes('this.agentService.finishPlanBuild('), true, 'the success is reported to the service');
 		// Clearing BEFORE reporting is what makes a second call a no-op.
 		assert.strictEqual(block.indexOf('conversation.planBuild = undefined;') < block.indexOf('failPlanBuild('), true,
 			'if it reports before clearing, two calls settle the Build twice');
+	});
+
+	test('a plan stays with its creating conversation and mirrors todos to its document', () => {
+		const build = controller.slice(controller.indexOf('private buildPlan('), controller.indexOf('private settlePlanBuild('));
+		assert.strictEqual(build.includes("request.conversationId || this.sessions.ensureActive()"), true,
+			'new plans must run in their creating conversation');
+		assert.strictEqual(build.includes('this._activeId = conversationId'), false,
+			'a background plan build must not switch the visible chat');
+		const progress = controller.slice(controller.indexOf('private updatePlanProgress('), controller.indexOf('/** Cancels a conversation'));
+		assert.strictEqual(progress.includes('this.agentService.updatePlanTasks('), true,
+			'update_todos must advance the native plan document');
 	});
 
 });

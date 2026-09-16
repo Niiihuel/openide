@@ -15,6 +15,7 @@ import { OpenideStringKey, t } from '../openideStrings.js';
  */
 export interface INativeWorkflowCommand {
 	readonly slug: string;
+	readonly icon: string;
 	/** Translation keys, not text: `t()` is read at call time so the menu follows the IDE language.
 	 *  Typed keys rather than an interpolated `chat.slash.${slug}` so a typo is a build error. */
 	readonly descriptionKey: OpenideStringKey;
@@ -43,25 +44,29 @@ export function nativeCommandHint(command: { hintKey?: OpenideStringKey }): stri
 }
 
 export const NATIVE_WORKFLOW_COMMANDS: readonly INativeWorkflowCommand[] = [
-	{ slug: 'agent', descriptionKey: 'chat.slash.agent', hintKey: 'chat.slash.agent.hint', mode: 'agent', instruction: 'Implementá la siguiente tarea con el workflow seguro de OpenIDE:' },
-	{ slug: 'plan', descriptionKey: 'chat.slash.plan', hintKey: 'chat.slash.plan.hint', mode: 'plan', instruction: 'Prepará un plan completo para la siguiente tarea:' },
-	{ slug: 'ask', descriptionKey: 'chat.slash.ask', hintKey: 'chat.slash.ask.hint', mode: 'ask', instruction: 'Investigá y respondé la siguiente consulta sin editar archivos:' },
-	{ slug: 'debug', descriptionKey: 'chat.slash.debug', hintKey: 'chat.slash.debug.hint', mode: 'debug', instruction: 'Reproducí, aislá la causa raíz y corregí el siguiente fallo con una validación de regresión:' },
-	{ slug: 'review', descriptionKey: 'chat.slash.review', hintKey: 'chat.slash.review.hint', instruction: 'Ejecutá review_changes sobre los archivos modificados relevantes. Si hay hallazgos bloqueantes, corregilos y repetí la revisión.' },
-	{ slug: 'verify', descriptionKey: 'chat.slash.verify', hintKey: 'chat.slash.verify.hint', instruction: 'Verificá los cambios: diagnósticos, pruebas pertinentes y git_preflight. No propongas commit si algo falla.' },
-	{ slug: 'status', descriptionKey: 'chat.slash.status', instruction: 'Ejecutá git_status y resumí el siguiente paso seguro del workflow.' },
-	{ slug: 'commit', descriptionKey: 'chat.slash.commit', hintKey: 'chat.slash.commit.hint', instruction: 'Prepará un commit atómico: identificá archivos explícitos, ejecutá review_changes, git_preflight y solo entonces proponé git_commit para aprobación. Nunca hagas push.' },
-	{ slug: 'workflow', descriptionKey: 'chat.slash.workflow', hintKey: 'chat.slash.workflow.hint', instruction: 'Explicá o configurá el workflow nativo de OpenIDE usando workflow_configure si hay preferencias concretas.' },
+	{ slug: 'agent', icon: 'sparkle', descriptionKey: 'chat.slash.agent', hintKey: 'chat.slash.agent.hint', mode: 'agent', instruction: 'Implementá la siguiente tarea con el workflow seguro de OpenIDE:' },
+	{ slug: 'plan', icon: 'checklist', descriptionKey: 'chat.slash.plan', hintKey: 'chat.slash.plan.hint', mode: 'plan', instruction: 'Prepará un plan completo para la siguiente tarea:' },
+	{ slug: 'ask', icon: 'question', descriptionKey: 'chat.slash.ask', hintKey: 'chat.slash.ask.hint', mode: 'ask', instruction: 'Investigá y respondé la siguiente consulta sin editar archivos:' },
+	{ slug: 'debug', icon: 'debug-alt', descriptionKey: 'chat.slash.debug', hintKey: 'chat.slash.debug.hint', mode: 'debug', instruction: 'Reproducí, aislá la causa raíz y corregí el siguiente fallo con una validación de regresión:' },
+	{ slug: 'review', icon: 'diff', descriptionKey: 'chat.slash.review', hintKey: 'chat.slash.review.hint', instruction: 'Ejecutá review_changes sobre los archivos modificados relevantes. Si hay hallazgos bloqueantes, corregilos y repetí la revisión.' },
+	{ slug: 'verify', icon: 'verified', descriptionKey: 'chat.slash.verify', hintKey: 'chat.slash.verify.hint', instruction: 'Verificá los cambios: diagnósticos, pruebas pertinentes y git_preflight. No propongas commit si algo falla.' },
+	{ slug: 'status', icon: 'pulse', descriptionKey: 'chat.slash.status', instruction: 'Ejecutá git_status y resumí el siguiente paso seguro del workflow.' },
+	{ slug: 'commit', icon: 'git-commit', descriptionKey: 'chat.slash.commit', hintKey: 'chat.slash.commit.hint', instruction: 'Prepará un commit atómico: identificá archivos explícitos, ejecutá review_changes, git_preflight y solo entonces proponé git_commit para aprobación. Nunca hagas push.' },
+	{ slug: 'workflow', icon: 'type-hierarchy', descriptionKey: 'chat.slash.workflow', hintKey: 'chat.slash.workflow.hint', instruction: 'Explicá o configurá el workflow nativo de OpenIDE usando workflow_configure si hay preferencias concretas.' },
 ];
 
 /** `/compact` is local: it never reaches the model as a turn. */
-export const COMPACT_COMMAND = { slug: 'compact', descriptionKey: 'chat.slash.compact' } as const;
+export const COMPACT_COMMAND = { slug: 'compact', icon: 'fold', descriptionKey: 'chat.slash.compact' } as const;
 
 /** One row of the composer's `/` menu. Same shape the webview received in `commandSuggest`. */
 export interface IOpenideChatSlashSuggestion {
 	readonly kind: IChatCapabilityMention['kind'] | 'mcp' | 'tool';
 	readonly name: string;
 	readonly description: string;
+	/** Codicon chosen for the command's meaning, rather than one icon shared by a whole group. */
+	readonly icon?: string;
+	/** Compact source label aligned to the trailing edge (for example Personal or Project). */
+	readonly origin?: string;
 	/** Argument hint shown after the name (`<tarea>`), commands only. */
 	readonly hint?: string;
 	readonly risk?: 'safe' | 'write' | 'exec';
@@ -95,6 +100,7 @@ interface ICapabilityLike {
 	readonly kind: IOpenideChatSlashSuggestion['kind'];
 	readonly name: string;
 	readonly description: string;
+	readonly origin?: string;
 	readonly risk?: 'safe' | 'write' | 'exec';
 }
 
@@ -115,23 +121,23 @@ export function buildOpenideChatSlashSuggestions(
 		.filter(c => c.slug !== COMPACT_COMMAND.slug && c.slug !== 'goal')
 		.filter(c => !NATIVE_WORKFLOW_COMMANDS.some(native => native.slug === c.slug))
 		.filter(c => matches(c.slug, c.description))
-		.map(c => ({ kind: 'command', name: c.slug, description: c.description, hint: c.argumentHint }));
+		.map(c => ({ kind: 'command', name: c.slug, description: c.description, hint: c.argumentHint, icon: 'terminal' }));
 	const goalDescription = t('goal.suggestion');
 	const builtinItems: IOpenideChatSlashSuggestion[] = [
-		...(matches('goal', goalDescription) ? [{ kind: 'command' as const, name: 'goal', description: goalDescription }] : []),
+		...(matches('goal', goalDescription) ? [{ kind: 'command' as const, name: 'goal', description: goalDescription, icon: 'target' }] : []),
 		// The description is resolved BEFORE matching, so typing "plan" in English finds the command
 		// by the words actually on screen rather than by a Spanish string nobody can see.
 		...NATIVE_WORKFLOW_COMMANDS
 			.map(command => ({ command, description: nativeCommandDescription(command) }))
 			.filter(({ command, description }) => matches(command.slug, description))
-			.map(({ command, description }) => ({ kind: 'command' as const, name: command.slug, description, hint: nativeCommandHint(command) })),
+			.map(({ command, description }) => ({ kind: 'command' as const, name: command.slug, description, hint: nativeCommandHint(command), icon: command.icon })),
 		...(matches(COMPACT_COMMAND.slug, nativeCommandDescription(COMPACT_COMMAND))
-			? [{ kind: 'command' as const, name: COMPACT_COMMAND.slug, description: nativeCommandDescription(COMPACT_COMMAND) }]
+			? [{ kind: 'command' as const, name: COMPACT_COMMAND.slug, description: nativeCommandDescription(COMPACT_COMMAND), icon: COMPACT_COMMAND.icon }]
 			: []),
 	];
 	const capabilityItems: IOpenideChatSlashSuggestion[] = capabilities
 		.filter(c => isSlashVisibleCapability(c.kind as IChatCapabilityMention['kind']))
 		.filter(c => matches(c.name, c.description))
-		.map(c => ({ kind: c.kind, name: c.name, description: c.description, risk: c.risk }));
+		.map(c => ({ kind: c.kind, name: c.name, description: c.description, origin: c.origin, risk: c.risk }));
 	return [...capabilityItems, ...builtinItems, ...commandItems];
 }

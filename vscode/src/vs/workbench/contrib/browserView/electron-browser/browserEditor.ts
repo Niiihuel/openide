@@ -258,6 +258,26 @@ export interface IContainerLayout {
 	};
 }
 
+/**
+ * A WebContentsView is a native child of the Electron window, so CSS overflow on the editor
+ * wrapper cannot clip it. Keep the final bounds inside the measured pane after every layout
+ * contribution has run; this also protects transitions and device emulation from stale or
+ * fractional geometry reaching outside the dock.
+ */
+export function clampBrowserContainerLayout(layout: IContainerLayout, pane: Pick<IContainerLayoutPane, 'width' | 'height'>): IContainerLayout {
+	const paneWidth = Math.max(0, Number.isFinite(pane.width) ? pane.width : 0);
+	const paneHeight = Math.max(0, Number.isFinite(pane.height) ? pane.height : 0);
+	const left = Math.min(paneWidth, Math.max(0, Number.isFinite(layout.left) ? layout.left! : 0));
+	const top = Math.min(paneHeight, Math.max(0, Number.isFinite(layout.top) ? layout.top! : 0));
+	return {
+		...layout,
+		left,
+		top,
+		width: Math.min(Math.max(0, Number.isFinite(layout.width) ? layout.width : 0), paneWidth - left),
+		height: Math.min(Math.max(0, Number.isFinite(layout.height) ? layout.height : 0), paneHeight - top),
+	};
+}
+
 /** Where a contributed widget mounts within the browser editor. */
 export const enum BrowserWidgetLocation {
 	/** Inside the navbar, before the URL input (e.g. site/security indicators). */
@@ -746,6 +766,7 @@ export class BrowserEditor extends EditorPane {
 				layout = next;
 			}
 		}
+		layout = clampBrowserContainerLayout(layout, pane);
 
 		const left = padding.left + (layout.left ?? 0);
 		const top = padding.top + (layout.top ?? 0);

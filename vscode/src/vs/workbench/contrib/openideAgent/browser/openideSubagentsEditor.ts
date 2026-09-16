@@ -28,6 +28,7 @@ import { ISubagentOrchestrationService } from './openideSubagentOrchestrationSer
 import { IOpenideAgentService } from './openideAgentService.js';
 import { OpenideChatWidget } from './chat/openideChatWidget.js';
 import { isOpenideChatTextClipped, setupChatTooltip } from './chat/openideChatHover.js';
+import { appendSubagentTimelineEvent, lastSubagentTimelineRows } from './chat/parts/openideChatSubagentTimeline.js';
 import { relativeTimeLabel } from './chat/openideChatSessionsPane.js';
 import './chat/media/openideSubagents.css';
 import { conversationSubagents, SubagentPresentation } from './openideSubagentPresentation.js';
@@ -74,9 +75,11 @@ export class OpenideSubagentsEditor extends EditorPane {
 	private transcriptLoad: CancellationTokenSource | undefined;
 	private readonly transcriptInput = this._register(new MutableDisposable<OpenideAgentConversationInput>());
 	private readonly subscriptions = this._register(new DisposableStore());
+	private readonly fallbackRows = this._register(new DisposableStore());
 	private readonly rows = new Map<string, RunRow>();
 	private overviewKey = '';
 	private detailRunId: string | undefined;
+	private fallbackKey = '';
 	private fullHistory = false;
 	private paneVisible = false;
 	private dimension = new Dimension(0, 0);
@@ -112,7 +115,12 @@ export class OpenideSubagentsEditor extends EditorPane {
 		this.workToggle = append(this.detail, $<HTMLButtonElement>('button.openide-subagents-work', { type: 'button', 'aria-expanded': 'false' }));
 		this.workLabel = append(this.workToggle, $('span'));
 		append(this.workToggle, $('span.codicon.codicon-chevron-down', { 'aria-hidden': 'true' }));
-		this._register(addDisposableListener(this.workToggle, 'click', () => { this.fullHistory = !this.fullHistory; this.transcriptInput.value?.setSummaryOnly(!this.fullHistory); this.workToggle.setAttribute('aria-expanded', String(this.fullHistory)); }));
+		this._register(addDisposableListener(this.workToggle, 'click', () => {
+			this.fullHistory = !this.fullHistory;
+			this.transcriptInput.value?.setSummaryOnly(!this.fullHistory);
+			this.workToggle.setAttribute('aria-expanded', String(this.fullHistory));
+			this.refresh();
+		}));
 		this.fallback = append(this.detail, $('.openide-subagents-fallback'));
 		this.transcriptHost = append(this.detail, $('.openide-subagents-transcript'));
 		this.transcript = this._register(this.instantiation.createInstance(OpenideAgentConversationEditor, this.group));
@@ -210,12 +218,45 @@ export class OpenideSubagentsEditor extends EditorPane {
 		this.transcript.setVisible(this.paneVisible && !!session);
 		this.fallback.hidden = !!session;
 		this.transcriptHost.hidden = !session;
-		const fallback = run.error || run.result?.summary || run.progress || t('agentWindow.subagentPreparing');
-		if (this.fallback.textContent !== fallback) { this.fallback.textContent = fallback; }
-		this.workToggle.setAttribute('aria-expanded', String(this.fullHistory)); this.workToggle.disabled = !session;
+		if (!session) { this.renderFallback(run); }
+		this.workToggle.setAttribute('aria-expanded', String(this.fullHistory));
+		this.workToggle.disabled = !session && !(run.timeline?.length);
 		this.stopDetail.hidden = isTerminalSubagentStatus(run.status);
 		this.updateDuration();
 	}
+	private renderFallback(run: SubagentPresentation): void {
+		const timeline = run.timeline ?? [];
+		const last = timeline[timeline.length - 1];
+		const key = JSON.stringify([
+			run.runId, this.fullHistory, run.status, timeline.length, last?.sequence,
+			run.progress, run.error, run.result?.summary,
+		]);
+		if (key === this.fallbackKey) { return; }
+		this.fallbackKey = key;
+		this.fallbackRows.clear();
+		this.fallback.replaceChildren();
+
+		const body = append(this.fallback, $('.openide-subagents-fallback-timeline'));
+		const toolRows = new Map<string, HTMLElement>();
+		const events = this.fullHistory ? timeline : lastSubagentTimelineRows(timeline, 4);
+		const messages = new Set(events.map(event => event.message).filter((message): message is string => !!message));
+		let painted = false;
+		for (const event of events) {
+			painted = !!appendSubagentTimelineEvent(body, toolRows, event, this.hover, this.fallbackRows) || painted;
+		}
+
+		const conclusion = run.error || run.result?.summary || (!painted ? run.progress : undefined);
+		if (conclusion && !messages.has(conclusion)) {
+			const result = append(body, $('.openide-subagents-fallback-result'));
+			result.textContent = conclusion;
+			result.classList.toggle('openide-subagents-fallback-error', !!run.error);
+			painted = true;
+		}
+		if (!painted) {
+			append(body, $('.openide-subagents-fallback-message', undefined, run.progress || t('agentWindow.subagentPreparing')));
+		}
+	}
+
 	private updateDuration(): void {
 		this.clockScheduler.cancel();
 		const input = this.selectedInput(); const run = input?.selectedRunId ? conversationSubagents(input.source.sessionStore, input.parentSessionId, this.orchestration.getRunsForParent(input.parentSessionId)).find(run => run.runId === input.selectedRunId) : undefined;
@@ -240,6 +281,6 @@ export class OpenideSubagentsEditor extends EditorPane {
 		if (!this.detail.hidden) { this.transcript.layout(new Dimension(this.transcriptHost.clientWidth, this.transcriptHost.clientHeight)); }
 	}
 	private clearTranscript(): void { this.transcriptLoad?.dispose(true); this.transcriptLoad = undefined; this.transcript.clearInput(); this.transcriptInput.clear(); }
-	override clearInput(): void { this.subscriptions.clear(); this.refreshScheduler.cancel(); this.clockScheduler.cancel(); this.clearTranscript(); this.detailRunId = undefined; this.overviewKey = ''; super.clearInput(); }
+	override clearInput(): void { this.subscriptions.clear(); this.refreshScheduler.cancel(); this.clockScheduler.cancel(); this.clearTranscript(); this.fallbackRows.clear(); this.fallbackKey = ''; this.detailRunId = undefined; this.overviewKey = ''; super.clearInput(); }
 	override dispose(): void { this.transcriptLoad?.dispose(true); for (const row of this.rows.values()) { row.store.dispose(); } this.rows.clear(); super.dispose(); }
 }

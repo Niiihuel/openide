@@ -45,7 +45,7 @@ suite('OpenIDE agent window context', () => {
 		class SectionStub extends Disposable { refresh() {} }
 		store.add(new OpenideAgentWindowContext(parent, source, {
 			review: (id, files, open) => { if (open) { reviews.push(...files.map(file => `${id}:${file.path}`)); } },
-			openTerminal: () => {}, createTerminal: () => {}, openFiles: () => {}, openResource: () => {},
+			openTerminal: () => {}, createTerminal: () => {}, openFiles: () => {}, openProject: () => {}, openResource: () => {},
 			openChanges: path => { reviews.push(path!); }, openCliChanges: (id,file) => { reviews.push(`${id}:${file.path}`); }, openComparison: async () => {}
 		}, upcastPartial<IOpenideAgentService>({onDidChangeFileDiff: diffChanged.event, pendingFileDiffs: id => { assert.strictEqual(id, 'native', 'pending edits must be queried by conversation'); return []; }}),
 		upcastPartial<ISCMService>({repositories: [], onDidAddRepository: Event.None, onDidRemoveRepository: Event.None}),

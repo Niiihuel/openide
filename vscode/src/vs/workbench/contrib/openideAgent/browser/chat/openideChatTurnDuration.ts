@@ -9,6 +9,14 @@ import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { IOpenideChatResponseItem } from '../../common/chat/openideChatItem.js';
 
+/** Shared compact duration used by the transcript and the native footer. */
+export function formatOpenideChatDuration(elapsedMs: number): string {
+	const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
+	return seconds < 60
+		? t('openide.duration.seconds', seconds)
+		: t('openide.duration.minutes', Math.floor(seconds / 60), seconds % 60);
+}
+
 /** One low-frequency text update per visible running turn; no transcript reconstruction. */
 export class OpenideChatTurnDuration extends Disposable {
 	readonly domNode: HTMLElement;
@@ -28,10 +36,7 @@ export class OpenideChatTurnDuration extends Disposable {
 		const item = this.item;
 		this.domNode.hidden = !item?.startedAt || (item.isComplete && !item.completedAt);
 		if (this.domNode.hidden || !item?.startedAt) { return; }
-		const seconds = Math.max(0, Math.floor(((item.completedAt ?? Date.now()) - item.startedAt) / 1000));
-		const duration = seconds < 60
-			? t('openide.duration.seconds', seconds)
-			: t('openide.duration.minutes', Math.floor(seconds / 60), seconds % 60);
+		const duration = formatOpenideChatDuration((item.completedAt ?? Date.now()) - item.startedAt);
 		const text = item.isComplete
 			? t('openide.duration.worked', duration)
 			: t('openide.duration.working', duration);

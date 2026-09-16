@@ -5,8 +5,10 @@
 
 import assert from 'assert';
 import { $ } from '../../../../../base/browser/dom.js';
+import { IAction } from '../../../../../base/common/actions.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { NullHoverService } from '../../../../../platform/hover/test/browser/nullHoverService.js';
+import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
 import { InMemoryStorageService } from '../../../../../platform/storage/common/storage.js';
 import { IComposerQueueEntry, OpenideChatComposerQueue, QUEUE_LIMIT } from '../../browser/chat/openideChatComposerQueue.js';
 import { t } from '../../common/openideStrings.js';
@@ -106,6 +108,44 @@ suite('OpenIDE ChatComposerQueue', () => {
 		rows()[0].querySelector<HTMLElement>('.codicon-trash')!.parentElement!.click();
 		assert.strictEqual(queue.length, 0);
 		assert.ok(queue.domNode.classList.contains('hidden'));
+	});
+
+	test('Codex-style menu edits, opens another chat and disables queueing', async () => {
+		let actions: readonly IAction[] = [];
+		let hideMenu: (() => void) | undefined;
+		const menuService = {
+			showContextMenu(delegate: { getActions(): readonly IAction[]; onHide?(cancelled: boolean): void }) {
+				actions = delegate.getActions();
+				hideMenu = () => delegate.onHide?.(false);
+			},
+		} as unknown as IContextMenuService;
+		const host = $('div');
+		const queue = store.add(new OpenideChatComposerQueue(host, store.add(new InMemoryStorageService()), NullHoverService, menuService));
+		queue.setConversation('c1');
+		const side: string[] = [];
+		const disabled: string[] = [];
+		store.add(queue.onDidRequestOpenInSideChat(({ entry }) => side.push(entry.inputText)));
+		store.add(queue.onDidRequestDisableQueueing(({ entry }) => disabled.push(entry.inputText)));
+		const openMenu = () => host.querySelector<HTMLElement>('.codicon-ellipsis')!.parentElement!.click();
+
+		queue.push(entry('to another chat'));
+		openMenu();
+		assert.deepStrictEqual(actions.map(action => action.label), [
+			t('chat.queue.editMessage'),
+			t('chat.queue.openInSideChat'),
+			t('chat.queue.disable'),
+		]);
+		await actions[1].run();
+		hideMenu?.();
+		assert.deepStrictEqual(side, ['to another chat']);
+		assert.strictEqual(queue.length, 0);
+
+		queue.push(entry('keep this draft'));
+		openMenu();
+		await actions[2].run();
+		hideMenu?.();
+		assert.deepStrictEqual(disabled, ['keep this draft']);
+		assert.strictEqual(queue.length, 0);
 	});
 
 	test('collapse keeps the next request visible while folding the remainder', () => {

@@ -5,6 +5,7 @@
 
 import { addDisposableListener, getActiveWindow, getWindow, getWindowById } from '../../../../base/browser/dom.js';
 import { mainWindow } from '../../../../base/browser/window.js';
+import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
@@ -16,6 +17,7 @@ import { IHostService } from '../../../services/host/browser/host.js';
 import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import { IStatusbarEntryContainer } from '../../../browser/parts/statusbar/statusbarPart.js';
 import { OpenideChatWidget } from './chat/openideChatWidget.js';
+import { formatOpenideChatDuration } from './chat/openideChatTurnDuration.js';
 import { IOpenideAgentService } from './openideAgentService.js';
 import { applyProviderIcon, createProviderIcon } from './openideProviderIcons.js';
 import { getOpenideCli } from '../common/openideAgentCliCatalog.js';
@@ -38,6 +40,11 @@ export class OpenideChatStatus extends Disposable {
 	private _usageBrandIcon: HTMLElement | undefined;
 	private _usageSummary: IOpenideUsageStatusSummary | undefined;
 	private _busy = false;
+	private _runStartedAt: number | undefined;
+	private readonly _workingTick = this._register(new RunOnceScheduler(() => {
+		this.updateStatusbar();
+		if (this._busy) { this._workingTick.schedule(); }
+	}, 1000));
 	private _statusModel = '';
 	private _statusProvider = '';
 	private _statusProviderId = '';
@@ -47,7 +54,7 @@ export class OpenideChatStatus extends Disposable {
 	private readonly _statusbarMirrors = new Set<() => void>();
 
 	constructor(
-		widget: OpenideChatWidget,
+		private readonly widget: OpenideChatWidget,
 		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
@@ -62,7 +69,14 @@ export class OpenideChatStatus extends Disposable {
 		super();
 		this._usagePopover = this._register(new OpenideUsagePopover(usageMonitor, contextViewService, commandService));
 		this._busy = widget.controller.isBusy;
-		this._register(widget.onDidChangeBusy(busy => { this._busy = busy; this.updateStatusbar(); }));
+		this._runStartedAt = widget.controller.activeRunStartedAt;
+		if (this._busy) { this._workingTick.schedule(); }
+		this._register(widget.onDidChangeBusy(busy => {
+			this._busy = busy;
+			this._runStartedAt = busy ? widget.controller.activeRunStartedAt ?? Date.now() : undefined;
+			if (busy) { this._workingTick.schedule(); } else { this._workingTick.cancel(); }
+			this.updateStatusbar();
+		}));
 		this._register(cliChanges.onDidFinishTurn(event => void this.notifyCliTurnComplete(event)));
 		this._register(widget.onDidFinishRun(({ hadError, conversationId }) => {
 			this.usageMonitor.notifyTurnFinished(this._statusProviderId);
@@ -75,6 +89,7 @@ export class OpenideChatStatus extends Disposable {
 			this.updateStatusbar();
 		}));
 		this._register(agentService.onDidChange(() => void this.refreshStatus()));
+		this._register(widget.controller.onDidChangeModelRoute(() => void this.refreshStatus()));
 		void this.refreshStatus();
 	}
 	/** Reuses execution status with a separate native entry and icon in each window. */
@@ -118,7 +133,7 @@ export class OpenideChatStatus extends Disposable {
 		const generation = ++this._statusGeneration;
 		const id = this.agentService.getActiveProviderId();
 		const entry = this.agentService.findProvider(id);
-		const model = this.agentService.getModel() || entry?.defaultModel || '';
+		const model = this.widget.controller.modelRoute?.model || this.agentService.getModel() || entry?.defaultModel || '';
 		let connected = false;
 		try { connected = await this.agentService.isConnected(id); } catch { connected = false; }
 		if (generation !== this._statusGeneration) { return; }
@@ -134,6 +149,7 @@ export class OpenideChatStatus extends Disposable {
 	/** Native footer: the "connect a provider" call to action and the account quota. */
 	private updateStatusbar(): void {
 		const model = this._statusModel || this._statusProvider || '—';
+		const working = t('openide.duration.working', formatOpenideChatDuration(Date.now() - (this._runStartedAt ?? Date.now())));
 		const statusDocument = mainWindow.document;
 		if (!this._statusBrandIcon) {
 			this._statusBrandIcon = createProviderIcon(statusDocument, this._statusProviderId, this._statusProvider, 'openide-status-provider-icon');
@@ -147,8 +163,8 @@ export class OpenideChatStatus extends Disposable {
 		// showing a default model that cannot answer).
 		const status: IStatusbarEntry = this._statusConnected || this._busy ? {
 			name: 'OpenIDE Agent',
-			text: this._busy ? `$(loading~spin) ${t('chatSurface.status.working')}` : model,
-			ariaLabel: this._busy ? t('chatSurface.status.workingAria') : `OpenIDE Agent: ${model}`,
+			text: this._busy ? `${model} · ${working}` : model,
+			ariaLabel: this._busy ? `OpenIDE Agent: ${model}, ${working}` : `OpenIDE Agent: ${model}`,
 			tooltip: `OpenIDE Agent — ${this._statusProvider || t('chatSurface.status.noProviderShort')}${this._statusModel ? `\n${this._statusModel}` : ''}`,
 			command: 'workbench.view.openideChat.view.focus',
 			content: this._statusBrandIcon,
@@ -160,8 +176,8 @@ export class OpenideChatStatus extends Disposable {
 			command: 'openide.agent.openProviders',
 			content: this._statusBrandIcon,
 		};
-		// The model already lives in the composer chip: the status bar only keeps the "connect a
-		// provider" call to action and the working spinner.
+		// The model already lives in the composer chip while idle. During a request the footer keeps
+		// the routed model and elapsed time visible without a continuously animated spinner.
 		this._statusSnapshot = this._statusConnected && !this._busy ? undefined : status;
 		if (this._statusConnected && !this._busy) {
 			this._statusEntry.clear();

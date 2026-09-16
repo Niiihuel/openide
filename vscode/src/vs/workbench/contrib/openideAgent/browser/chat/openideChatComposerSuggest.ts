@@ -74,6 +74,24 @@ const SLASH_GROUPS: readonly { kind: IOpenideChatSlashSuggestion['kind']; label:
 	{ kind: 'tool', label: 'Tools', icon: 'tools' },
 ];
 
+/** Capabilities arrive from extensions and MCP servers without presentation metadata. Infer a
+ * familiar glyph from their stable name; explicit command icons always win. */
+export function slashSuggestionIcon(item: IOpenideChatSlashSuggestion, fallback: string): string {
+	if (item.icon) { return item.icon; }
+	if (item.kind === 'skill') { return 'sparkle'; }
+	if (item.kind === 'mcp') { return 'plug'; }
+	if (item.kind === 'command') { return 'terminal'; }
+	const name = item.name.toLowerCase();
+	if (/(browser|web|url|navigate|playwright)/.test(name)) { return 'globe'; }
+	if (/(terminal|shell|command|exec|run)/.test(name)) { return 'terminal'; }
+	if (/(search|find|grep|query)/.test(name)) { return 'search'; }
+	if (/(file|read|write|edit|patch)/.test(name)) { return 'file-code'; }
+	if (/(git|branch|commit|diff)/.test(name)) { return 'source-control'; }
+	if (/(todo|plan|task)/.test(name)) { return 'checklist'; }
+	if (/(memory|database|store)/.test(name)) { return 'database'; }
+	return fallback;
+}
+
 type Kind = 'mention' | 'slash';
 
 export interface ISuggestHandlers {
@@ -268,6 +286,7 @@ export class OpenideChatComposerSuggest extends Disposable {
 		}
 		this._popover.show(this.anchor, {
 			className: 'openide-chat-suggest-menu',
+			initialFocus: () => this.prompt.focus({ preventScroll: true }),
 			render: container => {
 				this._pinWidth(container);
 				paint(container);
@@ -328,50 +347,38 @@ export class OpenideChatComposerSuggest extends Disposable {
 			if (!entries.length) { continue; }
 			const section = append(content, createOpenideElement(document, 'div'));
 			section.className = 'openide-chat-suggest-section';
-			const title = append(section, createOpenideElement(document, 'div'));
-			title.className = 'openide-menu-section';
-			title.textContent = group.label;
-			// Two lines per row: the name with its signature on the first, the description on the
-			// second. Sharing one line meant name, signature and description all competed for the
-			// dock's ~330px, so each of them ended in an ellipsis and none of them was legible --
-			// what makes a command scannable is the break between what you type and what it does,
-			// not how few pixels tall the row is.
+			const heading = append(section, createOpenideElement(document, 'div'));
+			heading.className = 'openide-menu-section';
+			heading.textContent = group.label;
 			for (const { item, index } of entries) {
 				const row = this._row(section, index);
 				const slot = append(row, createOpenideElement(document, 'span'));
 				slot.className = 'openide-menu-row-icon';
-				slot.appendChild(createCodicon(document, group.icon));
+				slot.appendChild(createCodicon(document, slashSuggestionIcon(item, group.icon)));
 				const text = append(row, createOpenideElement(document, 'span'));
 				text.className = 'openide-chat-suggest-text';
-				// Name and signature are separate spans so they give way in the right order: the
-				// name never shrinks and the signature truncates before it. Sharing one span made
-				// "/openide-canvas" collapse to "/openide-…" while its hint still had room.
-				const title = append(text, createOpenideElement(document, 'span'));
-				title.className = 'openide-chat-suggest-title';
-				const name = append(title, createOpenideElement(document, 'span'));
+				const name = append(text, createOpenideElement(document, 'span'));
 				name.className = 'openide-chat-suggest-name';
-				this._paintSlashLabel(name, `/${item.name}`);
+				this._paintSlashLabel(name, item.name);
 				if (item.hint) {
-					const hint = append(title, createOpenideElement(document, 'span'));
+					const hint = append(text, createOpenideElement(document, 'span'));
 					hint.className = 'openide-chat-suggest-hint';
-					// No leading space in the text: the title is a flex row, and a space at the
-					// start of a flex item is collapsed away. The gap belongs to the layout.
 					hint.textContent = item.hint;
-				}
-				// Only painted when there is something to warn about. An always-present empty span
-				// still ate the row's gap, which pushed the signature into truncating early.
-				if (item.risk === 'exec' || item.risk === 'write') {
-					const risk = append(title, createOpenideElement(document, 'span'));
-					risk.className = `openide-chat-suggest-risk ${item.risk}`;
-					risk.textContent = item.risk;
 				}
 				const detail = append(text, createOpenideElement(document, 'span'));
 				detail.className = 'openide-chat-suggest-desc';
 				detail.textContent = compactSlashDescription(item.description);
-				// The workbench hover, not `title=`: a bare title attribute draws the OPERATING
-				// SYSTEM's tip -- another font, another delay, outside the window -- which is the
-				// unstyled grey box that was covering the rows underneath it.
-				this._register(setupChatTooltip(this.hoverService, row, () => item.description || `/${item.name}`, {
+				if (item.risk === 'exec' || item.risk === 'write') {
+					const risk = append(row, createOpenideElement(document, 'span'));
+					risk.className = `openide-chat-suggest-risk ${item.risk}`;
+					risk.textContent = item.risk;
+				}
+				if (item.origin) {
+					const origin = append(row, createOpenideElement(document, 'span'));
+					origin.className = 'openide-chat-suggest-origin';
+					origin.textContent = item.origin;
+				}
+				this._register(setupChatTooltip(this.hoverService, row, () => item.description || item.name, {
 					position: HoverPosition.LEFT,
 					aria: false,
 				}));
@@ -426,6 +433,7 @@ export class OpenideChatComposerSuggest extends Disposable {
 		if (!ghost) { return; }
 		this._popover.show(this.anchor, {
 			className: 'openide-chat-suggest-menu',
+			initialFocus: () => this.prompt.focus({ preventScroll: true }),
 			render: container => {
 				this._pinWidth(container);
 				container.classList.add('openide-chat-suggest');

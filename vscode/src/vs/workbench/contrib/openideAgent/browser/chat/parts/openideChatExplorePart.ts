@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append } from '../../../../../../base/browser/dom.js';
+import { $, append, getWindow } from '../../../../../../base/browser/dom.js';
+import { onUnexpectedError } from '../../../../../../base/common/errors.js';
 import { DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IOpenideChatContent, IOpenideChatExploreContent, IOpenideChatExploreEntry, isOpenideChatContentOfKind } from '../../../common/chat/openideChatContent.js';
@@ -24,6 +25,7 @@ import {
 } from './openideChatActivityRow.js';
 import '../media/openideChatActivity.css';
 import { t } from '../../../common/openideStrings.js';
+import { IOpenideAgentService } from '../../openideAgentService.js';
 
 export const OPENIDE_CHAT_ACTIVITY_GROUP_CLASS = 'openide-chat-activity-group';
 
@@ -87,7 +89,8 @@ export class OpenideChatExplorePart extends OpenideChatContentPart {
 	constructor(
 		content: IOpenideChatExploreContent,
 		context: IOpenideChatContentPartContext,
-		private readonly _hoverService: IHoverService,
+		@IHoverService private readonly _hoverService: IHoverService,
+		@IOpenideAgentService private readonly _agentService: IOpenideAgentService,
 	) {
 		super();
 
@@ -208,7 +211,12 @@ export class OpenideChatExplorePart extends OpenideChatContentPart {
 		if (entry.state === 'error') {
 			rendered.row.verb.textContent = line;
 		} else {
-			renderOpenideChatActivityLine(rendered.row.verb, verb, entry.target);
+			renderOpenideChatActivityLine(
+				rendered.row.verb,
+				verb,
+				entry.target,
+				path => void this._agentService.openDiff(path, undefined, getWindow(this.domNode).vscodeWindowId).catch(onUnexpectedError),
+			);
 		}
 		rendered.line = line;
 		setOpenideChatShimmer(rendered.row.verb, entry.state === 'running');

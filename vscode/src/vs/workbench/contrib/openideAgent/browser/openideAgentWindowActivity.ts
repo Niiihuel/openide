@@ -133,6 +133,7 @@ export class OpenideAgentWindowActivity extends Disposable {
 			section.expanded = !section.expanded; body.hidden = !section.expanded;
 			toggle.setAttribute('aria-expanded', String(section.expanded));
 		}));
+		this._register(setupChatTooltip(this.hoverService, toggle, () => label));
 		return section;
 	}
 

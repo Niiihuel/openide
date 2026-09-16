@@ -3,8 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { getActiveWindow, scheduleAtNextAnimationFrame } from '../../../../../base/browser/dom.js';
-import { mainWindow } from '../../../../../base/browser/window.js';
+import { getActiveWindow, getWindowById, scheduleAtNextAnimationFrame } from '../../../../../base/browser/dom.js';
 import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
@@ -133,6 +132,8 @@ interface IOpenideChatConversation {
 	/** True while a run owns the open reply. Guards the image hydration against a live stream. */
 	streaming: boolean;
 	busy: boolean;
+	/** Start of the request currently owned by this conversation; drives shared elapsed-time UI. */
+	runStartedAt?: number;
 	runCts?: CancellationTokenSource;
 	/** Rollback awaits it after cancelling, so a late tool cannot write over restored files. */
 	runPromise?: Promise<void>;
@@ -150,7 +151,7 @@ interface IOpenideChatConversation {
 	 * The plan whose Build is in flight. Held so the run's outcome can be reported back to the plan
 	 * editor, which parks its own button on `finishPlanBuild` / `failPlanBuild`.
 	 */
-	planBuild?: { readonly resource: URI; readonly owner: string };
+	planBuild?: { readonly resource: URI; readonly owner: string; progress?: Promise<void> };
 }
 
 /** A turn running somewhere other than the chosen model, as the composer needs to show it. */
@@ -340,7 +341,13 @@ export class OpenideChatController extends Disposable {
 		if (conversationId !== this._activeId || this._deferredRepaint) {
 			return;
 		}
-		this._deferredRepaint = scheduleAtNextAnimationFrame(mainWindow, () => {
+		// A conversation can run in an Agent Window. Scheduling on `mainWindow` leaves its repaint
+		// behind in a hidden Chromium document, whose animation frames are throttled or suspended;
+		// the reducer keeps receiving deltas, but the user sees them only when `finishStream` forces
+		// the final synchronous repaint. Follow the run back to the window that submitted it, exactly
+		// as VS Code's chat widget schedules against the window containing its list.
+		const targetWindow = getWindowById(this.peek(conversationId)?.targetWindowId, true).window;
+		this._deferredRepaint = scheduleAtNextAnimationFrame(targetWindow, () => {
 			this._deferredRepaint = undefined;
 			this._onDidChangeItems.fire();
 		});
@@ -397,6 +404,11 @@ export class OpenideChatController extends Disposable {
 	/** Busy of the conversation ON SCREEN: it is what the composer's Stop button reflects. */
 	get isBusy(): boolean {
 		return this.peek(this._activeId)?.busy ?? false;
+	}
+
+	/** Exact start of the visible conversation's current request, shared by transcript and footer. */
+	get activeRunStartedAt(): number | undefined {
+		return this.peek(this._activeId)?.runStartedAt;
 	}
 
 	/** Whether THAT conversation has a run in flight, whoever is on screen. */
@@ -512,8 +524,10 @@ export class OpenideChatController extends Disposable {
 	 * shows up in the transcript as an ordinary reply. What the user sees is the card they clicked
 	 * turning into "Building", which the card does on its own.
 	 */
-	private buildPlan(request: { readonly path: string; readonly resource: URI; readonly owner: string; readonly providerId: string; readonly model: string }): void {
-		const conversationId = this.sessions.ensureActive();
+	private buildPlan(request: { readonly path: string; readonly resource: URI; readonly owner: string; readonly providerId: string; readonly model: string; readonly conversationId?: string }): void {
+		// Plans belong to the conversation that created them. Falling back keeps older plan files
+		// buildable, but a new plan can run while the user reads another chat.
+		const conversationId = request.conversationId || this.sessions.ensureActive();
 		const conversation = this.conversation(conversationId);
 		if (conversation.busy || conversation.planBuild || this._barrier.isActive) {
 			// The editor's button is parked on this promise; leaving it spinning forever would be
@@ -522,12 +536,9 @@ export class OpenideChatController extends Disposable {
 			this.notificationService.warn(PLAN_BUILD_BUSY);
 			return;
 		}
-		conversation.targetWindowId = getActiveWindow().vscodeWindowId;
+		conversation.targetWindowId ??= getActiveWindow().vscodeWindowId;
 		conversation.planBuild = { resource: request.resource, owner: request.owner };
 
-		this._activeId = conversationId;
-		this._effects.setVisibleConversation(conversationId);
-		this.publishModelRoute(conversationId);
 		const messages = this.sessions.messagesOf(conversationId);
 		const messageId = generateUuid();
 		messages.push({
@@ -542,7 +553,7 @@ export class OpenideChatController extends Disposable {
 		this.finishStream(conversationId, { isCanceled: true });
 		conversation.state = openOpenideChatReply(beginOpenideChatHiddenTurn(conversation.state, messageId));
 		conversation.streaming = true;
-		this._onDidChangeItems.fire();
+		this.repaint(conversationId);
 
 		this.launchRun(conversationId, messages, messageId, 'agent', request.providerId, request.model);
 	}
@@ -564,7 +575,23 @@ export class OpenideChatController extends Disposable {
 			this.agentService.failPlanBuild(planBuild.resource, planBuild.owner);
 			return;
 		}
-		this.agentService.finishPlanBuild(planBuild.resource, planBuild.owner);
+		// The last update_todos write may still be queued when the provider closes its stream. Wait
+		// for it before persisting `status: completado`, otherwise the older task write can overwrite
+		// the completed frontmatter or fail on an etag race.
+		void (planBuild.progress ?? Promise.resolve()).then(
+			() => this.agentService.finishPlanBuild(planBuild.resource, planBuild.owner),
+			() => this.agentService.finishPlanBuild(planBuild.resource, planBuild.owner),
+		);
+	}
+
+	/** Mirror the agent's visible todo snapshot into the plan editor, one file write at a time. */
+	private updatePlanProgress(conversation: IOpenideChatConversation, items: Extract<AgentLoopEvent, { type: 'todos' }>['items']): void {
+		const build = conversation.planBuild;
+		if (!build) { return; }
+		const tasks = items.map(item => ({ text: item.title, done: item.status === 'completed' }));
+		build.progress = (build.progress ?? Promise.resolve())
+			.catch(() => { /* a prior snapshot must not block newer progress */ })
+			.then(() => this.agentService.updatePlanTasks(build.resource, tasks));
 	}
 
 	/**
@@ -955,6 +982,9 @@ export class OpenideChatController extends Disposable {
 			this.acceptMemoryCapture(conversationId, event.messageId ?? conversation.state.requestId, event);
 			return;
 		}
+		if (event.type === 'todos') {
+			this.updatePlanProgress(conversation, event.items);
+		}
 		const step = applyAgentEvent(conversation.state, event);
 		if (conversation.runCts !== runCts) {
 			// A late callback from a superseded run must not touch the live transcript, but its
@@ -1064,8 +1094,11 @@ export class OpenideChatController extends Disposable {
 		if (conversation.busy === busy) { return; }
 		conversation.busy = busy;
 		if (busy) {
+			conversation.runStartedAt = Date.now();
 			this.sessions.setStatus(conversationId, 'in-progress');
 			this._onDidChangeSessions.fire();
+		} else {
+			conversation.runStartedAt = undefined;
 		}
 		if (conversationId === this._activeId) {
 			this._onDidChangeBusy.fire(busy);

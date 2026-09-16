@@ -14,7 +14,7 @@ import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { OpenideChatModelPicker } from './chat/openideChatModelPicker.js';
-import { createThinkingGlyph, reasoningControlVisible, reasoningEffortChipLabel } from './chat/openideChatReasoning.js';
+import { reasoningControlVisible, reasoningEffortChipLabel } from './chat/openideChatReasoning.js';
 import { appendKbd, PRIMARY_ENTER_HINT } from './chat/openideChatKbd.js';
 import { createMenuContent, createMenuRow, OpenideComposerPopover } from './chat/openideComposerMenu.js';
 import { t } from '../common/openideStrings.js';
@@ -138,7 +138,6 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 		// this surface knowing anything happened.
 		const effort = append(button, $('span.openide-composer-model-effort'));
 		effort.hidden = true;
-		effort.appendChild(createThinkingGlyph(document));
 		const effortLabel = append(effort, createOpenideElement(document, 'span'));
 		append(button, $('span.codicon.codicon-chevron-down.openide-composer-chevron'));
 		this._modelButton = button; this._modelIcon = icon; this._modelLabel = label;

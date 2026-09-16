@@ -34,7 +34,9 @@ suite('OpenIDE subagent presentation', () => {
 		sessions.createBackground('Old specialist', [{ role: 'assistant', content: 'Old result' }], 'old', parent);
 		emit(start); emit(start);
 		assert.strictEqual(conversationSubagents(sessions, parent, []).length, 2, 'replayed start does not duplicate the mirror');
-		assert.strictEqual(conversationSubagents(sessions, parent, []).find(run => run.runId === 'review')?.status, 'running');
+		const running = conversationSubagents(sessions, parent, []).find(run => run.runId === 'review');
+		assert.strictEqual(running?.status, 'running');
+		assert.strictEqual(running?.task, 'Review current changes', 'the delegated prompt remains the visible task title');
 		emit({ type: 'subagentEvent', id: 'review', parentId: 'call', index: 0, total: 1, status: 'running', ev: { type: 'text', delta: 'Current review: ' } });
 		emit({ type: 'subagentEvent', id: 'review', parentId: 'call', index: 0, total: 1, status: 'running', ev: { type: 'text', delta: 'VERDICT: PASS' } });
 		emit({ type: 'subagentDone', id: 'review', parentId: 'call', index: 0, total: 1, status: 'completed' });
@@ -49,8 +51,13 @@ suite('OpenIDE subagent presentation', () => {
 	test('durable runs take precedence over their mirror and interrupted runs do not remain working after restart', () => {
 		const { storage, sessions, parent, emit, start } = fixture();
 		emit(start);
-		const durable = { runId: 'review', status: 'failed', task: 'Authoritative durable run', createdAt: 1 } as ISubagentRun;
-		assert.deepStrictEqual(conversationSubagents(sessions, parent, [durable]), [durable]);
+		const durable = {
+			runId: 'review', status: 'failed', task: 'Authoritative durable run', createdAt: 1,
+			timeline: [{ sequence: 1, timestamp: 2, type: 'toolStart', toolName: 'read_file', message: 'Reading App.tsx' }],
+		} as unknown as ISubagentRun;
+		const presented = conversationSubagents(sessions, parent, [durable]);
+		assert.deepStrictEqual(presented, [durable]);
+		assert.strictEqual(presented[0].timeline?.[0].message, 'Reading App.tsx', 'the dedicated detail keeps durable activity');
 		assert.strictEqual(conversationSubagents(new OpenideChatSessions(storage), parent, [])[0].status, 'interrupted');
 	});
 

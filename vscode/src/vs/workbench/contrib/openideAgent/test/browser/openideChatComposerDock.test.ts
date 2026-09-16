@@ -85,6 +85,7 @@ suite('OpenIDE composer dock layout', () => {
 		const prompt = composer.domNode.querySelector<HTMLTextAreaElement>('textarea')!;
 		prompt.setSelectionRange(2, 6);
 		const notice = composer.noticeHost.appendChild($('.openide-chat-notice', undefined, 'Wait for the current run to finish before editing a message.'));
+		assert.strictEqual(composer.questionsHost, composer.trayHost);
 		const questions = composer.questionsHost.appendChild($('div', undefined, 'Question awaiting an answer'));
 		const files = composer.trayHost.appendChild($('div', undefined, '4 changed files'));
 		const terminals = composer.trayHost.appendChild($('div', undefined, '1 background terminal'));
