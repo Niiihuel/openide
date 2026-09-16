@@ -78,6 +78,12 @@ jobs:
         # the binary we then sign. In CI a cache is speed; here it is attack surface, and a release
         # is built once per version.
         with: { node-version-file: .nvmrc, package-manager-cache: false }
+      - name: Validate release notes
+        shell: bash
+        run: |
+          RELEASE_VERSION=$(node -p "require('./openide-version.json').version")
+          NOTES_FILE="docs/releases/${RELEASE_VERSION}.md"
+          [[ -s "${NOTES_FILE}" ]] || { echo "Missing release notes: ${NOTES_FILE}" >&2; exit 1; }
       # Every secret the platform's signing script actually reads, checked BEFORE a two-hour build
       # instead of after it. It used to check two of the five and name none of the missing ones, so
       # a release died deep inside `codesign` with "Missing APPLE_TEAM_ID" after the whole compile.
