@@ -260,6 +260,10 @@ jobs:
           fi
       - name: Build canonical product
         shell: bash
+        env:
+          # @vscode/ripgrep resolves its platform binary through GitHub's releases API during npm
+          # install. Anonymous requests share a runner IP limit and intermittently return 403.
+          GITHUB_TOKEN: ${{ github.token }}
         run: ./dev/build.sh
       - name: Smoke test packaged Linux workbench
         if: matrix.platform == 'linux'

@@ -653,7 +653,7 @@
 .openide-menu.openide-chat-suggest-menu {
 	min-width: var(--openide-menu-anchor-width, 0);
 	max-width: var(--openide-menu-anchor-width, calc(100vw - 16px));
-	border-radius: 18px;
+	border-radius: var(--oi-radius-lg);
 }
 /* Shorter than the menu's own 420px ceiling: the popover opens over the transcript, so every pixel
    of it is a pixel of the conversation you cannot see while you pick. Seven entries is enough to
@@ -727,7 +727,7 @@
 	align-items: center;
 	padding: 3px 9px 3px 7px;
 	gap: 7px;
-	border-radius: 10px;
+	border-radius: var(--oi-radius-lg);
 	color: var(--vscode-editorSuggestWidget-foreground, var(--vscode-menu-foreground, var(--vscode-foreground)));
 }
 .openide-chat-suggest-section .openide-menu-row > .openide-menu-row-icon {
