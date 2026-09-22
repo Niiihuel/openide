@@ -91,12 +91,32 @@ suite('OpenIDE chat status line', () => {
 		assert.strictEqual(label().getAnimations().length, before);
 	});
 
-	test('the shimmer survives the swap: it says "still working", not "working on this"', async () => {
-		const { label, step } = create();
+	test('the square lattice remains the one continuous working signal across a swap', async () => {
+		const { line, label, step } = create();
 		step('Read a.ts');
 		step('Searched needle');
 		await until(() => label().textContent ?? '', 'Searched needle');
-		assert.strictEqual(label().classList.contains('openide-chat-shimmer'), true);
+		assert.strictEqual(line.domNode.querySelectorAll('.openide-chat-status-lattice-cell').length, 9);
+		assert.strictEqual(line.domNode.querySelectorAll('.codicon').length, 1, 'only the optional disclosure chevron remains');
+	});
+
+	test('real steps become a progressive trace while filler never becomes transcript noise', async () => {
+		const { line, label, step, idle } = create({ stepMinMs: 10, idleGraceMs: 10 });
+		step('Read a.ts');
+		step('Searched needle');
+		await until(() => label().textContent ?? '', 'Searched needle');
+		idle('Planning next moves');
+		await until(() => label().textContent ?? '', 'Planning next moves');
+		step('Edited result.ts');
+		await until(() => label().textContent ?? '', 'Edited result.ts');
+		const trace = [...line.domNode.querySelectorAll('.openide-chat-status-trace-step')].map(node => node.textContent);
+		assert.deepStrictEqual(trace, ['Read a.ts', 'Searched needle']);
+	});
+
+	test('the elapsed clock is tabular and follows the turn start', () => {
+		const { line } = create();
+		line.setStatus({ text: 'Working', idle: false }, Date.now() - 4200);
+		assert.strictEqual(line.domNode.querySelector('.openide-chat-status-timer')?.textContent, '4s');
 	});
 
 	test('a step is held long enough to read, however fast the next one arrives', async () => {

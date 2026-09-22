@@ -261,38 +261,100 @@
    transcribed value by value from the webview, and keeping them here would have mixed that
    transcription with the transcript's own rules. */
 
-/* The turn's ONE live line, under the reply's last part: Cursor's thinking shimmer, the webview's
-   "Planning next moves". It is the only thing on screen that speaks in the present tense — the step
-   in flight lives HERE and not as a row in the transcript, and it swaps between steps in place
-   (browser/chat/openideChatStatusLine.ts drives the swap). The shimmer itself comes from
-   .openide-chat-shimmer (activity css) and keeps sweeping ACROSS a swap: the shimmer says "still
-   working", the swap says "on something else now". */
+/* One continuous work surface, adapted from React Bits' Lattice Loader + Thought Line. It avoids
+   a technical event log: the square lattice carries the ongoing signal, the current sentence owns
+   attention, and at most four recent real steps fade upward as context. */
 .openide-chat-response-working {
-	/* upstream .progress-container: text only, no glyph, 2px top padding, shimmer on the text */
-	display: flex;
-	align-items: center;
-	min-height: 22px;
-	padding: 2px 0 0;
+	display: grid;
+	grid-template-columns: 18px minmax(0, 1fr) auto;
+	align-items: end;
+	column-gap: 8px;
+	min-height: 24px;
+	padding: 4px 0 1px;
 	font-size: 12.5px;
 	color: var(--vscode-descriptionForeground);
 }
 .openide-chat-response-working.hidden { display: none; }
-/* The shimmering text lives in here and not on the row above: the row is a flex container, and
-   `background-clip: text` has no text of its own to clip against on one. Same shape as the tool
-   activity verb, which is also an inner span inside its flex row. */
-.openide-chat-response-working-label {
+
+.openide-chat-status-lattice {
+	align-self: end;
+	display: grid;
+	grid-template-columns: repeat(3, 4px);
+	grid-template-rows: repeat(3, 4px);
+	gap: 2px;
+	width: 16px;
+	height: 16px;
+	margin-bottom: 2px;
+	color: var(--vscode-progressBar-background);
+}
+.openide-chat-status-lattice-cell {
+	width: 4px;
+	height: 4px;
+	border-radius: 0;
+	background: currentColor;
+	opacity: .16;
+	animation: openide-chat-lattice-wave 864ms ease-in-out infinite;
+	animation-delay: calc(var(--oi-lattice-phase) * -108ms);
+}
+.openide-chat-status-lattice-cell-centre { animation: none; opacity: .08; }
+.openide-chat-status-waiting .openide-chat-status-lattice-cell { animation-play-state: paused; opacity: .3; }
+@keyframes openide-chat-lattice-wave {
+	0%, 30%, 100% { opacity: .16; transform: scale(.84); }
+	12% { opacity: 1; transform: scale(1); }
+}
+
+.openide-chat-status-flow { min-width: 0; overflow: hidden; }
+.openide-chat-status-trace {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	max-height: 49px;
+	overflow: hidden;
+	-webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 13px, #000 100%);
+	mask-image: linear-gradient(to bottom, transparent 0, #000 13px, #000 100%);
+}
+.openide-chat-status-trace:empty { display: none; }
+.openide-chat-status-trace-step {
+	display: block;
 	min-width: 0;
 	overflow: hidden;
 	white-space: nowrap;
 	text-overflow: ellipsis;
-	/* The swap animates `transform`, so the label needs a box of its own: an inline span has
-	   nothing to translate and nothing to clip the ellipsis against. */
+	font-size: 11.5px;
+	line-height: 16px;
+	opacity: .46;
+	animation: openide-chat-trace-enter 160ms cubic-bezier(.2, .8, .2, 1) both;
+}
+.openide-chat-status-trace-step:nth-last-child(2) { opacity: .34; }
+.openide-chat-status-trace-step:nth-last-child(n + 3) { opacity: .22; }
+@keyframes openide-chat-trace-enter {
+	from { opacity: 0; transform: translateY(4px); filter: blur(2px); }
+	to { transform: translateY(0); filter: blur(0); }
+}
+.openide-chat-status-current { display: flex; align-items: baseline; gap: 7px; min-width: 0; line-height: 18px; }
+.openide-chat-response-working-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
 	display: inline-block;
 	max-width: 100%;
-	/* `will-change` and not a transition: the keyframes come from the Web Animations API, so the
-	   only thing CSS has to do is promise the compositor that this box moves. */
 	will-change: opacity, transform;
 }
+.openide-chat-status-timer {
+	flex: none;
+	font-variant-numeric: tabular-nums;
+	font-size: 11px;
+	opacity: .58;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-status-lattice-cell { animation: none; opacity: .5; }
+	.openide-chat-status-trace-step { animation: none; }
+}
+.monaco-reduce-motion .openide-chat-status-lattice-cell { animation: none; opacity: .5; }
+.monaco-reduce-motion .openide-chat-status-trace-step { animation: none; }
 
 /* ---- Scrollbars: the shared skin in openideSurfaceCss.ts (thin pill, no track) selects on
    .openide-chat-native *, .openide-diagram * and .openide-diagram-scroll. Nothing local. */

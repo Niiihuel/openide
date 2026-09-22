@@ -76,6 +76,11 @@
 	color: var(--vscode-foreground);
 }
 
+/* While reasoning streams, the lattice line directly above is the heading. Keep the useful live
+   text, but never show a second "Thinking" label or a thought glyph for the same state. */
+.openide-chat-reasoning-live > .openide-chat-reasoning-summary { display: none; }
+.openide-chat-reasoning-live > .openide-chat-think { margin-top: 3px; }
+
 /* The default disclosure triangle is replaced by a codicon that rotates, so it has to go. */
 .openide-chat-reasoning-summary::-webkit-details-marker {
 	display: none;

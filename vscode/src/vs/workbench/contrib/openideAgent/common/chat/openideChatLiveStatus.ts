@@ -92,7 +92,10 @@ export function openideChatLiveStatusLabel(content: readonly IOpenideChatContent
 		return { text: t('chat.working.thinking'), idle: true };
 	}
 	if (last.kind === 'thinking' && !last.isComplete) {
-		return undefined;
+		// Reasoning uses the same continuous work surface as tools. A separate thought glyph and a
+		// second animated heading made the turn look like two concurrent processes; the lattice is
+		// now the sole working signal, while the reasoning body remains available as detail.
+		return step(t('chat.working.thinking'));
 	}
 	switch (last.kind) {
 		case 'markdown':

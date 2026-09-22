@@ -95,6 +95,17 @@ suite('OpenIDE ChatResponseRenderer layout', () => {
 		assert.strictEqual(h.host.querySelector('.openide-chat-ask')?.hasAttribute('hidden'), false);
 	});
 
+	test('live reasoning shares the lattice heading instead of painting a second thinking label', () => {
+		const h = create([reasoning(false)]);
+		const details = h.template.partsHost.querySelector<HTMLDetailsElement>('.openide-chat-reasoning')!;
+		assert.deepStrictEqual({
+			statusBeforeReasoning: h.template.status.domNode.nextSibling === details,
+			label: h.template.status.domNode.querySelector('.openide-chat-response-working-label')?.textContent,
+			summary: getComputedStyle(details.querySelector('summary')!).display,
+			body: getComputedStyle(details.querySelector('.openide-chat-think')!).display,
+		}, { statusBeforeReasoning: true, label: t('chat.working.thinking'), summary: 'none', body: 'block' });
+	});
+
 	test('finished reasoning leaves no painted text below its collapsed summary', async () => {
 		const h = create([reasoning(false)]);
 		await flush();

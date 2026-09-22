@@ -47,6 +47,7 @@ export class OpenideChatThinkingPart extends OpenideChatContentPart {
 	private readonly _think: HTMLElement;
 
 	private _content: IOpenideChatThinkingContent;
+	private _live = false;
 
 	/**
 	 * Whether the auto-collapse already ran. Without it every later re-render of a finished turn
@@ -142,6 +143,13 @@ export class OpenideChatThinkingPart extends OpenideChatContentPart {
 
 		this._onDidChangeHeight.fire();
 		return true;
+	}
+
+	/** The lattice owns the live heading; the streamed reasoning itself remains readable below it. */
+	setLive(live: boolean): void {
+		if (live === this._live) { return; }
+		this._live = live;
+		this._details.classList.toggle('openide-chat-reasoning-live', live);
 	}
 }
 

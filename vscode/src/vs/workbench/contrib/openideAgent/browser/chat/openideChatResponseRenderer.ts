@@ -59,7 +59,7 @@ export interface IOpenideChatResponseTemplate {
 	readonly partsHost: HTMLElement;
 	readonly activityGroups: OpenideChatActivityGroups;
 	readonly duration: OpenideChatTurnDuration;
-	/** The turn's ONE live line: the step in flight, swapped in place. See `_renderStatus`. */
+	/** The turn's live thought line: lattice, elapsed time, and the latest progressive steps. */
 	readonly status: OpenideChatStatusLine;
 	readonly footer: HTMLElement;
 	readonly templateDisposables: DisposableStore;
@@ -124,8 +124,7 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		const duration = templateDisposables.add(new OpenideChatTurnDuration(row));
 		const partsHost = append(row, $('.openide-chat-response-parts'));
 		const activityGroups = templateDisposables.add(new OpenideChatActivityGroups(partsHost));
-		// Cursor-style live line: lives OUTSIDE partsHost so the content diffing never sees it, and
-		// the renderer decides per paint which step it is speaking for.
+		// The live thought line lives outside partsHost so content diffing never rebuilds its trace.
 		const status = templateDisposables.add(new OpenideChatStatusLine(row, undefined, this._hoverService));
 		const footer = append(row, $('.openide-chat-response-footer'));
 		const template: IOpenideChatResponseTemplate = { row, partsHost, activityGroups, duration, status, footer, templateDisposables, parts: [], currentElement: undefined, renderedId: undefined };
@@ -164,14 +163,11 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 	}
 
 	/**
-	 * The turn's ONE live line.
+	 * The turn's live thought line.
 	 *
-	 * The steps of a running turn used to be a tree: a collapsible "Exploring" block with its own
-	 * chevron, plus a row per tool call, all of them growing under each other while they ran. What
-	 * the user asked for — and what Cursor does — is a single line in a fixed place that swaps
-	 * between the steps with a short animation while it shimmers. So the step IN FLIGHT is hoisted
-	 * out of the transcript and into this line (`setLive` tells the part to stand down), and the
-	 * transcript keeps only the settled record of what the agent already did.
+	 * The step in flight is hoisted out of the transcript (`setLive` tells its part to stand down).
+	 * Real steps accumulate briefly above the current one, like Thought Line, while the lattice
+	 * provides the continuous working signal without a generic thinking glyph.
 	 *
 	 * The wording is `openideChatLiveStatusLabel` (pure, in common/); the swap and its PACING are
 	 * the status line itself. `undefined` means some part below is already speaking — streaming
@@ -182,14 +178,16 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		const enabled = this._configurationService.getValue(OPENIDE_CHAT_WORKING_INDICATOR_KEY) !== false;
 		const status = enabled ? openideChatLiveStatusLabel(element.content, element.isComplete) : undefined;
 		if (status === undefined) {
-			template.status.hide();
+			// Streaming prose and rich terminal output speak for themselves. Preserve the short trace so
+			// a later tool in the same turn continues the story instead of starting over.
+			template.status.suspend();
 			if (template.status.domNode.parentElement !== template.row) { template.row.insertBefore(template.status.domNode, template.footer); }
 		} else {
 			// The line decides WHEN to show it: a step it just put up is held for a moment even if
 			// the content moved on, which is the difference between reading the turn and watching it
 			// strobe. See `openideChatStatusLine.ts`.
-			template.status.setStatus(status);
-			const live = !status.waitingForResponse && template.parts.find((part, index) => part instanceof OpenideChatExplorePart && isOpenideChatLiveTail(element.content, index, element.isComplete));
+			template.status.setStatus(status, element.startedAt);
+			const live = !status.waitingForResponse && template.parts.find((part, index) => (part instanceof OpenideChatExplorePart || part instanceof OpenideChatThinkingPart) && isOpenideChatLiveTail(element.content, index, element.isComplete));
 			if (live instanceof OpenideChatExplorePart) {
 				const toggle = () => {
 					live.setLiveExpanded(!live.liveExpanded);
@@ -198,6 +196,9 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 				template.status.setDisclosure(toggle, live.liveExpanded);
 				// Reuse the one status node directly above the existing live records. The parts array
 				// still owns only content parts; no row cloning or extra tool state is introduced.
+				if (template.status.domNode.nextSibling !== live.domNode) { live.domNode.before(template.status.domNode); }
+			} else if (live instanceof OpenideChatThinkingPart) {
+				template.status.setDisclosure(undefined);
 				if (template.status.domNode.nextSibling !== live.domNode) { live.domNode.before(template.status.domNode); }
 			} else {
 				template.status.setDisclosure(undefined);

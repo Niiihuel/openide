@@ -51,6 +51,11 @@ suite('OpenIDE chat live status', () => {
 		assertStatus(openideChatLiveStatusLabel([], false), t('chat.working.thinking'), true);
 	});
 
+	test('live reasoning uses the same thought line instead of a second thinking heading', () => {
+		const content: IOpenideChatContent[] = [{ kind: 'thinking', text: 'Inspecting', isComplete: false }];
+		assertStatus(openideChatLiveStatusLabel(content, false), t('chat.working.thinking'), false);
+	});
+
 	test('a finished turn has no live line at all', () => {
 		assert.strictEqual(openideChatLiveStatusLabel([tool('read_file', 'running')], true), undefined);
 	});

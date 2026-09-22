@@ -10,10 +10,10 @@ import { setupChatTooltip } from './openideChatHover.js';
 import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { IOpenideChatLiveStatus } from '../../common/chat/openideChatLiveStatus.js';
-import { OPENIDE_CHAT_SHIMMER_CLASS } from './parts/openideChatActivityRow.js';
+import { formatOpenideChatDuration } from './openideChatTurnDuration.js';
 
 /**
- * The turn's live line: one row, one label, and a swap between steps.
+ * The turn's live line: a small lattice, a progressive trace, and the current step.
  *
  * This is the vanilla equivalent of the React idiom the user asked for —
  *
@@ -22,11 +22,9 @@ import { OPENIDE_CHAT_SHIMMER_CLASS } from './parts/openideChatActivityRow.js';
  *                  exit={{opacity:0,y:-4}} transition={{duration:0.18}} />
  *   </AnimatePresence>
  *
- * — and `mode="wait"` is the part that matters: the outgoing step leaves BEFORE the incoming one
- * arrives, so the two never overlap and the row never needs a second line or an absolute position.
- * The label keeps its shimmer across the swap, because the shimmer says "still working" and the
- * swap says "working on something else now"; restarting the sweep on every step would turn a
- * continuous state into a stutter.
+ * — and `mode="wait"` is the part that matters: the outgoing current step leaves BEFORE the next
+ * one arrives, so those labels never overlap. Completed real steps move into the muted trace;
+ * generic waiting states do not, which keeps the trace useful instead of turning it into a log.
  *
  * The animation is WAAPI and not CSS classes on purpose: `mode="wait"` needs to know when the exit
  * finished, and an `animationend` listener has nothing to fire under `prefers-reduced-motion`,
@@ -72,6 +70,8 @@ export class OpenideChatStatusLine extends Disposable {
 	readonly domNode: HTMLElement;
 
 	private readonly _label: HTMLElement;
+	private readonly _trace: HTMLElement;
+	private readonly _timer: HTMLElement;
 	private readonly _disclosure: HTMLButtonElement;
 	private _toggleActivity: (() => void) | undefined;
 
@@ -86,6 +86,8 @@ export class OpenideChatStatusLine extends Disposable {
 	private _busy = false;
 	private _animation: Animation | undefined;
 	private _disposed = false;
+	private _startedAt: number | undefined;
+	private _lastTraceText = '';
 
 	private readonly _stepMinMs: number;
 	private readonly _idleGraceMs: number;
@@ -95,24 +97,34 @@ export class OpenideChatStatusLine extends Disposable {
 	 * otherwise sit in `_pending` until the next delta — which, at the end of a turn, is never.
 	 */
 	private readonly _later: RunOnceScheduler;
+	private readonly _clock: RunOnceScheduler;
 
 	constructor(container: HTMLElement, timing?: IOpenideChatStatusLineTiming, hoverService?: IHoverService) {
 		super();
 		this._stepMinMs = timing?.stepMinMs ?? OPENIDE_CHAT_STEP_MIN_MS;
 		this._idleGraceMs = timing?.idleGraceMs ?? OPENIDE_CHAT_IDLE_GRACE_MS;
 		this.domNode = append(container, $('.openide-chat-response-working.hidden', { role: 'status', 'aria-live': 'polite' }));
-		// The text lives in a child: the shimmer clips a gradient to it (`background-clip: text`),
-		// and a flex row owns no text of its own to clip against.
-		this._label = append(this.domNode, $(`span.openide-chat-response-working-label.${OPENIDE_CHAT_SHIMMER_CLASS}`));
+		const lattice = append(this.domNode, $('span.openide-chat-status-lattice', { 'aria-hidden': 'true' }));
+		// Orbit order from React Bits' Lattice Loader. The quiet centre keeps the mark from reading
+		// as a spinner or a product icon: it is simply a compact visualization of ongoing work.
+		for (const phase of [0, 1, 2, 7, -1, 3, 6, 5, 4]) {
+			append(lattice, $(`span.openide-chat-status-lattice-cell${phase < 0 ? '.openide-chat-status-lattice-cell-centre' : ''}`, phase < 0 ? undefined : { style: `--oi-lattice-phase:${phase}` }));
+		}
+		const flow = append(this.domNode, $('.openide-chat-status-flow'));
+		this._trace = append(flow, $('.openide-chat-status-trace', { 'aria-hidden': 'true' }));
+		const current = append(flow, $('.openide-chat-status-current'));
+		this._label = append(current, $('.openide-chat-response-working-label'));
+		this._timer = append(current, $('span.openide-chat-status-timer', { 'aria-hidden': 'true' }));
 		this._disclosure = append(this.domNode, $<HTMLButtonElement>('button.openide-chat-status-disclosure.hidden', { type: 'button', 'aria-label': t('openide.activity.details') }));
 		append(this._disclosure, $('span.codicon.codicon-chevron-down', { 'aria-hidden': 'true' }));
 		if (hoverService) { this._register(setupChatTooltip(hoverService, this._disclosure, () => t('openide.activity.details'))); }
 		this._register(addDisposableListener(this._disclosure, 'click', () => this._toggleActivity?.()));
 		this._later = this._register(new RunOnceScheduler(() => this._swap(), 0));
+		this._clock = this._register(new RunOnceScheduler(() => this._paintClock(), 1000));
 		this._register({ dispose: () => { this._disposed = true; this._animation?.cancel(); } });
 	}
 
-	/** The renderer supplies the existing activity owner; no duplicate records are kept here. */
+	/** The renderer supplies the existing detail owner; the trace remains presentation-only. */
 	setDisclosure(toggle: (() => void) | undefined, expanded = false): void {
 		this._toggleActivity = toggle;
 		this._disclosure.classList.toggle('hidden', !toggle);
@@ -127,11 +139,17 @@ export class OpenideChatStatusLine extends Disposable {
 	 * Called on every render, so it is mostly a no-op: the same status arriving again changes
 	 * nothing, and in particular does not restart a wait that is already counting down.
 	 */
-	setStatus(status: IOpenideChatLiveStatus): void {
+	setStatus(status: IOpenideChatLiveStatus, startedAt?: number): void {
 		this.domNode.classList.remove('hidden');
+		this.domNode.classList.toggle('openide-chat-status-waiting', status.waitingForResponse === true);
+		if (this._startedAt === undefined || (startedAt !== undefined && startedAt < this._startedAt)) {
+			this._startedAt = startedAt ?? Date.now();
+		}
+		if (!this._clock.isScheduled()) { this._paintClock(); }
 		if (status.text === this._pending?.text && status.idle === this._pending.idle) {
 			return;
 		}
+		this._remember(this._pending);
 		// Whatever was waiting its turn is stale now: only the newest status is ever shown, so a
 		// burst of steps ends on the present instead of replaying a queue.
 		this._pending = status;
@@ -147,19 +165,59 @@ export class OpenideChatStatusLine extends Disposable {
 	hide(): void {
 		this.setDisclosure(undefined);
 		this.domNode.classList.add('hidden');
+		this.domNode.classList.remove('openide-chat-status-waiting');
 		this._animation?.cancel();
 		this._animation = undefined;
 		this._later.cancel();
+		this._clock.cancel();
 		this._busy = false;
 		this._shown = '';
 		this._shownIsIdle = false;
 		this._shownAt = 0;
 		this._pending = undefined;
+		this._startedAt = undefined;
+		this._lastTraceText = '';
 		this._label.textContent = '';
+		this._timer.textContent = '';
+		this._trace.replaceChildren();
+	}
+
+	/** Temporarily leaves the stage while prose or another rich surface is streaming. */
+	suspend(): void {
+		this.setDisclosure(undefined);
+		this.domNode.classList.add('hidden');
+		this._clock.cancel();
+	}
+
+	private _remember(status: IOpenideChatLiveStatus | undefined): void {
+		if (!status || status.idle || status.waitingForResponse || status.text === this._lastTraceText) {
+			return;
+		}
+		this._lastTraceText = status.text;
+		const step = append(this._trace, $('span.openide-chat-status-trace-step'));
+		step.textContent = status.text;
+		// The trail is context, not a second transcript. Retaining its latest four steps makes rapid
+		// tool bursts legible while the existing disclosures remain the complete inspectable record.
+		while (this._trace.childElementCount > 4) {
+			this._trace.firstElementChild?.remove();
+		}
+	}
+
+	private _paintClock(): void {
+		this._clock.cancel();
+		if (this.domNode.classList.contains('hidden') || this._startedAt === undefined) {
+			return;
+		}
+		this._timer.textContent = formatOpenideChatDuration(Date.now() - this._startedAt);
+		this._clock.schedule();
 	}
 
 	private _swap(): void {
-		if (this._disposed || this._busy || !this._pending || this._pending.text === this._shown) {
+		if (this._disposed || this._busy || !this._pending) {
+			return;
+		}
+		if (this._pending.text === this._shown) {
+			this._shownIsIdle = this._pending.idle;
 			return;
 		}
 		// Nothing on screen yet: the first thing a turn has to say says it immediately. A wait here
