@@ -13,6 +13,7 @@ import { IChannel } from '../../../../../base/parts/ipc/common/ipc.js';
 import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { IMainProcessService } from '../../../../../platform/ipc/common/mainProcessService.js';
+import { IPlaywrightService } from '../../../../../platform/browserView/common/playwrightService.js';
 import { IEditorOptions } from '../../../../../platform/editor/common/editor.js';
 import { IWorkspaceTrustEnablementService, IWorkspaceTrustManagementService } from '../../../../../platform/workspace/common/workspaceTrust.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
@@ -28,6 +29,7 @@ suite('Browser preview focus', () => {
 		instantiation.stub(INativeWorkbenchEnvironmentService, { userHome: URI.file('/test-home') });
 		instantiation.stub(IWorkspaceTrustManagementService, 'getTrustedUris', () => []);
 		instantiation.stub(IWorkspaceTrustEnablementService, { isWorkspaceTrustEnabled: () => true });
+		instantiation.stub(IPlaywrightService, { onDidChangeActivity: Event.None } as IPlaywrightService);
 		let primaryOpens = 0;
 		let companionOpens = 0;
 		instantiation.stub(IEditorService, new class extends mock<IEditorService>() {
@@ -67,6 +69,7 @@ suite('Browser preview focus', () => {
 			instantiation.stub(INativeWorkbenchEnvironmentService, { userHome: URI.file('/test-home') });
 			instantiation.stub(IWorkspaceTrustManagementService, 'getTrustedUris', () => []);
 			instantiation.stub(IWorkspaceTrustEnablementService, { isWorkspaceTrustEnabled: () => true });
+			instantiation.stub(IPlaywrightService, { onDidChangeActivity: Event.None } as IPlaywrightService);
 			const opens: (IEditorOptions | undefined)[] = [];
 			instantiation.stub(IEditorService, new class extends mock<IEditorService>() {
 				override async openEditor(_input: unknown, optionsOrGroup?: unknown): Promise<undefined> {
