@@ -62,6 +62,19 @@ export class OpenideToolCallGuard {
 	}
 }
 
+const BROWSER_ACTION_TOOLS = new Set(['browser_navigate', 'browser_click', 'browser_type', 'browser_playwright', 'browser_set_style', 'browser_dialog']);
+
+/** A broken or still-loading page must not consume an unlimited agent turn through new selectors. */
+export class OpenideBrowserFailureGuard {
+	private failures = 0;
+
+	record(name: string, result: string): boolean {
+		if (!BROWSER_ACTION_TOOLS.has(name)) { return false; }
+		this.failures = result.startsWith('Error:') ? this.failures + 1 : 0;
+		return this.failures >= 3;
+	}
+}
+
 function matchesJsonType(value: unknown, type: string): boolean {
 	switch (type) {
 		case 'object': return !!value && typeof value === 'object' && !Array.isArray(value);

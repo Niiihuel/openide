@@ -499,8 +499,8 @@ suite('OpenIDE ChatSessions durable history', () => {
 		const restored = new OpenideChatSessions(storage);
 		restored.rename(id, 'Still present');
 		restored.archive(id);
-		assert.throws(() => restored.messagesOf(id), /No se pudo leer/);
-		assert.throws(() => restored.save(id, [user('Replacement')], false), /No se pudo leer/);
+		assert.throws(() => restored.messagesOf(id), /No se pudo leer|Could not read/);
+		assert.throws(() => restored.save(id, [user('Replacement')], false), /No se pudo leer|Could not read/);
 		assert.strictEqual(storage.get(contentKey(id), StorageScope.WORKSPACE), '{broken');
 	});
 

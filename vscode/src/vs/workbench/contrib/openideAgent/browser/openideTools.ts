@@ -37,6 +37,7 @@ import { IAgentLocation, IBackgroundTerminalEvent, IFileEditEvent, IToolDefiniti
 import { IOpenideToolExecution, OpenideToolExecutor, IOpenideExecutableTool, IOpenideToolExecutionResult } from '../common/openideToolExecutor.js';
 import { openideGoalPendingBackgroundReason } from '../common/openideGoalPendingWork.js';
 import { resolvePathInsideWorkspace } from '../common/openideWorkspacePath.js';
+import { isBackgroundTrayWorthy, shouldDetectAwaitingInput } from '../common/openideTerminalHeuristics.js';
 
 /** Leaves the pty output as plain text: strips OSC (including shell integration 633/133),
  *  CSI, stray escapes and controls other than \n/\t. The \r stays: the webview uses it to
@@ -49,28 +50,6 @@ function stripAnsi(data: string): string {
 		.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');        // controles (quedan \n \t \r)
 }
 
-/** awaiting-input heuristic: the command has run for a minimum time, already emitted output and
- *  has been silent for a while (y/N prompt, password, menu). It does not fire on continuous
- *  streams (progress bars) nor on hangs with no output (that is a real timeout).
- *  Defaults conservadores: 12s runtime + 6s de silencio — builds con pausas cortas no
- *  should not produce a false positive as easily as with 5s/3s. */
-export function shouldDetectAwaitingInput(opts: {
-	readonly now: number;
-	readonly startTime: number;
-	readonly lastDataTime: number;
-	readonly minRuntimeMs?: number;
-	readonly quietAfterOutputMs?: number;
-}): boolean {
-	const minRuntimeMs = opts.minRuntimeMs ?? 12_000;
-	const quietAfterOutputMs = opts.quietAfterOutputMs ?? 6_000;
-	if (opts.lastDataTime <= 0) {
-		return false;
-	}
-	const sinceStart = opts.now - opts.startTime;
-	const sinceData = opts.now - opts.lastDataTime;
-	return sinceStart >= minRuntimeMs && sinceData >= quietAfterOutputMs;
-}
-
 /** Respuesta de terminal_send / runShellCaptured con estados distinguibles. */
 export type ShellCaptureResult = {
 	readonly output: string;
@@ -79,34 +58,6 @@ export type ShellCaptureResult = {
 	/** Timeout de captura (no implica prompt interactivo). */
 	readonly timedOut?: boolean;
 };
-
-/** Only long-running commands (dev servers, watchers) go to the composer's "background
- *  terminal" tray — not quick reads (cat/grep/git status) nor one-shot builds. */
-export function isBackgroundTrayWorthy(command: string): boolean {
-	const c = command.trim().toLowerCase();
-	if (!c) {
-		return false;
-	}
-	if (/^(cat|head|tail|wc|ls|pwd|echo|printf|which|type|file|stat|test|\[|true|false)\b/.test(c)) {
-		return false;
-	}
-	if (/^(grep|rg|find|git\s+(status|diff|log|show|branch|stash\s+list|rev-parse|checkout|switch|add|commit))\b/.test(c)) {
-		return false;
-	}
-	if (/^(npm|pnpm|yarn|bun)\s+(test|run\s+(test|lint|check|build|compile|format|typecheck|verify))\b/.test(c)) {
-		return false;
-	}
-	if (/^(curl|wget)\s/.test(c) && !/\s(-d|--data|--upload-file)/.test(c)) {
-		return false;
-	}
-	if (/\b(dev|serve|server|watch|watchers?|start|nodemon|pm2|tail\s+-f|journalctl\s+-f|docker\s+(compose\s+up|run)|code\.sh)\b/.test(c)) {
-		return true;
-	}
-	if (/^(npm|yarn|pnpm|bun)\s+run\s+\w/.test(c) && !/\b(test|lint|check|build|compile|format|typecheck|verify)\b/.test(c)) {
-		return true;
-	}
-	return false;
-}
 
 export interface IToolApprovalInfo {
 	readonly title: string;

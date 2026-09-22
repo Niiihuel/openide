@@ -24,7 +24,7 @@ import { getReasoningStaleTimeoutFloor, resolveStreamStaleTimeoutSeconds } from 
 import { normalizeCodexUsageJson, normalizeGrokUsageJson } from '../../common/openideUsage.js';
 import { OpenideRunSequencer } from '../../common/openideRunSequencer.js';
 import { DEFAULT_AGENT_ITERATIONS, isOutputLimitStopReason, resolveAgentIterationLimit } from '../../common/openideRunLimits.js';
-import { OpenideToolCallGuard, repairToolArgumentsJson, validateToolArguments } from '../../common/openideToolGuardrails.js';
+import { OpenideBrowserFailureGuard, OpenideToolCallGuard, repairToolArgumentsJson, validateToolArguments } from '../../common/openideToolGuardrails.js';
 import { breakdownTotal, computeContextBreakdown, estimateConversationTokens, estimateMessageTokens, estimateTextTokens, estimateToolsTokens } from '../../common/openideTokens.js';
 import { getOpenideCanvasHtml } from '../../browser/openideCanvasHtml.js';
 import { queryTerms } from '../../browser/openideCodebaseQueryService.js';
@@ -316,6 +316,16 @@ suite('OpenIDE agent common', () => {
 			guard.recordStateChange();
 		}
 		assert.strictEqual(guard.inspect('edit_file', '{"path":"page.css"}').block, true);
+	});
+
+	test('stops repeated browser action failures across different selectors without counting diagnostics', () => {
+		const guard = new OpenideBrowserFailureGuard();
+		assert.strictEqual(guard.record('browser_navigate', 'Error: page still loading'), false);
+		assert.strictEqual(guard.record('browser_snapshot', 'Loading placeholders'), false);
+		assert.strictEqual(guard.record('browser_click', 'Error: locator timed out'), false);
+		assert.strictEqual(guard.record('browser_playwright', 'Error: locator timed out'), true);
+		assert.strictEqual(guard.record('browser_click', 'OK: clicked'), false);
+		assert.strictEqual(guard.record('browser_click', 'Error: target missing'), false);
 	});
 
 	test('maps reasoning effort by provider protocol quirks', () => {

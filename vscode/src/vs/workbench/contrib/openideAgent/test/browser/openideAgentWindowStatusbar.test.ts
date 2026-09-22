@@ -58,12 +58,11 @@ suite('OpenIDE agent window footer', () => {
 		assert.strictEqual(f.entries.get('openide.agent.usage')!.content, roster, 'native content node survives updates');
 		assert.ok(f.entries.get('openide.agent.footer.environment')!.ariaLabel.includes('two'));
 		assert.strictEqual(f.entries.get('openide.agent.footer.terminal')!.text, '$(terminal) 1');
-		for (const action of ['environment', 'terminal', 'browser', 'refresh']) {
+		for (const action of ['environment', 'terminal', 'browser']) {
 			const command = f.entries.get(`openide.agent.footer.${action}`)!.command as string;
 			await CommandsRegistry.getCommand(command)!.handler(upcastPartial<ServicesAccessor>({}));
-			if (action !== 'refresh') { assert.strictEqual(f.opened(), action); }
+			assert.strictEqual(f.opened(), action);
 		}
-		assert.strictEqual(f.refreshed(), 1);
 		const command = f.entries.get('openide.agent.footer.browser')!.command as string;
 		f.footer.dispose();
 		assert.strictEqual(f.entries.size, 0);

@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { isBackgroundTrayWorthy, shouldDetectAwaitingInput } from '../../browser/openideTools.js';
+import { isBackgroundTrayWorthy, shouldDetectAwaitingInput } from '../../common/openideTerminalHeuristics.js';
 import {
 	formatResetCountdown,
 	normalizeAnthropicUsageJson,

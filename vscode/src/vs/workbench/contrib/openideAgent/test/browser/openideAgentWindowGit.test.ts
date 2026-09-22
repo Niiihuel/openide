@@ -63,7 +63,7 @@ suite('OpenIDE agent window native Git actions', () => {
 		}, upcastPartial<IQuickInputService>({ createQuickPick: (() => picker) as IQuickInputService['createQuickPick'], createQuickWidget: () => form }),
 		upcastPartial<ICommandService>({ executeCommand: (async (id: string, ...args: unknown[]) => { commands.push({ id, args }); }) as ICommandService['executeCommand'] }),
 		upcastPartial<INotificationService>({ info: message => info.push(String(message)), error: error => { throw error; } })));
-		return { helper, picker, form, repository, groups, commands, comparisons, diffCalls, root, base, originalUri, modifiedUri, info, get draft() { return draft; }, type(value: string) { const input = (form.widget as HTMLElement).querySelector<HTMLTextAreaElement>('textarea')!; input.value = value; input.dispatchEvent(new InputEvent('input')); }, click(label: string) { const button = Array.from((form.widget as HTMLElement).querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === label)!; assert.ok(button, label); button.click(); }, accept(label: string) { picker.selectedItems = [picker.items.find(item => item.label === label)!]; accept.fire({ inBackground: false }); } };
+		return { helper, picker, form, repository, groups, commands, comparisons, diffCalls, root, base, originalUri, modifiedUri, info, get draft() { return draft; }, type(value: string) { const input = (form.widget as HTMLElement).querySelector<HTMLTextAreaElement>('textarea')!; input.value = value; input.dispatchEvent(new InputEvent('input')); }, click(label: string) { const button = Array.from((form.widget as HTMLElement).querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === label)!; assert.ok(button, label); button.click(); }, clickAction(action: string) { const button = (form.widget as HTMLElement).querySelector<HTMLButtonElement>(`[data-action="${action}"]`); assert.ok(button, action); button.click(); }, includeUnstaged() { const button = (form.widget as HTMLElement).querySelector<HTMLButtonElement>('.openide-agent-git-include-label'); assert.ok(button); button.click(); }, accept(label: string) { picker.selectedItems = [picker.items.find(item => item.label === label)!]; accept.fire({ inBackground: false }); } };
 	}
 
 	test('choosing a remote branch uses native tracking checkout with the selected repository', async () => {
@@ -91,12 +91,12 @@ suite('OpenIDE agent window native Git actions', () => {
 		const state = setup();
 		state.helper.showCommit();
 		assert.ok((state.form.widget as HTMLElement).textContent?.includes('1 staged'));
-		state.click('Commit staged changes');
+		state.clickAction('commit');
 		assert.deepStrictEqual(state.commands, []);
 		assert.ok((state.form.widget as HTMLElement).querySelector<HTMLButtonElement>('[data-action=commit]')?.disabled);
 		state.type('Fix routing');
 		assert.strictEqual(state.draft, 'Fix routing');
-		state.click('Commit staged changes');
+		state.clickAction('commit');
 		await Promise.resolve(); await Promise.resolve();
 		assert.deepStrictEqual(state.commands, [{ id: 'git.commitStaged', args: [state.root] }]);
 	});
@@ -105,13 +105,13 @@ suite('OpenIDE agent window native Git actions', () => {
 		const all = setup();
 		all.helper.showCommit();
 		all.type('Review all changes');
-		all.click('All changes');
-		all.click('Stage changes and commit');
+		all.includeUnstaged();
+		all.clickAction('commit');
 		await Promise.resolve(); await Promise.resolve();
 		assert.deepStrictEqual(all.commands.map(command => command.id), ['git.commitAll']);
 		const push = setup();
 		push.helper.showCommit();
-		push.click('Push commits');
+		push.clickAction('push');
 		await Promise.resolve();
 		assert.deepStrictEqual(push.commands.map(command => command.id), ['git.push']);
 	});
@@ -120,7 +120,7 @@ suite('OpenIDE agent window native Git actions', () => {
 		const state = setup();
 		let resolve!: (value: undefined) => void;
 		state.repository.input.validateInput = () => new Promise(done => { resolve = done; });
-		state.helper.showCommit(); state.type('Late validation'); state.click('Commit staged changes');
+		state.helper.showCommit(); state.type('Late validation'); state.clickAction('commit');
 		state.form.hide(); resolve(undefined);
 		await Promise.resolve(); await Promise.resolve();
 		assert.deepStrictEqual(state.commands, []);
@@ -129,7 +129,7 @@ suite('OpenIDE agent window native Git actions', () => {
 	test('conflicts disable commit while preserving the draft and independent push', () => {
 		const state = setup();
 		state.groups.push(upcastPartial<ISCMResourceGroup>({ id: 'merge', resources: [upcastPartial<ISCMResource>({})] }));
-		state.helper.showCommit(); state.type('Resolve merge'); state.click('Commit staged changes');
+		state.helper.showCommit(); state.type('Resolve merge'); state.clickAction('commit');
 		assert.deepStrictEqual(state.commands, []);
 		assert.ok((state.form.widget as HTMLElement).textContent?.includes('Resolve 1 conflicts'));
 		assert.strictEqual(state.draft, 'Resolve merge');

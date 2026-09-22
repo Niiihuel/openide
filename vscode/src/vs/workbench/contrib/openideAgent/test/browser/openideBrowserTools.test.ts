@@ -22,7 +22,7 @@ import { IOpenideNativeServices } from '../../common/openideNativeServices.js';
 suite('OpenIDE browser tools runtime observation boundary', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	function fixture(captureFails = false) {
+	function fixture(captureFails = false, loadingPlaceholders = 0) {
 		const calls: { fn: string; context: IPlaywrightExecutionContext | undefined; args: unknown[] }[] = [];
 		const tools = new Map<string, IAgentTool>();
 		const opens: (string | undefined)[] = [];
@@ -44,6 +44,8 @@ suite('OpenIDE browser tools runtime observation boundary', () => {
 			locator: () => locator,
 			mouse: { click: async () => { actions.push('mouse.click'); } },
 			goto: async () => { actions.push('navigate'); },
+			evaluate: async () => loadingPlaceholders,
+			waitForFunction: async () => { throw new Error('Still loading'); },
 			url: () => 'http://localhost:3000/settings',
 			title: async () => 'Settings',
 			waitForTimeout: async () => {},
@@ -76,6 +78,14 @@ suite('OpenIDE browser tools runtime observation boundary', () => {
 		assert.deepStrictEqual({ opens: f.opens, actions: f.actions, identities: f.calls.map(call => call.context?.toolCallId), success: result.startsWith('OK:') }, {
 			opens: [undefined], actions: ['navigate'], identities: ['navigate-tool'], success: true,
 		});
+	});
+
+	test('navigation reports a persistently loading app instead of claiming the page is ready', async () => {
+		const f = fixture(false, 5);
+		const result = await f.call('browser_navigate', { url: 'http://localhost:3000/settings' });
+		assert.ok(result.startsWith('Error:'));
+		assert.ok(result.includes('loading placeholders'));
+		assert.deepStrictEqual(f.actions, ['navigate']);
 	});
 
 	test('simultaneous tool contexts stay separate and actions do not install page overlays', async () => {

@@ -351,12 +351,32 @@ export class OpenideBrowserAutomation {
 					const input = await this.browserViewService.openPreview(undefined, undefined, { preserveFocus: true, targetWindowId: context?.targetWindowId });
 					const model = await input.resolve();
 					await model.shareWithAgentSession(this.playwrightSessionId);
-					const result = await this.playwrightService.invokeFunctionRawWithContext<{ url: string; title: string }>(this.playwrightSessionId, input.id, `async (page, url, timeoutMs) => {
+					const result = await this.playwrightService.invokeFunctionRawWithContext<{ url: string; title: string; loadingPlaceholders: number }>(this.playwrightSessionId, input.id, `async (page, url, timeoutMs) => {
 						await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-						return { url: page.url(), title: await page.title() };
+						const loading = () => page.evaluate(() => {
+							const visible = element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
+							const placeholders = [...document.querySelectorAll('[class*="skeleton" i]')].filter(visible).length;
+							const busy = [...document.querySelectorAll('[aria-busy="true"], [data-loading="true"]')].some(visible);
+							return busy ? Math.max(3, placeholders) : placeholders;
+						});
+						// Let client-side apps mount after DOMContentLoaded before declaring the page ready.
+						await page.waitForTimeout(300);
+						let loadingPlaceholders = await loading();
+						if (loadingPlaceholders >= 3) {
+							await page.waitForFunction(() => {
+								const visible = element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
+								return ![...document.querySelectorAll('[aria-busy="true"], [data-loading="true"]')].some(visible)
+									&& [...document.querySelectorAll('[class*="skeleton" i]')].filter(visible).length < 3;
+							}, undefined, { timeout: Math.min(timeoutMs, 8000) }).catch(() => {});
+							loadingPlaceholders = await loading();
+						}
+						return { url: page.url(), title: await page.title(), loadingPlaceholders };
 					}`, { toolCallId: context?.toolCallId }, url, this.navigationTimeoutMs());
 					await this.mark('Navigation', 'navigate', context);
-					return model.error ? `Error: ${model.error.errorDescription}` : `OK: loaded ${result.url} (title: ${result.title || 'untitled'}).`;
+					return model.error ? `Error: ${model.error.errorDescription}`
+						: result.loadingPlaceholders >= 3
+							? `Error: ${result.url} opened, but the app is still showing loading placeholders. Do not click yet. Check browser_console and browser_snapshot; if data requests are failing, report the blocker instead of navigating again.`
+							: `OK: loaded ${result.url} (title: ${result.title || 'untitled'}).`;
 				},
 			},
 			{

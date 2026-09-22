@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { registerWindow } from '../../../../../base/browser/dom.js';
-import { CodeWindow } from '../../../../../base/browser/window.js';
+import { CodeWindow, mainWindow } from '../../../../../base/browser/window.js';
 import { DeferredPromise } from '../../../../../base/common/async.js';
 import { VSBuffer, encodeBase64 } from '../../../../../base/common/buffer.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
@@ -127,6 +127,7 @@ suite('OpenIDE ChatController — send path', () => {
 		let frame: FrameRequestCallback | undefined;
 		const targetWindow = {
 			vscodeWindowId: 4242,
+			document: mainWindow.document,
 			addEventListener: () => { },
 			removeEventListener: () => { },
 			requestAnimationFrame: (callback: FrameRequestCallback) => { frame = callback; return 1; },

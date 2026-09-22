@@ -119,7 +119,7 @@ import { ITextFileService } from '../../../services/textfile/common/textfiles.js
 import { IOpenideJournalContext, IOpenideRunJournalRecord, OpenideRunJournalError, appendOpenideJournal, isOpenideRunJournalError } from '../../../../platform/openideAgentHost/common/openideRunJournal.js';
 import { applyOpenideJournalRecovery } from '../common/openideRunJournal.js';
 import { IOpenideToolExecution, OpenideToolExecutor } from '../common/openideToolExecutor.js';
-import { OpenideToolCallGuard,repairToolArgumentsJson,validateToolArguments } from '../common/openideToolGuardrails.js';
+import { OpenideBrowserFailureGuard, OpenideToolCallGuard,repairToolArgumentsJson,validateToolArguments } from '../common/openideToolGuardrails.js';
 import { sealOrphanToolCalls } from '../common/openideToolPairing.js';
 import { OpenideTurnCoordinator,runOpenideTurn } from '../common/openideTurnRuntime.js';
 import { IProviderRateLimits } from '../common/openideUsage.js';
@@ -3325,6 +3325,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			const skillsText = skillsBlock ?? '';
 			const subCtx = { adapter, credential, entry, model, baseUrl, maxTokens };
 			const toolCallGuard = new OpenideToolCallGuard();
+			const browserFailureGuard = new OpenideBrowserFailureGuard();
 			const instructionAuthorization = new OpenideInstructionAuthorization(messages);
 			const confirmedInstructionOperations = new WeakSet<Readonly<Record<string, unknown>>>();
 			const execution: IOpenideToolExecution = {
@@ -3408,6 +3409,11 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 							const blocked = `Error: repeated call blocked to avoid a loop (${call.name}, ${loopDecision.occurrence} identical repetitions). Review the previous result and change strategy.`;
 							onEvent({ type: 'toolResult', id: call.id, name: call.name, result: blocked, isError: true });
 							messages.push({ role: 'tool', toolCallId: call.id, content: blocked });
+							if (browserFailureGuard.record(call.name, blocked)) {
+								sealOrphanToolCalls(messages);
+								onEvent({ type: 'error', message: t('agentSurface.chat.browserStalled'), action: 'continue' });
+								return true;
+							}
 							continue;
 						}
 
@@ -3719,6 +3725,11 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 						// the edit's diff (when the tool edited a file) is attached to the tool result →
 						// persisted with the session and rebuilds the edit card on restore (Ctrl+R).
 						messages.push({ role: 'tool', toolCallId: call.id, content: out, ...(lastEditDiff ? { fileDiff: lastEditDiff } : {}) });
+						if (browserFailureGuard.record(call.name, out)) {
+							sealOrphanToolCalls(messages);
+							onEvent({ type: 'error', message: t('agentSurface.chat.browserStalled'), action: 'continue' });
+							return true;
+						}
 						// plan_save is THE CLOSING of plan mode and the decision passes to the user (Reject/Build
 						// card). Without this cut the model received the result and CARRIED ON:
 						// it started implementing without approval until it hit the fact that plan mode has no
