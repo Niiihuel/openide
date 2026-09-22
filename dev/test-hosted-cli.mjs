@@ -130,10 +130,15 @@ try {
 		const folders = JSON.parse(resultText(await command(first.generation, 'mcp', { tool: 'getWorkspaceFolders' })));
 		assert.equal(folders.rootPath, workspace); assert.equal(folders.folders.length, 1);
 	});
-	await check('Add selection to chat delivers the actual editor snippet to the hosted CLI', async () => {
+	await check('Add selection to chat stages the editor snippet, then explicit paste delivers it to the hosted CLI', async () => {
 		await page.locator('.part.editor .monaco-editor .view-lines').first().click();
 		await page.keyboard.press('Control+KeyA');
 		await page.keyboard.press('Control+KeyL');
+		const draft = page.locator('.openide-cli-composer textarea').first();
+		await draft.waitFor();
+		assert.match(await draft.inputValue(), /controlled fixture edit/);
+		assert.match(await draft.inputValue(), /fixture\.txt/);
+		await page.locator('.openide-cli-composer button.primary').click();
 		await until(() => generations().find(candidate => candidate.generation === first.generation && candidate.input.includes('controlled fixture edit') && candidate.input.includes('fixture.txt')), 'selection delivery');
 	});
 	await check('external plan approval returns the plan edited on disk through MCP', async () => {
