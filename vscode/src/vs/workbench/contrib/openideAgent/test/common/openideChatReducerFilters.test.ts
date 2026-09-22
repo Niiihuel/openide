@@ -69,13 +69,13 @@ suite('OpenIDE chat reducer filters', () => {
 		assert.deepStrictEqual(contentKinds(step.items), ['delegation', 'subagent']);
 		const last = step.items[step.items.length - 1];
 		const card = isOpenideChatResponseItem(last) ? last.content[1] as { timeline: readonly unknown[] } : undefined;
-		assert.strictEqual(card?.timeline.length, 2);
+		assert.strictEqual(card?.timeline.length, 3);
 
 		const mirrored = step.sessionEffects.filter(effect => effect.type === 'subagentSessionMessage');
 		assert.deepStrictEqual(mirrored.map(effect => effect.type === 'subagentSessionMessage' && effect.message.role), ['assistant', 'assistant', 'tool']);
-		// Streamed text merges into the previous assistant message and does NOT trigger a write.
+		// Streamed text merges into a stable block; persistence is batched by session effects.
 		assert.strictEqual(mirrored[0].type === 'subagentSessionMessage' && mirrored[0].mergeText, true);
-		assert.strictEqual(step.sessionEffects.filter(effect => effect.type === 'subagentSessionSave').length, 2);
+		assert.strictEqual(step.sessionEffects.filter(effect => effect.type === 'subagentSessionSave').length, 3);
 	});
 
 	test('fileCheckpoint does not cross and does not resurrect the legacy format', () => {

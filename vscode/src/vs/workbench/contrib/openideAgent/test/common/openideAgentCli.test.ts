@@ -5,7 +5,8 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { OPENIDE_HOSTED_CLI_ENV_RESET, buildAmpMcpConfig, buildCopilotMcpConfig, buildClaudeSessionSettings, buildClaudeMcpConfig, buildExecutableProbe, buildOpencodeMcpConfig, buildOpenideCliLaunch, parseExecutableProbe, getOpenideCli, IOpenideMcpEndpoint, OPENIDE_MCP_TOOL_TIMEOUT_MS, groupOpenideSessions, isSafeProviderSessionId, OPENIDE_CLI_CATALOG, openideSessionGroupOf, reduceOpenideCliStatus, stripClaudeResumeArgs } from '../../common/openideAgentCliCatalog.js';
+import { OPENIDE_HOSTED_CLI_ENV_RESET, buildAmpMcpConfig, buildCopilotMcpConfig, buildClaudeSessionSettings, buildClaudeMcpConfig, buildExecutableProbe, buildOpencodeMcpConfig, buildOpenideCliLaunch, parseExecutableProbe, getOpenideCli, IOpenideMcpEndpoint, OPENIDE_MCP_TOOL_TIMEOUT_MS, groupOpenideSessions, isSafeProviderSessionId, OPENIDE_CLI_CATALOG, openideSessionGroupOf, reduceOpenideCliStatus, stripClaudeResumeArgs, OPENIDE_CLI_INITIAL_STATE, reduceOpenideCliRuntime } from '../../common/openideAgentCliCatalog.js';
+import { appendOpenideCliDraft, buildOpenideCliPaste, canPasteOpenideCliDraft } from '../../common/openideCliComposer.js';
 import { OPENIDE_PROVIDER_BRANDS } from '../../common/openideProviderBranding.js';
 
 suite('OpenIDE CLI sessions — catalog, resume, state and grouping', () => {
@@ -53,21 +54,56 @@ suite('OpenIDE CLI sessions — catalog, resume, state and grouping', () => {
 		assert.deepStrictEqual(buildOpenideCliLaunch(getOpenideCli('claude')!, 'claude', 'x y').args, []);
 	});
 
-	test('state transitions: hooks win, the heuristic only applies without hooks', () => {
-		assert.strictEqual(reduceOpenideCliStatus('needs-input', { type: 'launched' }, false), 'in-progress');
-		assert.strictEqual(reduceOpenideCliStatus('in-progress', { type: 'quiet' }, false), 'needs-input');
-		assert.strictEqual(reduceOpenideCliStatus('needs-input', { type: 'output' }, false), 'in-progress');
+	test('state transitions require provider evidence, never output or silence', () => {
+		assert.strictEqual(reduceOpenideCliStatus('needs-input', { type: 'launched' }, false), 'unknown');
+		assert.strictEqual(reduceOpenideCliStatus('in-progress', { type: 'quiet' }, false), 'in-progress');
+		assert.strictEqual(reduceOpenideCliStatus('needs-input', { type: 'output' }, false), 'needs-input');
 		// With hooks the output heuristic is inert.
 		assert.strictEqual(reduceOpenideCliStatus('needs-input', { type: 'output' }, true), 'needs-input');
 		assert.strictEqual(reduceOpenideCliStatus('in-progress', { type: 'quiet' }, true), 'in-progress');
 		assert.strictEqual(reduceOpenideCliStatus('needs-input', { type: 'hook:prompt' }, true), 'in-progress');
-		assert.strictEqual(reduceOpenideCliStatus('in-progress', { type: 'hook:stop' }, true), 'needs-input');
+		assert.strictEqual(reduceOpenideCliStatus('in-progress', { type: 'hook:stop' }, true), 'completed');
 		assert.strictEqual(reduceOpenideCliStatus('in-progress', { type: 'hook:stop', failed: true }, true), 'failed');
-		assert.strictEqual(reduceOpenideCliStatus('in-progress', { type: 'hook:notification' }, true), 'needs-input');
+		assert.strictEqual(reduceOpenideCliStatus('in-progress', { type: 'hook:notification' }, true), 'in-progress');
+		assert.strictEqual(reduceOpenideCliStatus('in-progress', { type: 'hook:notification', reason: 'permission' }, true), 'needs-input');
 		assert.strictEqual(reduceOpenideCliStatus('in-progress', { type: 'exit', code: 0 }, false), 'completed');
 		assert.strictEqual(reduceOpenideCliStatus('in-progress', { type: 'exit', code: 1 }, true), 'failed');
+		assert.strictEqual(reduceOpenideCliStatus('in-progress', { type: 'exit', code: undefined }, false), 'unknown');
 		// A finished session does not wake up on late output.
 		assert.strictEqual(reduceOpenideCliStatus('completed', { type: 'output' }, false), 'completed');
+	});
+
+	test('runtime separates turn completion from PTY lifetime and ignores late events after exit', () => {
+		const working = reduceOpenideCliRuntime(OPENIDE_CLI_INITIAL_STATE, { type: 'hook:prompt' });
+		const waiting = reduceOpenideCliRuntime(working, { type: 'hook:notification', reason: 'permission' });
+		const resumed = reduceOpenideCliRuntime(waiting, { type: 'hook:tool-complete' });
+		const completed = reduceOpenideCliRuntime(resumed, { type: 'hook:stop' });
+		assert.deepStrictEqual([waiting, completed], [
+			{ lifecycle: 'running', status: 'needs-input', source: 'hooks', waitingReason: 'permission' },
+			{ lifecycle: 'running', status: 'completed', source: 'hooks' },
+		]);
+		assert.strictEqual(reduceOpenideCliRuntime(completed, { type: 'hook:notification', reason: 'prompt' }), completed);
+		const exited = reduceOpenideCliRuntime(completed, { type: 'exit', code: 0 });
+		assert.strictEqual(reduceOpenideCliRuntime(exited, { type: 'hook:prompt' }), exited);
+		assert.deepStrictEqual(reduceOpenideCliRuntime(working, { type: 'connection:lost' }), OPENIDE_CLI_INITIAL_STATE);
+	});
+
+	test('unverified PTYs remain unknown through repeated output and quiet periods', () => {
+		let state = OPENIDE_CLI_INITIAL_STATE;
+		for (let index = 0; index < 100; index++) {
+			state = reduceOpenideCliRuntime(state, { type: 'output' });
+			state = reduceOpenideCliRuntime(state, { type: 'quiet' });
+		}
+		assert.strictEqual(state, OPENIDE_CLI_INITIAL_STATE);
+	});
+
+	test('CLI draft appends context and strips terminal controls before bracketed paste', () => {
+		assert.deepStrictEqual({ draft: appendOpenideCliDraft('Review this', 'selected code'), empty: appendOpenideCliDraft('existing', '  '), paste: buildOpenideCliPaste('hello\n\tworld\x1b[201~\x03') },
+			{ draft: 'Review this\n\nselected code', empty: 'existing', paste: 'hello\n\tworld[201~' });
+	});
+
+	test('multiline drafts require verified bracketed paste mode', () => {
+		assert.deepStrictEqual([canPasteOpenideCliDraft('line one\nline two', false), canPasteOpenideCliDraft('line one\nline two', true), canPasteOpenideCliDraft('single line', false)], [false, true, true]);
 	});
 
 	test('grouping by recency: today, yesterday, 7 days, 30 days, older', () => {

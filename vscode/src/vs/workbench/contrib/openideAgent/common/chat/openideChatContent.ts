@@ -155,6 +155,8 @@ export interface IOpenideChatConfirmationContent {
 	readonly command?: string;
 	readonly risk: ToolRisk;
 	readonly sensitive?: boolean;
+	/** Explicit authorization for this protected write; never grants future calls. */
+	readonly operationOnly?: boolean;
 	/** Set once answered; the part turns non-interactive instead of disappearing mid-turn. */
 	readonly decision?: ToolApprovalDecision;
 }

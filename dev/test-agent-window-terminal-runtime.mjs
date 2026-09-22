@@ -60,14 +60,30 @@ try {
 		const { Action2, registerAction2 } = await import(base + 'platform/actions/common/actions.js');
 		const { ITerminalService } = await import(base + 'workbench/contrib/terminal/browser/terminal.js');
 		const { ICommandService } = await import(base + 'platform/commands/common/commands.js');
+		const { IViewsService } = await import(base + 'workbench/services/views/common/viewsService.js');
+		const { IOpenideAgentService } = await import(base + 'workbench/contrib/openideAgent/browser/openideAgentService.js');
 		registerAction2(class extends Action2 {
 			constructor() { super({ id: 'test.agentWindowTerminal', title: 'Agent Window Terminal Fixture', f1: true }); }
 			async run(accessor) {
 				const service = accessor.get(ITerminalService);
 				const commands = accessor.get(ICommandService);
+				const views = accessor.get(IViewsService), agentService = accessor.get(IOpenideAgentService);
+				await commands.executeCommand('openide.agent.injectCanvasPrompt', { prompt: 'Terminal fixture', send: false });
+				const primary = views.getViewWithId('workbench.view.openideChat.view')._widget.value;
 				const instance = await service.createTerminal({ config: { executable, cwd: workspace, name: 'Fixture Terminal' } });
 				await service.revealTerminal(instance);
-				window.agentWindowTerminalFixture = { instance, service, open: () => commands.executeCommand('openide.agent.openAgentWindow') };
+				window.agentWindowTerminalFixture = { instance, service, open: () => commands.executeCommand('openide.agent.openAgentWindow'),
+					startBackground: async () => {
+						const conversationId = primary.sessionStore.activeSessionId();
+						const background = await service.createTerminal({ config: { executable, cwd: workspace, name: 'Background fixture', hideFromUser: true, env: { OPENIDE_CONVERSATION_ID: conversationId } } });
+						await background.processReady;
+						// A real hidden PTY in the same registry used by run_command; no provider is needed.
+						agentService.tools.trackBackgroundTerminal(background, 'npm run dev', new Promise(() => {}), undefined, true, 'fixture', conversationId);
+						window.agentWindowTerminalFixture.background = background;
+						return { id: background.instanceId, pid: background.processId };
+					},
+					showChat: async () => { await views.openView('workbench.view.openideChat.view', true); },
+				};
 			}
 		});
 	}, {base:`vscode-file://vscode-app${root}/vscode/out/vs/`, executable, workspace});
@@ -133,8 +149,33 @@ try {
 	await until(() => agent.locator('.terminal-split-pane').count().then(count => count === 1), 'next group skips split sibling');
 	await agent.keyboard.press('Control+PageUp');
 	await until(() => agent.locator('.terminal-split-pane').count().then(count => count === 2), 'previous group restores native split');
-	await agent.screenshot({path:path.join(output,'terminal-island.png')});
+		await agent.screenshot({path:path.join(output,'terminal-island.png')});
+	const background = await ide.evaluate(() => window.agentWindowTerminalFixture.startBackground());
+	await until(() => generations().find(state => state.pid === background.pid), 'background tool PTY startup');
+	await ide.locator('.openide-chat-terms-tray:not(.hidden)').waitFor({state:'attached'});
+	assert.equal(await agent.locator('.openide-chat-terms-tray').count(), 0, 'Agents never duplicates the IDE composer tray');
+	const workspaceTabs = agent.locator('.openide-conversation-context-tabs');
+	if (!await workspaceTabs.isVisible()) { await agent.locator('.openide-agent-window-header button[aria-controls="openide-agent-window-context"]').click(); }
+	await agent.locator('#conversation-context-tab-terminals').click();
+	const moreProcesses = agent.locator('#conversation-context-panel-terminals .openide-context-activity-more');
+	if (await moreProcesses.isVisible()) { await moreProcesses.click(); }
+	const processRow = agent.locator(`#conversation-context-panel-terminals [data-terminal-id="${background.id}"]`);
+	await processRow.locator('button.openide-agent-window-context-row').click();
+	await agent.locator('.openide-agent-window-terminal-tab[aria-selected="true"]').filter({hasText:'Background fixture'}).waitFor();
+	const backgroundInput = agent.locator('.openide-agent-window-terminal .xterm-helper-textarea').first();
+	await backgroundInput.focus();
+	await backgroundInput.pressSequentially('from-workspace-terminals', {delay:15});
+	await until(() => generations().find(state => state.pid === background.pid)?.input.includes('from-workspace-terminals'), 'Terminals tab reveals the same background PTY');
+	await agent.screenshot({path:path.join(output,'workspace-background-terminal.png')});
 	await agent.close();
+	assert.equal(await ide.evaluate(() => window.agentWindowTerminalFixture.background.isDisposed), false, 'closing Agents preserves background work');
+	await ide.evaluate(() => window.agentWindowTerminalFixture.showChat());
+	const tray = ide.locator('.openide-chat-terms-tray:not(.hidden)');
+	await tray.waitFor();
+	await tray.locator('.openide-chat-terms-toggle').click();
+	await tray.getByRole('button', {name:'npm run dev', exact:true}).click();
+	await until(() => ide.evaluate(() => window.agentWindowTerminalFixture.service.activeInstance === window.agentWindowTerminalFixture.background), 'IDE tray can still reveal the background process');
+	await ide.screenshot({path:path.join(output,'ide-background-tray.png')});
 	await ide.evaluate(() => window.agentWindowTerminalFixture.service.focusInstance(window.agentWindowTerminalFixture.instance));
 	const ideInput = ide.locator('.terminal-wrapper.active .xterm-helper-textarea').first();
 	await ideInput.waitFor();
@@ -142,11 +183,11 @@ try {
 	await ideInput.focus();
 	await ideInput.pressSequentially('returned-to-ide', {delay:15});
 	await until(() => generations().find(state => state.pid === first.pid)?.input.includes('returned-to-ide'), 'typing into returned IDE PTY');
-	assert.equal(generations().length, 3, 'one PTY for New and one for Split; toggles never spawn');
+	assert.equal(generations().length, 4, 'one PTY for New, Split, and background; presentation never spawns');
 	assert.equal(generations().find(state => state.pid === first.pid)?.generation, first.generation, 'same original generation after close');
 	await ide.screenshot({path:path.join(output,'terminal-returned-ide.png')});
 	assert.deepEqual(errors, [], 'island handoff produces no renderer errors');
-	fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({realPty:true,sharedScrollbar:true,singleScrollport:true,auxiliaryKeyboard:true,multipleTerminals:true,nativeSplit:true,nativeShortcuts:true,customShortcut:true,keybindingLaunchArguments:true,selection:true,sameProcess:true,closeReturnsToIde:true},null,2));
+	fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({realPty:true,sharedScrollbar:true,singleScrollport:true,auxiliaryKeyboard:true,multipleTerminals:true,nativeSplit:true,nativeShortcuts:true,customShortcut:true,keybindingLaunchArguments:true,selection:true,sameProcess:true,closeReturnsToIde:true,noAgentsComposerTray:true,workspaceRevealsBackground:true,ideTrayPreserved:true,backgroundSurvivesClose:true},null,2));
 	console.log('PASS: real integrated PTY moves to terminal island and returns to IDE without losing process or keyboard input.');
 
 } catch(error) {

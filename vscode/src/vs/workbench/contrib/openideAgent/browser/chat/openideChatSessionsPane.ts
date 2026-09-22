@@ -9,19 +9,20 @@ import { ICommandService } from '../../../../../platform/commands/common/command
 import { OpenideEmptyState } from '../../../../browser/openideEmptyState.js';
 import { AgentWindowAction } from '../../common/openideAgentWindowShortcuts.js';
 import { AnchorAlignment } from '../../../../../base/browser/ui/contextview/contextview.js';
-import { DomScrollableElement } from '../../../../../base/browser/ui/scrollbar/scrollableElement.js';
+import { List } from '../../../../../base/browser/ui/list/listWidget.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable, DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { onUnexpectedError } from '../../../../../base/common/errors.js';
-import { ScrollbarVisibility } from '../../../../../base/common/scrollable.js';
 import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
+import { defaultListStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
 import { getOpenideCli } from '../../common/openideAgentCliCatalog.js';
+import { createProviderIcon } from '../openideProviderIcons.js';
 import { InputBox } from '../../../../../base/browser/ui/inputbox/inputBox.js';
 import { openideSearchBoxStyles } from '../openideControlStyles.js';
 import { onDidChangeOpenideLanguage, OpenideStringKey, t } from '../../common/openideStrings.js';
 import { IChatSessionMeta, OpenideChatSessions } from '../openideChatSessions.js';
-import { OPENIDE_CHAT_HOVER_APPEARANCE, OPENIDE_CHAT_HOVER_GROUP, setupChatTooltip, setupOverflowFade } from './openideChatHover.js';
+import { OPENIDE_CHAT_HOVER_APPEARANCE, OPENIDE_CHAT_HOVER_GROUP, setupChatTooltip } from './openideChatHover.js';
 import { HoverPosition } from '../../../../../base/browser/ui/hover/hoverWidget.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { isEqualOrParent } from '../../../../../base/common/resources.js';
@@ -32,25 +33,10 @@ import { createSubagentAvatar, subagentAvatarKind } from '../openideSubagentAvat
 import { ISubagentRunService } from '../openideSubagentRunService.js';
 import { ISubagentRun } from '../../common/openideSubagentTypes.js';
 import './media/openideSubagents.css';
+import './media/openideChatSessions.css';
 import { menuIcon, menuRow, menuRowAction, OpenideChatMenuPopover } from './openideChatMenuDom.js';
 
-/**
- * The Sessions panel of the dock — VS Code's Agent Sessions view (`agentSessionsControl.ts`,
- * `agentSessionsModel.ts` sections, `agentSessionsFilter.ts`) rebuilt on the dock's own
- * primitives: a panel that slides in under the header, side-by-side as a right column when the
- * dock is wide and stacked over the transcript when it is narrow, with search, a filter menu,
- * project-grouped rows with a shared activity indicator, and the per-row actions (mark read, archive, delete).
- *
- * Its head is ONE row — the search field and the filter — which is Cursor's ("Search Agents…" and
- * nothing else). Four controls were removed from it, each because something else already did the
- * job: a full-width "New session" button (the header's `+ ▾`), a panel toggle (the header's ⏱), a
- * title reading "Sessions" over a list of sessions, and a refresh button over an in-memory store
- * that repaints on every mutation. Search is always visible now instead of hiding behind a button,
- * which is the only reason that button existed.
- *
- * It only READS the store and asks the host to act: opening a session changes the transcript, the
- * terminal host and the header, which the widget owns.
- */
+/** Conversation navigation for the IDE dock and the standalone agent workspace. */
 
 export type OpenideSessionsFilter = 'all' | 'local' | 'cli' | 'needsInput' | 'inProgress' | 'archived';
 
@@ -156,51 +142,60 @@ class SessionActionsMenu extends OpenideChatMenuPopover {
 	}
 }
 
-const COMPACT_RECENT_LIMIT = 6;
-
-/** Only avatar inputs are retained; a sidebar never needs the worker transcript. */
+/** Only avatar inputs are retained; navigation never loads worker transcripts. */
 type SubagentAvatarTask = Pick<ISubagentRun, 'task' | 'profile' | 'readonly'>;
 
+type NavigationEntry =
+	| { id: string; kind: 'group'; project: IOpenideSessionProject; count: number; running: number; expanded: boolean }
+	| { id: string; kind: 'session'; session: IChatSessionMeta; project: IOpenideSessionProject; active: boolean; open: boolean }
+	| { id: string; kind: 'children'; parentId: string; count: number; expanded: boolean }
+	| { id: string; kind: 'child'; session: IChatSessionMeta; parentId: string };
+
+interface NavigationTemplate {
+	readonly container: HTMLElement;
+	readonly store: DisposableStore;
+	entry?: NavigationEntry;
+	update?: () => void;
+}
+
+/** A native virtual list; stream updates patch only the visible rows, preserving their controls. */
 export class OpenideChatSessionsPane extends Disposable {
-
 	readonly domNode: HTMLElement;
-
 	private readonly _listHost: HTMLElement;
-	private readonly _scroll: DomScrollableElement;
-	private readonly _rowsStore = this._register(new DisposableStore());
+	private readonly _list: List<NavigationEntry>;
+	private readonly _emptyHost: HTMLElement;
+	private readonly _emptyStore = this._register(new DisposableStore());
 	private readonly _search: HTMLInputElement;
 	private readonly _searchBox: InputBox;
-	private _head!: HTMLElement;
+	private readonly _head: HTMLElement;
 	private readonly _filterMenu: FilterMenu;
 	private readonly _sessionMenu: SessionActionsMenu;
+	private readonly _templates = new Map<string, NavigationTemplate>();
+	private _entries: NavigationEntry[] = [];
 	private _compact = false;
 	private readonly _collapsedGroups = new Set<string>(['archived']);
-	private readonly _expandedGroups = new Set<string>();
 	private readonly _expandedParents = new Set<string>();
 	private _renaming: { id: string; value: string } | undefined;
+	private _menuSessionId: string | undefined;
 	private _filter: OpenideSessionsFilter = 'all';
 	private _query = '';
-	private _renderKey: string | undefined;
 	private readonly _subagentTasks = new Map<string, SubagentAvatarTask | undefined>();
-	private readonly _subagentIcons = new Map<string, { node: HTMLElement; kind: string }>();
 	private _open = false;
 	private _full = false;
 	private _lastWidth = 0;
+	private _emptyKey: string | undefined;
+	private _languageVersion = 0;
 
 	private readonly _onDidOpenSession = this._register(new Emitter<string>());
 	readonly onDidOpenSession: Event<string> = this._onDidOpenSession.event;
 	private readonly _onDidOpenSubagent = this._register(new Emitter<string>());
-	readonly onDidOpenSubagent = this._onDidOpenSubagent.event;
-
+	readonly onDidOpenSubagent: Event<string> = this._onDidOpenSubagent.event;
 	private readonly _onDidChangeOpen = this._register(new Emitter<boolean>());
 	readonly onDidChangeOpen: Event<boolean> = this._onDidChangeOpen.event;
-
 	private readonly _onDidRequestCloseSession = this._register(new Emitter<string>());
-	/** The row's ✕ (external agents): release the hosted PTY and drop the tab, keep the record. */
+	/** Explicitly release the hosted PTY and close its tab while retaining the record. */
 	readonly onDidRequestCloseSession: Event<string> = this._onDidRequestCloseSession.event;
-
 	private readonly _onDidMutate = this._register(new Emitter<void>());
-	/** Archive/delete happened here; the header strip and the transcript may need a repaint. */
 	readonly onDidMutate: Event<void> = this._onDidMutate.event;
 
 	constructor(
@@ -216,451 +211,419 @@ export class OpenideChatSessionsPane extends Disposable {
 	) {
 		super();
 		this.domNode = append(parent, $('.openide-chat-sessions-pane.hidden'));
-
-		const head = append(this.domNode, $('.openide-chat-sessions-head'));
-		this._head = head;
-		// Native `InputBox`, not a bordered div around a bare input: it brings the theme's input
-		// colours, focus ring and high-contrast handling instead of a second copy that drifts. The
-		// magnifier is laid over it in CSS, so the only border here is the themed one.
-		const searchRow = append(head, $('.openide-chat-sessions-search'));
+		this._head = append(this.domNode, $('.openide-chat-sessions-head'));
+		const searchRow = append(this._head, $('.openide-chat-sessions-search'));
 		this._searchBox = this._register(new InputBox(searchRow, undefined, {
-			placeholder: t('sessions.search'),
-			ariaLabel: t('sessions.search'),
-			inputBoxStyles: openideSearchBoxStyles,
+			placeholder: t('sessions.search'), ariaLabel: t('sessions.search'), inputBoxStyles: openideSearchBoxStyles,
 		}));
 		append(searchRow, $('span.codicon.codicon-search.openide-chat-sessions-search-icon'));
 		this._search = this._searchBox.inputElement;
-		const filterButton = menuRowAction('filter', t('sessions.filter'), { hoverService: this.hoverService, store: this._store });
-		append(head, filterButton);
-
-		this._listHost = $('.openide-chat-sessions-list');
-		this._scroll = this._register(new DomScrollableElement(this._listHost, { vertical: ScrollbarVisibility.Auto, horizontal: ScrollbarVisibility.Hidden, useShadows: false }));
-		this._scroll.getDomNode().classList.add('openide-chat-sessions-scroll');
-		append(this.domNode, this._scroll.getDomNode());
-
+		const filterButton = append(this._head, menuRowAction('filter', t('sessions.filter'), { hoverService: this.hoverService, store: this._store }));
 		this._sessionMenu = this._register(new SessionActionsMenu(contextViewService));
 		this._filterMenu = this._register(new FilterMenu(contextViewService, () => this._filter, filter => { this._filter = filter; this.render(); }));
+		this._register(addDisposableListener(filterButton, 'click', event => { event.stopPropagation(); this._filterMenu.toggle(this._head, filterButton); }));
+		this._register(addDisposableListener(this._search, 'input', () => { this._query = this._search.value; this.render(); }));
 
-		this._register(addDisposableListener(filterButton, 'click', event => {
-			event.stopPropagation();
-			this._filterMenu.toggle(this._head, filterButton);
+		this._listHost = append(this.domNode, $('.openide-chat-sessions-list.openide-chat-sessions-scroll'));
+		this._emptyHost = append(this.domNode, $('.openide-chat-sessions-empty'));
+		this._list = this._register(new List<NavigationEntry>('OpenideChatSessions', this._listHost, {
+			getHeight: entry => entry.kind === 'session' ? this._compact ? 40 : 52 : 32,
+			getTemplateId: () => 'navigation',
+		}, [{
+			templateId: 'navigation',
+			renderTemplate: container => ({ container, store: new DisposableStore() }),
+			renderElement: (entry, _index, template: NavigationTemplate) => this._bindTemplate(entry, template),
+			disposeElement: (entry, _index, template) => {
+				if (entry.kind === 'session' && entry.session.id === this._menuSessionId) { this._sessionMenu.close(); this._menuSessionId = undefined; }
+				if (this._templates.get(entry.id) === template) { this._templates.delete(entry.id); }
+				// A recycled template must never retain a hover, input listener or session closure.
+				template.store.clear(); template.entry = undefined; template.update = undefined; clearNode(template.container);
+			},
+			disposeTemplate: template => template.store.dispose(),
+		}], {
+			horizontalScrolling: false, keyboardSupport: false, mouseSupport: false, multipleSelectionSupport: false,
+			identityProvider: { getId: entry => entry.id },
+			accessibilityProvider: {
+				getWidgetAriaLabel: () => t('sessions.navigation.list'), getWidgetRole: () => 'list', getRole: () => 'listitem',
+				getAriaLabel: entry => entry.kind === 'group' ? entry.project.label : entry.kind === 'children' ? t('agentWindow.subagents') : entry.session.title,
+			},
 		}));
-		this._register(addDisposableListener(this._search, 'input', () => {
-			this._query = this._search.value;
+		this._list.style({ ...defaultListStyles, listBackground: 'transparent', listHoverBackground: undefined, listHoverForeground: undefined, listInactiveFocusBackground: undefined });
+		this._register(addDisposableListener(this.domNode, 'keydown', event => this._onKeyDown(event)));
+		const observer = new (getWindow(parent).ResizeObserver)(() => this._layoutList());
+		observer.observe(this.domNode);
+		this._register(toDisposable(() => observer.disconnect()));
+		this._register(onDidChangeOpenideLanguage(() => {
+			this._languageVersion++;
+			this._emptyKey = undefined;
+			this._searchBox.setPlaceHolder(t('sessions.search')); this._searchBox.setAriaLabel(t('sessions.search'));
 			this.render();
 		}));
-		this._register(addDisposableListener(this.domNode, 'keydown', (event: KeyboardEvent) => {
-			if (event.key === 'Escape' && !event.isComposing) {
-				event.preventDefault();
-				this.setOpen(false);
-			}
-		}));
-		this._register(onDidChangeOpenideLanguage(() => this._repaintChrome()));
 		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => this.render()));
 		this._register(this.subagentRuns.onDidChangeRun(event => {
 			if (event.type === 'timeline' || !this._subagentTasks.has(event.run.runId)) { return; }
-			const previous = this._subagentTasks.get(event.run.runId);
-			if (previous && previous.task === event.run.task && previous.profile === (event.run.profile ?? event.run.routingDecision?.profile) && previous.readonly === event.run.readonly) { return; }
 			const task = this._avatarTask(event.run);
+			const previous = this._subagentTasks.get(event.run.runId);
+			if (previous?.task === task.task && previous?.profile === task.profile && previous?.readonly === task.readonly) { return; }
 			this._subagentTasks.set(event.run.runId, task);
-			const icon = this._subagentIcons.get(event.run.runId);
-			const kind = subagentAvatarKind(task);
-			if (icon && icon.kind !== kind) {
-				const node = createSubagentAvatar(task);
-				icon.node.replaceWith(node);
-				this._subagentIcons.set(event.run.runId, { node, kind });
+			for (const template of this._templates.values()) {
+				if (template.entry?.kind === 'child' && template.entry.session.subagentRunId === event.run.runId) { template.update?.(); }
 			}
 		}));
 	}
 
-	/** Standalone agent windows use a central search picker; IDE panels retain their search row. */
+	/** Standalone windows use their central search; the IDE panel keeps search and filters. */
 	setCompact(compact: boolean): void {
+		if (this._compact === compact) { return; }
 		this._compact = compact;
-		this.domNode.classList.toggle('compact', compact);
-		this._head.hidden = compact;
-		if (compact) {
-			this._filterMenu.close();
-			this._filter = 'all';
-			this._query = '';
-			this._searchBox.value = '';
-			this.render();
-		}
-		this.render();
-		this._scroll.scanDomNode();
+		this.domNode.classList.toggle('compact', compact); this._head.hidden = compact;
+		if (compact) { this._filterMenu.close(); this._filter = 'all'; this._query = ''; this._searchBox.value = ''; }
+		// Action sets differ between compact and IDE mode; templates are rebuilt only for this explicit switch.
+		this._list.splice(0, this._entries.length); this._entries = [];
+		this.render(); this._layoutList();
 	}
-
-	get isOpen(): boolean {
-		return this._open;
-	}
-
-	get mode(): OpenideSessionsPaneMode {
-		if (this._full) { return 'full'; }
-		return this._lastWidth >= SIDE_BY_SIDE_MIN_WIDTH ? 'side' : 'stacked';
-	}
-
-	/** Full mode = the panel IS the body while no session is open; it cannot be dismissed. */
-	setFull(full: boolean): void {
-		if (this._full === full) { return; }
-		this._full = full;
-		this._applyMode();
-		if (full) { this.setOpen(true); }
-	}
-
+	get isOpen(): boolean { return this._open; }
+	get mode(): OpenideSessionsPaneMode { return this._full ? 'full' : this._lastWidth >= SIDE_BY_SIDE_MIN_WIDTH ? 'side' : 'stacked'; }
+	setFull(full: boolean): void { if (this._full === full) { return; } this._full = full; this._applyMode(); if (full) { this.setOpen(true); } }
 	private _applyMode(): void {
-		const mode = this.mode;
-		this.domNode.classList.toggle('full', mode === 'full');
-		this.domNode.classList.toggle('side', mode === 'side');
-		this.domNode.classList.toggle('stacked', mode === 'stacked');
+		for (const mode of ['full', 'side', 'stacked']) { this.domNode.classList.toggle(mode, this.mode === mode); }
 	}
-
 	setOpen(open: boolean): void {
-		if (this._open === open || (!open && this._full)) {
-			return;
-		}
-		this._open = open;
-		this.domNode.classList.toggle('hidden', !open);
-		if (open) {
-			this.render();
-		} else {
-			this._filterMenu.close();
-		}
+		if (this._open === open || (!open && this._full)) { return; }
+		this._open = open; this.domNode.classList.toggle('hidden', !open);
+		if (open) { this.render(); this._layoutList(); } else { this._filterMenu.close(); this._sessionMenu.close(); }
 		this._onDidChangeOpen.fire(open);
 	}
-
-	toggle(): void {
-		this.setOpen(!this._open);
-	}
-
-	/**
-	 * Positions the panel: beside the transcript when wide, over it when narrow, and as the body
-	 * (down to the composer) in full mode.
-	 */
+	toggle(): void { this.setOpen(!this._open); }
 	layout(width: number, headerHeight: number, bottom = 0): void {
-		this._lastWidth = width;
-		this._applyMode();
-		this.domNode.style.top = `${headerHeight}px`;
-		this.domNode.style.bottom = this._full ? `${bottom}px` : '0';
-		this._scroll.scanDomNode();
+		this._lastWidth = width; this._applyMode();
+		this.domNode.style.top = `${headerHeight}px`; this.domNode.style.bottom = this._full ? `${bottom}px` : '0';
+		this._layoutList();
+	}
+	private _layoutList(): void {
+		if (!this._open) { return; }
+		this._list.layout(this._listHost.clientHeight, this._listHost.clientWidth);
 	}
 
-	private _repaintChrome(): void {
-		this._renderKey = undefined;
-		this._searchBox.setPlaceHolder(t('sessions.search'));
-		this._searchBox.setAriaLabel(t('sessions.search'));
-		this.render();
-	}
-
-	/** Repaints the rows only; the search field keeps its focus and text. */
+	/** Build lightweight metadata entries, retaining their identity; transcripts stay in storage. */
 	render(): void {
-		if (!this._open) {
-			return;
-		}
-		const oldRows = Array.from(this._listHost.querySelectorAll<HTMLElement>('.openide-chat-sessions-row'));
-		const focusedRow = oldRows.find(row => row.contains(this.domNode.ownerDocument.activeElement));
-		const focusedId = focusedRow?.dataset.sessionId;
-		const focusedIndex = focusedRow ? oldRows.indexOf(focusedRow) : -1;
-		const query = this._query.trim().toLowerCase();
+		if (!this._open) { return; }
 		const activeId = this.sessions.activeSessionId();
-		const now = Date.now();
+		const openOrder = new Map(this.sessions.openTabs().map((session, index) => [session.id, index]));
+		const openIds = new Set(openOrder.keys());
 		const folders = this.workspaceContextService.getWorkspace().folders;
+		const query = this._query.trim().toLowerCase();
 		const all = this.sessions.listAll();
-		const visible = all
-			.filter(session => !session.subagentRunId)
-			.filter(session => !session.empty || session.pinned || session.id === activeId)
+		const children = new Map<string, IChatSessionMeta[]>();
+		const runIds = new Set<string>();
+		for (const session of all) {
+			if (!session.subagentRunId || !session.parentSessionId) { continue; }
+			runIds.add(session.subagentRunId);
+			const siblings = children.get(session.parentSessionId) ?? [];
+			siblings.push(session); children.set(session.parentSessionId, siblings);
+		}
+		for (const id of this._subagentTasks.keys()) { if (!runIds.has(id)) { this._subagentTasks.delete(id); } }
+		const visible = all.filter(session => !session.subagentRunId && (!session.empty || session.pinned || session.id === activeId || openIds.has(session.id)))
 			.filter(session => this._compact || matchesOpenideSessionsFilter(session, this._filter))
 			.filter(session => {
 				const project = sessionProjectContext(session, folders);
 				return !query || [session.title, project.label, project.path, getOpenideCli(session.cliId)?.name].some(value => value?.toLowerCase().includes(query));
 			});
-		// No-op notifications keep DOM targets (and open native previews) stable.
-		const renderKey = JSON.stringify([all.filter(session => session.subagentRunId), this._compact, [...this._expandedGroups], this._renaming?.id, this._filter, query, activeId, Math.floor(now / 60_000), visible, folders.map(folder => [folder.name, folder.uri.toString()]), this.sessions.openTabs().map(session => session.id)]);
-		if (renderKey === this._renderKey) { return; }
-		this._renderKey = renderKey;
-		this._sessionMenu.close();
-		this._rowsStore.clear();
-		this._subagentIcons.clear();
-		const runIds = new Set(all.map(session => session.subagentRunId));
-		for (const id of this._subagentTasks.keys()) { if (!runIds.has(id)) { this._subagentTasks.delete(id); } }
-		clearNode(this._listHost);
-		if (!visible.length) {
-			const filtered = !!query || this._filter !== 'all';
-			const commandId = this._compact ? AgentWindowAction.newChat : 'openide.agent.newChat';
-			this._rowsStore.add(this.instantiationService.createInstance(OpenideEmptyState, this._listHost, {
-				title: t('sessions.empty'), description: '', compact: true,
-				actions: filtered ? [{
-					label: t('openide.sessions.clearFilters'),
-					run: () => { this._query = ''; this._filter = 'all'; this._searchBox.value = ''; this.render(); this._search.focus(); },
-				}] : [{ label: t('chat.header.newTitle'), commandId, run: async () => { await this.commandService.executeCommand(commandId); } }],
-			}));
-			if (focusedRow) { this._search.focus(); }
-			this._scroll.scanDomNode();
-			return;
-		}
-		const projects = new Map<string, { project: IOpenideSessionProject; sessions: IChatSessionMeta[] }>();
-		if (this._compact && visible.some(session => session.pinned && !session.archived)) {
-			projects.set('pinned', { project: { id: 'pinned', label: t('sessions.group.pinned') }, sessions: visible.filter(session => session.pinned && !session.archived) });
+		const groups = new Map<string, { project: IOpenideSessionProject; sessions: IChatSessionMeta[] }>();
+		const addGroup = (id: string, label: string, sessions: IChatSessionMeta[], path?: string) => {
+			if (sessions.length) { groups.set(id, { project: { id, label, path }, sessions }); }
+		};
+		if (this._compact) {
+			addGroup('pinned', t('sessions.group.pinned'), visible.filter(session => session.pinned && !session.archived));
+			// Open is tab membership, never a synonym for running. A completed tab stays here.
+			addGroup('opened', t('sessions.navigation.opened'), visible.filter(session => !session.pinned && !session.archived && openIds.has(session.id)).sort((a, b) => openOrder.get(a.id)! - openOrder.get(b.id)!));
 		}
 		for (const session of visible) {
-			if (this._compact && (session.pinned || session.archived)) { continue; }
+			if (this._compact && (session.pinned || session.archived || openIds.has(session.id))) { continue; }
 			const project = sessionProjectContext(session, folders);
-			let group = projects.get(project.id);
-			if (!group) { group = { project, sessions: [] }; projects.set(project.id, group); }
+			let group = groups.get(project.id);
+			if (!group) {
+				group = { project: this._compact ? { ...project, label: project.id === 'no-project' ? t('sessions.navigation.history') : t('sessions.navigation.historyProject', project.label) } : project, sessions: [] };
+				groups.set(project.id, group);
+			}
 			group.sessions.push(session);
 		}
-		if (this._compact && visible.some(session => session.archived)) {
-			projects.set('archived', { project: { id: 'archived', label: t('sessions.filter.archived') }, sessions: visible.filter(session => session.archived) });
-		}
-		for (const { project, sessions } of projects.values()) {
-			const section = append(this._listHost, $(this._compact ? 'button.openide-chat-sessions-group.oi-btn.ghost.oi-dock-row' : '.openide-chat-sessions-group.oi-dock-section'));
-			section.dataset.projectId = project.id;
-			append(section, menuIcon(project.id === 'pinned' ? 'pin' : project.id === 'archived' ? 'archive' : 'folder'));
-			append(section, $('span.openide-chat-sessions-group-title', undefined, project.label));
-			append(section, $('span.openide-chat-sessions-group-count', undefined, String(sessions.length)));
-			if (project.path) {
-				const projectPath = project.path;
-				this._rowsStore.add(this.hoverService.setupDelayedHover(section, () => {
-					const preview = $('.openide-chat-session-preview');
-					const heading = append(preview, $('.openide-chat-session-preview-heading'));
-					append(heading, menuIcon('folder'));
-					append(heading, $('.openide-chat-session-preview-title', undefined, project.label));
-					const activity = append(preview, $('.openide-chat-session-preview-activity'));
-					append(activity, menuIcon('comment'));
-					const active = sessions.filter(session => session.status === 'in-progress').length;
-					append(activity, $('span', undefined, t('openide.sessions.projectActivity', sessions.length, active)));
-					const context = append(preview, $('.openide-chat-session-preview-context'));
-					append(context, menuIcon('folder-opened'));
-					append(context, $('span', undefined, projectPath));
-					return { content: preview, position: { hoverPosition: HoverPosition.RIGHT }, appearance: OPENIDE_CHAT_HOVER_APPEARANCE, persistence: { hideOnHover: false } };
-				}, { groupId: OPENIDE_CHAT_HOVER_GROUP }));
+		if (this._compact) { addGroup('archived', t('sessions.filter.archived'), visible.filter(session => session.archived)); }
+		const next: NavigationEntry[] = [];
+		for (const { project, sessions } of groups.values()) {
+			const expanded = !this._collapsedGroups.has(project.id) || !!query;
+			next.push({ id: `group:${project.id}`, kind: 'group', project, count: sessions.length, running: sessions.filter(session => session.status === 'in-progress').length, expanded });
+			if (!expanded) { continue; }
+			for (const session of sessions) {
+				next.push({ id: `session:${session.id}`, kind: 'session', session, project: sessionProjectContext(session, folders), active: session.id === activeId, open: openIds.has(session.id) });
+				const workers = children.get(session.id);
+				if (!workers?.length) { continue; }
+				const expanded = this._expandedParents.has(session.id);
+				next.push({ id: `children:${session.id}`, kind: 'children', parentId: session.id, count: workers.length, expanded });
+				if (expanded) {
+					for (const worker of workers) { next.push({ id: `child:${worker.id}`, kind: 'child', session: worker, parentId: session.id }); }
+				}
 			}
-			const populate = (content: HTMLElement) => {
-				const limited = this._compact && project.id !== 'pinned' && !this._expandedGroups.has(project.id);
-				const recent = limited ? sessions.filter((session, index) => index < COMPACT_RECENT_LIMIT || session.id === activeId || session.id === this._renaming?.id) : sessions;
-				for (const session of recent) {
-					const row = append(content, this._renderRow(session, session.id === activeId, now, sessionProjectContext(session, folders)));
-					const children = all.filter(child => child.subagentRunId && child.parentSessionId === session.id);
-					if (children.length) { this._renderSubagents(content, row, session, children); }
-				}
-				if (this._compact && project.id !== 'pinned' && sessions.length > COMPACT_RECENT_LIMIT) {
-					const more = append(content, $<HTMLButtonElement>('button.oi-btn.ghost.openide-chat-sessions-more', { type: 'button', 'data-more-project-id': project.id }, t(limited ? 'sessions.showMore' : 'sessions.showLess')));
-					this._rowsStore.add(addDisposableListener(more, 'click', () => {
-						if (limited) { this._expandedGroups.add(project.id); } else { this._expandedGroups.delete(project.id); }
-						this.render();
-						Array.from(this._listHost.querySelectorAll<HTMLElement>('[data-more-project-id]')).find(element => element.dataset.moreProjectId === project.id)?.focus();
-					}));
-				}
-			};
-			if (this._compact) {
-				section.setAttribute('type', 'button');
-				append(section, menuIcon('chevron-right')).classList.add('openide-chat-sessions-chevron');
-				this._disclosure(this._listHost, section, !this._collapsedGroups.has(project.id), populate, expanded => {
-					if (expanded) { this._collapsedGroups.delete(project.id); } else { this._collapsedGroups.add(project.id); }
-				});
-			} else { populate(this._listHost); }
-
 		}
-		if (this._renaming) {
-			this._listHost.querySelector<HTMLInputElement>('.openide-chat-sessions-rename input')?.focus({ preventScroll: true });
-		} else if (focusedRow) {
-			const rows = Array.from(this._listHost.querySelectorAll<HTMLElement>('.openide-chat-sessions-row'));
-			const next = rows.find(row => row.dataset.sessionId === focusedId) ?? rows[Math.min(focusedIndex, rows.length - 1)];
-			next?.querySelector<HTMLButtonElement>('.openide-chat-sessions-open')?.focus({ preventScroll: true });
-		}
-		this._scroll.scanDomNode();
+		this._reconcile(next);
+		this._listHost.hidden = !visible.length; this._emptyHost.hidden = !!visible.length;
+		if (!visible.length) { this._showEmpty(); } else { this._emptyStore.clear(); clearNode(this._emptyHost); this._emptyKey = undefined; }
+		if (this._menuSessionId && !next.some(entry => entry.kind === 'session' && entry.session.id === this._menuSessionId)) { this._sessionMenu.close(); this._menuSessionId = undefined; }
+		this._layoutList();
 	}
 
-	/** Keep branch DOM and focus stable; only materialize children when first expanded. */
-	private _disclosure(host: HTMLElement, toggle: HTMLElement, expanded: boolean, populate: (content: HTMLElement) => void, changed: (expanded: boolean) => void): void {
-		const reveal = append(host, $('.openide-chat-sessions-reveal'));
-		const clip = append(reveal, $('.openide-chat-sessions-clip'));
-		const content = append(clip, $('.openide-chat-sessions-branch'));
-		let populated = false;
-		const update = () => {
-			if (expanded && !populated) { populate(content); populated = true; }
-			toggle.setAttribute('aria-expanded', String(expanded));
-			content.inert = !expanded;
-			reveal.classList.toggle('expanded', expanded);
-		};
-		update();
-		const observer = new (getWindow(host).ResizeObserver)(() => this._scroll.scanDomNode());
-		observer.observe(reveal);
-		this._rowsStore.add(toDisposable(() => observer.disconnect()));
-		this._rowsStore.add(addDisposableListener(toggle, 'click', () => {
-			expanded = !expanded;
-			changed(expanded);
-			update();
+	private _reconcile(next: NavigationEntry[]): void {
+		const activeElement = this.domNode.ownerDocument.activeElement;
+		const focused = activeElement instanceof getWindow(this.domNode).HTMLElement ? activeElement.closest<HTMLElement>('[data-navigation-id]')?.dataset.navigationId : undefined;
+		const previousIndex = focused ? this._entries.findIndex(entry => entry.id === focused) : -1;
+		const oldById = new Map(this._entries.map(entry => [entry.id, entry]));
+		for (let index = 0; index < next.length; index++) {
+			const previous = oldById.get(next[index].id);
+			if (previous) { Object.assign(previous, next[index]); next[index] = previous; }
+		}
+		let start = 0;
+		while (start < next.length && start < this._entries.length && next[start].id === this._entries[start].id) { start++; }
+		let oldEnd = this._entries.length; let newEnd = next.length;
+		while (oldEnd > start && newEnd > start && this._entries[oldEnd - 1].id === next[newEnd - 1].id) { oldEnd--; newEnd--; }
+		const scrollTop = this._list.scrollTop;
+		if (oldEnd !== start || newEnd !== start) { this._list.splice(start, oldEnd - start, next.slice(start, newEnd)); }
+		this._entries = next;
+		// Status/title changes do not splice, replace targets or close menus. Only mounted rows are patched.
+		for (const template of this._templates.values()) { template.update?.(); }
+		this._list.scrollTop = scrollTop;
+		if (focused && activeElement && !activeElement.isConnected) {
+			const index = next.findIndex(entry => entry.id === focused);
+			this._focusEntry(index < 0 ? Math.min(previousIndex, next.length - 1) : index);
+		}
+	}
+
+	private _showEmpty(): void {
+		const filtered = !!this._query || this._filter !== 'all';
+		const key = `${filtered}:${this._compact}:${this._languageVersion}`;
+		if (key === this._emptyKey) { return; }
+		this._emptyKey = key; this._emptyStore.clear(); clearNode(this._emptyHost);
+		const commandId = this._compact ? AgentWindowAction.newChat : 'openide.agent.newChat';
+		this._emptyStore.add(this.instantiationService.createInstance(OpenideEmptyState, this._emptyHost, {
+			title: t('sessions.empty'), description: '', compact: true,
+			actions: filtered ? [{ label: t('openide.sessions.clearFilters'), run: () => { this._query = ''; this._filter = 'all'; this._searchBox.value = ''; this.render(); this._search.focus(); } }]
+				: [{ label: t('chat.header.newTitle'), commandId, run: async () => { await this.commandService.executeCommand(commandId); } }],
 		}));
 	}
 
-	private _avatarTask(run: ISubagentRun): SubagentAvatarTask {
-		return { task: run.task, profile: run.profile ?? run.routingDecision?.profile, readonly: run.readonly };
-	}
-
-	private _subagentAvatar(child: IChatSessionMeta): HTMLElement {
-		const runId = child.subagentRunId!;
-		if (!this._subagentTasks.has(runId)) {
-			const run = this.subagentRuns.get(runId);
-			this._subagentTasks.set(runId, run ? this._avatarTask(run) : undefined);
-		}
-		const task = this._subagentTasks.get(runId) ?? { task: child.title };
-		const node = createSubagentAvatar(task);
-		this._subagentIcons.set(runId, { node, kind: subagentAvatarKind(task) });
-		return node;
-	}
-
-	private _renderSubagents(host: HTMLElement, row: HTMLElement, parent: IChatSessionMeta, children: IChatSessionMeta[]): void {
-		const group = append(host, $('.openide-chat-sessions-children'));
-		group.dataset.parentSessionId = parent.id;
-		const expanded = this._expandedParents.has(parent.id);
-		const toggle = append(group, $<HTMLButtonElement>('button.oi-btn.ghost.openide-chat-sessions-children-toggle', { type: 'button', 'aria-expanded': String(expanded) }));
-		append(toggle, menuIcon('chevron-right')).classList.add('openide-chat-sessions-chevron');
-		append(toggle, $('span', undefined, `${t('agentWindow.subagents')} · ${children.length}`));
-		row.classList.add('has-subagents');
-		this._disclosure(group, toggle, expanded, content => {
-			for (const child of children) {
-				const button = append(content, $<HTMLButtonElement>('button.oi-btn.ghost.openide-chat-sessions-child', { type: 'button', 'data-subagent-session-id': child.id }));
-				append(button, this._subagentAvatar(child));
-				const title = append(button, $('span.openide-chat-sessions-child-title', undefined, child.title));
-				const status = createChatSessionStatusIcon(button.ownerDocument, child.status);
-				if (status) { append(button, status); }
-				this._rowsStore.add(setupChatTooltip(this.hoverService, button, () => child.title, { position: HoverPosition.RIGHT }));
-				this._rowsStore.add(setupOverflowFade(title));
-				this._rowsStore.add(addDisposableListener(button, 'click', () => {
-					this._onDidOpenSession.fire(parent.id);
-					this._onDidOpenSubagent.fire(child.id);
-				}));
+	private _bindTemplate(entry: NavigationEntry, template: NavigationTemplate): void {
+		if (template.entry?.id !== entry.id) {
+			if (template.entry) { this._templates.delete(template.entry.id); }
+			template.store.clear(); clearNode(template.container);
+			template.entry = entry;
+			template.container.dataset.navigationId = entry.id;
+			this._templates.set(entry.id, template);
+			switch (entry.kind) {
+				case 'group': this._renderGroup(entry, template); break;
+				case 'session': this._renderRow(entry, template); break;
+				case 'children': this._renderChildren(entry, template); break;
+				case 'child': this._renderChild(entry, template); break;
 			}
-		}, expanded => {
-			if (expanded) { this._expandedParents.add(parent.id); } else { this._expandedParents.delete(parent.id); }
-		});
+		}
+		template.update?.();
 	}
 
-	private _renderRow(session: IChatSessionMeta, active: boolean, now: number, project: IOpenideSessionProject): HTMLElement {
-		const row = $('.openide-chat-sessions-row');
-		row.classList.toggle('active', active);
-		row.classList.toggle('unread', !!session.unread);
-		row.classList.toggle('has-status', !!session.status && session.status !== 'completed');
-		row.dataset.sessionId = session.id;
-		if (this._renaming?.id === session.id) { return this._renderRename(row, session); }
-		const primary = append(row, $<HTMLButtonElement>('button.openide-chat-sessions-open.oi-dock-row', { type: 'button' }));
-		primary.classList.toggle('selected', active);
-		if (active) { primary.setAttribute('aria-current', 'true'); }
-
-		const statusIcon = createChatSessionStatusIcon(primary.ownerDocument, session.status);
-		if (statusIcon && !this._compact) { append(primary, statusIcon); }
-		if (session.kind === 'cli' || session.forked) {
-			const kind = append(primary, $('span.openide-chat-sessions-kind', { 'aria-hidden': 'true' }));
-			append(kind, menuIcon(session.kind === 'cli' ? 'terminal' : 'repo-forked'));
-		}
-
-		const title = session.title || t('chat.header.newTitle');
-		const body = append(primary, $('span.openide-chat-sessions-body'));
-		append(body, $('span.openide-chat-sessions-row-title', undefined, title));
-		if (statusIcon && this._compact) { append(primary, statusIcon); }
-		row.classList.toggle('running', session.status === 'in-progress');
-		append(primary, $('time.openide-chat-sessions-row-time', { 'aria-hidden': 'true', datetime: new Date(session.updatedAt).toISOString() }, relativeTimeLabel(session.updatedAt, now)));
-		const cli = getOpenideCli(session.cliId);
-		const status = session.status ? t(statusKey(session.status)) : '';
-		primary.setAttribute('aria-label', [title, project.label, cli?.name, status, relativeTimeLabel(session.updatedAt, now)].filter(Boolean).join(' · '));
-		// One stable target owns the preview. Child title/status tooltips would compete as the
-		// pointer crosses them, and rebuilding it on mousemove would make it flicker.
-		this._rowsStore.add(this.hoverService.setupDelayedHover(primary, () => {
+	private _renderGroup(entry: Extract<NavigationEntry, { kind: 'group' }>, template: NavigationTemplate): void {
+		const button = append(template.container, $<HTMLButtonElement>('button.openide-chat-sessions-group.oi-btn.ghost.oi-dock-row', { type: 'button', 'data-project-id': entry.project.id }));
+		append(button, menuIcon(entry.project.id === 'pinned' ? 'pin' : entry.project.id === 'opened' ? 'comment-discussion' : entry.project.id === 'archived' ? 'archive' : 'history'));
+		const title = append(button, $('span.openide-chat-sessions-group-title'));
+		const count = append(button, $('span.openide-chat-sessions-group-count'));
+		append(button, menuIcon('chevron-right')).classList.add('openide-chat-sessions-chevron');
+		template.update = () => { setText(title, entry.project.label); setText(count, String(entry.count)); button.setAttribute('aria-expanded', String(entry.expanded)); };
+		template.store.add(addDisposableListener(button, 'click', () => {
+			if (entry.expanded) { this._collapsedGroups.add(entry.project.id); } else { this._collapsedGroups.delete(entry.project.id); }
+			this.render();
+		}));
+		template.store.add(this.hoverService.setupDelayedHover(button, () => {
 			const preview = $('.openide-chat-session-preview');
 			const heading = append(preview, $('.openide-chat-session-preview-heading'));
-			append(heading, $('.openide-chat-session-preview-title', undefined, title));
-			const meta = append(heading, $('.openide-chat-session-preview-meta'));
-			append(meta, menuIcon(session.kind === 'cli' ? 'terminal' : 'device-desktop'));
-			append(meta, $('span', undefined, relativeTimeLabel(session.updatedAt, Date.now())));
-			const context = append(preview, $('.openide-chat-session-preview-context'));
-			append(context, menuIcon('folder'));
-			append(context, $('span', undefined, project.label));
+			append(heading, menuIcon('folder'));
+			append(heading, $('.openide-chat-session-preview-title', undefined, entry.project.label));
+			append(preview, $('.openide-chat-session-preview-activity', undefined, t('openide.sessions.projectActivity', entry.count, entry.running)));
+			if (entry.project.path) {
+				const context = append(preview, $('.openide-chat-session-preview-context'));
+				append(context, menuIcon('folder-opened')); append(context, $('span', undefined, entry.project.path));
+			}
+			return { content: preview, position: { hoverPosition: HoverPosition.RIGHT }, appearance: OPENIDE_CHAT_HOVER_APPEARANCE, persistence: { hideOnHover: false } };
+		}, { groupId: OPENIDE_CHAT_HOVER_GROUP }));
+	}
+
+	private _renderChildren(entry: Extract<NavigationEntry, { kind: 'children' }>, template: NavigationTemplate): void {
+		const group = append(template.container, $('.openide-chat-sessions-children', { 'data-parent-session-id': entry.parentId }));
+		const button = append(group, $<HTMLButtonElement>('button.oi-btn.ghost.openide-chat-sessions-children-toggle', { type: 'button' }));
+		append(button, menuIcon('chevron-right')).classList.add('openide-chat-sessions-chevron');
+		const title = append(button, $('span'));
+		template.update = () => { setText(title, `${t('agentWindow.subagents')} · ${entry.count}`); button.setAttribute('aria-expanded', String(entry.expanded)); };
+		template.store.add(addDisposableListener(button, 'click', () => {
+			if (entry.expanded) { this._expandedParents.delete(entry.parentId); } else { this._expandedParents.add(entry.parentId); }
+			this.render();
+		}));
+	}
+
+	private _avatarTask(run: ISubagentRun): SubagentAvatarTask { return { task: run.task, profile: run.profile ?? run.routingDecision?.profile, readonly: run.readonly }; }
+	private _renderChild(entry: Extract<NavigationEntry, { kind: 'child' }>, template: NavigationTemplate): void {
+		const button = append(template.container, $<HTMLButtonElement>('button.oi-btn.ghost.openide-chat-sessions-child', { type: 'button', 'data-subagent-session-id': entry.session.id }));
+		let avatar: HTMLElement | undefined;
+		let avatarKind: string | undefined;
+		let previousStatus: IChatSessionMeta['status'];
+		const title = append(button, $('span.openide-chat-sessions-child-title'));
+		const activity = append(button, $('span.openide-chat-sessions-activity'));
+		template.update = () => {
+			const runId = entry.session.subagentRunId!;
+			if (!this._subagentTasks.has(runId)) {
+				const run = this.subagentRuns.get(runId); this._subagentTasks.set(runId, run ? this._avatarTask(run) : undefined);
+			}
+			const task = this._subagentTasks.get(runId) ?? { task: entry.session.title };
+			const kind = subagentAvatarKind(task);
+			if (!avatar || avatarKind !== kind) { avatar?.remove(); avatar = createSubagentAvatar(task); button.prepend(avatar); avatarKind = kind; }
+			setText(title, entry.session.title);
+			if (previousStatus !== entry.session.status) {
+				clearNode(activity); const icon = createChatSessionStatusIcon(button.ownerDocument, entry.session.status); if (icon) { append(activity, icon); }
+				previousStatus = entry.session.status;
+			}
+		};
+		template.store.add(setupChatTooltip(this.hoverService, button, () => entry.session.title, { position: HoverPosition.RIGHT }));
+		template.store.add(addDisposableListener(button, 'click', () => { this._onDidOpenSession.fire(entry.parentId); this._onDidOpenSubagent.fire(entry.session.id); }));
+	}
+
+	private _renderRow(entry: Extract<NavigationEntry, { kind: 'session' }>, template: NavigationTemplate): void {
+		const row = append(template.container, $('.openide-chat-sessions-row', { 'data-session-id': entry.session.id }));
+		const primary = append(row, $<HTMLButtonElement>('button.openide-chat-sessions-open.oi-dock-row', { type: 'button' }));
+		const kind = append(primary, $('span.openide-chat-sessions-kind', { 'aria-hidden': 'true' }));
+		const body = append(primary, $('span.openide-chat-sessions-body'));
+		const title = append(body, $('span.openide-chat-sessions-row-title'));
+		const subtitle = append(body, $('span.openide-chat-sessions-row-context', { 'aria-hidden': 'true' }));
+		const activity = append(primary, $('span.openide-chat-sessions-activity', { 'aria-hidden': 'true' }));
+		const time = append(primary, $('time.openide-chat-sessions-row-time', { 'aria-hidden': 'true' }));
+		const actions = append(row, $('span.openide-chat-sessions-row-actions'));
+		const actionsStore = template.store.add(new DisposableStore());
+		const renameStore = template.store.add(new DisposableStore());
+		let renameInput: InputBox | undefined;
+		let actionsKey: string | undefined;
+		let iconKey: string | undefined;
+		let status: IChatSessionMeta['status'];
+		let unread = false;
+		const update = () => {
+			const session = entry.session;
+			const renaming = this._renaming?.id === session.id;
+			row.classList.toggle('openide-chat-sessions-rename', renaming);
+			primary.hidden = renaming; actions.hidden = renaming;
+			if (renaming && !renameInput) {
+				renameInput = renameStore.add(new InputBox(row, undefined, { ariaLabel: t('sessions.action.rename'), inputBoxStyles: openideSearchBoxStyles }));
+				renameInput.value = this._renaming!.value;
+				const input = renameInput;
+				renameStore.add(input.onDidChange(value => { if (this._renaming?.id === session.id) { this._renaming.value = value; } }));
+				const finish = (save: boolean) => {
+					if (this._renaming?.id !== session.id) { return; }
+					this._renaming = undefined;
+					if (save && input.value.trim()) { this.sessions.rename(session.id, input.value.trim()); this._onDidMutate.fire(); }
+					this.render(); primary.focus({ preventScroll: true });
+				};
+				renameStore.add(addDisposableListener(input.inputElement, 'keydown', event => {
+					if (!event.isComposing && (event.key === 'Enter' || event.key === 'Escape')) { event.preventDefault(); event.stopPropagation(); finish(event.key === 'Enter'); }
+				}));
+				renameStore.add(addDisposableListener(input.inputElement, 'blur', () => finish(true)));
+				input.focus(); input.select();
+			} else if (!renaming && renameInput) { renameStore.clear(); renameInput.element.remove(); renameInput = undefined; }
+			row.classList.toggle('active', entry.active); row.classList.toggle('unread', !!session.unread); row.classList.toggle('running', session.status === 'in-progress');
+			row.classList.toggle('has-status', session.status === 'in-progress' || session.status === 'needs-input' || session.status === 'failed');
+			primary.classList.toggle('selected', entry.active); primary.setAttribute('aria-current', String(entry.active));
+			const cli = getOpenideCli(session.cliId);
+			const nextIcon = session.kind === 'cli' ? `cli:${cli?.icon ?? 'terminal'}` : 'openide';
+			if (iconKey !== nextIcon) {
+				clearNode(kind);
+				append(kind, session.kind === 'cli' && cli
+					? createProviderIcon(primary.ownerDocument, cli.icon, cli.name, 'openide-chat-sessions-provider-icon')
+					: session.kind === 'cli' ? menuIcon('terminal') : $('span.openide-chat-sessions-native-icon'));
+				iconKey = nextIcon;
+			}
+			setText(title, session.title || t('chat.header.newTitle'));
+			const activityLabel = session.status ? t(statusKey(session.status)) : '';
+			setText(subtitle, [entry.project.label, cli?.name, session.status === 'needs-input' || session.status === 'failed' || session.status === 'unknown' ? activityLabel : undefined].filter(Boolean).join(' · '));
+			if (status !== session.status || unread !== !!session.unread) {
+				clearNode(activity); const icon = createChatSessionStatusIcon(primary.ownerDocument, session.status);
+				if (icon) { append(activity, icon); } else if (session.unread) { append(activity, $('span.openide-chat-sessions-unread')); }
+				status = session.status; unread = !!session.unread;
+			}
+			setText(time, relativeTimeLabel(session.updatedAt, Date.now())); time.setAttribute('datetime', new Date(session.updatedAt).toISOString());
+			primary.setAttribute('aria-label', [title.textContent, entry.project.label, cli?.name, activityLabel, entry.open ? t('sessions.navigation.opened') : '', time.textContent].filter(Boolean).join(' · '));
+			const nextActionsKey = `${session.unread}:${session.archived}:${entry.open}:${session.kind}:${this._languageVersion}`;
+			if (actionsKey !== nextActionsKey) {
+				// The compact menu trigger is never replaced for streaming metadata changes.
+				if (!this._compact || actionsKey === undefined) { actionsStore.clear(); clearNode(actions); this._renderActions(entry, row, actions, actionsStore); }
+				actionsKey = nextActionsKey;
+			}
+		};
+		template.update = update;
+		template.store.add(addDisposableListener(primary, 'click', () => this._onDidOpenSession.fire(entry.session.id)));
+		template.store.add(this.hoverService.setupDelayedHover(primary, () => {
+			const session = entry.session;
+			const preview = $('.openide-chat-session-preview');
+			const heading = append(preview, $('.openide-chat-session-preview-heading'));
+			append(heading, $('.openide-chat-session-preview-title', undefined, session.title || t('chat.header.newTitle')));
+			append(heading, $('.openide-chat-session-preview-meta', undefined, relativeTimeLabel(session.updatedAt, Date.now())));
+			const context = append(preview, $('.openide-chat-session-preview-context')); append(context, menuIcon('folder'));
+			append(context, $('span', undefined, entry.project.path ?? entry.project.label));
 			const activity = append(preview, $('.openide-chat-session-preview-activity'));
-			const activityIcon = createChatSessionStatusIcon(primary.ownerDocument, session.status);
-			if (activityIcon) { append(activity, activityIcon); }
-			append(activity, $('span', undefined, [cli?.name, status].filter(Boolean).join(' · ')));
+			append(activity, $('span', undefined, [getOpenideCli(session.cliId)?.name, session.status ? t(statusKey(session.status)) : ''].filter(Boolean).join(' · ')));
 			activity.hidden = !activity.textContent;
 			return { id: `openide-session-preview-${session.id}`, content: preview, position: { hoverPosition: HoverPosition.RIGHT }, appearance: OPENIDE_CHAT_HOVER_APPEARANCE, persistence: { hideOnHover: false } };
 		}, { groupId: OPENIDE_CHAT_HOVER_GROUP }));
-
-		if (this._compact && session.unread && session.status !== 'in-progress') {
-			append(primary, $('span.openide-chat-sessions-unread', { 'aria-hidden': 'true' }));
-		}
-		const actions = append(row, $('span.openide-chat-sessions-row-actions'));
-		if (this._compact) {
-			const more = append(actions, menuRowAction('ellipsis', t('chat.header.more'), { hoverService: this.hoverService, store: this._rowsStore }));
-			this._rowsStore.add(addDisposableListener(more, 'click', event => {
-				event.stopPropagation();
-				this._sessionMenu.actions = this._sessionActions(session);
-				this._sessionMenu.toggle(row, more);
-			}));
-			row.style.setProperty('--oi-session-actions-width', '34px');
-			this._rowsStore.add(addDisposableListener(primary, 'click', () => this._onDidOpenSession.fire(session.id)));
-			return row;
-		}
-		if (session.unread) {
-			const read = append(actions, menuRowAction('eye', t('sessions.action.markRead'), { hoverService: this.hoverService, store: this._rowsStore }));
-			this._rowsStore.add(addDisposableListener(read, 'click', event => { event.stopPropagation(); this.sessions.markRead(session.id); this.render(); this._onDidMutate.fire(); }));
-		}
-		const archive = append(actions, menuRowAction(session.archived ? 'unarchive' : 'archive', t(session.archived ? 'sessions.action.unarchive' : 'sessions.action.archive'), { hoverService: this.hoverService, store: this._rowsStore }));
-		this._rowsStore.add(addDisposableListener(archive, 'click', event => {
-			event.stopPropagation();
-			if (session.archived) { this.sessions.unarchive(session.id); } else { this.sessions.archive(session.id); }
-			this.render();
-			this._onDidMutate.fire();
-		}));
-		if (session.kind === 'cli' && this.sessions.openTabs().some(open => open.id === session.id)) {
-			const close = append(actions, menuRowAction('close', t('sessions.action.closeSession'), { hoverService: this.hoverService, store: this._rowsStore }));
-			this._rowsStore.add(addDisposableListener(close, 'click', event => { event.stopPropagation(); this._onDidRequestCloseSession.fire(session.id); }));
-		}
-		const remove = append(actions, menuRowAction('trash', t('sessions.action.delete'), { hoverService: this.hoverService, store: this._rowsStore }));
-		this._rowsStore.add(addDisposableListener(remove, 'click', async event => {
-			event.stopPropagation();
-			if (await this.confirmDelete(session.id)) {
-				this.render();
-				this._onDidMutate.fire();
-			}
-		}));
-
-		row.style.setProperty('--oi-session-actions-width', `${actions.childElementCount * 26 + 8}px`);
-
-		this._rowsStore.add(addDisposableListener(primary, 'click', () => this._onDidOpenSession.fire(session.id)));
-		return row;
 	}
+
+	private _renderActions(entry: Extract<NavigationEntry, { kind: 'session' }>, row: HTMLElement, host: HTMLElement, store: DisposableStore): void {
+		if (this._compact) {
+			const more = append(host, menuRowAction('ellipsis', t('chat.header.more'), { hoverService: this.hoverService, store }));
+			store.add(addDisposableListener(more, 'click', event => {
+				event.stopPropagation(); this._menuSessionId = entry.session.id;
+				this._sessionMenu.actions = this._sessionActions(entry.session); this._sessionMenu.toggle(row, more);
+			}));
+		} else {
+			const actions = this._sessionActions(entry.session).filter(action => action.icon !== 'pin' && action.icon !== 'pinned' && action.icon !== 'edit');
+			for (const action of actions) {
+				const button = append(host, menuRowAction(action.icon, action.label, { hoverService: this.hoverService, store }));
+				store.add(addDisposableListener(button, 'click', event => { event.stopPropagation(); Promise.resolve(action.run()).catch(onUnexpectedError); }));
+			}
+		}
+		row.style.setProperty('--oi-session-actions-width', `${host.childElementCount * 26 + 8}px`);
+	}
+
 	private _sessionActions(session: IChatSessionMeta): ISessionMenuAction[] {
 		const mutate = (run: () => void) => () => { run(); this.render(); this._onDidMutate.fire(); };
 		const actions: ISessionMenuAction[] = [
 			{ icon: session.pinned ? 'pinned' : 'pin', label: t(session.pinned ? 'sessions.action.unpin' : 'sessions.action.pin'), run: mutate(() => this.sessions.setPinned(session.id, !session.pinned)) },
-			{ icon: 'edit', label: t('sessions.action.rename'), run: () => { this._renaming = { id: session.id, value: session.title }; this.render(); this._listHost.querySelector<HTMLInputElement>('.openide-chat-sessions-rename input')?.select(); } },
+			{ icon: 'edit', label: t('sessions.action.rename'), run: () => { this._renaming = { id: session.id, value: session.title }; this.render(); } },
 		];
 		if (session.unread) { actions.push({ icon: 'eye', label: t('sessions.action.markRead'), run: mutate(() => this.sessions.markRead(session.id)) }); }
 		actions.push({ icon: session.archived ? 'unarchive' : 'archive', label: t(session.archived ? 'sessions.action.unarchive' : 'sessions.action.archive'), run: mutate(() => session.archived ? this.sessions.unarchive(session.id) : this.sessions.archive(session.id)) });
-		if (session.kind === 'cli' && this.sessions.openTabs().some(open => open.id === session.id)) {
-			actions.push({ icon: 'close', label: t('sessions.action.closeSession'), run: () => this._onDidRequestCloseSession.fire(session.id) });
-		}
+		if (session.kind === 'cli' && this.sessions.openTabs().some(open => open.id === session.id)) { actions.push({ icon: 'close', label: t('sessions.action.closeSession'), run: () => this._onDidRequestCloseSession.fire(session.id) }); }
 		actions.push({ icon: 'trash', label: t('sessions.action.delete'), run: async () => { if (await this.confirmDelete(session.id)) { this.render(); this._onDidMutate.fire(); } } });
 		return actions;
 	}
 
-	private _renderRename(row: HTMLElement, session: IChatSessionMeta): HTMLElement {
-		row.classList.add('openide-chat-sessions-rename');
-		const input = this._rowsStore.add(new InputBox(row, undefined, { ariaLabel: t('sessions.action.rename'), inputBoxStyles: openideSearchBoxStyles }));
-		input.value = this._renaming!.value;
-		this._rowsStore.add(input.onDidChange(value => { if (this._renaming?.id === session.id) { this._renaming.value = value; } }));
-		let finished = false;
-		const finish = (save: boolean) => {
-			if (finished) { return; } finished = true;
-			this._renaming = undefined;
-			if (save && input.value.trim()) { this.sessions.rename(session.id, input.value.trim()); this._onDidMutate.fire(); }
-			this.render();
-		};
-		this._rowsStore.add(addDisposableListener(input.inputElement, 'keydown', event => {
-			if (event.isComposing) { return; }
-			if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(event.key === 'Enter'); }
-		}));
-		this._rowsStore.add(addDisposableListener(input.inputElement, 'blur', () => finish(true)));
-		return row;
+	private _focusEntry(index: number): void {
+		const entry = this._entries[index];
+		if (!entry) { if (!this._compact) { this._search.focus(); } return; }
+		this._list.reveal(index); this._list.setFocus([index]);
+		this._templates.get(entry.id)?.container.querySelector<HTMLElement>('button, input')?.focus({ preventScroll: true });
 	}
-
+	private _onKeyDown(event: KeyboardEvent): void {
+		if (event.isComposing) { return; }
+		const target = event.target as HTMLElement;
+		if (event.key === 'Escape') { event.preventDefault(); this.setOpen(false); return; }
+		if (target.closest('.openide-chat-sessions-rename, .openide-menu')) { return; }
+		const id = target.closest<HTMLElement>('[data-navigation-id]')?.dataset.navigationId;
+		const index = this._entries.findIndex(entry => entry.id === id);
+		if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || (index >= 0 && (event.key === 'Home' || event.key === 'End'))) {
+			event.preventDefault(); event.stopPropagation();
+			const next = event.key === 'Home' ? 0 : event.key === 'End' ? this._entries.length - 1 : Math.max(0, Math.min(this._entries.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+			this._focusEntry(next);
+		}
+	}
 }
 
 function statusKey(status: NonNullable<IChatSessionMeta['status']>): OpenideStringKey {
@@ -669,5 +632,11 @@ function statusKey(status: NonNullable<IChatSessionMeta['status']>): OpenideStri
 		case 'needs-input': return 'sessions.status.needsInput';
 		case 'completed': return 'sessions.status.completed';
 		case 'failed': return 'sessions.status.failed';
+		default: return 'sessions.navigation.unknown';
 	}
+}
+
+/** Keep unchanged labels intact during token and status notifications. */
+function setText(element: HTMLElement, value: string): void {
+	if (element.textContent !== value) { element.textContent = value; }
 }

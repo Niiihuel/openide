@@ -53,7 +53,7 @@ const MARKER = '.openide/agent-hooks/claude';
  * revision (no session guard, no StopFailure) and gets rewritten.
  */
 const SENTINEL = 'openideSessionId';
-const EVENTS = ['UserPromptSubmit', 'PreToolUse', 'Stop', 'StopFailure', 'Notification'] as const;
+const EVENTS = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'Stop', 'StopFailure', 'Notification'] as const;
 const POLL_MS = 2000;
 /** A drop that cannot be parsed after this long is not half-written, it is garbage. */
 const UNPARSABLE_GRACE_MS = 10_000;
@@ -113,7 +113,7 @@ export function mergeOpenideClaudeHooks(settings: Record<string, unknown>): Reco
 		// Ours but stale: drop it, keeping whatever else the user had in the same group.
 		const kept = withoutOpenideHooks(existing);
 		const group: Record<string, unknown> = { hooks: [{ type: 'command', command }] };
-		if (eventName === 'PreToolUse') {
+		if (eventName === 'PreToolUse' || eventName === 'PostToolUse' || eventName === 'PostToolUseFailure' || eventName === 'PermissionRequest') {
 			group['matcher'] = '*';
 		}
 		kept.push(group);
@@ -151,7 +151,12 @@ export function claudeHookEventOf(payload: Record<string, unknown>): OpenideCliS
 		case 'UserPromptSubmit':
 			return { type: 'hook:prompt' };
 		case 'PreToolUse':
-			return { type: 'hook:tool' };
+			return payload['tool_name'] === 'AskUserQuestion' ? { type: 'hook:notification', reason: 'question' } : { type: 'hook:tool' };
+		case 'PostToolUse':
+		case 'PostToolUseFailure':
+			return { type: 'hook:tool-complete' };
+		case 'PermissionRequest':
+			return { type: 'hook:notification', reason: 'permission' };
 		case 'Stop':
 			return { type: 'hook:stop' };
 		case 'StopFailure':
@@ -159,7 +164,12 @@ export function claudeHookEventOf(payload: Record<string, unknown>): OpenideCliS
 			// forever: once hooked, the output heuristic no longer moves it, so nothing else could.
 			return { type: 'hook:stop', failed: true };
 		case 'Notification':
-			return { type: 'hook:notification' };
+			switch (payload['notification_type']) {
+				case 'permission_prompt': return { type: 'hook:notification', reason: 'permission' };
+				case 'elicitation_dialog': return { type: 'hook:notification', reason: 'question' };
+				case 'idle_prompt': return { type: 'hook:notification', reason: 'prompt' };
+				default: return undefined;
+			}
 		default:
 			return undefined;
 	}

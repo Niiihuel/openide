@@ -13,7 +13,7 @@ import { IFileService } from '../../platform/files/common/files.js';
 import { EditorResourceAccessor, IUntitledTextResourceEditorInput, SideBySideEditor, pathsToEditors, IResourceDiffEditorInput, IUntypedEditorInput, IEditorPane, isResourceEditorInput, IResourceMergeEditorInput } from '../common/editor.js';
 import { IEditorService } from '../services/editor/common/editorService.js';
 import { ITelemetryService } from '../../platform/telemetry/common/telemetry.js';
-import { WindowMinimumSize, IOpenFileRequest, IAddRemoveFoldersRequest, INativeRunActionInWindowRequest, INativeRunKeybindingInWindowRequest, INativeOpenFileRequest, hasNativeTitlebar } from '../../platform/window/common/window.js';
+import { WindowMinimumSize, IOpenFileRequest, IAddRemoveFoldersRequest, INativeRunActionInWindowRequest, INativeRunKeybindingInWindowRequest, INativeOpenFileRequest, IOpenideAgentWindowRequest, IOpenideAgentWindowResponse, hasNativeTitlebar } from '../../platform/window/common/window.js';
 import { ITitleService } from '../services/title/browser/titleService.js';
 import { IWorkbenchThemeService } from '../services/themes/common/workbenchThemeService.js';
 import { ApplyZoomTarget, applyZoom } from '../../platform/window/electron-browser/window.js';
@@ -186,6 +186,22 @@ export class NativeWindow extends BaseWindow {
 				this.notificationService.error(error);
 			}
 		});
+
+		// Open a companion without revealing or reloading this workspace's IDE surface.
+		const openAgentWindow = async (_event: unknown, ...args: unknown[]) => {
+			const request = args[0] as IOpenideAgentWindowRequest;
+			let response: IOpenideAgentWindowResponse;
+			try {
+				await this.lifecycleService.when(LifecyclePhase.Restored);
+				await this.commandService.executeCommand('openide.agent.openAgentWindow');
+				response = { success: true };
+			} catch (error) {
+				response = { success: false, error: error instanceof Error ? error.message : String(error) };
+			}
+			ipcRenderer.send(request.replyChannel, response);
+		};
+		ipcRenderer.on('vscode:openOpenideAgentWindow', openAgentWindow);
+		this._register(toDisposable(() => ipcRenderer.removeListener('vscode:openOpenideAgentWindow', openAgentWindow)));
 
 		// Support runKeybinding event
 		ipcRenderer.on('vscode:runKeybinding', (event: unknown, ...argsRaw: unknown[]) => {

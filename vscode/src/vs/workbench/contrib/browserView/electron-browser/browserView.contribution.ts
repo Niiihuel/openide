@@ -21,9 +21,12 @@ import { BrowserViewWorkbenchService } from './browserViewWorkbenchService.js';
 import { BrowserViewCDPService } from './browserViewCDPService.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { logBrowserOpen } from '../../../../platform/browserView/common/browserViewTelemetry.js';
+import { IBrowserAgentSessionService } from '../common/browserAgentSessionService.js';
+import { BrowserAgentSessionService } from './browserAgentSessionService.js';
 
 // Register actions and browser features
 import './features/webContentsViewRendererFeature.js';
+import './features/browserAgentFeature.js';
 import './features/browserNavigationFeatures.js';
 import './features/browserWelcomeFeature.js';
 import './features/browserFavoritesFeature.js';
@@ -154,3 +157,4 @@ registerWorkbenchContribution2(BrowserEditorResolverContribution.ID, BrowserEdit
 
 registerSingleton(IBrowserViewWorkbenchService, BrowserViewWorkbenchService, InstantiationType.Delayed);
 registerSingleton(IBrowserViewCDPService, BrowserViewCDPService, InstantiationType.Delayed);
+registerSingleton(IBrowserAgentSessionService, BrowserAgentSessionService, InstantiationType.Delayed);

@@ -33,6 +33,7 @@ export function createCustomizationCardPrimaryAction(parent: HTMLElement, ariaLa
 export class CustomizationCardListController extends Disposable {
 
 	private readonly items: ICardListItem[] = [];
+	private activeItem: ICardListItem | undefined;
 	private readonly typeAheadReset = this._register(new MutableDisposable());
 	private typeAhead = '';
 
@@ -55,6 +56,7 @@ export class CustomizationCardListController extends Disposable {
 		entry.row.setAttribute('role', 'listitem');
 		entry.row.setAttribute('aria-posinset', String(this.items.length));
 		entry.primaryAction.tabIndex = this.items.length === 1 ? 0 : -1;
+		this.activeItem ??= entry;
 		this.setActionsTabbable(entry, false);
 
 		this._register(DOM.addDisposableListener(entry.primaryAction, 'focus', () => this.setActiveItem(entry)));
@@ -167,12 +169,17 @@ export class CustomizationCardListController extends Disposable {
 	}
 
 	private setActiveItem(active: ICardListItem): void {
-		for (const item of this.items) {
-			item.primaryAction.tabIndex = item === active ? 0 : -1;
-			if (item !== active) {
-				this.setActionsTabbable(item, false);
-			}
+		if (this.activeItem === active) {
+			return;
 		}
+		// Roving focus changes two rows. Rewriting the entire inventory on every
+		// focus (and again on its focus event) invalidates every card's styles.
+		if (this.activeItem) {
+			this.activeItem.primaryAction.tabIndex = -1;
+			this.setActionsTabbable(this.activeItem, false);
+		}
+		this.activeItem = active;
+		active.primaryAction.tabIndex = 0;
 	}
 
 	private setActionsTabbable(item: ICardListItem, tabbable: boolean): void {

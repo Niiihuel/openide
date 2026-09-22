@@ -27,6 +27,8 @@ export const OPENIDE_AGENT_SURFACE_STRINGS = {
 	'agentSurface.approval.subagentCreate': { es: 'Crear Subagente', en: 'Create Subagent' },
 	'agentSurface.approval.ruleDelete': { es: 'Eliminar Rule', en: 'Delete Rule' },
 	'agentSurface.approval.ruleSave': { es: 'Guardar Rule', en: 'Save Rule' },
+	'agentSurface.approval.rulesProtected': { es: 'Esta acción modifica las reglas que guían al agente. Tu permiso se aplica únicamente a esta operación.', en: 'This action changes the rules that guide the agent. Your permission applies only to this operation.' },
+	'agentSurface.approval.memoryProtected': { es: 'Esta acción modifica la memoria guardada. Tu permiso se aplica únicamente a esta operación.', en: 'This action changes saved memory. Your permission applies only to this operation.' },
 	'agentSurface.approval.gitNewBranch': { es: ' — rama nueva {0}', en: ' — new branch {0}' },
 	'agentSurface.approval.gitFileCount': { es: '{0} archivo(s)', en: '{0} file(s)' },
 	'agentSurface.approval.gitNoFiles': { es: 'sin archivos', en: 'no files' },

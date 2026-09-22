@@ -604,6 +604,21 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-row.selected { background: color-mix(in srgb, var(--oi-accent) 8%, transparent); }
 .openide-settings-voice { display: flex; flex-direction: column; gap: 24px; }
 .openide-settings-voice .openide-settings-provider-logo { width: 20px; height: 20px; }
+.openide-settings .openide-provider-icon-tile {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 32px;
+	width: 32px;
+	height: 32px;
+	border: 1px solid var(--oi-border-soft);
+	border-radius: var(--oi-radius-md);
+	background: var(--oi-raised);
+}
+/* Settings uses one neutral icon language; the provider silhouette still identifies the brand. */
+.openide-settings .openide-provider-icon.logo-ready { background-color: var(--oi-text); }
+.openide-settings .openide-provider-icon.logo-image { filter: grayscale(1); opacity: .86; }
+.openide-settings .openide-provider-icon.monogram { color: var(--oi-text); }
 .openide-settings-voice-test {
 	padding: 16px;
 	border: 1px solid var(--oi-border);
@@ -678,6 +693,7 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-provider-back .openide-settings-section-button.monaco-button { min-height: var(--oi-row-md); padding: 0 10px 0 6px; font-size: var(--oi-text-md); color: var(--oi-text-muted); }
 .openide-settings-provider-head { display: flex; align-items: center; gap: 14px; padding: 0 2px 22px; }
 .openide-settings-provider-head .openide-settings-provider-logo { width: 28px; height: 28px; border-radius: var(--oi-radius-md); }
+.openide-settings .openide-settings-provider-head .openide-provider-icon-tile { flex-basis: 44px; width: 44px; height: 44px; }
 .openide-settings-provider-copy { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .openide-settings-provider-name { font-size: var(--oi-text-lg); font-weight: 400; line-height: 20px; color: var(--oi-text); }
 .openide-settings-provider-sub { color: var(--oi-text-muted); font-size: var(--oi-text-md); line-height: 18px; }
@@ -923,6 +939,38 @@ textarea.openide-settings-input { min-height: 64px; padding: 6px 8px; border-rad
 .openide-settings-voice-provider > .openide-settings-cardsection { padding: 0; }
 .openide-settings-voice-provider .openide-settings-group { padding-bottom: 0; }
 .openide-settings-voice-provider .openide-settings-card { border: 0; border-top: 1px solid var(--oi-border); border-radius: 0; }
+.openide-settings-voice-excluded {
+	border: 1px solid var(--oi-border-soft);
+	border-radius: var(--oi-radius-group, var(--oi-radius-lg));
+	background: var(--oi-card);
+	overflow: hidden;
+}
+.openide-settings-voice-excluded-summary {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-height: 44px;
+	padding: 0 16px;
+	list-style: none;
+	cursor: pointer;
+	color: var(--oi-text-muted);
+}
+.openide-settings-voice-excluded-summary::-webkit-details-marker { display: none; }
+.openide-settings-voice-excluded-summary:hover { background: var(--oi-hover); color: var(--oi-text); }
+.openide-settings-voice-excluded-summary:focus-visible { outline: 1px solid var(--oi-focus); outline-offset: -2px; }
+.openide-settings-voice-excluded-label { flex: 1; min-width: 0; }
+.openide-settings-voice-excluded-count {
+	min-width: 20px;
+	padding: 2px 6px;
+	border-radius: var(--oi-radius-control);
+	background: var(--oi-raised);
+	font-size: var(--oi-text-xs);
+	text-align: center;
+}
+.openide-settings-voice-excluded[open] > summary > .codicon-chevron-right { transform: rotate(90deg); }
+.openide-settings-voice-excluded-content { padding: 0 12px 12px; }
+.openide-settings-voice-excluded-content .openide-settings-card { border-color: var(--oi-border-soft); }
+.openide-settings-voice-excluded-content > .openide-settings-section-desc { margin: 10px 4px 0; }
 
 /* Respond to this editor's width, not the window: split groups and side editors have their
    own available space. Queries only change layout, leaving controls and their state intact. */

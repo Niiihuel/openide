@@ -7,6 +7,7 @@
  *  OpenIDE — subagent state machine and scheduler. Each run owns its CTS and lifecycle.
  *--------------------------------------------------------------------------------------------*/
 
+import { appendSubagentTimeline } from '../common/openideSubagentTranscript.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
@@ -95,9 +96,13 @@ export class SubagentRunService extends Disposable implements ISubagentRunServic
 	}
 	append(runId: string, event: Omit<ISubagentTimelineEvent, 'sequence' | 'timestamp'>): ISubagentRun | undefined {
 		const mutable = this.active.get(runId); if (!mutable) { return undefined; }
-		const lastSequence = mutable.value.timeline[mutable.value.timeline.length - 1]?.sequence ?? 0;
-		const timelineEvent: ISubagentTimelineEvent = { ...event, sequence: lastSequence + 1, timestamp: Date.now() };
-		const updated = this.update(runId, run => ({ ...run, timeline: [...run.timeline, timelineEvent].slice(-500) }));
+		const timeline = appendSubagentTimeline(mutable.value.timeline, event, Date.now());
+		const timelineEvent = timeline[timeline.length - 1];
+		const updated = this.update(runId, run => ({ ...run, timeline, metrics: {
+			...run.metrics,
+			toolCalls: run.metrics.toolCalls + (event.type === 'toolStart' ? 1 : 0),
+			filesModified: run.metrics.filesModified + (event.type === 'fileChange' ? 1 : 0),
+		} }));
 		if (updated) { this._onDidChangeRun.fire({ type: 'timeline', runId, event: timelineEvent }); }
 		return updated;
 	}

@@ -105,7 +105,7 @@ export class RunPlaywrightCodeTool implements IToolImpl {
 
 		let result;
 		try {
-			result = await this.playwrightService.invokeFunction(sessionId, params.pageId, `async (page) => { ${params.code} }`, undefined, params.timeoutMs ?? 5_000);
+			result = await this.playwrightService.invokeFunction(sessionId, params.pageId, `async (page) => { ${params.code} }`, undefined, params.timeoutMs ?? 5_000, { toolCallId: invocation.callId });
 		} catch (e) {
 			const message = e instanceof Error ? e.message : String(e);
 			return errorResult(`Code execution failed: ${message}`);

@@ -536,73 +536,6 @@
 .openide-cli-tools summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .openide-cli-tools p { margin: 0; padding: 4px 8px 8px; }
 
-.openide-chat-sessions-pane.compact .openide-chat-sessions-head {
-	display: none;
-}
-
-/* Conversation navigation follows the shared dock rows. A reserved trailing slot swaps
-   recency for actions without reflowing the title while the pointer moves through the list. */
-.openide-chat-sessions-pane.compact .openide-chat-sessions-list { padding: 0 0 var(--vscode-spacing-size12, 12px); gap: var(--oi-navigation-row-gap); }
-.openide-chat-sessions-pane.compact .openide-chat-sessions-group {
-	margin-top: var(--vscode-spacing-size12, 12px);
-	min-height: var(--oi-navigation-row-height);
-	padding: var(--vscode-spacing-size4, 4px) var(--vscode-spacing-size8, 8px);
-	gap: var(--vscode-spacing-size8, 8px);
-	font-size: var(--oi-text-sm);
-	color: var(--oi-secondary);
-}
-.openide-chat-sessions-pane.compact .openide-chat-sessions-group:first-child { margin-top: var(--vscode-spacing-size4, 4px); }
-.openide-chat-sessions-pane.compact .openide-chat-sessions-group-title { flex: 1; text-align: left; font-weight: 400; }
-.openide-chat-sessions-pane.compact .openide-chat-sessions-group-count { min-width: 16px; font-size: var(--oi-text-xs); text-align: center; }
-.openide-chat-sessions-pane.compact .openide-chat-sessions-group > .codicon { font-size: var(--oi-icon-action, 16px); }
-.openide-chat-sessions-pane.compact .openide-chat-sessions-group > :last-child { font-size: 12px; opacity: .7; }
-.openide-chat-sessions-pane.compact .openide-chat-sessions-row { min-height: var(--oi-navigation-row-height); }
-.openide-chat-sessions-pane.compact .openide-chat-sessions-open {
-	position: relative;
-	min-height: var(--oi-navigation-row-height);
-	box-sizing: border-box;
-	padding: 4px calc(var(--oi-session-actions-width) + 8px) 4px 28px;
-}
-.openide-chat-sessions-pane.compact .openide-chat-sessions-open.selected::before {
-	content: '';
-	position: absolute;
-	left: var(--vscode-spacing-size8, 8px);
-	top: 50%;
-	width: 2px;
-	height: 12px;
-	border-radius: var(--oi-radius-control);
-	background: currentColor;
-	transform: translateY(-50%);
-	opacity: .7;
-}
-.openide-chat-sessions-pane.compact .openide-chat-sessions-row-title { font-size: var(--oi-text-md); }
-.openide-chat-sessions-pane.compact .openide-chat-sessions-row-time {
-	display: inline;
-	position: absolute;
-	right: var(--vscode-spacing-size12, 12px);
-	max-width: 34px;
-	overflow: hidden;
-	white-space: nowrap;
-	pointer-events: none;
-	transition: opacity var(--oi-duration-hover) var(--oi-ease);
-}
-.openide-chat-sessions-pane.compact .openide-chat-sessions-row-actions {
-	display: inline-flex;
-	opacity: 0;
-	pointer-events: none;
-	transition: opacity var(--oi-duration-hover) var(--oi-ease);
-}
-.openide-chat-sessions-pane.compact .openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-row-actions { opacity: 1; pointer-events: auto; }
-.openide-chat-sessions-pane.compact .openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-row-time,
-.openide-chat-sessions-pane.compact .openide-chat-sessions-row:is(.has-status, .unread) .openide-chat-sessions-row-time { opacity: 0; }
-.openide-chat-sessions-pane.compact .openide-chat-sessions-more { justify-content: flex-start; color: var(--oi-secondary); padding-left: 28px; min-height: var(--oi-navigation-row-height); font-size: var(--oi-text-sm); }
-.openide-chat-sessions-unread { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--vscode-notificationsInfoIcon-foreground, var(--oi-primary)); }
-.openide-chat-sessions-rename .monaco-inputbox { width: 100%; }
-.monaco-reduce-motion .openide-chat-sessions-pane.compact :is(.openide-chat-sessions-row-time, .openide-chat-sessions-row-actions) { transition: none; }
-@media (prefers-reduced-motion: reduce) {
-	.openide-chat-sessions-pane.compact :is(.openide-chat-sessions-row-time, .openide-chat-sessions-row-actions) { transition: none; }
-}
-
 .openide-chat-session-preview-heading { display: flex; align-items: flex-start; gap: 16px; }
 .openide-chat-session-preview-title { flex: 1; min-width: 0; }
 .openide-chat-session-preview-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-top: 2px; }
@@ -619,22 +552,3 @@
 .openide-chat-sessions-child-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
 .openide-chat-sessions-children .codicon { flex-shrink: 0; font-size: var(--oi-icon-action, 16px); }
 .openide-text-overflowing { mask-image: linear-gradient(to right, black calc(100% - 24px), transparent); text-overflow: clip !important; }
-
-/* Disclosure layout follows the composer's reveal pattern, without rebuilding sibling rows. */
-.openide-chat-sessions-reveal { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 160ms ease, opacity 160ms ease; }
-.openide-chat-sessions-reveal.expanded { grid-template-rows: 1fr; opacity: 1; }
-.openide-chat-sessions-clip { min-height: 0; overflow: hidden; }
-.openide-chat-sessions-branch { display: flex; flex-direction: column; min-width: 0; }
-.openide-chat-sessions-chevron { transition: transform 160ms ease; }
-[aria-expanded="true"] > .openide-chat-sessions-chevron { transform: rotate(90deg); }
-@media (prefers-reduced-motion: reduce) {
-	.openide-chat-sessions-reveal, .openide-chat-sessions-chevron { transition: none; }
-}
-.monaco-workbench.monaco-reduce-motion .openide-chat-sessions-reveal,
-.monaco-workbench.monaco-reduce-motion .openide-chat-sessions-chevron { transition: none; }
-
-.openide-chat-sessions-pane.compact .openide-chat-sessions-branch { gap: var(--oi-navigation-row-gap); }
-
-.openide-chat-sessions-pane.compact .openide-chat-sessions-row { border-radius: var(--oi-navigation-row-radius); transition: background-color var(--oi-duration-hover) var(--oi-ease); }
-.openide-chat-sessions-pane.compact .openide-chat-sessions-row:is(:hover, :focus-within) { background: var(--oi-hover); }
-.openide-chat-sessions-pane.compact .openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-open:not(.selected) { background: transparent; }

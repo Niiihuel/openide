@@ -47,7 +47,7 @@ suite('OpenIDE memory rollback transaction', () => {
 		const messages: IChatMessage[] = [{ role: 'user', content: 'Do work', messageId: 'turn' }, { role: 'assistant', content: 'Done', messageId: 'reply' }];
 		const calls: string[] = [];
 		const sessions = {
-			messagesOf: () => messages, changeSetOf: () => undefined,
+			messagesOf: () => messages, changeSetOf: () => undefined, truncateArchiveBefore: () => {},
 			removeChangeSets: () => calls.push('remove'), clearUsage: () => {}, save: () => calls.push('save'),
 		} as unknown as OpenideChatSessions;
 		const service = {
@@ -68,7 +68,7 @@ suite('OpenIDE memory rollback transaction', () => {
 		await owner.request({ ...save('second'), body: 'An additional decision.', id: first.record.id, expectedRevision: first.record.revision, expectedHash: first.hash });
 		const messages: IChatMessage[] = ['first', 'second'].map(messageId => ({ role: 'user', content: messageId, messageId }));
 		const order: string[] = [];
-		const sessions = { messagesOf: () => messages, changeSetOf: () => undefined, removeChangeSets: () => {}, clearUsage: () => {}, save: () => {} } as unknown as OpenideChatSessions;
+		const sessions = { messagesOf: () => messages, changeSetOf: () => undefined, truncateArchiveBefore: () => {}, removeChangeSets: () => {}, clearUsage: () => {}, save: () => {} } as unknown as OpenideChatSessions;
 		const service = { prepareMemoryRollback: (_id: string, ids: readonly string[]) => prepare(ids), rollbackMessage: (change: IMessageChangeSet) => { order.push(change.messageId); return restore.rollback(change); } } as unknown as IOpenideAgentService;
 		const result = await runOpenideChatRollback({ sessions, agentService: service, conversationId: 'chat', messageId: 'first', restoreComposer: false, drainRun: async () => {} });
 		assert.strictEqual(result.warning, undefined); assert.deepStrictEqual(order, ['second', 'first']);
@@ -79,7 +79,7 @@ suite('OpenIDE memory rollback transaction', () => {
 		const first = (await owner.request(save('turn'))).document!;
 		await owner.request({ ...save('turn'), operationId: 'checkpoint:turn:second', body: 'Second observation.', id: first.record.id, expectedRevision: first.record.revision, expectedHash: first.hash });
 		const messages: IChatMessage[] = [{ role: 'user', messageId: 'turn', content: 'Work' }];
-		const sessions = { messagesOf: () => messages, changeSetOf: () => undefined, removeChangeSets: () => {}, clearUsage: () => {}, save: () => {} } as unknown as OpenideChatSessions;
+		const sessions = { messagesOf: () => messages, changeSetOf: () => undefined, truncateArchiveBefore: () => {}, removeChangeSets: () => {}, clearUsage: () => {}, save: () => {} } as unknown as OpenideChatSessions;
 		const service = {
 			prepareMemoryRollback: async (_id: string, ids: readonly string[]) => (await prepare(ids)).map(change => ({ ...change, timestamp: 10 })),
 			rollbackMessage: (change: IMessageChangeSet) => restore.rollback(change),

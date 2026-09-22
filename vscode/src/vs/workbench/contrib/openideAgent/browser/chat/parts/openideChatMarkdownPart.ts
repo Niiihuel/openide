@@ -127,6 +127,7 @@ export class OpenideChatMarkdownPart extends OpenideChatContentPart {
 	 */
 	private _reconcile(root: HTMLElement): boolean {
 		const host = this.domNode;
+		const restoreSelection = preserveTextSelection(host);
 		const current = Array.from(host.children);
 		const next = Array.from(root.children) as HTMLElement[];
 		let changed = false;
@@ -162,6 +163,7 @@ export class OpenideChatMarkdownPart extends OpenideChatContentPart {
 			this._dropExtras(current[index]);
 			current[index].remove();
 		}
+		if (changed) { restoreSelection?.(); }
 		return changed;
 	}
 
@@ -218,4 +220,43 @@ export class OpenideChatMarkdownPart extends OpenideChatContentPart {
  */
 function signatureOf(block: HTMLElement): string {
 	return block.outerHTML.replace(/ data-code="[^"]*"/g, '');
+}
+
+/** Keep a selection copyable even when the paragraph under it receives another streamed token. */
+function preserveTextSelection(host: HTMLElement): (() => void) | undefined {
+	const selection = host.ownerDocument.getSelection();
+	if (!selection || selection.isCollapsed || !selection.anchorNode || !selection.focusNode
+		|| (!host.contains(selection.anchorNode) && !host.contains(selection.focusNode))) {
+		return undefined;
+	}
+	const capture = (node: Node, offset: number) => {
+		if (!host.contains(node)) { return { node, offset, textOffset: undefined }; }
+		const range = host.ownerDocument.createRange();
+		range.selectNodeContents(host);
+		range.setEnd(node, offset);
+		return { node, offset, textOffset: range.toString().length };
+	};
+	const anchor = capture(selection.anchorNode, selection.anchorOffset);
+	const focus = capture(selection.focusNode, selection.focusOffset);
+	return () => {
+		const resolve = (point: typeof anchor): { node: Node; offset: number } => {
+			if (point.textOffset === undefined || (point.node !== host && host.contains(point.node))) { return point; }
+			const walker = host.ownerDocument.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+			let remaining = point.textOffset;
+			let node: Node | null;
+			while ((node = walker.nextNode())) {
+				const length = node.textContent?.length ?? 0;
+				if (remaining <= length) { return { node, offset: remaining }; }
+				remaining -= length;
+			}
+			return { node: host, offset: host.childNodes.length };
+		};
+		const nextAnchor = resolve(anchor);
+		const nextFocus = resolve(focus);
+		if (nextAnchor.node.isConnected && nextFocus.node.isConnected
+			&& (selection.anchorNode !== nextAnchor.node || selection.anchorOffset !== nextAnchor.offset
+				|| selection.focusNode !== nextFocus.node || selection.focusOffset !== nextFocus.offset)) {
+			selection.setBaseAndExtent(nextAnchor.node, nextAnchor.offset, nextFocus.node, nextFocus.offset);
+		}
+	};
 }

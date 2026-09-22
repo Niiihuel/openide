@@ -45,7 +45,7 @@ function fixture(steps: Step[], token = CancellationToken.None, messages: IChatM
 		planDraft: () => { },
 		stop: () => { },
 	};
-	const run = () => runOpenideTurn({ messages, provider: { credential: { kind: 'apiKey', value: 'fixture' }, providerId: 'scripted', model: 'fixture', tools: [] }, token, onEvent: event => events.push(event), maxIterations: 4, messageId: 'owner', runtimeContext: 'retrieved context' }, ports);
+	const run = (maxIterations = 4) => runOpenideTurn({ messages, provider: { credential: { kind: 'apiKey', value: 'fixture' }, providerId: 'scripted', model: 'fixture', tools: [] }, token, onEvent: event => events.push(event), maxIterations, messageId: 'owner', runtimeContext: 'retrieved context' }, ports);
 	return { run, ports, stream, adapter, messages, events, effects, requests };
 }
 
@@ -59,6 +59,24 @@ suite('OpenIDE injected turn runtime', () => {
 		}]);
 		assert.strictEqual(await h.run(), 'completed');
 		assert.deepStrictEqual({ roles: h.messages.map(message => message.role), effects: h.effects, terminals: h.events.filter(event => event.type === 'done' || event.type === 'error').map(event => event.type), storedUser: h.messages[0].content, wireUser: h.requests[0].messages[0].content }, { roles: ['user', 'assistant', 'tool', 'assistant'], effects: ['call'], terminals: ['done'], storedUser: 'Task', wireUser: 'Task\n\nretrieved context' });
+	});
+
+	test('an unlimited turn passes 200 cycles with compaction checks and no synthetic restart', async () => {
+		const h = fixture([...Array.from({ length: 205 }, (_, index) => async () => ({ message: { role: 'assistant' as const, content: '', toolCalls: [{ id: `call-${index}`, name: 'read', argumentsJson: '{}' }] } })), async () => final()]);
+		let compactions = 0;
+		h.ports.compact = async () => { compactions++; return false; };
+		assert.strictEqual(await h.run(0), 'completed');
+		assert.deepStrictEqual({ calls: h.effects.length, compactions, userTurns: h.messages.filter(message => message.role === 'user').length, errors: h.events.filter(event => event.type === 'error').length }, { calls: 205, compactions: 206, userTurns: 1, errors: 0 });
+	});
+
+	test('an unlimited turn still stops immediately when cancelled', async () => {
+		const cancellation = store.add(new CancellationTokenSource());
+		const h = fixture([async () => callResult()], cancellation.token);
+		const execute = h.ports.executeTools;
+		h.ports.executeTools = async (...args) => { await execute(...args); cancellation.cancel(); return false; };
+		assert.strictEqual(await h.run(0), 'cancelled');
+		assert.strictEqual(h.requests.length, 1);
+		assert.strictEqual(h.events.filter(event => event.type === 'error').length, 0);
 	});
 
 	test('retries a transient request before output without duplicating tool effects', async () => {
@@ -165,5 +183,24 @@ suite('OpenIDE injected turn runtime', () => {
 		const stopped = fixture([async () => { cancellation.cancel(); throw new Error('Cancelled'); }], cancellation.token);
 		assert.strictEqual(await compactor.compact({ ...request, messages: preserved, token: cancellation.token, runtime: { ...request.runtime, adapter: stopped.adapter }, origin: 'recovery' }, { stream: (...args) => stopped.stream.stream(...args), auxiliary: async () => undefined }), false);
 		assert.deepStrictEqual(preserved, before);
+	});
+
+	test('emergency compaction exposes the intact history before replacing the model window', async () => {
+		const original: IChatMessage = { role: 'user', messageId: 'large-request', content: 'Preserve this request. '.repeat(4000) };
+		const messages = [original];
+		const h = fixture([]);
+		let archived: IChatMessage[] = [];
+		const statuses: string[] = [];
+		const compacted = await new OpenideContextCompactor().compact({
+			messages, runtime: { adapter: h.adapter, credential: { kind: 'apiKey', value: 'fixture' }, model: 'fixture' },
+			token: CancellationToken.None, system: '', toolDefs: [], contextLimit: 4000, origin: 'automatic',
+			onEvent: event => {
+				if (event.type !== 'compaction') { return; }
+				statuses.push(event.status);
+				if (event.status === 'started') { archived = structuredClone(messages); }
+			},
+		}, { stream: (...args) => h.stream.stream(...args), auxiliary: async () => undefined });
+		assert.deepStrictEqual({ compacted, statuses, archived, shortened: messages.at(-1)!.content.length < original.content.length, providerRequests: h.requests.length },
+			{ compacted: true, statuses: ['started', 'completed'], archived: [original], shortened: true, providerRequests: 0 });
 	});
 });

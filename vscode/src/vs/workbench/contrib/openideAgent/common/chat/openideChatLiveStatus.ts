@@ -6,6 +6,7 @@
 import { t } from '../openideStrings.js';
 import { IOpenideChatContent, IOpenideChatExploreEntry } from './openideChatContent.js';
 import { splitOpenOpenideChatDiagram } from './openideChatDiagramSplit.js';
+import { openideChatAuthoringFileLabel, openideChatToolPresentation } from './openideChatToolPresentation.js';
 import { basenameForChat, compactExploreDetail, getOpenideToolMeta, toolDetailFor } from './openideChatToolMeta.js';
 
 /**
@@ -35,6 +36,8 @@ function awaitsResponse(content: IOpenideChatContent): boolean {
 
 /** "Read openideChatWidget.ts" — the same sentence the settled row shows, in the present tense. */
 export function openideChatToolStepLabel(name: string, argumentsJson: string | undefined): string {
+	const presentation = openideChatToolPresentation(name, argumentsJson, 'running');
+	if (presentation.authoring) { return presentation.detail ? `${presentation.verb} ${presentation.detail}` : presentation.verb; }
 	const meta = getOpenideToolMeta(name);
 	// The basename and not the full path: the line is a single row that has to survive a 280px dock,
 	// and the directory is the half an ellipsis would eat anyway.
@@ -43,6 +46,8 @@ export function openideChatToolStepLabel(name: string, argumentsJson: string | u
 }
 
 export function openideChatExploreStepLabel(entry: IOpenideChatExploreEntry): string {
+	const presentation = openideChatToolPresentation(entry.tool, JSON.stringify({ path: entry.target }), 'running');
+	if (presentation.authoring) { return presentation.detail ? `${presentation.verb} ${presentation.detail}` : presentation.verb; }
 	const meta = getOpenideToolMeta(entry.tool);
 	return entry.target ? `${meta.verb} ${entry.target}` : meta.verb;
 }
@@ -92,12 +97,12 @@ export function openideChatLiveStatusLabel(content: readonly IOpenideChatContent
 		return { text: t('chat.working.thinking'), idle: true };
 	}
 	if (last.kind === 'thinking' && !last.isComplete) {
-		// Reasoning uses the same continuous work surface as tools. A separate thought glyph and a
-		// second animated heading made the turn look like two concurrent processes; the lattice is
-		// now the sole working signal, while the reasoning body remains available as detail.
-		return step(t('chat.working.thinking'));
+		// The reasoning disclosure owns its streaming label and must remain interactive.
+		return undefined;
 	}
 	switch (last.kind) {
+		case 'compaction':
+			return last.status === 'started' ? undefined : waiting();
 		case 'markdown':
 			// Prose speaks for itself — EXCEPT while a diagram fence is open. Then the text on screen
 			// has stopped growing and what is streaming is the diagram's source, which is deliberately
@@ -151,7 +156,7 @@ export function openideChatLiveStatusLabel(content: readonly IOpenideChatContent
 			// The card shimmers its filename until the diff lands, so it is already speaking.
 			return last.diff.diffLines
 				? waiting()
-				: step(`${getOpenideToolMeta('edit_file').verb} ${basenameForChat(last.diff.path)}`);
+				: step(`${openideChatAuthoringFileLabel(last.diff.path, 'running') ?? getOpenideToolMeta('edit_file').verb} ${basenameForChat(last.diff.path)}`);
 		default:
 			return waiting();
 	}

@@ -16,6 +16,8 @@ import { NullHoverService } from '../../../../../platform/hover/test/browser/nul
 import { ICreateTerminalOptions, ITerminalGroupService, ITerminalInstance, ITerminalService } from '../../../terminal/browser/terminal.js';
 import { TerminalCommandId } from '../../../terminal/common/terminal.js';
 import { OpenideAgentWindowTerminal } from '../../browser/openideAgentWindowTerminal.js';
+import { IOpenideAgentService } from '../../browser/openideAgentService.js';
+import { IBackgroundTerminalEvent } from '../../common/openideAgentTypes.js';
 
 suite('OpenIDE agent window terminal ownership', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -23,12 +25,14 @@ suite('OpenIDE agent window terminal ownership', () => {
 	function fixture(deferred?: DeferredPromise<ITerminalInstance>, extra?: ITerminalInstance) {
 		const changed = store.add(new Emitter<void>());
 		const disposed = store.add(new Emitter<ITerminalInstance>());
+		const backgroundChanged = store.add(new Emitter<IBackgroundTerminalEvent>());
+		const backgroundTerminalInstanceIds: number[] = [];
 		const home = mainWindow.document.createElement('div');
 		const element = mainWindow.document.createElement('div');
 		home.appendChild(element);
 		let creates = 0, returns = 0, moves = 0, kills = 0, ended = false;
 		const terminal = upcastPartial<ITerminalInstance>({
-			instanceId: 1, title: 'shell', onDidFocus: Event.None, setParentContextKeyService: () => {}, getCwdResource: async () => undefined, domElement: element, shellLaunchConfig: {}, isVisible: true,
+			instanceId: 1, title: 'shell', icon: { id: 'terminal' }, onDidFocus: Event.None, setParentContextKeyService: () => {}, getCwdResource: async () => undefined, domElement: element, shellLaunchConfig: {}, isVisible: true,
 			get isDisposed() { return ended; },
 			attachToElement: host => { host.appendChild(element); },
 			detachFromElement: () => element.remove(), setVisible: () => {}, layout: () => {}, focus: () => {},
@@ -39,7 +43,7 @@ suite('OpenIDE agent window terminal ownership', () => {
 		const launchOptions: (ICreateTerminalOptions | undefined)[] = [];
 		const service = upcastPartial<ITerminalService>({
 			instances, foregroundInstances: foreground, activeInstance: terminal,
-			onDidChangeInstances: changed.event, onAnyInstanceTitleChange: Event.None, onDidDisposeInstance: disposed.event,
+			onDidChangeInstances: changed.event, onAnyInstanceTitleChange: Event.None, onAnyInstanceIconChange: Event.None, onDidDisposeInstance: disposed.event,
 			createTerminal: async options => { launchOptions.push(options); creates++; if (extra) { instances.push(extra); foreground.push(extra); return extra; } return deferred ? deferred.p : terminal; },
 			moveToBackground: instance => { moves++; foreground.splice(foreground.indexOf(instance), 1); changed.fire(); },
 			showBackgroundTerminal: async instance => { returns++; home.appendChild(instance.domElement); foreground.push(instance); changed.fire(); },
@@ -49,8 +53,8 @@ suite('OpenIDE agent window terminal ownership', () => {
 		const keybindingChanges = store.add(new Emitter<void>());
 		const instantiation = store.add(new TestInstantiationService());
 		instantiation.stub(IKeybindingService, upcastPartial<IKeybindingService>({ lookupKeybinding: () => undefined, onDidUpdateKeybindings: keybindingChanges.event }));
-		const panel = store.add(new OpenideAgentWindowTerminal(host, () => {}, service, NullHoverService, upcastPartial<ITerminalGroupService>({ getGroupForInstance: () => undefined, joinInstances: instances => { joined.push(instances.map(instance => instance.instanceId)); } }), new MockContextKeyService(), instantiation));
-		return { panel, terminal, element, home, service, joined, launchOptions, keybindingChanges, counts: () => ({ creates, moves, returns, kills }) };
+		const panel = store.add(new OpenideAgentWindowTerminal(host, () => {}, service, NullHoverService, upcastPartial<ITerminalGroupService>({ getGroupForInstance: () => undefined, joinInstances: instances => { joined.push(instances.map(instance => instance.instanceId)); } }), new MockContextKeyService(), instantiation, upcastPartial<IOpenideAgentService>({ backgroundTerminalInstanceIds, onDidChangeBackgroundTerminal: backgroundChanged.event })));
+		return { panel, terminal, element, home, service, foreground, changed, backgroundChanged, backgroundTerminalInstanceIds, joined, launchOptions, keybindingChanges, counts: () => ({ creates, moves, returns, kills }) };
 	}
 
 	test('select and close window borrow and return the same terminal without spawning or killing', async () => {
@@ -68,6 +72,23 @@ suite('OpenIDE agent window terminal ownership', () => {
 		f.panel.hide();
 		await f.panel.reveal();
 		assert.deepStrictEqual({ ...f.counts(), active: f.panel.domNode.querySelectorAll('[aria-selected="true"]').length, attached: f.panel.domNode.contains(f.element) }, { creates: 0, moves: 2, returns: 1, kills: 0, active: 1, attached: true });
+	});
+
+	test('only registered background tools can borrow a hidden terminal and closing leaves its owner intact', async () => {
+		const f = fixture();
+		mainWindow.document.body.appendChild(f.home);
+		store.add({ dispose: () => f.home.remove() });
+		f.terminal.shellLaunchConfig.hideFromUser = true;
+		f.foreground.length = 0;
+		f.changed.fire();
+		await f.panel.reveal(f.terminal.instanceId);
+		assert.strictEqual(f.panel.domNode.contains(f.element), false);
+		f.backgroundTerminalInstanceIds.push(f.terminal.instanceId);
+		f.backgroundChanged.fire({ id: 'tool', command: 'npm run dev', status: 'running' });
+		await f.panel.reveal(f.terminal.instanceId);
+		assert.strictEqual(f.panel.domNode.contains(f.element), true);
+		f.panel.dispose();
+		assert.deepStrictEqual({ ...f.counts(), hidden: f.terminal.shellLaunchConfig.hideFromUser, returned: f.home.contains(f.element) }, { creates: 0, moves: 0, returns: 0, kills: 0, hidden: true, returned: true });
 	});
 
 	test('terminal disposal removes stale selection without restoring the terminated process', async () => {
@@ -127,7 +148,7 @@ suite('OpenIDE agent window terminal ownership', () => {
 	test('split command uses native panes, preserves both processes and restores the split group', async () => {
 		const element = mainWindow.document.createElement('div');
 		const second = upcastPartial<ITerminalInstance>({
-			instanceId: 2, title: 'second', domElement: element, shellLaunchConfig: {}, isVisible: true, isDisposed: false,
+			instanceId: 2, title: 'second', icon: { id: 'terminal' }, domElement: element, shellLaunchConfig: {}, isVisible: true, isDisposed: false,
 			onDidFocus: Event.None, setParentContextKeyService: () => {}, attachToElement: host => { host.appendChild(element); }, detachFromElement: () => element.remove(),
 			setVisible: () => {}, layout: () => {}, focus: () => {},
 		});

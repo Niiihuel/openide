@@ -9,7 +9,9 @@ import { DeferredPromise, disposableTimeout, raceTimeout, timeout } from '../../
 import { ILogService } from '../../log/common/log.js';
 import { ITelemetryService } from '../../telemetry/common/telemetry.js';
 import { IAgentNetworkFilterService } from '../../networkFilter/common/networkFilterService.js';
-import { IInvokeFunctionResult, IPlaywrightService } from '../common/playwrightService.js';
+import { IInvokeFunctionResult, IPlaywrightExecutionContext, IPlaywrightService } from '../common/playwrightService.js';
+import { BrowserAgentEvent } from '../common/browserAgentEvents.js';
+import { PlaywrightBrowserAgentAdapter } from './playwrightBrowserAgentAdapter.js';
 import { IBrowserViewGroupRemoteService } from '../node/browserViewGroupRemoteService.js';
 import { IBrowserViewGroup } from '../common/browserViewGroup.js';
 import { getAgentBrowserViewCreationDefaults } from '../common/browserView.js';
@@ -65,6 +67,8 @@ export class PlaywrightService extends Disposable implements IPlaywrightService 
 	private readonly activityCounts = new Map<string, number>();
 	private readonly activityEmitter = this._register(new Emitter<{ pageId: string; active: boolean }>());
 	readonly onDidChangeActivity = this.activityEmitter.event;
+	private readonly browserAgentEmitter = this._register(new Emitter<BrowserAgentEvent>());
+	readonly onDidBrowserAgentEvent = this.browserAgentEmitter.event;
 
 	private beginActivity(pageId: string): IDisposable {
 		const count = this.activityCounts.get(pageId) ?? 0;
@@ -188,6 +192,7 @@ export class PlaywrightService extends Disposable implements IPlaywrightService 
 
 		const session = new PlaywrightSession(
 			pageId => this.beginActivity(pageId),
+			event => this.browserAgentEmitter.fire(event),
 			sessionId,
 			browser,
 			group,
@@ -213,6 +218,11 @@ export class PlaywrightService extends Disposable implements IPlaywrightService 
 
 	// --- Playwright operations (delegated to per-session instances) ---
 
+	async reportBrowserAgentAction(sessionId: string, pageId: string, action: 'screenshot', phase: 'started' | 'completed' | 'error', context: IPlaywrightExecutionContext): Promise<void> {
+		const session = phase === 'started' ? await this._getOrCreateSession(sessionId) : this._sessions.get(sessionId);
+		await session?.reportBrowserAgentAction(pageId, action, phase, context);
+	}
+
 	async waitForPageAndGetSummary(sessionId: string, pageId: string, expectedUrl: string, discoveryTimeoutMs: number): Promise<string> {
 		const session = await this._getOrCreateSession(sessionId);
 		return session.waitForPageAndGetSummary(pageId, expectedUrl, discoveryTimeoutMs);
@@ -224,13 +234,17 @@ export class PlaywrightService extends Disposable implements IPlaywrightService 
 	}
 
 	async invokeFunctionRaw<T>(sessionId: string, pageId: string, fnDef: string, ...args: unknown[]): Promise<T> {
-		const session = await this._getOrCreateSession(sessionId);
-		return session.invokeFunctionRaw(pageId, fnDef, ...args);
+		return this.invokeFunctionRawWithContext(sessionId, pageId, fnDef, undefined, ...args);
 	}
 
-	async invokeFunction(sessionId: string, pageId: string, fnDef: string, args: unknown[] = [], timeoutMs?: number): Promise<IInvokeFunctionResult> {
+	async invokeFunctionRawWithContext<T>(sessionId: string, pageId: string, fnDef: string, context: IPlaywrightExecutionContext | undefined, ...args: unknown[]): Promise<T> {
 		const session = await this._getOrCreateSession(sessionId);
-		return session.invokeFunction(pageId, fnDef, args, timeoutMs);
+		return session.invokeFunctionRaw(pageId, fnDef, context, ...args);
+	}
+
+	async invokeFunction(sessionId: string, pageId: string, fnDef: string, args: unknown[] = [], timeoutMs?: number, context?: IPlaywrightExecutionContext): Promise<IInvokeFunctionResult> {
+		const session = await this._getOrCreateSession(sessionId);
+		return session.invokeFunction(pageId, fnDef, args, timeoutMs, context);
 	}
 
 	async waitForDeferredResult(sessionId: string, deferredResultId: string, timeoutMs: number): Promise<IInvokeFunctionResult> {
@@ -289,6 +303,7 @@ export class PlaywrightService extends Disposable implements IPlaywrightService 
  */
 class PlaywrightSession extends Disposable {
 	private readonly activeInvocations = this._register(new DisposableMap<string, IDisposable>());
+	private readonly browserAgents = this._register(new DisposableMap<string, PlaywrightBrowserAgentAdapter>());
 
 	// --- Page matching ---
 
@@ -308,6 +323,7 @@ class PlaywrightSession extends Disposable {
 
 	constructor(
 		private readonly beginActivity: (pageId: string) => IDisposable,
+		private readonly publishBrowserAgentEvent: (event: BrowserAgentEvent) => void,
 		readonly sessionId: string,
 		private _browser: Browser,
 		readonly group: IBrowserViewGroup,
@@ -329,6 +345,21 @@ class PlaywrightSession extends Disposable {
 	}
 
 	// --- Page operations ---
+
+	async reportBrowserAgentAction(pageId: string, action: 'screenshot', phase: 'started' | 'completed' | 'error', context: IPlaywrightExecutionContext): Promise<void> {
+		if (!context.executionId) { return; }
+		if (phase === 'started') {
+			const page = await this._getPage(pageId);
+			this.activeInvocations.set(context.executionId, this.beginActivity(pageId));
+			await this.browserAgentForPage(pageId, page).reportAction(action, phase, context);
+		} else {
+			try {
+				await this.browserAgents.get(pageId)?.reportAction(action, phase, context);
+			} finally {
+				this.activeInvocations.deleteAndDispose(context.executionId);
+			}
+		}
+	}
 
 	async waitForPageAndGetSummary(pageId: string, expectedUrl: string, discoveryTimeoutMs: number): Promise<string> {
 		const page = await this._waitForPage(pageId, Date.now() + discoveryTimeoutMs);
@@ -353,12 +384,12 @@ class PlaywrightSession extends Disposable {
 		return this._getSummary(pageId, true);
 	}
 
-	async invokeFunctionRaw<T>(pageId: string, fnDef: string, ...args: unknown[]): Promise<T> {
+	async invokeFunctionRaw<T>(pageId: string, fnDef: string, context: IPlaywrightExecutionContext | undefined, ...args: unknown[]): Promise<T> {
 		const fn = await this._compileFunction(fnDef);
-		return this._runAgainstPage(pageId, (page) => fn(page, args) as T);
+		return this._runAgainstPage(pageId, page => this.runObserved(pageId, page, observed => fn(observed, args) as T, context));
 	}
 
-	async invokeFunction(pageId: string, fnDef: string, args: unknown[] = [], timeoutMs?: number): Promise<IInvokeFunctionResult> {
+	async invokeFunction(pageId: string, fnDef: string, args: unknown[] = [], timeoutMs?: number, context?: IPlaywrightExecutionContext): Promise<IInvokeFunctionResult> {
 		this.logService.info(`[PlaywrightSession] Invoking function on view ${pageId}`);
 
 		const logCtx: IExecutionLogContext = {
@@ -381,10 +412,7 @@ class PlaywrightSession extends Disposable {
 			return { error: err instanceof Error ? err.message : String(err), summary };
 		}
 		const wrappedCallback = async (page: Page) => {
-			const id = generateUuid();
-			this.activeInvocations.set(id, this.beginActivity(pageId));
-			try { return await fn(createPageApiProxy(page, logCtx.pageMethodsCalled), args); }
-			finally { this.activeInvocations.deleteAndDispose(id); }
+			return this.runObserved(pageId, page, observed => fn(createPageApiProxy(observed, logCtx.pageMethodsCalled), args), context);
 		};
 
 		if (timeoutMs !== undefined) {
@@ -440,6 +468,26 @@ class PlaywrightSession extends Disposable {
 	}
 
 	// --- Private: page operations ---
+
+	private browserAgentForPage(pageId: string, page: Page): PlaywrightBrowserAgentAdapter {
+		let adapter = this.browserAgents.get(pageId);
+		if (!adapter) {
+			adapter = new PlaywrightBrowserAgentAdapter(this.sessionId, pageId, page, this.publishBrowserAgentEvent);
+			this.browserAgents.set(pageId, adapter);
+		}
+		return adapter;
+	}
+
+	private async runObserved<T>(pageId: string, page: Page, callback: (page: Page) => T | Promise<T>, context?: IPlaywrightExecutionContext): Promise<T> {
+		const adapter = this.browserAgentForPage(pageId, page);
+		const id = generateUuid();
+		this.activeInvocations.set(id, this.beginActivity(pageId));
+		try {
+			return await adapter.run(callback, context);
+		} finally {
+			this.activeInvocations.deleteAndDispose(id);
+		}
+	}
 
 	private async _getSummary(pageId: string, full = false): Promise<string> {
 		const page = await this._getPage(pageId);
@@ -627,6 +675,7 @@ class PlaywrightSession extends Disposable {
 		const viewId = this._pageToViewId.get(page);
 		if (viewId) {
 			this._viewIdToPage.delete(viewId);
+			this.browserAgents.deleteAndDispose(viewId);
 		}
 		this._pageToViewId.delete(page);
 	}

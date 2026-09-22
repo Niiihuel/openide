@@ -36,7 +36,7 @@ import { OpenideSectionRenderer, markSectionGroup } from '../../openideSettings/
 import { t } from '../common/openideStrings.js';
 import { formatVoiceSetting, isVoiceSettingFor, IVoiceExclusion, IVoiceModelSelection, parseVoiceSetting, VoiceSetting } from '../common/openideVoiceModels.js';
 import { IOpenideAgentService, IOpenidePickerModel, IVoiceCapability } from './openideAgentService.js';
-import { createProviderIcon } from './openideProviderIcons.js';
+import { createProviderIconTile } from './openideProviderIcons.js';
 import { OpenideChatComposerVoice } from './chat/openideChatComposerVoice.js';
 
 const VOICE_MODEL_SETTING = 'openide.agent.voiceModel';
@@ -147,7 +147,7 @@ export class OpenideVoiceSettingsSection extends Disposable implements IOpenideS
 		const value = this.ui.cardRow(card, {
 			label: capability.providerLabel ?? t('settings.voice.modelTitle'),
 			description: capability.available ? capability.model : capability.reason,
-			leading: capability.providerId ? createProviderIcon(host.ownerDocument, capability.providerId, capability.providerLabel ?? capability.providerId, 'openide-settings-provider-logo') : undefined,
+			leading: capability.providerId ? createProviderIconTile(host.ownerDocument, capability.providerId, capability.providerLabel ?? capability.providerId, 'openide-settings-provider-logo') : undefined,
 		});
 		const badge = this.ui.status(value, { label: t(capability.available ? 'settings.voice.configured' : 'settings.voice.needsSetup'), tone: capability.available ? 'neutral' : 'warn' });
 		const status = append(host, $('.openide-settings-section-desc', { role: 'status', 'aria-live': 'polite' }));
@@ -261,7 +261,7 @@ export class OpenideVoiceSettingsSection extends Disposable implements IOpenideS
 		this.renderAutomatic(host, setting);
 
 		for (const group of selection.groups) {
-			const details = this.providerGroup(host, group.id, group.label, t('settings.voice.modelsCount', String(group.models.length)),
+			const details = this.providerGroup(host, group.id, group.label, group.models.length === 1 ? t('settings.voice.modelsCountOne') : t('settings.voice.modelsCount', String(group.models.length)),
 				group.models.some(model => isVoiceSettingFor(setting, group.id, model.id)));
 			const card = this.ui.card(details, { keywords: [group.id, group.label, 'voice', 'audio', 'dictation', 'dictado', 'voz'] });
 			providers.set(card, { details, id: group.id });
@@ -328,6 +328,7 @@ export class OpenideVoiceSettingsSection extends Disposable implements IOpenideS
 	 *  right now: "Automatic" alone is a promise the user cannot check. */
 	private renderAutomatic(host: HTMLElement, setting: VoiceSetting): void {
 		const active = this.agentService.findProvider(this.agentService.getActiveProviderId());
+		const usableAutomatic = setting.kind === 'auto' && !!active?.voiceModel;
 		const resolved = active?.voiceModel
 			? t('settings.voice.autoResolved', active.label, active.voiceModel)
 			: t('settings.voice.autoUnresolved', active?.label ?? '—');
@@ -335,10 +336,10 @@ export class OpenideVoiceSettingsSection extends Disposable implements IOpenideS
 		const value = this.ui.cardRow(card, {
 			label: t('settings.voice.auto'),
 			description: resolved,
-			icon: setting.kind === 'auto' ? 'check' : undefined,
+			icon: usableAutomatic ? 'check' : undefined,
 			run: () => void this.choose(undefined),
 		});
-		if (setting.kind === 'auto') { value.parentElement!.classList.add('selected'); }
+		if (usableAutomatic) { value.parentElement!.classList.add('selected'); }
 	}
 
 	private renderNothingAvailable(host: HTMLElement, excluded: readonly IVoiceExclusion[]): void {
@@ -350,20 +351,26 @@ export class OpenideVoiceSettingsSection extends Disposable implements IOpenideS
 		this.renderExcluded(host, excluded);
 	}
 
-	/** Why a connected provider is not on the list. Without this the page is an absence, and an
-	 *  absence reads as a bug. */
+	/** Keep the explanation discoverable without making providers that cannot dictate dominate the page. */
 	private renderExcluded(host: HTMLElement, excluded: readonly IVoiceExclusion[]): void {
 		if (!excluded.length) { return; }
-		const box = this.ui.group(host, { title: t('settings.voice.excludedTitle'), footer: t('settings.voice.excludedFooter') });
+		const details = append(host, $('details.openide-settings-voice-excluded')) as HTMLDetailsElement;
+		const summary = append(details, $('summary.openide-settings-voice-excluded-summary'));
+		append(summary, $('span.openide-settings-voice-excluded-label', undefined, t('settings.voice.excludedTitle')));
+		append(summary, $('span.openide-settings-voice-excluded-count', undefined, String(excluded.length)));
+		append(summary, $('span.codicon.codicon-chevron-right', { 'aria-hidden': 'true' }));
+		const content = append(details, $('.openide-settings-voice-excluded-content'));
+		const card = this.ui.card(content, {});
 		for (const entry of excluded) {
-			const details = this.providerGroup(box, entry.id, entry.label, t('settings.voice.unavailable'), false);
-			this.ui.groupRow(details, {
+			this.ui.cardRow(card, {
+				leading: createProviderIconTile(host.ownerDocument, entry.id, entry.label, 'openide-settings-provider-logo'),
 				label: entry.label,
 				description: entry.reason === 'protocol'
 					? t('settings.voice.excludedProtocol')
 					: t('settings.voice.excludedNoAudio'),
 			});
 		}
+		append(content, $('.openide-settings-section-desc', undefined, t('settings.voice.excludedFooter')));
 	}
 
 	/** Native details preserve keyboard interaction and keep each provider's expansion choice. */
@@ -374,7 +381,7 @@ export class OpenideVoiceSettingsSection extends Disposable implements IOpenideS
 		if (!this.expandedProviders.has(id)) { this.expandedProviders.set(id, selected); }
 		details.open = this.expandedProviders.get(id)!;
 		const summary = append(details, $('summary.openide-settings-voice-provider-summary'));
-		summary.appendChild(createProviderIcon(host.ownerDocument, id, label, 'openide-settings-provider-logo'));
+		summary.appendChild(createProviderIconTile(host.ownerDocument, id, label, 'openide-settings-provider-logo'));
 		append(summary, $('span.openide-settings-voice-provider-label', undefined, label));
 		append(summary, $('span.openide-settings-voice-provider-count', undefined, count));
 		append(summary, $('span.codicon.codicon-chevron-right', { 'aria-hidden': 'true' }));

@@ -130,7 +130,9 @@ export class OpenideChatPlanPart extends OpenideChatContentPart {
 		if (!uri || uri.toString() !== resource.toString() || this._resolution === 'rejected') {
 			return;
 		}
-		this._resolution = this._agentService.isPlanBuildRunning(uri) ? 'building' : this._resolution;
+		// The service also emits when a build is refused or fails. Do not leave the optimistic
+		// "Building" state parked forever after its owner has released the plan.
+		this._resolution = this._agentService.isPlanBuildRunning(uri) ? 'building' : 'pending';
 		this._renderFooter();
 		this._onDidChangeHeight.fire();
 	}

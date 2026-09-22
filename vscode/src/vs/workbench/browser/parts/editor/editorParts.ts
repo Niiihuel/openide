@@ -30,6 +30,7 @@ import { IStatusbarService } from '../../../services/statusbar/browser/statusbar
 import { mainWindow } from '../../../../base/browser/window.js';
 import { IModalEditorPartOptions } from '../../../../platform/editor/common/editor.js';
 import { EditorPartModalVisibleContext } from '../../../common/contextkeys.js';
+import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 
 interface IEditorPartsUIState {
 	readonly auxiliary: IAuxiliaryEditorPartState[];
@@ -77,7 +78,8 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 		@IStorageService private readonly storageService: IStorageService,
 		@IThemeService themeService: IThemeService,
 		@IAuxiliaryWindowService private readonly auxiliaryWindowService: IAuxiliaryWindowService,
-		@IContextKeyService private readonly contextKeyService: IContextKeyService
+		@IContextKeyService private readonly contextKeyService: IContextKeyService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService
 	) {
 		super('workbench.editorParts', themeService, storageService);
 		this.modalEditorVisibleContext = EditorPartModalVisibleContext.bindTo(this.contextKeyService);
@@ -452,7 +454,7 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 		// when the main part did restore. It is possible
 		// that restoring was not attempted because specific
 		// editors were opened.
-		if (this.mainPart.willRestoreState) {
+		if (this.mainPart.willRestoreState && !this.environmentService.openideAgentWindowOwner) {
 			const state = this.loadState();
 			if (state) {
 				await this.restoreState(state);
@@ -475,6 +477,11 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 	}
 
 	protected override saveState(): void {
+		// Hidden Agents owners share workspace storage with the IDE. Keep its saved
+		// window layout intact instead of replacing it with this runtime's empty UI.
+		if (this.environmentService.openideAgentWindowOwner) {
+			return;
+		}
 		const state = this.createState();
 		if (state.auxiliary.length === 0) {
 			delete this.workspaceMemento[EditorParts.EDITOR_PARTS_UI_STATE_STORAGE_KEY];
@@ -517,15 +524,19 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 	}
 
 	private createState(): IEditorPartsUIState {
+		// Modal and embedded parts belong to their presentation owner. Persisting one
+		// as an auxiliary part would reopen it as a detached editor on the next load.
+		const modalParts = new Set<IEditorPart>(this.modalEditorParts);
+		const parts = this.parts.filter(part => !modalParts.has(part));
 		return {
-			auxiliary: this.parts
+			auxiliary: parts
 				.map(part => ({ part, auxiliaryWindow: this.auxiliaryWindowService.getWindow(part.windowId) }))
 				.filter(({ auxiliaryWindow }) => auxiliaryWindow !== undefined)
 				.map(({ part, auxiliaryWindow }) => ({
 					state: part.createState(),
 					...auxiliaryWindow!.createState()
 				})),
-			mru: this.mostRecentActiveParts.map(part => this.parts.indexOf(part))
+			mru: this.mostRecentActiveParts.filter(part => parts.includes(part)).map(part => parts.indexOf(part))
 		};
 	}
 
@@ -560,6 +571,9 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 	private onDidChangeMementoState(e: IStorageValueChangeEvent): void {
 		if (e.external && e.scope === StorageScope.WORKSPACE) {
 			this.reloadMemento(e.scope);
+			if (this.environmentService.openideAgentWindowOwner) {
+				return;
+			}
 
 			const state = this.loadState();
 			if (state) {

@@ -1,0 +1,59 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.openide-chat-agent-terminal.openide-cli-workspace {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+.openide-chat-agent-terminal.openide-cli-workspace.hidden { display: none; }
+.openide-cli-workspace > .openide-chat-agent-terminal-host {
+	position: relative;
+	inset: auto;
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
+}
+.openide-cli-workspace .openide-cli-tools { flex: 0 0 auto; }
+.openide-cli-workspace .openide-cli-tools summary { display: flex; align-items: center; gap: 8px; }
+.openide-cli-workspace .openide-cli-tools summary > span:last-child { max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.openide-cli-status { flex: 1; overflow: hidden; text-overflow: ellipsis; color: var(--vscode-foreground); }
+.openide-cli-status[data-status="needs-input"] { color: var(--vscode-editorWarning-foreground); }
+.openide-cli-status[data-status="failed"] { color: var(--vscode-errorForeground); }
+.openide-cli-workspace .openide-cli-tools p { font-size: var(--oi-text-sm); line-height: 1.5; }
+.openide-cli-composer {
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin: 8px;
+	padding: 12px;
+	border: var(--vscode-strokeThickness, 1px) solid var(--oi-border, var(--vscode-input-border));
+	border-radius: var(--oi-radius-group);
+	background: var(--oi-conversation-panel, var(--vscode-editor-background));
+}
+.openide-cli-composer:focus-within { border-color: var(--vscode-focusBorder); }
+.openide-cli-composer-route { font-size: var(--oi-text-sm); font-weight: 600; color: var(--vscode-foreground); }
+.openide-cli-composer textarea {
+	width: 100%;
+	min-height: 48px;
+	max-height: 160px;
+	resize: vertical;
+	box-sizing: border-box;
+	border: 0;
+	outline: none;
+	padding: 0;
+	font-family: inherit;
+	font-size: var(--oi-text-md);
+	line-height: 1.5;
+	background: transparent;
+	color: var(--vscode-input-foreground);
+}
+.openide-cli-composer textarea::placeholder { color: var(--vscode-input-placeholderForeground); }
+.openide-cli-composer-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.openide-cli-composer-actions > .primary { margin-inline-start: auto; }
+.openide-cli-composer-hint { font-size: var(--oi-text-sm); color: var(--vscode-descriptionForeground); line-height: 1.5; }
+.openide-cli-composer-error { font-size: var(--oi-text-sm); color: var(--vscode-errorForeground); }
+.openide-cli-composer-error:empty { display: none; }

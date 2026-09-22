@@ -89,14 +89,22 @@ try {
  await page.evaluate(() => window.waitingFixture.update([{ kind: 'ask', requestId: 'ask', questions: [], isComplete: false }]));
  await status.getByText('Waiting for response', { exact: true }).waitFor();
  assert.equal(await fixture.locator('.openide-chat-ask').isVisible(), false);
- assert.equal(await fixture.locator('.openide-chat-shimmer:visible').count(), 1);
+ assert.equal(await fixture.locator('.openide-chat-response-working:visible').count(), 1);
  await page.emulateMedia({ reducedMotion: 'reduce' });
  assert.equal(await status.evaluate(el => getComputedStyle(el).animationName), 'none');
  await page.evaluate(() => window.waitingFixture.update([{ kind: 'ask', requestId: 'ask', questions: [], isComplete: true, answers: [] }], true));
  await fixture.locator('.openide-chat-response-working').waitFor({ state: 'hidden' });
+ await page.emulateMedia({ reducedMotion: 'no-preference' });
+ await page.evaluate(() => window.waitingFixture.update([{ kind: 'tool', callId: 'done', name: 'browser_evaluate', argumentsJson: '{}', state: 'success', result: 'Done' }]));
+ await status.getByText('Planning next moves', { exact: true }).waitFor();
+ assert.equal(await fixture.locator('.openide-chat-status-lattice, .openide-chat-status-trace').count(), 0, 'the live line has no rotating dots or faded previous step');
+ assert.equal(await status.evaluate(el => getComputedStyle(el).animationName), 'openide-text-shimmer');
+ await fixture.screenshot({ path: path.join(output, 'shimmer-only.png') });
+ await page.emulateMedia({ reducedMotion: 'reduce' });
+ assert.equal(await status.evaluate(el => getComputedStyle(el).animationName), 'none');
  await page.evaluate(() => window.waitingFixture.dispose());
  fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ neutralComposer: true, noBorderAnimation: true, borderlessApprovalScope: true, sharedWaitingStatus: true, reducedMotion: true }, null, 2));
- console.log('PASS: neutral composer, approval scope, single waiting shimmer, reduced motion and completion.');
+ console.log('PASS: neutral composer, approval scope, single waiting indicator, reduced motion and completion.');
 } finally {
  if (app) await app.close();
  fs.rmSync(tmp, { recursive: true, force: true });

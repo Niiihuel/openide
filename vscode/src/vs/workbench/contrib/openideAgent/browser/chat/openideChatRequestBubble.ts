@@ -105,18 +105,23 @@ export function renderImageStrip(host: HTMLElement, images: readonly IChatImage[
 	const renderable = (images ?? []).filter(image => !!image.data);
 	host.classList.toggle('hidden', renderable.length === 0);
 	for (const image of renderable) {
-		const frame = append(host, $('div.openide-chat-request-image'));
+		const openable = !!store && !!commandService;
+		const frame = append(host, $(openable ? 'button.openide-chat-request-image' : 'div.openide-chat-request-image'));
+		const name = image.name || t('chat.image.title');
 		const element = append(frame, $('img')) as HTMLImageElement;
 		const uri = `data:${image.mimeType};base64,${image.data}`;
 		element.src = uri;
+		element.alt = name;
 		if (store && commandService) {
 			// A thumbnail is a promise of the picture: the click opens it in the fullscreen
 			// viewer the screenshots use (zoom, pan, fit), instead of doing nothing.
 			frame.classList.add('openable');
-			frame.title = t('chat.image.open');
+			frame.setAttribute('type', 'button');
+			frame.setAttribute('aria-label', `${t('chat.image.open')}: ${name}`);
+			frame.title = name;
 			store.add(addDisposableListener(frame, 'click', event => {
 				event.stopPropagation();
-				void commandService.executeCommand('openide.diagram.fullscreen', { kind: 'image', uri, alt: '' }, t('chat.image.title'));
+				void commandService.executeCommand('openide.diagram.fullscreen', { kind: 'image', uri, alt: name }, name);
 			}));
 		}
 	}

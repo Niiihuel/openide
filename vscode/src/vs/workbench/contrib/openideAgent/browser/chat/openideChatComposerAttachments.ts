@@ -7,6 +7,7 @@ import { createOpenideElement } from '../openideDom.js';
 import { addDisposableListener, append, clearNode } from '../../../../../base/browser/dom.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IChatImage } from '../../common/openideAgentTypes.js';
 import { t } from '../../common/openideStrings.js';
@@ -38,7 +39,7 @@ export async function readChatImage(file: File): Promise<IChatImage | undefined>
 		reader.readAsDataURL(file);
 	});
 	const comma = url.indexOf(',');
-	return comma < 0 ? undefined : { mimeType: file.type, data: url.slice(comma + 1) };
+	return comma < 0 ? undefined : { mimeType: file.type, name: file.name, data: url.slice(comma + 1) };
 }
 
 /**
@@ -56,6 +57,7 @@ export class OpenideChatComposerAttachments extends Disposable {
 	private _images: IChatImage[] = [];
 	/** Bumped by every mutation, so a hydration that comes back late knows the strip moved on. */
 	private _generation = 0;
+	private _readEpoch = 0;
 
 	get images(): readonly IChatImage[] { return this._images; }
 	get isEmpty(): boolean { return this._images.length === 0; }
@@ -68,6 +70,8 @@ export class OpenideChatComposerAttachments extends Disposable {
 		private readonly fileService: IFileService,
 		/** Re-evaluates the send/mic slot: attachments alone are enough to make a turn sendable. */
 		private readonly onDidChange: () => void,
+		private readonly commandService?: ICommandService,
+		private readonly focusInput?: () => void,
 	) {
 		super();
 		this._strip = strip;
@@ -94,6 +98,7 @@ export class OpenideChatComposerAttachments extends Disposable {
 	 * glyph — and submitting them sent the provider an attachment with no bytes in it.
 	 */
 	restore(images: readonly IChatImage[]): void {
+		this._readEpoch++;
 		if (!images.length && !this._images.length) {
 			return;
 		}
@@ -144,8 +149,9 @@ export class OpenideChatComposerAttachments extends Disposable {
 		if (this._images.length >= ATTACH_LIMIT) {
 			return;
 		}
+		const epoch = this._readEpoch;
 		const image = await readChatImage(file);
-		if (!image) {
+		if (!image || epoch !== this._readEpoch || this._store.isDisposed || this._images.length >= ATTACH_LIMIT) {
 			return;
 		}
 		this._images.push(image);
@@ -154,6 +160,7 @@ export class OpenideChatComposerAttachments extends Disposable {
 	}
 
 	clear(): void {
+		this._readEpoch++;
 		if (!this._images.length) {
 			return;
 		}
@@ -170,17 +177,31 @@ export class OpenideChatComposerAttachments extends Disposable {
 		this._images.forEach((image, index) => {
 			const chip = append(this._strip, createOpenideElement(document, 'div'));
 			chip.className = 'openide-attach-chip';
+			const name = image.name || t('chat.image.title');
+			const preview = append(chip, createOpenideElement(document, 'button'));
+			preview.type = 'button';
+			preview.className = 'openide-attach-preview';
+			preview.disabled = !image.data || !this.commandService;
+			preview.setAttribute('aria-label', `${t('chat.image.open')}: ${name}`);
+			this._chipStore.add(setupChatTooltip(this.hoverService, preview, () => name, { aria: false }));
+			this._chipStore.add(addDisposableListener(preview, 'click', () => {
+				void this.commandService?.executeCommand('openide.diagram.fullscreen', { kind: 'image', uri: `data:${image.mimeType};base64,${image.data}`, alt: name }, name);
+			}));
 			// While the asset is being read there is nothing to show: an `<img>` with an empty src
 			// paints the broken-image glyph, so the chip stays an empty frame until the bytes land.
 			chip.classList.toggle('pending', !image.data);
 			if (image.data) {
-				const thumbnail = append(chip, createOpenideElement(document, 'img'));
+				const thumbnail = append(preview, createOpenideElement(document, 'img'));
 				thumbnail.src = `data:${image.mimeType};base64,${image.data}`;
+				thumbnail.alt = '';
 			}
+			const label = append(preview, createOpenideElement(document, 'span'));
+			label.className = 'openide-attach-name';
+			label.textContent = name;
 			const remove = append(chip, createOpenideElement(document, 'button'));
 			remove.type = 'button';
 			remove.className = 'openide-attach-remove';
-			this._chipStore.add(setupChatTooltip(this.hoverService, remove, () => t('chat.attach.remove')));
+			this._chipStore.add(setupChatTooltip(this.hoverService, remove, () => `${t('chat.attach.remove')}: ${name}`));
 			remove.appendChild(createCodicon(document, 'close'));
 			// Re-rendered from the array rather than removing the node: the indices of the chips
 			// after this one shift, and stale closures would delete the wrong image next time.
@@ -188,6 +209,12 @@ export class OpenideChatComposerAttachments extends Disposable {
 				this._images.splice(index, 1);
 				this._generation++;
 				this._render();
+				const remaining = this._strip.querySelectorAll<HTMLButtonElement>('.openide-attach-remove');
+				if (remaining.length) {
+					remaining[Math.min(index, remaining.length - 1)].focus();
+				} else {
+					this.focusInput?.();
+				}
 			}));
 		});
 		this.onDidChange();

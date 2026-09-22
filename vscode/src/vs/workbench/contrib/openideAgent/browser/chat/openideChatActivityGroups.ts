@@ -13,14 +13,13 @@ import { OpenideChatSubagentGroup } from './openideChatSubagentGroup.js';
 import { OpenideChatSubagentPart } from './parts/openideChatSubagentPart.js';
 import './media/openideChatActivityGroups.css';
 
-type ActivityKind = 'commands' | 'files' | 'browser' | 'tools' | 'thinking';
+type ActivityKind = 'commands' | 'files' | 'browser' | 'tools';
 
 /** Only settled, successful work can be folded. Failures and interactive work stay visible. */
 function activityKind(content: IOpenideChatContent): ActivityKind | undefined {
 	switch (content.kind) {
 		case 'terminal': return content.state === 'exited' && (content.exitCode === undefined || content.exitCode === 0) ? 'commands' : undefined;
 		case 'explore': return content.isComplete && content.entries.every(entry => entry.state === 'success') ? 'files' : undefined;
-		case 'thinking': return content.isComplete ? 'thinking' : undefined;
 		case 'tool': return content.state === 'success' && !webPreviewFromTool(content) ? (content.name.startsWith('browser_') ? 'browser' : 'tools') : undefined;
 		default: return undefined;
 	}
@@ -28,8 +27,6 @@ function activityKind(content: IOpenideChatContent): ActivityKind | undefined {
 
 function summary(kinds: ReadonlySet<ActivityKind>): { label: string; icon: string } {
 	const work = new Set(kinds);
-	work.delete('thinking');
-	if (work.size === 0) { return { label: t('openide.activity.thought'), icon: 'thought' }; }
 	if (work.size === 2 && work.has('files') && work.has('commands')) { return { label: t('openide.activity.readRan'), icon: 'search' }; }
 	if (work.size > 1) { return { label: t('openide.activity.completed'), icon: 'checklist' }; }
 	switch ([...work][0]) {
@@ -54,7 +51,7 @@ export class OpenideChatActivityGroups extends Disposable {
 
 	constructor(private readonly host: HTMLElement) { super(); }
 
-	render(content: readonly IOpenideChatContent[], parts: readonly IOpenideChatContentPart[], expanded: boolean, thinkingOpen: boolean, complete: boolean): void {
+	render(content: readonly IOpenideChatContent[], parts: readonly IOpenideChatContentPart[], expanded: boolean, complete: boolean): void {
 		const kindAt = (index: number) => !complete && index === content.length - 1 ? undefined : activityKind(content[index]);
 		const used = new Set<number>();
 		const usedSubagents = new Set<number>();
@@ -96,7 +93,7 @@ export class OpenideChatActivityGroups extends Disposable {
 				continue;
 			}
 			const kind = kindAt(i);
-			if (!kind || (thinkingOpen && kind === 'thinking')) {
+			if (!kind) {
 				const node = parts[i++]?.domNode;
 				if (node) { place(node); }
 				continue;
@@ -105,14 +102,9 @@ export class OpenideChatActivityGroups extends Disposable {
 			const kinds = new Set<ActivityKind>();
 			while (i < content.length) {
 				const next = kindAt(i);
-				if (!next || (thinkingOpen && next === 'thinking')) { break; }
+				if (!next) { break; }
 				kinds.add(next);
 				i++;
-			}
-			// A lone reasoning summary already has the right compact disclosure.
-			if (i === start + 1 && kind === 'thinking') {
-				if (parts[start]?.domNode) { place(parts[start].domNode!); }
-				continue;
 			}
 			used.add(start);
 			let group = this.groups.get(start);

@@ -174,11 +174,12 @@ export class AuxiliaryWindow extends BaseWindow implements IAuxiliaryWindow {
 	}
 
 	private unloaded = false;
+	private disposing = false;
 	private preparingUnload = false;
 	private preparedUnload = false;
 
 	private handleBeforeUnload(e: BeforeUnloadEvent): void {
-		if (this.unloaded || this._store.isDisposed) { return; }
+		if (this.unloaded || this.disposing || this._store.isDisposed) { return; }
 		if (this.preparingUnload) { this.preventUnload(e); return; }
 		const prepared = this.preparedUnload;
 		this.preparedUnload = false;
@@ -276,10 +277,14 @@ export class AuxiliaryWindow extends BaseWindow implements IAuxiliaryWindow {
 	}
 
 	override dispose(): void {
-		if (this._store.isDisposed) {
+		if (this.disposing || this._store.isDisposed) {
 			return;
 		}
 
+		// Disposal follows an accepted owner shutdown or a completed close. A new
+		// asynchronous beforeunload veto here would retain a window whose styles and
+		// services are about to be disposed, and whose close retry can no longer run.
+		this.disposing = true;
 		this._onWillDispose.fire();
 
 		super.dispose();

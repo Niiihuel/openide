@@ -43,6 +43,10 @@ export interface IOpenideSettingsSectionContext {
 export interface IOpenideSettingsSection extends IDisposable {
 	/** Keys this section renders itself: they are hidden from the native list. */
 	readonly ownedSettings: readonly string[];
+	/** Self-updating sections can retain their DOM during unrelated editor refreshes when the
+	 * page has no native rows and its category, query and scope have not changed. The section
+	 * must observe its own data sources; profile and language changes still remount it. */
+	readonly retainOnRefresh?: boolean;
 	/**
 	 * Sub-pages this section contributes under its own category, if any.
 	 *

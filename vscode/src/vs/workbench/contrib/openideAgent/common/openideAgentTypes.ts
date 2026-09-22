@@ -30,6 +30,8 @@ export interface IToolCall {
 /** Image attached to a user message (paste/drag in the composer). */
 export interface IChatImage {
 	readonly mimeType: string;
+	/** Original filename, retained in the composer and restored transcript. */
+	readonly name?: string;
 	/** Base64 data, without the data: prefix. Empty on load until `assetUri` is hydrated. */
 	readonly data: string;
 	/** Copia durable fuera del state.vscdb, dentro del workspaceStorage privado de OpenIDE. */
@@ -90,6 +92,10 @@ export interface IPersistedFlowVideo {
 export interface IChatMessage {
 	role: ChatRole;
 	content: string;
+	/** Provider-emitted reasoning for the local transcript; never added to model input as prose. */
+	reasoning?: string;
+	/** Local subagent terminal transcript, excluded from provider messages. */
+	terminalOutput?: { callId: string; output: string };
 	/** Stable local identity of the message. On user messages it also identifies the file
 	 *  transaction produced by its AI response. Not sent to the provider as content. */
 	messageId?: string;
@@ -442,7 +448,7 @@ export type AgentLoopEvent =
 	| { type: 'approval'; name: string; decision: string }
 	// INLINE approval request: the UI shows a card in the chat box with the options
 	// (allow/session/always/reject) and answers with resolveApproval(id, decision).
-	| { type: 'approvalRequest'; id: string; tool: string; title: string; detail?: string; command?: string; risk: ToolRisk; sensitive?: boolean }
+	| { type: 'approvalRequest'; id: string; tool: string; title: string; detail?: string; command?: string; risk: ToolRisk; sensitive?: boolean; operationOnly?: boolean }
 	// The active account is spent and several could take over: the UI shows the choice and answers
 	// with resolveAccountChoice(id, accountId | 'stop').
 	| { type: 'accountChoiceRequest'; id: string; spentLabel: string; candidates: readonly { accountId: string; label: string; paid?: boolean }[] }

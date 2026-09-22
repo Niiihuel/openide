@@ -15,6 +15,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { ITerminalService } from '../../terminal/browser/terminal.js';
+import { IOpenideAgentService } from './openideAgentService.js';
 import { IChatMessage } from '../common/openideAgentTypes.js';
 import { isTerminalSubagentStatus } from '../common/openideSubagentTypes.js';
 import { t } from '../common/openideStrings.js';
@@ -26,6 +27,7 @@ import './chat/media/openideAgentWindowActivity.css';
 import './chat/media/openideSubagents.css';
 
 export interface IAgentWindowActivityActions {
+	readonly processesParent?: HTMLElement;
 	readonly openSubagents?: () => void;
 	readonly openTerminal: (instanceId?: number) => void;
 	readonly addSource?: () => void;
@@ -94,6 +96,7 @@ export class OpenideAgentWindowActivity extends Disposable {
 		@ITerminalService private readonly terminalService: ITerminalService,
 		@IWorkspaceContextService private readonly workspaceService: IWorkspaceContextService,
 		@IHoverService private readonly hoverService: IHoverService,
+		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
 	) {
 		super();
 		// Recover ownership for mirrors saved before parentSessionId was persisted.
@@ -105,7 +108,7 @@ export class OpenideAgentWindowActivity extends Disposable {
 			}
 		}
 		this.subagents = this.section(parent, t('agentWindow.subagents'), 'subagents');
-		this.processes = this.section(parent, t('agentWindow.processes'), 'processes', () => actions.openTerminal());
+		this.processes = this.section(actions.processesParent ?? parent, t('agentWindow.processes'), 'processes', () => actions.openTerminal());
 		this.sources = this.section(parent, t('agentWindow.sources'), 'sources', actions.addSource);
 		const refresh = this._register(new RunOnceScheduler(() => this.refresh(), 75));
 		const schedule = () => { if (!refresh.isScheduled()) { refresh.schedule(); } };
@@ -114,6 +117,7 @@ export class OpenideAgentWindowActivity extends Disposable {
 		this._register(source.onDidChangeNavigation(schedule));
 		this._register(this.orchestration.onDidChangeRun(() => { if (!subagentsRefresh.isScheduled()) { subagentsRefresh.schedule(); } }));
 		this._register(this.terminalService.onDidChangeInstances(() => this.bindTerminals()));
+		this._register(this.agentService.onDidChangeBackgroundTerminal(() => this.renderProcesses()));
 		this.bindTerminals();
 		this.refresh();
 	}
@@ -207,7 +211,12 @@ export class OpenideAgentWindowActivity extends Disposable {
 	}
 
 	private renderProcesses(): void {
-		const instances = this.terminalService.instances.filter(instance => !instance.isDisposed && !instance.shellLaunchConfig.hideFromUser);
+		const conversation = this.source.sessionStore.activeSessionId();
+		const background = new Set(this.agentService.backgroundTerminalInstanceIds);
+		const instances = this.terminalService.instances.filter(instance => {
+			const owner = instance.shellLaunchConfig.env?.['OPENIDE_CONVERSATION_ID'] ?? instance.shellLaunchConfig.env?.['OPENIDE_SESSION_ID'];
+			return !instance.isDisposed && (!instance.shellLaunchConfig.hideFromUser || background.has(instance.instanceId)) && (!owner || owner === conversation);
+		});
 		if (!this.begin(this.processes, instances.map(instance => [instance.instanceId, instance.title]), instances.length)) { return; }
 		if (!instances.length) { this.empty(this.processes, t('agentWindow.noProcesses')); }
 		for (const instance of this.processes.all ? instances : instances.slice(0, 3)) {

@@ -10,6 +10,7 @@ import { INotificationService } from '../../../../../../platform/notification/co
 import { IOpenideChatContent, IOpenideChatEditContent, isOpenideChatContentOfKind } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
 import { IOpenideAgentService } from '../../openideAgentService.js';
+import { openideChatAuthoringFileLabel } from '../../../common/chat/openideChatToolPresentation.js';
 import { t } from '../../../common/openideStrings.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
 import { setupChatTooltip } from '../openideChatHover.js';
@@ -47,6 +48,7 @@ export class OpenideChatEditPart extends OpenideChatContentPart {
 	private _isComplete: boolean;
 	private readonly _row: OpenideChatFileRow;
 	private readonly _body: HTMLElement;
+	private readonly _activity: HTMLElement;
 	private readonly _diff: OpenideDiffBlock;
 
 	constructor(
@@ -69,6 +71,7 @@ export class OpenideChatEditPart extends OpenideChatContentPart {
 			className: 'openide-chat-edit-head',
 			onClick: () => this._openReview(),
 		}));
+		this._activity = append(this.domNode, $('div.openide-chat-authoring-edit-label'));
 		append(this.domNode, this._row.domNode);
 		// The trailing button is not a duplicate of the row click: it is the affordance that took
 		// the place of the expand chevron, so the card still LOOKS actionable at rest. Without it
@@ -90,6 +93,9 @@ export class OpenideChatEditPart extends OpenideChatContentPart {
 		// card without a diff is a failed or empty write, and must stop pretending to work.
 		const pending = !diff.diffLines && !this._isComplete;
 		this._row.setPending(pending);
+		const activity = openideChatAuthoringFileLabel(diff.path, pending ? 'running' : diff.created ? 'created' : 'updated');
+		this._activity.textContent = activity ?? '';
+		this._activity.hidden = !activity;
 		// Only actual diffs deserve a card. The shared status line reports the in-flight write.
 		this.domNode.hidden = !diff.diffLines?.length && !this._content.waitingFor;
 		this._renderDiff();

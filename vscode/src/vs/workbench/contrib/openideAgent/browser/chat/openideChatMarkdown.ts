@@ -90,6 +90,7 @@ export function getOpenideChatMarkdownRenderOptions(options?: MarkdownRenderOpti
 			allowedAttributes: { override: allowedMarkdownHtmlAttributes },
 			...options?.sanitizerConfig,
 			allowedLinkSchemes: { augment: [product.urlProtocol] },
+			allowRelativeLinkPaths: true,
 			remoteImageIsAllowed,
 		},
 	};
@@ -489,12 +490,15 @@ function chatWebLink(href: string): URL | undefined {
 export function chatWorkspaceFileLink(href: string): string | undefined {
 	const value = href.trim();
 	if (!value) { return undefined; }
-	try {
-		const uri = URI.parse(value);
-		if (uri.scheme === 'file') { return uri.fsPath; }
-		if (uri.scheme) { return undefined; }
-	} catch {
-		return undefined;
+	// URI.parse defaults unschemed paths to file:, which would turn a project-relative
+	// path into an absolute path before the workspace resolver can handle it.
+	if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) {
+		try {
+			const uri = URI.parse(value);
+			return uri.scheme === 'file' ? uri.fsPath : undefined;
+		} catch {
+			return undefined;
+		}
 	}
 	let path = value.split(/[?#]/, 1)[0];
 	try { path = decodeURIComponent(path); } catch { return undefined; }

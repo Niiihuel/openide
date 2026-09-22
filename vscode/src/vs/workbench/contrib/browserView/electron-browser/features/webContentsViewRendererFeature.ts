@@ -40,12 +40,13 @@ import { BrowserOverlayManager, BrowserOverlayType } from '../overlayManager.js'
  * An alternative renderer (e.g. an in-DOM iframe) would replace this
  * contribution and need none of the above.
  */
-class WebContentsViewRendererFeature extends BrowserEditorContribution {
+export class WebContentsViewRendererFeature extends BrowserEditorContribution {
 
 	private _container: HTMLElement | undefined;
 	private _model: IBrowserViewModel | undefined;
 	private _editorVisible = false;
 	private _overlayObscured = false;
+	private _agentRendering = false;
 
 	private readonly _placeholderScreenshot = $('.browser-placeholder-screenshot');
 	private readonly _overlayPauseEl = $('.browser-overlay-paused');
@@ -151,6 +152,7 @@ class WebContentsViewRendererFeature extends BrowserEditorContribution {
 	}
 
 	override tryFocus(): boolean {
+		if (this._agentRendering) { return false; }
 		if (!this.editor.input?.url) {
 			return false;
 		}
@@ -208,9 +210,17 @@ class WebContentsViewRendererFeature extends BrowserEditorContribution {
 
 	private _shouldShowPage(): boolean {
 		return this._editorVisible
+			&& !this._agentRendering
 			&& !this._overlayObscured
 			&& !!this._model?.url
 			&& !this._model?.error;
+	}
+
+	/** A native DOM renderer is showing real frames of this same page during agent activity. */
+	setAgentRendering(active: boolean): void {
+		if (this._agentRendering === active) { return; }
+		this._agentRendering = active;
+		this._refresh();
 	}
 
 	/**
@@ -224,7 +234,9 @@ class WebContentsViewRendererFeature extends BrowserEditorContribution {
 		this._placeholderScreenshot.style.display = placeholderActive ? '' : 'none';
 
 		// Overlay-pause overlay: fades in when an overlay obscures the page.
-		const pauseActive = !!this._model?.url && this._editorVisible && this._overlayObscured;
+		// DOM presentation composes underneath Workbench overlays naturally and does
+		// not need the native view's occlusion pause screen.
+		const pauseActive = !!this._model?.url && this._editorVisible && this._overlayObscured && !this._agentRendering;
 		this._overlayPauseEl.classList.toggle('visible', pauseActive);
 
 		if (!this._model) {

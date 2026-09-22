@@ -24,6 +24,7 @@ import { TerminalCommandId } from '../../terminal/common/terminal.js';
 import { TerminalContextKeys } from '../../terminal/common/terminalContextKey.js';
 import { terminalStrings } from '../../terminal/common/terminalStrings.js';
 import { t } from '../common/openideStrings.js';
+import { IOpenideAgentService } from './openideAgentService.js';
 import { setupChatTooltip } from './chat/openideChatHover.js';
 
 interface IBorrowedTerminal {
@@ -60,6 +61,7 @@ export class OpenideAgentWindowTerminal extends Disposable {
 		@ITerminalGroupService private readonly terminalGroupService: ITerminalGroupService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
+		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
 	) {
 		super();
 		this.domNode = append(parent, $('.openide-agent-window-terminal'));
@@ -83,6 +85,7 @@ export class OpenideAgentWindowTerminal extends Disposable {
 		this._register(this.terminalService.onDidChangeInstances(() => this.renderTabs()));
 		this._register(this.terminalService.onAnyInstanceTitleChange(() => this.renderTabs()));
 		this._register(this.terminalService.onAnyInstanceIconChange(() => this.renderTabs()));
+		this._register(this.agentService.onDidChangeBackgroundTerminal(() => this.renderTabs()));
 		this._register(this.terminalService.onDidDisposeInstance(instance => {
 			if (this.panes.delete(instance.instanceId)) {
 				this.splitView.value?.remove(instance);
@@ -101,8 +104,9 @@ export class OpenideAgentWindowTerminal extends Disposable {
 
 	private available(): readonly ITerminalInstance[] {
 		// CLI harnesses own their hidden terminal presentation; do not steal it from the chat.
+		const background = new Set(this.agentService.backgroundTerminalInstanceIds);
 		return this.terminalService.instances.filter(instance => !instance.isDisposed && (
-			instance === this.borrowed?.instance || !instance.shellLaunchConfig.hideFromUser
+			instance === this.borrowed?.instance || !instance.shellLaunchConfig.hideFromUser || background.has(instance.instanceId)
 		));
 	}
 
@@ -138,7 +142,7 @@ export class OpenideAgentWindowTerminal extends Disposable {
 		}
 		if (!this.panes.has(instance.instanceId)) {
 			const group = this.terminalGroupService.getGroupForInstance(instance);
-			const instances = group ? group.terminalInstances.filter(member => !member.shellLaunchConfig.hideFromUser) : [instance];
+			const instances = group ? group.terminalInstances.filter(member => member === instance || !member.shellLaunchConfig.hideFromUser) : [instance];
 			this.release();
 			this.emptyState.clear();
 			clearNode(this.body);

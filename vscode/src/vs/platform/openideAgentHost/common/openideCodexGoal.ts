@@ -17,5 +17,6 @@ export interface IOpenideCodexGoalConnection {
 }
 export interface IOpenideCodexGoalResult { readonly report: string; readonly error?: string; readonly stop?: boolean }
 export type IOpenideCodexGoalEvent =
+	| { readonly sessionId: string; readonly kind: 'activity'; readonly status: 'in-progress' | 'completed' | 'failed' | 'needs-input'; readonly waitingReason?: 'permission' | 'question' }
 	| { readonly sessionId: string; readonly kind: 'manualTurn' | 'disconnected' | 'providerGoal'; readonly reason: string }
 	| { readonly sessionId: string; readonly kind: 'approval'; readonly approvalId: string; readonly title: string; readonly detail: string };

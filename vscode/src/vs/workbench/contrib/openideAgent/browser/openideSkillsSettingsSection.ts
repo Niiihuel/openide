@@ -15,7 +15,7 @@
  *  separate panel (which is exactly what happened with the webview).
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append, clearNode } from '../../../../base/browser/dom.js';
+import { $, append, clearNode, getWindow } from '../../../../base/browser/dom.js';
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { basename, joinPath } from '../../../../base/common/resources.js';
@@ -54,6 +54,9 @@ export class OpenideSkillsSettingsSection extends Disposable implements IOpenide
 	private root: HTMLElement | undefined;
 	private context: IOpenideSettingsSectionContext = { scope: 'workspace', query: '' };
 	private generation = 0;
+	private skillsSnapshot: readonly ISkillInfo[] | undefined;
+	private skillsRequest: Promise<readonly ISkillInfo[]> | undefined;
+	private skillsVersion = 0;
 
 	constructor(
 		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
@@ -69,9 +72,12 @@ export class OpenideSkillsSettingsSection extends Disposable implements IOpenide
 	) { super(); }
 
 	render(container: HTMLElement, context: IOpenideSettingsSectionContext): void {
+		// Search filters the already-discovered inventory. Reading every SKILL.md
+		// again per keystroke competes with the renderer without changing the data.
+		const queryOnly = !!this.root && context.scope === this.context.scope && context.query !== this.context.query;
 		this.context = context;
 		this.root = append(container, $('.openide-settings-sections'));
-		this.paint();
+		this.paint(!queryOnly);
 	}
 
 	private get skillScope(): OpenideSkillInstallScope {
@@ -80,9 +86,14 @@ export class OpenideSkillsSettingsSection extends Disposable implements IOpenide
 	private projectRoot(): URI | undefined { return this.contextService.getWorkspace().folders[0]?.uri; }
 	private notify(severity: Severity, message: string): void { this.notificationService.notify({ severity, message }); }
 
-	private paint(): void {
+	private paint(refresh = true): void {
 		const root = this.root;
 		if (!root?.isConnected) { return; }
+		if (refresh) {
+			this.skillsSnapshot = undefined;
+			this.skillsRequest = undefined;
+			this.skillsVersion++;
+		}
 		this.renderStore.clear();
 		clearNode(root);
 		const token = ++this.generation;
@@ -115,9 +126,9 @@ export class OpenideSkillsSettingsSection extends Disposable implements IOpenide
 	}
 
 	private async paintSkills(body: HTMLElement, token: number): Promise<void> {
-		const all = await this.agentService.listSkills(true).catch(() => [] as ISkillInfo[]);
+		const all = await this.readSkills();
 		// It may have repainted (scope or search change) while we were reading the disk.
-		if (token !== this.generation) { return; }
+		if (token !== this.generation || this._store.isDisposed || !body.isConnected) { return; }
 		clearNode(body);
 
 		const scope = this.skillScope === 'global' ? 'global' : 'project';
@@ -167,6 +178,20 @@ export class OpenideSkillsSettingsSection extends Disposable implements IOpenide
 		}
 	}
 
+	private readSkills(): Promise<readonly ISkillInfo[]> {
+		if (this.skillsSnapshot) { return Promise.resolve(this.skillsSnapshot); }
+		if (!this.skillsRequest) {
+			const version = this.skillsVersion;
+			const request = this.agentService.listSkills(true).then(skills => {
+				if (version === this.skillsVersion && !this._store.isDisposed) { this.skillsSnapshot = skills; }
+				return skills;
+			}, () => [] as ISkillInfo[]);
+			this.skillsRequest = request;
+			void request.finally(() => { if (this.skillsRequest === request) { this.skillsRequest = undefined; } });
+		}
+		return this.skillsRequest;
+	}
+
 	private async toggleSkill(name: string, disabled: boolean): Promise<void> {
 		await this.agentService.setSkillDisabled(name, disabled);
 		this.notify(Severity.Info, t('openide.skills.toggled'));
@@ -195,12 +220,16 @@ export class OpenideSkillsSettingsSection extends Disposable implements IOpenide
 	private async openInstaller(): Promise<void> {
 		await this.editorService.openEditor(new OpenideSkillInstallerInput(this.skillScope), {
 			pinned: true,
-			modal: { nested: true, size: { width: 920, height: 660 } },
+			modal: { targetWindowId: this.root ? getWindow(this.root).vscodeWindowId : undefined, nested: true, size: { width: 920, height: 660 } },
 		}, MODAL_GROUP);
 	}
 
 	private async openPluginMarketplace(): Promise<void> {
-		await this.commandService.executeCommand(AICustomizationManagementCommands.OpenMarketplace, AICustomizationManagementSection.Plugins);
+		await this.commandService.executeCommand(AICustomizationManagementCommands.OpenMarketplace, AICustomizationManagementSection.Plugins, {
+			targetWindowId: this.root ? getWindow(this.root).vscodeWindowId : undefined,
+			nested: true,
+			maximized: true,
+		});
 	}
 
 	private async newSkill(): Promise<void> {

@@ -36,6 +36,7 @@ export class OpenideCodexGoalConnection extends Disposable {
 	private manual = false;
 	private disconnected = false;
 	private providerGoal = false;
+	private observedTurnId: string | undefined;
 	get isConnected(): boolean { return !this.disconnected; }
 	constructor(readonly sessionId: string, readonly threadId: string, private readonly wire: IOpenideCodexWire) { super(); }
 
@@ -65,6 +66,7 @@ export class OpenideCodexGoalConnection extends Disposable {
 	}
 
 	accept(message: IWire): void {
+		if (this.disconnected) { return; }
 		const params = message.params ?? {};
 		if (params['threadId'] !== this.threadId) { return; }
 		if (message.method === 'thread/goal/updated') {
@@ -81,8 +83,23 @@ export class OpenideCodexGoalConnection extends Disposable {
 		}
 		const turn = params['turn'] as { id?: string; status?: string } | undefined;
 		const turnId = typeof params['turnId'] === 'string' ? params['turnId'] : turn?.id;
+		const completesObservedTurn = !!turnId && (turnId === this.observedTurnId || !this.observedTurnId && turnId === run?.turnId);
+		// Activity belongs to this exact thread and turn. It is observational: requests from
+		// the terminal's turn still remain with its own client and are never answered here.
+		if (turnId && message.method === 'turn/started') {
+			this.observedTurnId = turnId;
+			this.changed.fire({ sessionId: this.sessionId, kind: 'activity', status: 'in-progress' });
+		} else if (message.method === 'turn/completed' && completesObservedTurn) {
+			this.observedTurnId = undefined;
+			this.changed.fire({ sessionId: this.sessionId, kind: 'activity', status: turn?.status === 'completed' ? 'completed' : 'failed' });
+		} else if (turnId && turnId === this.observedTurnId && message.id !== undefined) {
+			const waitingReason = message.method?.endsWith('/requestApproval') ? 'permission' : message.method === 'item/tool/requestUserInput' ? 'question' : undefined;
+			if (waitingReason) { this.changed.fire({ sessionId: this.sessionId, kind: 'activity', status: 'needs-input', waitingReason }); }
+		} else if (turnId && turnId === this.observedTurnId && message.method === 'item/completed') {
+			this.changed.fire({ sessionId: this.sessionId, kind: 'activity', status: 'in-progress' });
+		}
 		if (message.method === 'turn/started' && turnId !== run?.turnId) { this.manual = true; this.stopForManual('manualTurn', 'A turn started from the Codex terminal. Resume the OpenIDE goal after it finishes.'); return; }
-		if (message.method === 'turn/completed' && turnId !== run?.turnId) { this.manual = false; return; }
+		if (message.method === 'turn/completed' && turnId !== run?.turnId) { if (completesObservedTurn) { this.manual = false; } return; }
 		if (!run || turnId !== run.turnId) { return; }
 		if (message.method === 'item/started' || message.method === 'item/completed') {
 			const item = params['item'] as { type?: string; id?: string; status?: string; exitCode?: number | null } | undefined;

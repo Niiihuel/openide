@@ -54,46 +54,14 @@ export function subagentStatusText(tool: string, argumentsJson: string | undefin
 	return detail ? `${meta.verb} ${detail}` : meta.verb;
 }
 
-/**
- * The last events that would actually PAINT something, newest last.
- *
- * Not `timeline.slice(-limit)`. Most of what a specialist emits leaves no row: a successful
- * `toolResult` renders nothing at all (its only job is to un-shimmer the call it answers), and a
- * failing one with a known `toolCallId` only tints the row its call already has. A raw tail is
- * therefore mostly invisible events, and a card asked for "the last three lines" would show one.
- *
- * Kept pure and separate from `appendSubagentTimelineEvent` so the rule can be asserted, but the
- * two have to agree: anything this keeps, that function must be able to draw.
- */
+/** Last visible events for the optional compact overview in the Agents panel. */
 export function lastSubagentTimelineRows(timeline: readonly ISubagentTimelineEvent[], limit: number): readonly ISubagentTimelineEvent[] {
 	const picked: ISubagentTimelineEvent[] = [];
-	// The ids of the calls we are keeping, so a failing result for one of them is recognised as a
-	// tint on a row that is already in the list rather than as a line of its own.
-	const listed = new Set<string>();
 	for (let index = timeline.length - 1; index >= 0 && picked.length < limit; index--) {
 		const event = timeline[index];
-		if (paintsRow(event, listed)) {
-			picked.push(event);
-			if (event.type === 'toolStart' && event.toolCallId) { listed.add(event.toolCallId); }
-		}
+		if (event.message || event.fileDiff || event.type === 'toolResult' || event.type === 'permissionDenied' || event.type === 'error' || (event.type === 'toolStart' && event.toolName)) { picked.push(event); }
 	}
 	return picked.reverse();
-}
-
-function paintsRow(event: ISubagentTimelineEvent, listed: ReadonlySet<string>): boolean {
-	switch (event.type) {
-		case 'toolStart':
-			// Without a name there is no row to draw; it falls through to the text branch below.
-			return !!event.toolName || !!event.message;
-		case 'toolResult':
-			// A success is silent, and a failure whose call is already listed is a tint, not a line.
-			return !!event.isError && !(event.toolCallId && listed.has(event.toolCallId));
-		case 'permissionDenied':
-		case 'error':
-			return true;
-		default:
-			return !!event.message;
-	}
 }
 
 export interface IRenderedTimelineRow {
@@ -115,7 +83,9 @@ export function appendSubagentTimelineEvent(
 	store: DisposableStore,
 ): IRenderedTimelineRow | undefined {
 	if (event.type === 'toolStart' && event.toolName) {
-		const row = append(body, $('div.openide-chat-sub-tool'));
+		const details = append(body, $('details.openide-chat-sub-disclosure')) as HTMLDetailsElement;
+		const row = append(details, $('summary.openide-chat-sub-tool'));
+		append(details, $('pre.openide-chat-sub-text')).textContent = event.argumentsJson ?? '{}';
 		const icon = append(row, $('span.openide-chat-sub-tool-icon'));
 		// Per-tool codicon rather than the webview's single `codicon-tools` for every row: the card
 		// is a compressed transcript, and a column of identical glyphs carries no information.
@@ -128,19 +98,24 @@ export function appendSubagentTimelineEvent(
 		if (event.toolCallId) {
 			rows.set(event.toolCallId, row);
 		}
-		return { toolCallId: event.toolCallId, node: row };
+		append(row, $('span.codicon.codicon-chevron-right.openide-chat-sub-disclosure-chevron', { 'aria-hidden': 'true' }));
+		return { toolCallId: event.toolCallId, node: details };
 	}
 
 	if (event.type === 'toolResult') {
-		if (!event.isError) {
-			return undefined;
-		}
 		const existing = event.toolCallId ? rows.get(event.toolCallId) : undefined;
-		if (existing) {
-			existing.classList.add('openide-chat-sub-tool-error');
-			return undefined;
-		}
-		return { node: appendText(body, event.message || t('chatSurface.subagent.toolFailed')) };
+		if (event.isError) { existing?.classList.add('openide-chat-sub-tool-error'); }
+		return { node: appendDisclosure(body, event.toolName ?? t('chatSurface.subagent.toolResult'), event.message ?? '', 'output') };
+	}
+	if (event.type === 'reasoning') {
+		return { node: appendDisclosure(body, t('chatSurface.subagent.reasoning'), event.message ?? '', 'reasoning') };
+	}
+	if (event.type === 'terminal') {
+		return { node: appendDisclosure(body, t('chatSurface.subagent.terminal'), event.message ?? '', 'output') };
+	}
+	if (event.type === 'fileChange' && event.fileDiff) {
+		const diff = event.fileDiff;
+		return { node: appendDisclosure(body, `${diff.path} · +${diff.editAdded ?? 0} −${diff.editRemoved ?? 0}`, (diff.diffLines ?? []).map(line => `${line.t === 'add' ? '+' : line.t === 'del' ? '−' : ' '}${line.x}`).join('\n'), 'output') };
 	}
 
 	if (event.type === 'permissionDenied' || event.type === 'error') {
@@ -185,4 +160,22 @@ export function lastSubagentToolStart(timeline: readonly ISubagentTimelineEvent[
 		}
 	}
 	return undefined;
+}
+
+/** Native disclosure keeps large outputs readable and keyboard accessible. */
+function appendDisclosure(body: HTMLElement, label: string, text: string, kind: 'reasoning' | 'output'): HTMLElement {
+	const details = append(body, $('details.openide-chat-sub-disclosure')) as HTMLDetailsElement;
+	details.dataset.kind = kind;
+	append(details, $('summary')).textContent = label;
+	append(details, $(kind === 'output' ? 'pre.openide-chat-sub-text' : 'div.openide-chat-sub-text')).textContent = text;
+	return details;
+}
+
+export function updateSubagentTimelineRow(node: HTMLElement, event: ISubagentTimelineEvent): void {
+	const text = node.matches('.openide-chat-sub-text') ? node : node.querySelector('.openide-chat-sub-text');
+	if (text && event.message !== undefined && text.textContent !== event.message) {
+		const previous = text.textContent ?? '';
+		if (text.firstChild?.nodeType === 3 && event.message.startsWith(previous)) { (text.firstChild as Text).appendData(event.message.slice(previous.length)); }
+		else { text.textContent = event.message; }
+	}
 }

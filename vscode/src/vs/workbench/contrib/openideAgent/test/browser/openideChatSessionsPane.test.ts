@@ -35,10 +35,11 @@ suite('OpenIDE Chat Sessions Pane', () => {
 		}));
 		const archived: string[] = [];
 		const opened: string[] = [];
+		const tabs: string[] = [];
 		const sessions: Partial<OpenideChatSessions> = {
 			listAll: () => records,
 			activeSessionId: () => '0',
-			openTabs: () => [],
+			openTabs: () => tabs.map(id => records.find(record => record.id === id)!),
 			archive: id => { archived.push(id); records.find(record => record.id === id)!.archived = true; },
 			unarchive: id => { records.find(record => record.id === id)!.archived = false; },
 			setPinned: (id, pinned) => { records.find(record => record.id === id)!.pinned = pinned; },
@@ -46,6 +47,7 @@ suite('OpenIDE Chat Sessions Pane', () => {
 			markRead: id => { records.find(record => record.id === id)!.unread = false; },
 		};
 		const host = mainWindow.document.createElement('div');
+		host.style.cssText = 'position:relative;width:320px;height:800px';
 		mainWindow.document.body.appendChild(host);
 		store.add(toDisposable(() => host.remove()));
 		const previews = new Map<HTMLElement, () => IDelayedHoverOptions>();
@@ -74,7 +76,8 @@ suite('OpenIDE Chat Sessions Pane', () => {
 		const pane = store.add(new OpenideChatSessionsPane(host, sessions as OpenideChatSessions, async () => false, instantiation, commands, context, hoverService, workspace, runService));
 		store.add(pane.onDidOpenSession(id => opened.push(id)));
 		pane.setOpen(true);
-		return { host, pane, archived, opened, records, previews, runs, runEvents, lookups };
+		pane.layout(320, 0);
+		return { host, pane, archived, opened, records, previews, runs, runEvents, lookups, tabs };
 	}
 
 	test('specialists are nested under their parent and open separately from the main conversation', () => {
@@ -91,7 +94,7 @@ suite('OpenIDE Chat Sessions Pane', () => {
 		assert.deepStrictEqual(specialists, ['child']);
 	});
 
-	test('disclosures preserve row identity, focus and lazy children while toggling', () => {
+	test('disclosures preserve sibling identity and focus while lazily mounting visible children', () => {
 		const { host, pane, records, lookups } = create();
 		records.push({ ...records[0], id: 'child', title: 'Worker', subagentRunId: 'run', parentSessionId: '0' });
 		pane.setCompact(true);
@@ -101,13 +104,15 @@ suite('OpenIDE Chat Sessions Pane', () => {
 		assert.deepStrictEqual(lookups, []);
 		toggle.focus(); toggle.click();
 		const child = host.querySelector('[data-subagent-session-id="child"]')!;
+		assert.ok(child);
 		toggle.click();
-		assert.ok(child.closest('[inert]'));
-		toggle.click(); project.click(); project.click(); pane.render();
+		assert.strictEqual(host.querySelector('[data-subagent-session-id="child"]'), null);
+		toggle.click(); pane.render();
 		assert.strictEqual(host.querySelector('[data-session-id="0"]'), row);
-		assert.strictEqual(host.querySelector('[data-subagent-session-id="child"]'), child);
+		assert.ok(host.querySelector('[data-subagent-session-id="child"]'));
 		assert.strictEqual(host.ownerDocument.activeElement, toggle);
-		assert.strictEqual(child.closest('[inert]'), null);
+		project.click(); project.click();
+		assert.ok(host.querySelector('[data-session-id="0"]'));
 		assert.deepStrictEqual(lookups, ['run']);
 	});
 
@@ -165,7 +170,7 @@ suite('OpenIDE Chat Sessions Pane', () => {
 		records[0].status = 'in-progress';
 		pane.render();
 		const replacement = host.querySelector<HTMLButtonElement>('[data-session-id="0"] .openide-chat-sessions-open')!;
-		assert.notStrictEqual(replacement, primary);
+		assert.strictEqual(replacement, primary, 'status and title update the existing primary control');
 		assert.ok(replacement.querySelector('.oi-spinner'));
 		assert.strictEqual(host.querySelector('.openide-chat-session-dot'), null);
 		assert.strictEqual(mainWindow.document.activeElement, replacement);
@@ -243,22 +248,21 @@ suite('OpenIDE Chat Sessions Pane', () => {
 		assert.strictEqual(host.querySelector('.codicon-pin'), null);
 	});
 
-	test('compact groups keep pins visible, limit recents, and expose collapsed archive history', () => {
+	test('compact groups keep pins separate and expose all history with collapsed archives', () => {
 		const { host, pane, records } = create(10);
 		records[9].pinned = true; records[9].empty = true; records[8].archived = true;
 		pane.setCompact(true);
 		const groups = () => Array.from(host.querySelectorAll<HTMLElement>('[data-project-id]'));
 		assert.deepStrictEqual(groups().map(group => group.dataset.projectId), ['pinned', 'no-project', 'archived']);
-		assert.strictEqual(host.querySelectorAll('.openide-chat-sessions-row').length, 7);
+		assert.strictEqual(host.querySelectorAll('.openide-chat-sessions-row').length, 9);
 		assert.ok(host.querySelector('[data-session-id="9"]'));
 		assert.strictEqual(host.querySelector('[data-session-id="8"]'), null);
-		host.querySelector<HTMLButtonElement>('.openide-chat-sessions-more')!.click();
-		assert.strictEqual(host.querySelectorAll('.openide-chat-sessions-row').length, 9);
 		groups().find(group => group.dataset.projectId === 'no-project')!.click();
-		assert.strictEqual(Array.from(host.querySelectorAll('.openide-chat-sessions-row')).filter(row => !row.closest('[inert]')).length, 1);
+		assert.strictEqual(host.querySelectorAll('.openide-chat-sessions-row').length, 1);
 		assert.strictEqual(groups().find(group => group.dataset.projectId === 'no-project')!.getAttribute('aria-expanded'), 'false');
 		groups().find(group => group.dataset.projectId === 'archived')!.click();
 		assert.ok(host.querySelector('[data-session-id="8"]'));
+		groups().find(group => group.dataset.projectId === 'no-project')!.click();
 		pane.setCompact(false);
 		assert.strictEqual(host.querySelectorAll('.openide-chat-sessions-row').length, 9, 'IDE keeps its complete non-archived history');
 	});
@@ -277,8 +281,11 @@ suite('OpenIDE Chat Sessions Pane', () => {
 		menu(); await pick(t('sessions.action.rename'));
 		let input = host.querySelector<HTMLInputElement>('.openide-chat-sessions-rename input')!;
 		input.value = 'A renamed conversation'; input.dispatchEvent(new mainWindow.Event('input', { bubbles: true }));
+		const originalInput = input; input.setSelectionRange(2, 7);
 		records[0].status = 'in-progress'; pane.render();
 		input = host.querySelector<HTMLInputElement>('.openide-chat-sessions-rename input')!;
+		assert.strictEqual(input, originalInput, 'streaming preserves the input itself');
+		assert.deepStrictEqual([input.selectionStart, input.selectionEnd], [2, 7]);
 		assert.strictEqual(input.value, 'A renamed conversation', 'status update preserves edit draft');
 		input.dispatchEvent(new mainWindow.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		assert.strictEqual(records[0].title, 'A renamed conversation');
@@ -303,6 +310,50 @@ suite('OpenIDE Chat Sessions Pane', () => {
 		await Promise.resolve(); await Promise.resolve();
 		assert.strictEqual(records[0].unread, false);
 		assert.strictEqual(host.querySelector('.openide-chat-sessions-unread'), null);
+	});
+
+
+	test('open conversations are grouped by tab membership independently of running status', () => {
+		const { host, pane, records, tabs } = create(4);
+		tabs.push('1', '0'); records[0].status = 'completed'; records[2].status = 'in-progress';
+		pane.setCompact(true);
+		const group = host.querySelector('[data-project-id="opened"]')!;
+		assert.strictEqual(group.querySelector('.openide-chat-sessions-group-count')!.textContent, '2');
+		const ids = () => Array.from(host.querySelectorAll<HTMLElement>('[data-session-id]')).map(row => row.dataset.sessionId);
+		assert.deepStrictEqual(ids(), ['1', '0', '2', '3']);
+		records[1].status = 'in-progress'; pane.render();
+		assert.strictEqual(host.querySelector('[data-project-id="opened"]'), group);
+		assert.deepStrictEqual(ids(), ['1', '0', '2', '3']);
+	});
+
+	test('one thousand conversations have bounded DOM and keyboard access to the final history row', () => {
+		const { host, pane, records } = create(1000);
+		pane.setCompact(true);
+		const rows = () => host.querySelectorAll('.openide-chat-sessions-row').length;
+		assert.ok(rows() > 0 && rows() < 25, `mounted ${rows()} rows for a thousand sessions`);
+		const first = host.querySelector<HTMLButtonElement>('[data-session-id="0"] .openide-chat-sessions-open')!;
+		first.focus(); first.dispatchEvent(new mainWindow.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+		const last = host.querySelector<HTMLButtonElement>('[data-session-id="999"] .openide-chat-sessions-open')!;
+		assert.ok(last, 'End reveals history beyond the viewport');
+		assert.strictEqual(mainWindow.document.activeElement, last);
+		assert.ok(rows() < 25);
+		records[999].status = 'in-progress'; records[999].title = 'Streaming last session'; pane.render();
+		assert.strictEqual(host.querySelector('[data-session-id="999"] .openide-chat-sessions-open'), last);
+		assert.strictEqual(mainWindow.document.activeElement, last);
+		assert.strictEqual(host.querySelector('[data-session-id="0"]'), null);
+		last.dispatchEvent(new mainWindow.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+		assert.ok(host.querySelector('[data-session-id="0"]'));
+	});
+
+	test('streaming updates preserve an open actions menu and its focused item', () => {
+		const { host, pane, records } = create(); pane.setCompact(true);
+		const trigger = host.querySelector<HTMLButtonElement>('[data-session-id="0"] .openide-chat-sessions-row-actions button')!;
+		trigger.click();
+		const item = host.querySelector<HTMLButtonElement>('.openide-menu-row')!; item.focus();
+		records[0] = { ...records[0], status: 'in-progress', title: 'New title' }; pane.render();
+		assert.strictEqual(host.querySelector('[data-session-id="0"] .openide-chat-sessions-row-actions button'), trigger);
+		assert.strictEqual(host.querySelector('.openide-menu-row'), item);
+		assert.strictEqual(mainWindow.document.activeElement, item);
 	});
 
 });

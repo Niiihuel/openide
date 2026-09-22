@@ -17,6 +17,7 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { ILayoutNode } from '../../../../../platform/openideCodebase/common/openideCodebaseGraphLayout.js';
 import { IGraphView, IGraphViewNode } from '../openideCodebaseGraphService.js';
+import { createOpenideElement } from '../openideDom.js';
 
 /** Graphify's palette: one colour per community, in size order. */
 export const PROJECT_MAP_PALETTE = ['#f87171', '#fb923c', '#fbbf24', '#a3e635', '#4ade80', '#2dd4bf', '#38bdf8', '#818cf8', '#c084fc', '#f472b6', '#94a3b8', '#d4a373'];
@@ -71,10 +72,10 @@ export class OpenideProjectMapCanvas extends Disposable {
 
 	constructor(host: HTMLElement, minimapHost: HTMLElement) {
 		super();
-		this.canvas = host.ownerDocument.createElement('canvas');
+		this.canvas = createOpenideElement(host.ownerDocument, 'canvas');
 		this.canvas.className = 'openide-pmap-canvas';
 		host.appendChild(this.canvas);
-		this.minimap = minimapHost.ownerDocument.createElement('canvas');
+		this.minimap = createOpenideElement(minimapHost.ownerDocument, 'canvas');
 		this.minimap.className = 'openide-pmap-minimap-canvas';
 		minimapHost.appendChild(this.minimap);
 

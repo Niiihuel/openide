@@ -26,6 +26,8 @@ process.stdout.on('resize', () => { state.columns = process.stdout.columns; stat
 process.stdin.on('data', chunk => { state.input += String(chunk); save(); output('INPUT'); });
 if (process.stdin.isTTY) { process.stdin.setRawMode(true); }
 process.stdin.resume();
+// Real coding CLIs enable bracketed paste so multiline input remains an unsubmitted prompt.
+process.stdout.write('\x1b[?2004h');
 save(); output('READY');
 const timer = setInterval(async () => {
 	const file = path.join(directory, `${generation}.command.json`);

@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { appendSubagentTimeline as appendTimeline, subagentTimelineEvent, subagentTimelineMessage } from '../openideSubagentTranscript.js';
 import { AgentLoopEvent, IAgentLocation, IChatMessage } from '../openideAgentTypes.js';
 import { ISubagentTimelineEvent } from '../openideSubagentTypes.js';
 import {
@@ -133,7 +134,7 @@ function reduceRootEvent(draft: IOpenideChatDraft, ev: AgentLoopEvent): void {
 			interrupt(draft);
 			pushOpenideChatContent(draft, {
 				kind: 'confirmation', requestId: ev.id, tool: ev.tool, title: ev.title,
-				detail: ev.detail, command: ev.command, risk: ev.risk, sensitive: ev.sensitive,
+				detail: ev.detail, command: ev.command, risk: ev.risk, sensitive: ev.sensitive, operationOnly: ev.operationOnly,
 			});
 			return;
 		case 'accountChoiceRequest':
@@ -350,7 +351,7 @@ function appendSubagentTimeline(draft: IOpenideChatDraft, runId: string, event: 
 	const index = draft.subagents.get(runId);
 	const existing = index === undefined ? undefined : getOpenideChatContentAt<IOpenideChatSubagentContent>(draft, index, 'subagent');
 	if (!existing || index === undefined) { return; }
-	setOpenideChatContentAt(draft, index, { ...existing, timeline: [...existing.timeline, event] });
+	setOpenideChatContentAt(draft, index, { ...existing, timeline: [...existing.timeline.filter(entry => entry.sequence !== event.sequence), event] });
 }
 
 /**
@@ -368,36 +369,18 @@ function reduceNestedSubagentEvent(draft: IOpenideChatDraft, envelope: IOpenideC
 	const index = draft.subagents.get(frame.id);
 	const card = index === undefined ? undefined : getOpenideChatContentAt<IOpenideChatSubagentContent>(draft, index, 'subagent');
 
-	if ((inner.type === 'toolStart' || inner.type === 'toolResult') && card && index !== undefined) {
-		const timelineEvent: ISubagentTimelineEvent = {
-			sequence: card.timeline.length,
-			timestamp: draft.now,
-			type: inner.type,
-			toolCallId: inner.id,
-			toolName: inner.name,
-			argumentsJson: inner.type === 'toolStart' ? inner.argumentsJson : undefined,
-			isError: inner.type === 'toolResult' ? inner.isError : undefined,
-		};
-		setOpenideChatContentAt(draft, index, { ...card, timeline: [...card.timeline, timelineEvent] });
+	const event = subagentTimelineEvent(inner);
+	if (event && card && index !== undefined) {
+		setOpenideChatContentAt(draft, index, { ...card, timeline: appendTimeline(card.timeline, event, draft.now) });
 	}
 
-	const message = mirrorMessageFor(inner);
+	const message = event ? subagentTimelineMessage(event) : undefined;
 	if (message) {
-		addOpenideChatEffect(draft, { type: 'subagentSessionMessage', runId: frame.id, message, mergeText: inner.type === 'text' });
+		addOpenideChatEffect(draft, { type: 'subagentSessionMessage', runId: frame.id, message, mergeText: inner.type === 'text' || inner.type === 'reasoning' });
 	}
-	// Streamed text is deliberately excluded: persisting per token would write on every delta.
-	if (inner.type !== 'text') {
+	// The effect layer batches streamed writes while keeping the visible mirror current.
+	if (event) {
 		addOpenideChatEffect(draft, { type: 'subagentSessionSave', runId: frame.id, isError: false });
-	}
-}
-
-function mirrorMessageFor(ev: AgentLoopEvent): IChatMessage | undefined {
-	switch (ev.type) {
-		case 'text': return { role: 'assistant', content: ev.delta };
-		case 'toolStart': return { role: 'assistant', content: '', toolCalls: [{ id: ev.id, name: ev.name, argumentsJson: ev.argumentsJson }] };
-		case 'toolResult': return { role: 'tool', toolCallId: ev.id, content: ev.result };
-		case 'info': return { role: 'assistant', content: ev.message };
-		default: return undefined;
 	}
 }
 

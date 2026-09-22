@@ -11,6 +11,9 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/tes
 import { workbenchInstantiationService } from '../../../../test/browser/workbenchTestServices.js';
 import { BrowserEditorInput } from '../../../browserView/common/browserEditorInput.js';
 import { IBrowserViewWorkbenchService } from '../../../browserView/common/browserView.js';
+import { IBrowserAgentSessionService } from '../../../browserView/common/browserAgentSessionService.js';
+import { BrowserAgentSessionModel } from '../../../../../platform/browserView/common/browserAgentSessionModel.js';
+import { OpenideChatWebPreviewPart } from '../../browser/chat/parts/openideChatWebPreviewPart.js';
 import { OpenideChatResponseRenderer } from '../../browser/chat/openideChatResponseRenderer.js';
 import { IOpenideChatToolContent } from '../../common/chat/openideChatContent.js';
 import { advanceOpenideChatResponseItem, createOpenideChatResponseItem, IOpenideChatItem } from '../../common/chat/openideChatItem.js';
@@ -20,7 +23,7 @@ suite('OpenIDE chat web preview', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 	const tool: IOpenideChatToolContent = { kind: 'tool', callId: 'nav', name: 'browser_navigate', state: 'success', argumentsJson: '{"url":"http://localhost:8091"}', resultText: 'OK: loaded http://localhost:8091/sign-in (title: My app (dev)).' };
 	test('uses the final navigated URL and retains titles from saved results', () => {
-		assert.deepStrictEqual(webPreviewFromTool(JSON.parse(JSON.stringify(tool))), { url: 'http://localhost:8091/sign-in', title: 'My app (dev)' });
+		assert.deepStrictEqual(webPreviewFromTool(JSON.parse(JSON.stringify(tool))), { url: 'http://localhost:8091/sign-in', title: 'My app (dev)', toolCallId: 'nav' });
 		assert.equal(webPreviewFromTool({ ...tool, resultText: 'OK: loaded http://localhost:8091/ (title: untitled).' })?.title, '');
 	});
 	test('does not infer a preview from pending, failed, unrelated or unsafe results', () => {
@@ -36,6 +39,7 @@ suite('OpenIDE chat web preview', () => {
 		store.add(toDisposable(() => host.remove()));
 		const instantiation = workbenchInstantiationService(undefined, store);
 		const opens: unknown[] = [];
+		instantiation.stub(IBrowserAgentSessionService, { sessionForToolCall: () => undefined });
 		instantiation.stub(IBrowserViewWorkbenchService, { openPreview: async (...args: unknown[]) => { opens.push(args); return new (mock<BrowserEditorInput>())(); } });
 		const renderer = store.add(instantiation.createInstance(OpenideChatResponseRenderer, observableValue('width', 440), Event.None));
 		const template = renderer.renderTemplate(host);
@@ -67,5 +71,19 @@ suite('OpenIDE chat web preview', () => {
 		render();
 		assert.equal(host.querySelectorAll('.openide-chat-resource-card').length, 1);
 		assert.equal(opens.length, 1);
+	});
+
+	test('a historical tool card reveals its live browser session without choosing a different page', async () => {
+		const instantiation = workbenchInstantiationService(undefined, store);
+		const session = store.add(new BrowserAgentSessionModel('browser-session'));
+		session.acceptEvent({ sessionId: 'browser-session', pageId: 'browser-page', toolCallId: 'nav', sequence: 1, timestamp: 1, action: 'navigate', url: 'http://localhost:8091/current-page' });
+		const opens: Parameters<IBrowserViewWorkbenchService['openPreview']>[] = [];
+		instantiation.stub(IBrowserAgentSessionService, { sessionForToolCall: callId => callId === 'nav' ? session : undefined });
+		instantiation.stub(IBrowserViewWorkbenchService, { openPreview: async (...args) => { opens.push(args); return new (mock<BrowserEditorInput>())(); } });
+		const part = store.add(instantiation.createInstance(OpenideChatWebPreviewPart, webPreviewFromTool(tool)!));
+		(part.domNode.querySelector('.oi-split-main') as HTMLElement).click();
+		await Promise.resolve();
+		assert.deepStrictEqual({ browserId: opens[0]?.[2]?.browserId, reveal: opens[0]?.[2]?.reveal, fallbackUrl: opens[0]?.[0] }, { browserId: 'browser-page', reveal: true, fallbackUrl: 'http://localhost:8091/sign-in' });
+		assert.strictEqual(part.hasSameContent({ ...tool, callId: 'unrelated-navigation' }), false);
 	});
 });

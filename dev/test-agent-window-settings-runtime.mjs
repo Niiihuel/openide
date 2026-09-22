@@ -24,11 +24,18 @@ try {
 		const { Action2, registerAction2 } = await import(base + 'platform/actions/common/actions.js');
 		const { ICommandService } = await import(base + 'platform/commands/common/commands.js');
 		const { IOpenideChatRuntime } = await import(base + 'workbench/contrib/openideAgent/browser/openideChatRuntime.js');
+		const { IOpenideAgentService } = await import(base + 'workbench/contrib/openideAgent/browser/openideAgentService.js');
 		registerAction2(class extends Action2 {
 			constructor() { super({ id:'test.agentSettings',title:'Agent Settings Fixture',f1:true }); }
 			async run(accessor) {
 				const commands=accessor.get(ICommandService);
 				const runtime=accessor.get(IOpenideChatRuntime);
+				const agent=accessor.get(IOpenideAgentService);
+				agent.getVoiceCapability = async () => ({ available: false, reason: 'Choose an audio model' });
+				agent.listVoiceModels = async () => ({
+					groups: [{ id: 'nvidia-nim', label: 'NVIDIA NIM', models: [{ id: 'fixture-audio-model', name: 'Fixture audio model', context: '', input: ['audio'], output: ['text'], toolCall: false, reasoning: false, costIn: '', costOut: '', hasCost: false, efforts: [], toggle: false }] }],
+					excluded: [{ id: 'openai-codex', label: 'ChatGPT (Codex subscription)', reason: 'noAudioModel' }, { id: 'opencode', label: 'OpenCode Zen', reason: 'protocol' }],
+				});
 				window.agentSettingsFixture = {
 					open: () => commands.executeCommand('openide.agent.openAgentWindow'),
 					showUsage: () => {
@@ -126,11 +133,33 @@ try {
 	await agent.locator('[data-nav-id="openideAgent/providers"]').click();
 	await agent.locator('.openide-settings-provider-intro').waitFor();
 	await agent.screenshot({path:path.join(output,'agent-settings-providers.png')});
+	await agent.locator('[data-nav-id="openideAgent/voice"]').click();
+	await agent.locator('.openide-settings-voice-excluded').waitFor();
+	assert.equal(await agent.locator('.openide-settings-voice-excluded').evaluate(element => element.open), false, 'providers without dictation are collapsed by default');
+	assert.equal(await agent.locator('.openide-settings-voice-excluded-count').innerText(), '2');
+	await agent.screenshot({path:path.join(output,'agent-settings-voice.png')});
+	await agent.locator('.openide-settings-voice-excluded-summary').click();
+	assert.equal(await agent.locator('.openide-settings-voice-excluded-content .openide-provider-icon-tile').count(), 2);
+	await agent.locator('.openide-settings-voice-excluded').scrollIntoViewIfNeeded();
+	await agent.screenshot({path:path.join(output,'agent-settings-voice-details.png')});
+	await agent.locator('[data-nav-id="openideAgent/subagents"]').click();
+	await agent.locator('.openide-subagent-settings-status .openide-settings-section-body').waitFor();
+	await agent.getByRole('button', { name: 'Manage providers', exact: true }).waitFor();
+	assert.equal(await agent.locator('.openide-subagent-settings-status .openide-settings-status-row.off').count(), 0, 'subagent routing does not dump disconnected catalog entries');
+	await agent.locator('.openide-subagent-settings-status').scrollIntoViewIfNeeded();
+	await agent.screenshot({path:path.join(output,'agent-settings-subagents.png')});
+	await agent.getByRole('button', { name: 'Manage providers', exact: true }).click();
+	await agent.locator('.openide-settings-provider-intro').waitFor();
+	await agent.locator('[data-nav-id="openideAgent/projectMap"]').click();
+	await agent.locator('.openide-project-map-settings .openide-settings-metrics').first().waitFor();
+	assert.equal(await agent.locator('.openide-project-map-index .openide-settings-metric').count(), 5);
+	await agent.locator('.openide-project-map-index').scrollIntoViewIfNeeded();
+	await agent.screenshot({path:path.join(output,'agent-settings-project-map.png')});
 	await agent.locator('.openide-settings-back').click();
 	await agent.locator('.openide-settings').waitFor({state:'detached'});
 	assert.equal(await agent.locator('.openide-agent-window').count(),1,'closing Settings returns to companion shell');
 	assert.deepEqual(await agent.locator('.openide-agent-window-workspace .tab').allTextContents(), workspaceTabs, 'Settings never joins or replaces workspace tabs');
 	assert.deepEqual(errors,[],'shared Settings controls support auxiliary DOM');
-	const result={localUsageLabel:true,profilePage:true,manageProfileInSettings:true,profileCreateRenameDelete:true,profileSwitch:true,usageToggle:true,localSettings:true,search:true,providersPage:true,closeReturnsToChat:true};
+	const result={localUsageLabel:true,profilePage:true,manageProfileInSettings:true,profileCreateRenameDelete:true,profileSwitch:true,usageToggle:true,localSettings:true,search:true,providersPage:true,voicePage:true,subagentRoutingSummary:true,projectMapLayout:true,closeReturnsToChat:true};
 	fs.writeFileSync(path.join(output,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 } finally { if(app) { await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.destroy())); await app.close(); } fs.rmSync(tmp,{recursive:true,force:true}); }

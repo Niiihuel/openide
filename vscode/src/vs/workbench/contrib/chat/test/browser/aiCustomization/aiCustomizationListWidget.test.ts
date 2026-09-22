@@ -148,6 +148,37 @@ suite('aiCustomizationListWidget', () => {
 		}
 	});
 
+	test('large card lists only update the previous and next focus targets', () => {
+		const disposables = new DisposableStore();
+		const list = document.createElement('div');
+		document.body.appendChild(list);
+		const controller = disposables.add(new CustomizationCardListController(list, 'Customizations'));
+		const primaryActions = Array.from({ length: 300 }, (_, index) => {
+			const row = document.createElement('div');
+			const label = `Skill ${index}`;
+			const primaryAction = createCustomizationCardPrimaryAction(row, label);
+			list.appendChild(row);
+			controller.addItem({ row, primaryAction, label });
+			return primaryAction;
+		});
+		controller.finalize();
+		primaryActions[0].focus();
+		const observer = new MutationObserver(() => { });
+		observer.observe(list, { subtree: true, attributes: true, attributeFilter: ['tabindex'] });
+		try {
+			primaryActions[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+			assert.deepStrictEqual({
+				focusWrites: observer.takeRecords().length,
+				activeIndex: primaryActions.indexOf(document.activeElement as HTMLButtonElement),
+				tabbable: primaryActions.filter(button => button.tabIndex === 0).length,
+			}, { focusWrites: 2, activeIndex: 1, tabbable: 1 });
+		} finally {
+			observer.disconnect();
+			disposables.dispose();
+			list.remove();
+		}
+	});
+
 	suite('truncateToFirstLine', () => {
 		test('keeps first line when text has multiple lines', () => {
 			assert.strictEqual(

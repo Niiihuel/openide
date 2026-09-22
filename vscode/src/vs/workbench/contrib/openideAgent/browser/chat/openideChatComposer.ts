@@ -259,7 +259,7 @@ export class OpenideChatComposer extends Disposable {
 		this._attachments = this._register(new OpenideChatComposerAttachments(attachStrip, this._card, hoverService, fileService, () => {
 			this._syncContent();
 			this._measure();
-		}));
+		}, commandService, () => this._prompt.focus()));
 		this._chips = this._register(new OpenideChatComposerChips(chipHost, hoverService, () => {
 			this._syncContent();
 			this._measure();
@@ -725,6 +725,11 @@ export class OpenideChatComposer extends Disposable {
 	 * An editor selection sent to the chat (Continue's "Add to Chat"): one more chip above the
 	 * prompt, never text in it. The limit is said out loud, like a full `@` strip.
 	 */
+	addReference(reference: IComposerReference): boolean {
+		if (!this._chips.addReference(reference)) { this._onDidReject.fire(t('chat.references.full', REFERENCE_LIMIT)); return false; }
+		return true;
+	}
+
 	addSnippet(snippet: IComposerSnippet): boolean {
 		if (!this._chips.addSnippet(snippet)) {
 			this._onDidReject.fire(t('chat.snippet.limit', String(SNIPPET_LIMIT)));

@@ -2,7 +2,7 @@
   "nameShort": "OpenIDE",
   "nameLong": "OpenIDE",
   "applicationName": "openide",
-  "openideVersion": "1.4.3",
+  "openideVersion": "1.5.0",
   "dataFolderName": ".openide",
   "sharedDataFolderName": ".vscode-oss-shared",
   "win32MutexName": "openide",

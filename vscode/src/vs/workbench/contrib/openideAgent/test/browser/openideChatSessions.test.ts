@@ -12,6 +12,9 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/tes
 import { TestStorageService } from '../../../../test/common/workbenchTestServices.js';
 import { OpenideChatSessions } from '../../browser/openideChatSessions.js';
 import { createFileChange } from '../../common/openideMessageChanges.js';
+import { StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
+import { StorageValue } from '../../../../../base/parts/storage/common/storage.js';
+import { IChatMessage } from '../../common/openideAgentTypes.js';
 
 suite('OpenIDE ChatSessions change sets', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -218,17 +221,23 @@ suite('OpenIDE ChatSessions — VS Code session semantics', () => {
 		storage.dispose();
 	});
 
-	test('a pinned empty conversation survives tab closure and history pruning', () => {
+	test('history retains pinned and unpinned conversations beyond 200 sessions', () => {
 		const { storage, sessions } = make();
 		const pinned = sessions.create();
 		sessions.setPinned(pinned, true);
 		sessions.closeTab(pinned);
 		assert.strictEqual(sessions.metaOf(pinned)?.empty, false);
+		const history: string[] = [];
 		for (let index = 0; index < 205; index++) {
-			sessions.createBackground(`Recent ${index}`, [user(`Task ${index}`)]);
+			history.push(sessions.createBackground(`Recent ${index}`, [user(`Task ${index}`)]));
 		}
-		assert.strictEqual(sessions.listAll().length, 200);
-		assert.strictEqual(new OpenideChatSessions(storage).metaOf(pinned)?.pinned, true);
+		const restored = new OpenideChatSessions(storage);
+		assert.deepStrictEqual({
+			count: restored.listAll().length,
+			pinned: restored.metaOf(pinned)?.pinned,
+			oldest: restored.messagesOf(history[0])[0].content,
+			newest: restored.messagesOf(history[204])[0].content,
+		}, { count: 206, pinned: true, oldest: 'Task 0', newest: 'Task 204' });
 		storage.dispose();
 	});
 
@@ -322,5 +331,274 @@ suite('OpenIDE ChatSessions — VS Code session semantics', () => {
 		const fresh = sessions.ensureActive();
 		assert.notStrictEqual(fresh, id);
 		storage.dispose();
+	});
+});
+
+suite('OpenIDE ChatSessions durable history', () => {
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+	const legacyKey = 'openide.chat.sessions.v1';
+	const indexKey = 'openide.chat.sessions.v2.index';
+	const metaKey = (id: string) => `openide.chat.sessions.v2.meta.${id}`;
+	const contentKey = (id: string) => `openide.chat.sessions.v2.content.${id}`;
+	const user = (content: string) => ({ role: 'user' as const, content, messageId: content });
+
+	class RecordingStorageService extends TestStorageService {
+		readonly reads: string[] = [];
+		readonly writes: string[] = [];
+		failOnKey: string | undefined;
+
+		override get(key: string, scope: StorageScope, fallbackValue: string): string;
+		override get(key: string, scope: StorageScope, fallbackValue?: string): string | undefined;
+		override get(key: string, scope: StorageScope, fallbackValue?: string): string | undefined {
+			this.reads.push(key);
+			return fallbackValue === undefined ? super.get(key, scope) : super.get(key, scope, fallbackValue);
+		}
+
+		override store(key: string, value: StorageValue, scope: StorageScope, target: StorageTarget): void {
+			if (key === this.failOnKey) { throw new Error('Simulated interrupted migration'); }
+			this.writes.push(key);
+			super.store(key, value, scope, target);
+		}
+	}
+
+	function legacyFixture(storage: TestStorageService): string {
+		const data = JSON.stringify({
+			sessions: [
+				{
+					id: 'native', title: 'Old automatic title', customTitle: 'Investigation', updatedAt: 12,
+					archived: false, pinned: true, hasError: false, forked: false, kind: 'native',
+					messages: [user('Original request'), { role: 'assistant', content: 'Investigating', reasoning: 'Check the source' }],
+					changeSetsByMessageId: { edit: { messageId: 'edit', timestamp: 11, state: 'open', files: [createFileChange('file:///a.ts', 'modify', 'before', 'after')] } },
+					usage: { input: 12, output: 3, used: 15, limit: 100 },
+				},
+				{
+					id: 'cli', title: 'Codex', updatedAt: 13, archived: true, hasError: false, forked: false,
+					kind: 'cli', cliId: 'codex', providerSessionId: 'provider-id', cwd: '/work/project', status: 'in-progress', messages: [],
+				},
+			],
+			openTabIds: ['native', 'native', 'missing', 'cli'], activeId: 'native',
+		});
+		storage.store(legacyKey, data, StorageScope.WORKSPACE, StorageTarget.MACHINE);
+		return data;
+	}
+
+	test('metadata operations and startup leave transcripts unloaded until requested', () => {
+		const storage = store.add(new RecordingStorageService());
+		const first = new OpenideChatSessions(storage);
+		const a = first.createBackground('A', [user('A')]);
+		const b = first.createBackground('B', [user('B')]);
+		first.saveUsage(a, { input: 2, output: 1, used: 3, limit: 100 });
+		storage.reads.length = 0;
+		const restored = new OpenideChatSessions(storage);
+		restored.listAll();
+		restored.openTabs();
+		restored.metaOf(a);
+		restored.rename(a, 'Renamed');
+		restored.setPinned(b, true);
+		restored.setStatus(a, 'needs-input');
+		restored.activate(a);
+		restored.archive(b);
+		restored.usageOf(a);
+		assert.deepStrictEqual(storage.reads.filter(key => key.startsWith('openide.chat.sessions.v2.content.')), []);
+		const messages = restored.messagesOf(a);
+		assert.strictEqual(restored.messagesOf(a), messages, 'loaded content is reused for streaming readers');
+		restored.changesOf(a);
+		assert.deepStrictEqual(storage.reads.filter(key => key.startsWith('openide.chat.sessions.v2.content.')), [contentKey(a)]);
+	});
+
+	test('saving a transcript and usage writes only the changed conversation', () => {
+		const storage = store.add(new RecordingStorageService());
+		const first = new OpenideChatSessions(storage);
+		const a = first.createBackground('A', [user('A')]);
+		const b = first.createBackground('B', [user('B')]);
+		const restored = new OpenideChatSessions(storage);
+		storage.writes.length = 0;
+		restored.save(a, [user('A'), { role: 'assistant', content: 'streamed answer' }], false);
+		assert.deepStrictEqual(storage.writes, [contentKey(a), metaKey(a)]);
+		storage.writes.length = 0;
+		restored.saveUsage(a, { input: 4, output: 2, used: 6, limit: 100 });
+		assert.deepStrictEqual(storage.writes, [metaKey(a)]);
+		storage.writes.length = 0;
+		restored.rename(b, 'Other title');
+		assert.deepStrictEqual(storage.writes, [metaKey(b)]);
+		assert.deepStrictEqual(new OpenideChatSessions(storage).messagesOf(b), [user('B')]);
+	});
+
+	test('migration preserves transcripts, receipts, selection, provider identity and original backup', () => {
+		const storage = store.add(new RecordingStorageService());
+		const original = legacyFixture(storage);
+		const migrated = new OpenideChatSessions(storage);
+		assert.deepStrictEqual({
+			ids: migrated.listAll().map(meta => meta.id),
+			tabs: migrated.openTabs().map(meta => meta.id),
+			active: migrated.activeSessionId(),
+			title: migrated.metaOf('native')?.title,
+			pinned: migrated.metaOf('native')?.pinned,
+			reasoning: migrated.messagesOf('native')[1].reasoning,
+			receipt: migrated.changeSetOf('native', 'edit')?.state,
+			after: migrated.changeSetOf('native', 'edit')?.files[0].afterContent,
+			usage: migrated.usageOf('native'),
+			provider: migrated.metaOf('cli')?.providerSessionId,
+			status: migrated.metaOf('cli')?.status,
+			backup: storage.get(legacyKey, StorageScope.WORKSPACE),
+		}, {
+			ids: ['cli', 'native'], tabs: ['native'], active: 'native', title: 'Investigation', pinned: true,
+			reasoning: 'Check the source', receipt: 'cancelled', after: 'after',
+			usage: { input: 12, output: 3, used: 15, limit: 100, breakdown: undefined },
+			provider: 'provider-id', status: 'unknown', backup: original,
+		});
+		storage.writes.length = 0;
+		storage.reads.length = 0;
+		const restarted = new OpenideChatSessions(storage);
+		assert.deepStrictEqual({ count: restarted.listAll().length, writes: storage.writes, legacyRead: storage.reads.includes(legacyKey) }, { count: 2, writes: [], legacyRead: false });
+	});
+
+	test('a partial migration retries from the original source without losing or duplicating sessions', () => {
+		const storage = store.add(new RecordingStorageService());
+		const original = legacyFixture(storage);
+		storage.failOnKey = metaKey('cli');
+		assert.throws(() => new OpenideChatSessions(storage), /Simulated interrupted migration/);
+		assert.deepStrictEqual({ backup: storage.get(legacyKey, StorageScope.WORKSPACE), index: storage.get(indexKey, StorageScope.WORKSPACE) }, { backup: original, index: undefined });
+		storage.failOnKey = undefined;
+		const recovered = new OpenideChatSessions(storage);
+		assert.deepStrictEqual({ ids: recovered.listAll().map(meta => meta.id), content: recovered.messagesOf('native')[0].content }, { ids: ['cli', 'native'], content: 'Original request' });
+	});
+
+	test('a damaged index recovers individual records without loading or replacing their content', () => {
+		const storage = store.add(new RecordingStorageService());
+		const first = new OpenideChatSessions(storage);
+		const id = first.createBackground('Keep me', [user('Durable request')]);
+		storage.store(indexKey, '{broken', StorageScope.WORKSPACE, StorageTarget.MACHINE);
+		storage.reads.length = 0;
+		const restored = new OpenideChatSessions(storage);
+		assert.deepStrictEqual({ title: restored.metaOf(id)?.title, contentReads: storage.reads.filter(key => key === contentKey(id)) }, { title: 'Keep me', contentReads: [] });
+		assert.strictEqual(restored.messagesOf(id)[0].content, 'Durable request');
+	});
+
+	test('a missing index recovers newer records before the stale migration backup', () => {
+		const storage = store.add(new RecordingStorageService());
+		legacyFixture(storage);
+		const migrated = new OpenideChatSessions(storage);
+		migrated.save('native', [...migrated.messagesOf('native'), user('Newer durable request')], false);
+		migrated.rename('native', 'Newer title');
+		storage.remove(indexKey, StorageScope.WORKSPACE);
+		storage.writes.length = 0;
+		const restored = new OpenideChatSessions(storage);
+		assert.deepStrictEqual({
+			title: restored.metaOf('native')?.title,
+			last: restored.messagesOf('native').at(-1)?.content,
+			contentWrites: storage.writes.filter(key => key.startsWith('openide.chat.sessions.v2.content.')),
+		}, { title: 'Newer title', last: 'Newer durable request', contentWrites: [] });
+	});
+
+	test('damaged content remains untouched by metadata changes and cannot be silently overwritten', () => {
+		const storage = store.add(new RecordingStorageService());
+		const first = new OpenideChatSessions(storage);
+		const id = first.createBackground('Keep me', [user('Durable request')]);
+		storage.store(contentKey(id), '{broken', StorageScope.WORKSPACE, StorageTarget.MACHINE);
+		const restored = new OpenideChatSessions(storage);
+		restored.rename(id, 'Still present');
+		restored.archive(id);
+		assert.throws(() => restored.messagesOf(id), /No se pudo leer/);
+		assert.throws(() => restored.save(id, [user('Replacement')], false), /No se pudo leer/);
+		assert.strictEqual(storage.get(contentKey(id), StorageScope.WORKSPACE), '{broken');
+	});
+
+	test('explicit deletion removes session content and migration recovery copies', () => {
+		const storage = store.add(new RecordingStorageService());
+		legacyFixture(storage);
+		const sessions = new OpenideChatSessions(storage);
+		sessions.delete('native');
+		assert.deepStrictEqual({
+			backup: storage.get(legacyKey, StorageScope.WORKSPACE),
+			metadata: storage.get(metaKey('native'), StorageScope.WORKSPACE),
+			content: storage.get(contentKey('native'), StorageScope.WORKSPACE),
+			remaining: new OpenideChatSessions(storage).listAll().map(meta => meta.id),
+		}, { backup: undefined, metadata: undefined, content: undefined, remaining: ['cli'] });
+		storage.store('openide.chat.sessions.v2.archive.orphan:interrupted', '[]', StorageScope.WORKSPACE, StorageTarget.MACHINE);
+		sessions.deleteAll();
+		assert.deepStrictEqual({ count: new OpenideChatSessions(storage).listAll().length, keys: storage.keys(StorageScope.WORKSPACE, StorageTarget.MACHINE) }, { count: 0, keys: [indexKey] });
+	});
+
+	test('compaction archives survive mutation and restart without repeating retained tails', () => {
+		const storage = store.add(new RecordingStorageService());
+		const sessions = new OpenideChatSessions(storage);
+		const answer: IChatMessage = { role: 'assistant', content: 'Original answer', reasoning: 'Original reasoning' };
+		const tool: IChatMessage = { role: 'tool', toolCallId: 'tool-1', content: 'Original tool result' };
+		const messages = [user('Original request'), answer, tool];
+		const id = sessions.createBackground('Long conversation', messages);
+		const summary = (content: string): IChatMessage => ({ role: 'user', content, compaction: { beforeTokens: 100, afterTokens: 20, savingsPercent: 80, origin: 'automatic' } });
+		const summary1 = summary('Summary 1');
+		const summary2 = summary('Summary 2');
+		sessions.archiveBeforeCompaction(id, messages);
+		sessions.archiveBeforeCompaction(id, messages);
+		messages.splice(0, messages.length, summary1, answer, tool, user('Second request'), { role: 'assistant', content: 'Second answer' });
+		sessions.save(id, messages, false);
+		sessions.archiveBeforeCompaction(id, messages);
+		messages.splice(0, messages.length, summary2, user('Second request'), { role: 'assistant', content: 'Second answer' }, user('Third request'));
+		sessions.save(id, messages, false);
+		storage.reads.length = 0;
+		const restored = new OpenideChatSessions(storage);
+		restored.listAll();
+		restored.messagesOf(id);
+		assert.deepStrictEqual(storage.reads.filter(key => key.startsWith('openide.chat.sessions.v2.archive.')), [], 'model loading never loads archived context');
+		assert.deepStrictEqual({
+			archiveCount: storage.keys(StorageScope.WORKSPACE, StorageTarget.MACHINE).filter(key => key.startsWith('openide.chat.sessions.v2.archive.')).length,
+			transcript: restored.transcriptOf(id).map(message => [message.content, message.reasoning]),
+			modelWindow: restored.messagesOf(id).map(message => message.content),
+		}, {
+			archiveCount: 2,
+			transcript: [['Original request', undefined], ['Original answer', 'Original reasoning'], ['Original tool result', undefined], ['Summary 1', undefined], ['Second request', undefined], ['Second answer', undefined], ['Summary 2', undefined], ['Third request', undefined]],
+			modelWindow: ['Summary 2', 'Second request', 'Second answer', 'Third request'],
+		});
+	});
+
+	test('emergency summaries preserve the full original request and forks own their archive', () => {
+		const storage = store.add(new RecordingStorageService());
+		const sessions = new OpenideChatSessions(storage);
+		const original = { ...user('Original request in full'), messageId: 'turn-1' };
+		const messages: IChatMessage[] = [original, { role: 'tool', content: 'Large output', toolCallId: 'call-1' }];
+		const id = sessions.createBackground('Original', messages);
+		sessions.archiveBeforeCompaction(id, messages);
+		messages.splice(0, messages.length, { role: 'user', content: '[Resumen histórico compacto]\nEmergency summary' }, { ...original, content: 'Original request [excerpt]' });
+		sessions.save(id, messages, false);
+		const fork = sessions.fork(id)!;
+		sessions.delete(id);
+		const restored = new OpenideChatSessions(storage);
+		assert.deepStrictEqual(restored.transcriptOf(fork).map(message => message.content), ['Original request in full', 'Large output', '[Resumen histórico compacto]\nEmergency summary']);
+		restored.deleteAll();
+		assert.deepStrictEqual(storage.keys(StorageScope.WORKSPACE, StorageTarget.MACHINE), [indexKey]);
+	});
+
+	test('continued assistant and tool messages with stable IDs are never dropped from archived history', () => {
+		const storage = store.add(new RecordingStorageService());
+		const sessions = new OpenideChatSessions(storage);
+		const first: IChatMessage = { role: 'assistant', messageId: 'response', content: 'First part', reasoning: 'First reasoning' };
+		const tool: IChatMessage = { role: 'tool', messageId: 'output', toolCallId: 'call', content: 'First output' };
+		const id = sessions.createBackground('Long answer', [user('Continue'), first, tool]);
+		sessions.archiveBeforeCompaction(id, sessions.messagesOf(id));
+		sessions.save(id, [{ role: 'user', content: '[Resumen histórico compacto]\nSummary' }, { ...first, content: 'Later continuation', reasoning: 'Later reasoning' }, { ...tool, content: 'Later output' }], false);
+		assert.deepStrictEqual(sessions.transcriptOf(id).filter(message => message.role !== 'user').map(message => [message.content, message.reasoning]), [['First part', 'First reasoning'], ['First output', undefined], ['Later continuation', 'Later reasoning'], ['Later output', undefined]]);
+	});
+
+	test('only actual deletions emit deletion events, while closing or archiving preserves ownership', () => {
+		const storage = store.add(new RecordingStorageService());
+		const sessions = new OpenideChatSessions(storage);
+		const deleted: string[] = [];
+		store.add(sessions.onDidDelete(id => deleted.push(id)));
+		const a = sessions.createBackground('A', [user('A')]);
+		const b = sessions.createCli('codex', 'Codex', '/work');
+		sessions.openTab(a);
+		sessions.closeTab(a);
+		sessions.closeBackgroundTab(b);
+		sessions.archive(a);
+		assert.deepStrictEqual(deleted, []);
+		sessions.delete(a);
+		sessions.delete(a);
+		sessions.delete('missing');
+		const empty = sessions.create();
+		sessions.closeTab(empty);
+		sessions.deleteAll();
+		assert.deepStrictEqual(deleted, [a, empty, b]);
 	});
 });

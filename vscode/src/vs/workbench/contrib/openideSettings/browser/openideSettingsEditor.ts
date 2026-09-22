@@ -106,6 +106,7 @@ export class OpenideSettingsEditor extends EditorPane {
 	 *  they are disposed with the rows they belong to, not leaked across renders. */
 	private readonly rowWidgets = this._register(new DisposableStore());
 	private readonly renderedSection = this._register(new MutableDisposable<IDisposable>());
+	private mountedSection: { section: IOpenideSettingsSection; category: string; query: string; scope: 'user' | 'workspace' } | undefined;
 	private sectionNeedsRender = false;
 	private readonly settingsModel: OpenideSettingsModel;
 	private renderLimit = INITIAL_RENDER_LIMIT;
@@ -281,7 +282,7 @@ export class OpenideSettingsEditor extends EditorPane {
 
 	private scheduleRender(reset: boolean): void {
 		if (!this.root || !this.input) { return; }
-		if (reset) { this.renderLimit = INITIAL_RENDER_LIMIT; }
+		if (reset) { this.renderLimit = INITIAL_RENDER_LIMIT; this.mountedSection = undefined; }
 		if (this.renderHandle !== undefined) { cancelAnimationFrame(this.renderHandle); }
 		this.renderHandle = requestAnimationFrame(() => { this.renderHandle = undefined; this.renderAll(); });
 	}
@@ -416,11 +417,8 @@ export class OpenideSettingsEditor extends EditorPane {
 	}
 
 	private renderItems(): void {
-		this.renderedSection.clear();
-		this.rowHovers.clear();
-		this.rowWidgets.clear();
-		clearNode(this.content);
-		const section = this.sectionForCategory(this.settingsModel.viewState.category);
+		const category = this.settingsModel.viewState.category;
+		const section = this.sectionForCategory(category);
 		const owned = new Set(section?.ownedSettings ?? []);
 		const subPageEntry = this.sectionNavigationEntry(this.settingsModel.viewState.category);
 		// A section SUB-page (one provider) is 100% section-owned. The model cannot know that: the
@@ -435,6 +433,19 @@ export class OpenideSettingsEditor extends EditorPane {
 		this.count.textContent = activeQuery ? (items.length === 1 ? t('settings.search.oneResult') : t('settings.search.results', items.length)) : '';
 		this.title.textContent = subPageEntry ? subPageEntry.label : this.settingsModel.activeNavigationLabel;
 		this.renderBreadcrumb();
+		// Live sections observe their own data. Replacing their host for an unrelated setting or
+		// navigation update would discard focused inputs before the section can preserve them.
+		const query = this.settingsModel.surfaceMatchesQuery(category) ? '' : plainSettingsQuery(this.settingsModel.viewState.query);
+		const scope = this.settingsModel.viewState.target === ConfigurationTarget.WORKSPACE || this.settingsModel.viewState.target === ConfigurationTarget.WORKSPACE_FOLDER ? 'workspace' : 'user';
+		const mounted = this.mountedSection;
+		if (section?.retainOnRefresh && !items.length && mounted?.section === section && mounted.category === category && mounted.query === query && mounted.scope === scope && this.content.hasChildNodes()) {
+			return;
+		}
+		this.mountedSection = undefined;
+		this.renderedSection.clear();
+		this.rowHovers.clear();
+		this.rowWidgets.clear();
+		clearNode(this.content);
 		// One card per group: a small caption above it and the rows inside, divided by the card's own
 		// hairlines. The groups are the TOC one level under the page (see `groupItems`); when the
 		// page yields a single group, the caption is dropped — the title above already says it.
@@ -459,14 +470,20 @@ export class OpenideSettingsEditor extends EditorPane {
 		// query matches the category by what it offers, the page is drawn in full.
 		// Without the `@…` filters: the section searches by text, and `@modified` is not text that
 		// exists in a skill list — letting it through emptied the whole page.
-		const query = this.settingsModel.surfaceMatchesQuery(this.settingsModel.viewState.category) ? '' : plainSettingsQuery(this.settingsModel.viewState.query);
+		const nativeBlocks = Array.from(this.content.children);
 		const renderedSection = section.render(this.content, {
-			scope: this.settingsModel.viewState.target === ConfigurationTarget.WORKSPACE || this.settingsModel.viewState.target === ConfigurationTarget.WORKSPACE_FOLDER ? 'workspace' : 'user',
+			scope,
 			query,
-			category: this.settingsModel.viewState.category,
+			category,
 			navigate: category => { this.settingsModel.setState({ category }); this.renderAll(); },
 		});
+		// Operational AI Agent pages lead with their live overview. The schema-backed controls
+		// remain below it for editing, search and per-scope reset.
+		if (!query && (category === 'openideAgent/subagents' || category === 'openideAgent/projectMap')) {
+			for (const block of nativeBlocks) { this.content.appendChild(block); }
+		}
 		this.renderedSection.value = renderedSection || undefined;
+		this.mountedSection = !items.length ? { section, category, query, scope } : undefined;
 		// And whatever the section did not filter itself (whole blocks, rows from another list) is
 		// filtered by the renderer, in one place and using the declared keywords.
 		OpenideSectionRenderer.prune(this.content, query);
@@ -562,6 +579,7 @@ export class OpenideSettingsEditor extends EditorPane {
 		super.setEditorVisible(visible);
 		if (!visible && this.renderedSection.value) {
 			this.sectionNeedsRender = true;
+			this.mountedSection = undefined;
 			this.renderedSection.clear();
 		} else if (visible && this.sectionNeedsRender) {
 			this.sectionNeedsRender = false;
@@ -574,6 +592,7 @@ export class OpenideSettingsEditor extends EditorPane {
 		if (this.renderHandle !== undefined) { cancelAnimationFrame(this.renderHandle); this.renderHandle = undefined; }
 		this.modelListeners.clear();
 		this.settingsModel.setModel(undefined);
+		this.mountedSection = undefined;
 		this.renderedSection.clear();
 		super.clearInput();
 	}

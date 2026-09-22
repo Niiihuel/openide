@@ -16,6 +16,7 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { IOpenideReviewDiffService } from '../../browser/openideReviewDiffService.js';
 import { IModelService } from '../../../../../editor/common/services/model.js';
+import { ILanguageService } from '../../../../../editor/common/languages/language.js';
 import { ITextModelService } from '../../../../../editor/common/services/resolverService.js';
 import { ISCMService } from '../../../scm/common/scm.js';
 import { OpenideChatController } from '../../browser/chat/openideChatController.js';
@@ -52,8 +53,8 @@ suite('OpenIDE agent window context', () => {
 		upcastPartial<IWorkspaceContextService>({getWorkspace: () => ({id: 'project', folders: []}), onDidChangeWorkspaceFolders: Event.None}),
 		NullHoverService, upcastPartial<OpenideCliChangesService>({onDidChange: cliChanged.event, sessions: () => cliSessions, preview: async () => ({ added: 2, removed: 1, lines: [], created: false })}),
 		upcastPartial<IInstantiationService>({createInstance: (() => new SectionStub()) as IInstantiationService['createInstance']}),
-		upcastPartial<ITextModelService>({}), upcastPartial<IModelService>({getModels: () => [], onModelAdded: Event.None, createModel: value => createTextModel(value)}), upcastPartial<IOpenideReviewDiffService>({ acquire: (model, before) => ({ dispose: () => {}, object: { compute: async () => ({ version: model.getVersionId(), changes: linesDiffComputers.getDefault().computeDiff(before.split('\n'), model.getLinesContent(), { ignoreTrimWhitespace: false, maxComputationTimeMs: 100, computeMoves: false }).changes }) } }) })));
-		return {parent,diffs,diffChanged,cliSessions,reviews,diffReads: () => diffReads,toCli: async () => {cli=true; navigation.fire(); await timeout(150);}};
+		upcastPartial<ITextModelService>({}), upcastPartial<IModelService>({getModels: () => [], getModel: () => null, onModelAdded: Event.None, createModel: value => createTextModel(value)}), upcastPartial<ILanguageService>({ guessLanguageIdByFilepathOrFirstLine: () => 'typescript' }), upcastPartial<IOpenideReviewDiffService>({ acquire: (model, before) => ({ dispose: () => {}, object: { compute: async () => ({ version: model.getVersionId(), changes: linesDiffComputers.getDefault().computeDiff(before.split('\n'), model.getLinesContent(), { ignoreTrimWhitespace: false, maxComputationTimeMs: 100, computeMoves: false }).changes }) } }) })));
+		return {parent,diffs,diffChanged,cliSessions,reviews,diffReads: () => diffReads,selectCli: () => { cli = true; },toCli: async () => {cli=true; navigation.fire(); await timeout(150);}};
 	}
 	test('CLI changes stay isolated from native changes and open with selected session', async () => {
 		const f=fixture(); f.diffs.push({path:'/native.ts',added:1,removed:0});
@@ -92,6 +93,23 @@ suite('OpenIDE agent window context', () => {
 		assert.strictEqual(f.diffReads() - before, 1);
 		f.parent.querySelector<HTMLButtonElement>('.openide-agent-window-review-summary')!.click();
 		assert.strictEqual(f.reviews.length, 400);
+	});
+
+	test('review actions retain the displayed files owner across delayed navigation refreshes', async () => {
+		const f = fixture();
+		const file = { path: '/native.ts', added: 1, removed: 0 };
+		f.diffs.push(file);
+		f.cliSessions.push(upcastPartial<IOpenideCliChangesSession>({ sessionId: 'cli', cwd: '/project', files: [{ path: 'cli.ts', status: 'modified', exact: true }] }));
+		f.diffChanged.fire(file);
+		await timeout(150);
+		f.selectCli();
+		// Before navigation is repainted, the visible summary still belongs to native.
+		f.parent.querySelector<HTMLButtonElement>('.openide-agent-window-review-summary')!.click();
+		// A changes notification can refresh the files before the debounced navigation handler.
+		f.diffChanged.fire(file);
+		await timeout(150);
+		f.parent.querySelector<HTMLButtonElement>('.openide-conversation-changes-files button')!.click();
+		assert.deepStrictEqual(f.reviews, ['native:/native.ts', 'cli:cli.ts']);
 	});
 
 });

@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { openideChatAuthoringFileLabel } from './openideChatToolPresentation.js';
 import { IOpenideChatExploreContent, IOpenideChatExploreEntry, OpenideChatToolState } from './openideChatContent.js';
 import { compactExploreDetail, getOpenideToolMeta, lineSpanTarget, OpenideChatExploreKind, openideExploreKind, toolDetailFor } from './openideChatToolMeta.js';
 
@@ -31,7 +32,8 @@ export function createOpenideChatExploreContent(id: string): IOpenideChatExplore
  */
 export function exploreEntryTarget(tool: string, argumentsJson: string | undefined): string {
 	const meta = getOpenideToolMeta(tool);
-	return compactExploreDetail(meta, toolDetailFor(meta, argumentsJson));
+	const detail = toolDetailFor(meta, argumentsJson);
+	return openideChatAuthoringFileLabel(detail, 'running') ? detail : compactExploreDetail(meta, detail);
 }
 
 export function createOpenideChatExploreEntry(callId: string, tool: string, argumentsJson: string | undefined): IOpenideChatExploreEntry {
@@ -76,6 +78,8 @@ export function enrichOpenideChatExploreEntry(
 ): IOpenideChatExploreContent {
 	const entries = content.entries.map(entry => {
 		if (entry.callId !== callId) { return entry; }
+		// Preserve the configuration path so its kind and skill directory remain identifiable.
+		if (openideChatAuthoringFileLabel(entry.target, 'running')) { return entry; }
 		const enriched = lineSpanTarget(getOpenideToolMeta(entry.tool), argumentsJson, resultText);
 		return enriched ? { ...entry, target: enriched } : entry;
 	});

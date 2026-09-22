@@ -359,6 +359,8 @@ suite('OpenIDE agent common', () => {
 
 	test('keeps long agent runs and recognizes provider output limits', () => {
 		assert.strictEqual(resolveAgentIterationLimit(undefined), DEFAULT_AGENT_ITERATIONS);
+		assert.strictEqual(resolveAgentIterationLimit(0), 0);
+		assert.strictEqual(DEFAULT_AGENT_ITERATIONS, 0);
 		assert.strictEqual(resolveAgentIterationLimit(10), 25);
 		assert.strictEqual(resolveAgentIterationLimit(80), 80);
 		assert.strictEqual(resolveAgentIterationLimit(1000), 500);

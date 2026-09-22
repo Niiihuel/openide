@@ -187,7 +187,7 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 			// the content moved on, which is the difference between reading the turn and watching it
 			// strobe. See `openideChatStatusLine.ts`.
 			template.status.setStatus(status, element.startedAt);
-			const live = !status.waitingForResponse && template.parts.find((part, index) => (part instanceof OpenideChatExplorePart || part instanceof OpenideChatThinkingPart) && isOpenideChatLiveTail(element.content, index, element.isComplete));
+			const live = !status.waitingForResponse && template.parts.find((part, index) => part instanceof OpenideChatExplorePart && isOpenideChatLiveTail(element.content, index, element.isComplete));
 			if (live instanceof OpenideChatExplorePart) {
 				const toggle = () => {
 					live.setLiveExpanded(!live.liveExpanded);
@@ -196,9 +196,6 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 				template.status.setDisclosure(toggle, live.liveExpanded);
 				// Reuse the one status node directly above the existing live records. The parts array
 				// still owns only content parts; no row cloning or extra tool state is introduced.
-				if (template.status.domNode.nextSibling !== live.domNode) { live.domNode.before(template.status.domNode); }
-			} else if (live instanceof OpenideChatThinkingPart) {
-				template.status.setDisclosure(undefined);
 				if (template.status.domNode.nextSibling !== live.domNode) { live.domNode.before(template.status.domNode); }
 			} else {
 				template.status.setDisclosure(undefined);
@@ -255,8 +252,10 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 		// Which part is the step in flight, decided HERE and not by the part: a part only learns
 		// what follows it from `hasSameContent`, which is a pure query and must not be what moves
 		// the row. The live one hides itself — the status line above is showing it.
+		const status = this._configurationService.getValue(OPENIDE_CHAT_WORKING_INDICATOR_KEY) !== false
+			? openideChatLiveStatusLabel(content, element.isComplete) : undefined;
 		for (let i = 0; i < template.parts.length; i++) {
-			template.parts[i]?.setLive?.(isOpenideChatLiveTail(content, i, element.isComplete));
+			template.parts[i]?.setLive?.(!!status && !status.waitingForResponse && isOpenideChatLiveTail(content, i, element.isComplete));
 		}
 		const previewUrls = new Set<string>();
 		for (let i = 0; i < content.length; i++) {
@@ -266,7 +265,7 @@ export class OpenideChatResponseRenderer extends Disposable implements ITreeRend
 			if (node) { node.hidden = previewUrls.has(preview.url); }
 			previewUrls.add(preview.url);
 		}
-		template.activityGroups.render(content, template.parts, this._configurationService.getValue(OPENIDE_CHAT_TOOLS_EXPANDED_KEY) === true, this._configurationService.getValue(OPENIDE_CHAT_THINKING_OPEN_KEY) === true, element.isComplete);
+		template.activityGroups.render(content, template.parts, this._configurationService.getValue(OPENIDE_CHAT_TOOLS_EXPANDED_KEY) === true, element.isComplete);
 	}
 
 	private _replacePart(element: IOpenideChatResponseItem, elementIndex: number, template: IOpenideChatResponseTemplate, index: number, content: readonly IOpenideChatContent[]): void {

@@ -282,8 +282,9 @@ export interface IBrowserViewWorkbenchService {
 	 * Open or navigate the workspace's single local-app preview.
 	 * `reveal` reuses an already loaded URL without reloading its page; explicit navigation still reloads.
 	 * `modal` selects full view (true) or the companion's workspace panel (false); omission preserves presentation.
+	 * `browserId` reveals that live browser when it exists, preserving its current URL and DOM.
 	 */
-	openPreview(url?: string, initialState?: IBrowserEditorViewState, options?: { readonly preserveFocus?: boolean; readonly targetWindowId?: number; readonly modal?: boolean; readonly reveal?: boolean }): Promise<BrowserEditorInput>;
+	openPreview(url?: string, initialState?: IBrowserEditorViewState, options?: { readonly preserveFocus?: boolean; readonly targetWindowId?: number; readonly modal?: boolean; readonly reveal?: boolean; readonly browserId?: string }): Promise<BrowserEditorInput>;
 
 	/** Reuses the workspace preview without choosing its editor presentation. */
 	getOrCreatePreview(url?: string, initialState?: IBrowserEditorViewState): BrowserEditorInput;

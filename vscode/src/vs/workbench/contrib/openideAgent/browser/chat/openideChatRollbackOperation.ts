@@ -55,6 +55,7 @@ export async function runOpenideChatRollback(request: IOpenideChatRollbackReques
 	}
 	const removedMessageIds = messages.slice(cut).map(message => message.messageId).filter((value): value is string => !!value);
 	const warning = await revertTransaction(request, removedMessageIds);
+	sessions.truncateArchiveBefore(conversationId, messageId);
 	messages.splice(cut);
 	sessions.removeChangeSets(conversationId, removedMessageIds);
 	sessions.clearUsage(conversationId);

@@ -1,5 +1,5 @@
 // Copyright (c) OpenIDE. Licensed under the MIT License.
-// Run with: node dev/run-virtual-gui.mjs dev/test-agent-workspace-chrome-runtime.mjs
+// Run with: node dev/run-virtual-gui.mjs dev/test-chat-web-preview-runtime.mjs
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -36,6 +36,7 @@ try {
 		const { ICommandService } = await import(base + 'platform/commands/common/commands.js');
 		const { IInstantiationService } = await import(base + 'platform/instantiation/common/instantiation.js');
 		const { IBrowserViewWorkbenchService } = await import(base + 'workbench/contrib/browserView/common/browserView.js');
+		const { IBrowserAgentSessionService } = await import(base + 'workbench/contrib/browserView/common/browserAgentSessionService.js');
 		const { getWindows } = await import(base + 'base/browser/dom.js');
 		const { OpenideChatResponseRenderer } = await import(base + 'workbench/contrib/openideAgent/browser/chat/openideChatResponseRenderer.js');
 		const { createOpenideChatResponseItem, advanceOpenideChatResponseItem } = await import(base + 'workbench/contrib/openideAgent/common/chat/openideChatItem.js');
@@ -47,6 +48,7 @@ try {
 			constructor() { super({ id: 'test.webPreview', title: 'Web Preview Fixture', f1: true }); }
 			async run(accessor) {
 				const instantiation = accessor.get(IInstantiationService), browsers = accessor.get(IBrowserViewWorkbenchService);
+				const browserSessions = accessor.get(IBrowserAgentSessionService);
 				const commands = accessor.get(ICommandService);
 				await commands.executeCommand('openide.agent.injectCanvasPrompt', { prompt: 'Preserved composer draft', send: false });
 				window.webPreviewFixture = {
@@ -60,7 +62,20 @@ try {
  const tool = { kind:'tool', callId:'nav', name:'browser_navigate', argumentsJson:JSON.stringify({url}), state:'running' };
  let item = createOpenideChatResponseItem({id:'preview',requestId:'r',content:[tool]});
  const render = () => renderer.renderElement({element:item},0,template); render();
- this.complete = () => { item = advanceOpenideChatResponseItem(item,{content:[{...tool,state:'success',resultText:`OK: loaded ${url} (title: Preview fixture).`},{...tool,callId:'again',state:'success',resultText:`OK: loaded ${url} (title: Preview fixture).`}],isComplete:true}); render(); };
+ this.complete = (recordedUrl = url) => { item = advanceOpenideChatResponseItem(item,{content:[{...tool,argumentsJson:JSON.stringify({url:recordedUrl}),state:'success',resultText:`OK: loaded ${recordedUrl} (title: Preview fixture).`},{...tool,callId:'again',argumentsJson:JSON.stringify({url:recordedUrl}),state:'success',resultText:`OK: loaded ${recordedUrl} (title: Preview fixture).`}],isComplete:true}); render(); };
+ this.linkHistorical = () => {
+  const pageId = browsers.getPreview().id;
+  for (const [index, toolCallId] of ['nav', 'again'].entries()) {
+   browserSessions.acceptEvent({sessionId:'fixture-linked-session',pageId,sequence:index+1,timestamp:Date.now(),action:'success',phase:'completed',status:'completed',toolCallId,url});
+  }
+  this.complete(new URL('historical-page',url).href);
+  return ['nav','again'].map(call => browserSessions.sessionForToolCall(call)?.sessionId);
+ };
+ const originalOpenPreview = browsers.openPreview;
+ this.openCount = 0;
+ browsers.openPreview = async (...args) => { const input = await Reflect.apply(originalOpenPreview,browsers,args); this.openCount++; return input; };
+ // Delayed services cache bound methods on the proxy; invalidate that cache after instrumenting.
+ delete browsers.openPreview;
  this.replay = () => { item = {...item,id:'restored'}; render(); };
  this.previewId = () => browsers.getPreview()?.id;
  this.previewVisible = () => browsers.getPreview()?.model?.visible;
@@ -68,7 +83,7 @@ try {
  const imageStore = new DisposableStore(); host.append(attachments);
  renderImageStrip(attachments,[{mimeType:'image/png',data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='}],imageStore,commands);
  this.nativeNavigate = () => browsers.openPreview(url,undefined,{targetWindowId:target.vscodeWindowId});
- this.dispose = () => {imageStore.dispose();renderer.disposeTemplate(template);renderer.dispose();host.remove();};
+ this.dispose = () => {browsers.openPreview=originalOpenPreview;delete browsers.openPreview;imageStore.dispose();renderer.disposeTemplate(template);renderer.dispose();host.remove();};
  },
  open: () => commands.executeCommand('openide.agent.openAgentWindow'),
 				};
@@ -101,7 +116,7 @@ try {
   const page = webContents.getAllWebContents().find(w => w.getURL() === url);
   if (!page) return undefined;
   if (value !== undefined) await page.executeJavaScript(`document.querySelector('#state').value = ${JSON.stringify(value)}`);
-  return { id:page.id, value:await page.executeJavaScript("document.querySelector('#state').value"), count:webContents.getAllWebContents().filter(w=>w.getURL()===url).length };
+  return { id:page.id, url:page.getURL(), value:await page.executeJavaScript("document.querySelector('#state').value"), count:webContents.getAllWebContents().filter(w=>w.getURL()===url).length };
  },{url,value});
  for (let n=0;n<50 && !(await state());n++) await new Promise(r=>setTimeout(r,100));
  const initial = await state('Keep this draft');
@@ -156,6 +171,19 @@ try {
  assert.equal(await card.locator('.oi-split-more').evaluate(el=>el===el.ownerDocument.activeElement),true);
  await card.locator('.oi-split-main').click();
  assert.deepEqual(await state(),initial,'repeated click does not navigate');
+ // Historical tool URLs must reveal their still-live browser session, preserving its current DOM.
+ assert.deepEqual(await ide.evaluate(()=>window.webPreviewFixture.linkHistorical()),['fixture-linked-session','fixture-linked-session']);
+ await card.filter({hasText:'historical-page'}).waitFor();
+ const beforeLinkedOpen = await ide.evaluate(()=>window.webPreviewFixture.openCount);
+ // The fixture spans the workspace, while native browser pixels can cover its right half.
+ await card.locator('.oi-split-main').click({position:{x:24,y:16}});
+ await ide.waitForFunction(count=>window.webPreviewFixture.openCount>count,beforeLinkedOpen).catch(async error=>{
+  await agent.screenshot({path:path.join(output,'linked-tool-failure.png')});
+  console.error('Linked browser fixture:',await ide.evaluate(()=>({openCount:window.webPreviewFixture.openCount,previewId:window.webPreviewFixture.previewId()})),await card.evaluate(element=>({text:element.textContent,rect:element.getBoundingClientRect().toJSON()})),await agent.locator('.notifications-toasts').innerText().catch(()=>''));
+  throw error;
+ });
+ await agent.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+ assert.deepEqual(await state(),initial,'historical tool card reveals correlated browser without navigating to its recorded URL');
  await ide.evaluate(()=>window.webPreviewFixture.replay());
  await card.waitFor();
  assert.equal(await ide.evaluate(()=>window.webPreviewFixture.previewId()),previewId);
@@ -169,8 +197,8 @@ try {
  assert.equal(await agent.locator('.openide-chat-input-card textarea:visible').inputValue(),'Preserved composer draft');
  await ide.evaluate(()=>window.webPreviewFixture.dispose());
  assert.deepEqual(errors,[], 'no runtime errors in main or auxiliary windows');
- fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({liveCard:true,replay:true,oneBrowser:true,nativeFullView:true,attachmentViewer:true,closeOnlyActive:true,browserExitSnapshot:true,preservedPage:true,nativeMenu:true,explicitNavigationStillWorks:true},null,2));
- console.log('PASS: web card, full native modal, page state, same browser, menu and restored transcript.');
+ fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({liveCard:true,replay:true,oneBrowser:true,nativeFullView:true,attachmentViewer:true,closeOnlyActive:true,browserExitSnapshot:true,preservedPage:true,nativeMenu:true,linkedHistoricalToolPreservesLiveBrowser:true,explicitNavigationStillWorks:true},null,2));
+ console.log('PASS: web card, full native modal, page state, linked historical tool, same browser, menu and restored transcript.');
 } finally {
  if(app) { await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.destroy())); await app.close(); }
  server.close();

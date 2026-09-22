@@ -13,6 +13,7 @@
  *  strip and moves it to the Archived section; deleting removes it for good.
  *--------------------------------------------------------------------------------------------*/
 
+import { t } from '../common/openideStrings.js';
 import { collectConversationChanges, IConversationFileChange } from '../common/openideConversationChanges.js';
 import { subagentTaskTitle } from '../common/openideSubagentTitle.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
@@ -31,7 +32,7 @@ export interface IChatSessionMeta {
 	title: string;
 	updatedAt: number;
 	archived: boolean;
-	/** User-pinned history survives recency pruning and is grouped by the sidebar. */
+	/** User-pinned history is grouped by the sidebar. History is never pruned by recency. */
 	pinned?: boolean;
 	hasError: boolean;
 	/** Born as a fork of another session (the UI marks it with the repo-forked codicon). */
@@ -88,10 +89,80 @@ interface IPersisted {
 	activeId?: string;
 }
 
-const STORAGE_KEY = 'openide.chat.sessions.v1';
-const MAX_SESSIONS = 200;
+interface IStoredChatSession extends IChatSessionMeta {
+	customTitle?: string;
+	/** Allows history and tab operations without reading the transcript. */
+	hasUserMessages: boolean;
+	usage?: IChatSessionUsage;
+	/** Immutable model-window snapshots captured before compaction, oldest first. */
+	compactionArchiveIds?: string[];
+}
+
+interface IChatSessionContent {
+	messages: IChatMessage[];
+	changeSetsByMessageId: Record<string, IMessageChangeSet>;
+}
+
+interface IPersistedIndex {
+	version: 2;
+	sessionIds: string[];
+	openTabIds: string[];
+	activeId?: string;
+}
+
+const LEGACY_STORAGE_KEY = 'openide.chat.sessions.v1';
+const INDEX_STORAGE_KEY = 'openide.chat.sessions.v2.index';
+const META_STORAGE_PREFIX = 'openide.chat.sessions.v2.meta.';
+const CONTENT_STORAGE_PREFIX = 'openide.chat.sessions.v2.content.';
+const ARCHIVE_STORAGE_PREFIX = 'openide.chat.sessions.v2.archive.';
 const TITLE_MAX = 120;
 const MAX_CHANGE_SET_CHARS = 16_000_000;
+
+function messagesForStorage(messages: readonly IChatMessage[]): IChatMessage[] {
+	return messages.map(message => !message.images?.length ? message : {
+		...message,
+		images: message.images.map(image => image.assetUri ? { ...image, data: '' } : image),
+	});
+}
+
+function isCompactionMessage(message: IChatMessage): boolean {
+	return !!message.compaction || (message.role === 'user' && message.content.startsWith('[Resumen histórico compacto]'));
+}
+
+/** Join successive model windows without repeating their preserved tail. This projection is
+ * for reading/export only: the harness always receives the compacted `messagesOf` window. */
+function appendTranscriptWindow(history: IChatMessage[], window: readonly IChatMessage[]): void {
+	const messages = window.filter(message => !isCompactionMessage(message));
+	const candidateKeys = messagesForStorage(messages).map(message => JSON.stringify(message));
+	const previous = history.filter(message => !isCompactionMessage(message));
+	const previousKeys = messagesForStorage(messages.length ? previous.slice(-messages.length) : []).map(message => JSON.stringify(message));
+	// KMP computes the longest history suffix matching the next window's prefix in linear time.
+	const prefixes = new Array<number>(candidateKeys.length).fill(0);
+	for (let i = 1, matched = 0; i < candidateKeys.length; i++) {
+		while (matched > 0 && candidateKeys[i] !== candidateKeys[matched]) { matched = prefixes[matched - 1]; }
+		if (candidateKeys[i] === candidateKeys[matched]) { matched++; }
+		prefixes[i] = matched;
+	}
+	let overlap = 0;
+	for (const key of previousKeys) {
+		while (overlap > 0 && (overlap === candidateKeys.length || key !== candidateKeys[overlap])) { overlap = prefixes[overlap - 1]; }
+		if (key === candidateKeys[overlap]) { overlap++; }
+	}
+	const priorCompactions = new Set(history.filter(isCompactionMessage).map(message => JSON.stringify(message)));
+	for (const message of window.filter(isCompactionMessage)) {
+		if (!priorCompactions.has(JSON.stringify(message))) { history.push(message); }
+	}
+	const userMessageIds = new Set(history.filter(message => message.role === 'user' && message.messageId).map(message => message.messageId!));
+	for (const message of messages.slice(overlap)) {
+		// Emergency compaction can retain a shortened version of the latest user request.
+		// Its durable original is the same turn and must stay intact in the reading projection.
+		const key = message.role === 'user' ? message.messageId : undefined;
+		if (!key || !userMessageIds.has(key)) {
+			history.push(message);
+			if (key) { userMessageIds.add(key); }
+		}
+	}
+}
 
 function normalizeChangeSets(value: unknown, messages: IChatMessage[]): Record<string, IMessageChangeSet> {
 	const result: Record<string, IMessageChangeSet> = {};
@@ -156,9 +227,11 @@ export class OpenideChatSessions {
 	private readonly _onDidChange = new Emitter<void>();
 	readonly onDidChange: Event<void> = this._onDidChange.event;
 
-	private readonly sessions = new Map<string, IChatSession>();
+	private readonly sessions = new Map<string, IStoredChatSession>();
+	private readonly contents = new Map<string, IChatSessionContent>();
+	private readonly archives = new Map<string, readonly IChatMessage[]>();
 	private readonly reviewChanges = new Map<string, readonly IConversationFileChange[]>();
-	private readonly messageVersions = new WeakMap<IChatSession, number>();
+	private readonly messageVersions = new WeakMap<IStoredChatSession, number>();
 	/** Global session order (most recent first by updatedAt). */
 	private order: string[] = [];
 	private openTabIds: string[] = [];
@@ -169,74 +242,163 @@ export class OpenideChatSessions {
 	}
 
 	private load(): void {
-		const raw = this.storageService.get(STORAGE_KEY, StorageScope.WORKSPACE);
-		if (!raw) { return; }
-		try {
-			const p: IPersisted = JSON.parse(raw);
-			for (const s of p.sessions || []) {
-				if (!s || typeof s.id !== 'string') { continue; }
-				const messages = Array.isArray(s.messages) ? s.messages : [];
-				const canDeriveTitle = !s.subagentRunId && s.kind !== 'cli' && messages.some(message => message.role === 'user') && !messages.some(message => message.compaction);
-				this.sessions.set(s.id, {
-					id: s.id,
-					title: s.customTitle || (canDeriveTitle ? this.deriveTitle(messages) : s.title) || 'Nuevo chat',
-					customTitle: typeof s.customTitle === 'string' && s.customTitle ? s.customTitle : undefined,
-					updatedAt: typeof s.updatedAt === 'number' ? s.updatedAt : 0,
-					archived: !!s.archived,
-					pinned: !!s.pinned,
-					hasError: !!s.hasError,
-					forked: !!s.forked,
-					subagentRunId: typeof s.subagentRunId === 'string' && s.subagentRunId ? s.subagentRunId : undefined,
-					subagentStartedAt: typeof s.subagentStartedAt === 'number' ? s.subagentStartedAt : undefined,
-					subagentCompletedAt: typeof s.subagentCompletedAt === 'number' ? s.subagentCompletedAt : undefined,
-					subagentStatus: s.subagentStatus === 'running' ? 'interrupted' : s.subagentStatus,
-					parentSessionId: typeof s.parentSessionId === 'string' ? s.parentSessionId : undefined,
-					kind: s.kind === 'cli' && isOpenideCliId(s.cliId) ? 'cli' : 'native',
-					cliId: s.kind === 'cli' && isOpenideCliId(s.cliId) ? s.cliId : undefined,
-					// A CLI that was running when the window closed is not running any more.
-					status: isOpenideCliSessionStatus(s.status) ? (s.status === 'in-progress' ? 'completed' : s.status) : undefined,
-					cwd: typeof s.cwd === 'string' && s.cwd ? s.cwd : undefined,
-					providerSessionId: typeof s.providerSessionId === 'string' && s.providerSessionId ? s.providerSessionId : undefined,
-					unread: !!s.unread,
-					messages: Array.isArray(s.messages) ? s.messages : [],
-					changeSetsByMessageId: normalizeChangeSets(s.changeSetsByMessageId, Array.isArray(s.messages) ? s.messages : []),
-					usage: normalizeUsage(s.usage),
-				});
-				this.order.push(s.id);
-			}
-			this.openTabIds = (p.openTabIds || []).filter(id => this.sessions.has(id) && !this.sessions.get(id)!.archived);
-			this.activeId = p.activeId && this.sessions.has(p.activeId) ? p.activeId : undefined;
-		} catch {
-			// corrupt index → start clean
+		const rawIndex = this.storageService.get(INDEX_STORAGE_KEY, StorageScope.WORKSPACE);
+		let index: IPersistedIndex | undefined;
+		if (rawIndex) {
+			try {
+				const candidate: IPersistedIndex = JSON.parse(rawIndex);
+				if (candidate.version === 2 && Array.isArray(candidate.sessionIds) && Array.isArray(candidate.openTabIds)) { index = candidate; }
+			} catch { /* Recover individual records below; never replace them with an empty store. */ }
+		}
+		if (index) {
+			this.loadMetadata(index.sessionIds);
+			this.restoreTabs(index);
+			return;
+		}
+		// Recover newer records before consulting the migration backup. Losing only the index
+		// must never let a stale v1 snapshot overwrite conversations saved since migration.
+		const ids = this.storageService.keys(StorageScope.WORKSPACE, StorageTarget.MACHINE)
+			.filter(key => key.startsWith(META_STORAGE_PREFIX))
+			.map(key => key.slice(META_STORAGE_PREFIX.length));
+		this.loadMetadata(ids);
+		// An interrupted migration can still have missing records; import only those IDs.
+		if (!this.migrateLegacy() && this.sessions.size) { this.persistIndex(); }
+	}
+
+	private normalizeMetadata(s: Partial<IStoredChatSession>, id: string): IStoredChatSession {
+		const cli = s.kind === 'cli' && isOpenideCliId(s.cliId);
+		const customTitle = typeof s.customTitle === 'string' && s.customTitle ? s.customTitle : undefined;
+		return {
+			id,
+			title: customTitle || (typeof s.title === 'string' && s.title) || 'Nuevo chat',
+			customTitle,
+			updatedAt: typeof s.updatedAt === 'number' && Number.isFinite(s.updatedAt) ? s.updatedAt : 0,
+			archived: !!s.archived,
+			pinned: !!s.pinned,
+			hasError: !!s.hasError,
+			forked: !!s.forked,
+			subagentRunId: typeof s.subagentRunId === 'string' && s.subagentRunId ? s.subagentRunId : undefined,
+			subagentStartedAt: typeof s.subagentStartedAt === 'number' ? s.subagentStartedAt : undefined,
+			subagentCompletedAt: typeof s.subagentCompletedAt === 'number' ? s.subagentCompletedAt : undefined,
+			subagentStatus: s.subagentStatus === 'running' ? 'interrupted' : ['completed', 'failed', 'cancelled', 'interrupted'].includes(s.subagentStatus ?? '') ? s.subagentStatus : undefined,
+			parentSessionId: typeof s.parentSessionId === 'string' ? s.parentSessionId : undefined,
+			kind: cli ? 'cli' : 'native',
+			cliId: cli ? s.cliId : undefined,
+			// A restored CLI has no live turn signal until its terminal reconnects.
+			status: isOpenideCliSessionStatus(s.status) ? (s.status === 'in-progress' ? (cli ? 'unknown' : 'completed') : s.status) : undefined,
+			cwd: typeof s.cwd === 'string' && s.cwd ? s.cwd : undefined,
+			providerSessionId: typeof s.providerSessionId === 'string' && s.providerSessionId ? s.providerSessionId : undefined,
+			unread: !!s.unread,
+			hasUserMessages: s.hasUserMessages !== false,
+			usage: normalizeUsage(s.usage),
+			compactionArchiveIds: Array.isArray(s.compactionArchiveIds) ? s.compactionArchiveIds.filter(id => typeof id === 'string') : undefined,
+		};
+	}
+
+	private loadMetadata(ids: readonly string[]): void {
+		for (const id of ids) {
+			if (typeof id !== 'string' || this.sessions.has(id)) { continue; }
+			let source: Partial<IStoredChatSession> = {};
+			try {
+				const raw = this.storageService.get(META_STORAGE_PREFIX + id, StorageScope.WORKSPACE);
+				const candidate: IStoredChatSession | undefined = raw ? JSON.parse(raw) : undefined;
+				if (candidate?.id === id) { source = candidate; }
+			} catch { /* Keep the indexed conversation and its content even if its metadata is damaged. */ }
+			this.sessions.set(id, this.normalizeMetadata(source, id));
+			this.order.push(id);
 		}
 	}
 
-	private persist(): void {
+	private restoreTabs(source: { openTabIds: string[]; activeId?: string }): void {
+		this.openTabIds = [...new Set(source.openTabIds)].filter(id => this.sessions.has(id) && !this.sessions.get(id)!.archived);
+		this.activeId = source.activeId && this.sessions.has(source.activeId) ? source.activeId : undefined;
+	}
+
+	/** Publish the new index only after every migrated record exists. Keep v1 as recovery data. */
+	private migrateLegacy(): boolean {
+		const raw = this.storageService.get(LEGACY_STORAGE_KEY, StorageScope.WORKSPACE);
+		if (!raw) { return false; }
+		let source: IPersisted;
+		try {
+			source = JSON.parse(raw);
+			if (!Array.isArray(source.sessions)) { return false; }
+		} catch { return false; }
+		for (const old of source.sessions) {
+			if (!old || typeof old.id !== 'string' || this.sessions.has(old.id)) { continue; }
+			const messages = Array.isArray(old.messages) ? old.messages : [];
+			const hasUserMessages = messages.some(message => message.role === 'user');
+			const canDeriveTitle = !old.subagentRunId && old.kind !== 'cli' && hasUserMessages && !messages.some(message => message.compaction);
+			const session = this.normalizeMetadata({ ...old, title: canDeriveTitle ? this.deriveTitle(messages) : old.title, hasUserMessages }, old.id);
+			this.sessions.set(old.id, session);
+			this.contents.set(old.id, { messages, changeSetsByMessageId: normalizeChangeSets(old.changeSetsByMessageId, messages) });
+			this.order.push(old.id);
+			this.persistContent(old.id);
+			this.persistMetadata(session);
+		}
+		this.restoreTabs({ openTabIds: Array.isArray(source.openTabIds) ? source.openTabIds : [], activeId: source.activeId });
+		this.persistIndex();
+		// Migration is the only full transcript read. Subsequent access follows the lazy path too.
+		this.contents.clear();
+		return true;
+	}
+
+	private contentOf(id: string): IChatSessionContent {
+		let content = this.contents.get(id);
+		if (!content) {
+			const raw = this.storageService.get(CONTENT_STORAGE_PREFIX + id, StorageScope.WORKSPACE);
+			try {
+				const source: IChatSessionContent = raw ? JSON.parse(raw) : { messages: [], changeSetsByMessageId: {} };
+				if (!Array.isArray(source.messages)) { throw new Error('Invalid conversation content'); }
+				content = { messages: source.messages, changeSetsByMessageId: normalizeChangeSets(source.changeSetsByMessageId, source.messages) };
+			} catch {
+				// Do not silently replace damaged content when the user opens or renames a session.
+				throw new Error(t('openide.chat.history.unreadable'));
+			}
+			this.contents.set(id, content);
+		}
+		return content;
+	}
+
+	private persistContent(id: string): void {
+		const content = this.contents.get(id);
+		if (!content) { return; }
 		// The binary lives in workspaceStorage. In state.vscdb we only store mime + assetUri;
 		// old images, or ones whose write failed, keep base64 as a fallback so they are not lost.
-		const sessions = this.order
-			.map(id => this.sessions.get(id))
-			.filter((s): s is IChatSession => !!s)
-			.map(s => ({
-				...s,
-				messages: s.messages.map(m => !m.images?.length ? m : {
-					...m,
-					images: m.images.map(image => image.assetUri ? { ...image, data: '' } : image),
-				}),
-			}));
-		const data: IPersisted = { sessions, openTabIds: this.openTabIds, activeId: this.activeId };
-		this.storageService.store(STORAGE_KEY, JSON.stringify(data), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+		const data: IChatSessionContent = {
+			...content,
+			messages: messagesForStorage(content.messages),
+		};
+		this.storageService.store(CONTENT_STORAGE_PREFIX + id, JSON.stringify(data), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+	}
+
+	private persistMetadata(session: IStoredChatSession): void {
+		this.storageService.store(META_STORAGE_PREFIX + session.id, JSON.stringify(session), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+	}
+
+	private persistIndex(): void {
+		const data: IPersistedIndex = { version: 2, sessionIds: this.order, openTabIds: this.openTabIds, activeId: this.activeId };
+		this.storageService.store(INDEX_STORAGE_KEY, JSON.stringify(data), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+	}
+
+	/** Transcript writes never serialize other conversations or the full history index. */
+	private persist(id?: string, contentChanged = false, indexChanged = id === undefined): void {
+		const session = id ? this.sessions.get(id) : undefined;
+		if (session) {
+			if (contentChanged) { this.persistContent(session.id); }
+			this.persistMetadata(session);
+		}
+		if (indexChanged) { this.persistIndex(); }
 		this._onDidChange.fire();
 	}
 
-	private toMeta(s: IChatSession): IChatSessionMeta {
+	private toMeta(s: IStoredChatSession): IChatSessionMeta {
 		return { id: s.id, title: s.title, updatedAt: s.updatedAt, archived: s.archived, pinned: s.pinned, hasError: s.hasError, forked: s.forked, subagentRunId: s.subagentRunId, subagentStartedAt: s.subagentStartedAt, subagentCompletedAt: s.subagentCompletedAt, subagentStatus: s.subagentStatus, parentSessionId: s.parentSessionId, empty: this.isEmptySession(s), kind: s.kind, cliId: s.cliId, status: s.status, cwd: s.cwd, providerSessionId: s.providerSessionId, unread: s.unread };
 	}
 
 	/** No user turns and no name the user chose: nothing worth keeping or listing. A CLI session
 	 *  is never empty — its content lives in the agent's own transcript, not in `messages`. */
-	private isEmptySession(s: IChatSession): boolean {
-		return s.kind === 'native' && !s.customTitle && !s.pinned && !s.messages.some(message => message.role === 'user');
+	private isEmptySession(s: IStoredChatSession): boolean {
+		return s.kind === 'native' && !s.customTitle && !s.pinned && !s.hasUserMessages;
 	}
 
 	kindOf(id: string | undefined): OpenideChatSessionKind | undefined {
@@ -257,14 +419,13 @@ export class OpenideChatSessions {
 		const now = Date.now();
 		this.sessions.set(id, {
 			id, title, updatedAt: now, archived: false, hasError: false, forked: false,
-			kind: 'cli', cliId, status: 'in-progress', cwd, providerSessionId,
-			messages: [], changeSetsByMessageId: {},
+			kind: 'cli', cliId, status: 'unknown', cwd, providerSessionId, hasUserMessages: false,
 		});
+		this.contents.set(id, { messages: [], changeSetsByMessageId: {} });
 		this.order.unshift(id);
 		this.openTabIds.push(id);
 		this.activeId = id;
-		this.prune();
-		this.persist();
+		this.persist(id, true, true);
 		return id;
 	}
 
@@ -279,7 +440,7 @@ export class OpenideChatSessions {
 			s.unread = true;
 		}
 		this.touch(id);
-		this.persist();
+		this.persist(id);
 		return true;
 	}
 
@@ -287,14 +448,14 @@ export class OpenideChatSessions {
 		const s = this.sessions.get(id);
 		if (!s || s.providerSessionId === providerSessionId) { return; }
 		s.providerSessionId = providerSessionId;
-		this.persist();
+		this.persist(id);
 	}
 
 	markRead(id: string): void {
 		const s = this.sessions.get(id);
 		if (!s || !s.unread) { return; }
 		s.unread = false;
-		this.persist();
+		this.persist(id);
 	}
 
 	private touch(id: string): void {
@@ -319,14 +480,14 @@ export class OpenideChatSessions {
 
 	/** Sessions open as a tab (in strip order). */
 	openTabs(): IChatSessionMeta[] {
-		return this.openTabIds.map(id => this.sessions.get(id)).filter((s): s is IChatSession => !!s).map(s => this.toMeta(s));
+		return this.openTabIds.map(id => this.sessions.get(id)).filter((s): s is IStoredChatSession => !!s).map(s => this.toMeta(s));
 	}
 
 	/** Every persisted session (archived included), most recent first. */
 	listAll(): IChatSessionMeta[] {
 		return this.order
 			.map(id => this.sessions.get(id))
-			.filter((s): s is IChatSession => !!s)
+			.filter((s): s is IStoredChatSession => !!s)
 			.sort((a, b) => b.updatedAt - a.updatedAt)
 			.map(s => this.toMeta(s));
 	}
@@ -342,7 +503,85 @@ export class OpenideChatSessions {
 	}
 
 	messagesOf(id: string | undefined): IChatMessage[] {
-		return (id && this.sessions.get(id)?.messages) || [];
+		return id && this.sessions.has(id) ? this.contentOf(id).messages : [];
+	}
+
+	/** Synchronous capture: the compactor mutates the live array immediately after its event. */
+	archiveBeforeCompaction(id: string, messages: readonly IChatMessage[]): void {
+		const session = this.sessions.get(id);
+		if (!session || !messages.length) { return; }
+		const encoded = JSON.stringify(messagesForStorage(messages));
+		const lastArchiveId = session.compactionArchiveIds?.at(-1);
+		if (lastArchiveId && this.storageService.get(this.archiveKey(id, lastArchiveId), StorageScope.WORKSPACE) === encoded) { return; }
+		const archiveId = generateUuid();
+		this.storageService.store(this.archiveKey(id, archiveId), encoded, StorageScope.WORKSPACE, StorageTarget.MACHINE);
+		session.compactionArchiveIds = [...session.compactionArchiveIds ?? [], archiveId];
+		this.persist(id);
+	}
+
+	/** Original messages remain available for reading even after several automatic compactions. */
+	archivedMessagesOf(id: string | undefined): IChatMessage[] {
+		const history: IChatMessage[] = [];
+		if (!id) { return history; }
+		for (const archiveId of this.sessions.get(id)?.compactionArchiveIds ?? []) {
+			appendTranscriptWindow(history, this.readArchive(id, archiveId));
+		}
+		return history;
+	}
+
+	/** Full read-only history. Never pass this projection back into the harness or rollback. */
+	transcriptOf(id: string | undefined): IChatMessage[] {
+		if (!id || !this.sessions.has(id)) { return []; }
+		const history = this.archivedMessagesOf(id);
+		if (!history.length) { return this.messagesOf(id); }
+		appendTranscriptWindow(history, this.messagesOf(id));
+		return history;
+	}
+
+	/** A reverted turn may also occur in a pre-compaction snapshot. Replace this branch's
+	 * archive with its retained prefix so reading/export cannot resurrect discarded turns. */
+	truncateArchiveBefore(id: string, messageId: string): void {
+		const session = this.sessions.get(id);
+		if (!session?.compactionArchiveIds?.length) { return; }
+		const history = this.archivedMessagesOf(id);
+		const cut = history.findIndex(message => message.role === 'user' && message.messageId === messageId);
+		if (cut < 0) { return; }
+		const previousIds = session.compactionArchiveIds;
+		const archiveId = cut > 0 ? generateUuid() : undefined;
+		if (archiveId) {
+			this.storageService.store(this.archiveKey(id, archiveId), JSON.stringify(messagesForStorage(history.slice(0, cut))), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+		}
+		// Publish the replacement only once it exists. Forks own separate archive keys.
+		session.compactionArchiveIds = archiveId ? [archiveId] : [];
+		try { this.persistMetadata(session); }
+		catch (error) { session.compactionArchiveIds = previousIds; throw error; }
+		this.messageVersions.set(session, (this.messageVersions.get(session) ?? 0) + 1);
+		for (const previousId of previousIds) {
+			const key = this.archiveKey(id, previousId);
+			this.storageService.remove(key, StorageScope.WORKSPACE);
+			this.archives.delete(key);
+		}
+	}
+
+	private archiveKey(sessionId: string, archiveId: string): string {
+		return `${ARCHIVE_STORAGE_PREFIX}${encodeURIComponent(sessionId)}:${archiveId}`;
+	}
+
+	private readArchive(sessionId: string, archiveId: string): readonly IChatMessage[] {
+		const key = this.archiveKey(sessionId, archiveId);
+		let messages = this.archives.get(key);
+		if (!messages) {
+			try {
+				const raw = this.storageService.get(key, StorageScope.WORKSPACE);
+				const source: IChatMessage[] | undefined = raw ? JSON.parse(raw) : undefined;
+				if (!Array.isArray(source)) { throw new Error('Invalid archived conversation'); }
+				messages = source;
+			} catch {
+				throw new Error(t('openide.chat.archive.unreadable'));
+			}
+			this.archives.set(key, messages);
+		}
+		return messages;
 	}
 
 	/** Exact before/after receipts owned by this conversation, independent of the working tree. */
@@ -352,14 +591,14 @@ export class OpenideChatSessions {
 		if (!session) { return []; }
 		let changes = this.reviewChanges.get(id);
 		if (!changes) {
-			changes = collectConversationChanges(Object.values(session.changeSetsByMessageId));
+			changes = collectConversationChanges(Object.values(this.contentOf(id).changeSetsByMessageId));
 			this.reviewChanges.set(id, changes);
 		}
 		return changes;
 	}
 
 	changeSetOf(id: string | undefined, messageId: string): IMessageChangeSet | undefined {
-		const set = id ? this.sessions.get(id)?.changeSetsByMessageId[messageId] : undefined;
+		const set = id && this.sessions.has(id) ? this.contentOf(id).changeSetsByMessageId[messageId] : undefined;
 		return set ? JSON.parse(JSON.stringify(set)) as IMessageChangeSet : undefined;
 	}
 
@@ -367,24 +606,26 @@ export class OpenideChatSessions {
 		this.reviewChanges.delete(id);
 		const session = this.sessions.get(id);
 		if (!session) { return; }
+		const content = this.contentOf(id);
 		const encoded = JSON.stringify(changeSet);
-		const currentSize = Object.entries(session.changeSetsByMessageId)
+		const currentSize = Object.entries(content.changeSetsByMessageId)
 			.filter(([messageId]) => messageId !== changeSet.messageId)
 			.reduce((total, [, set]) => total + JSON.stringify(set).length, 0);
 		if (encoded.length + currentSize > MAX_CHANGE_SET_CHARS) {
-			session.changeSetsByMessageId[changeSet.messageId] = { messageId: changeSet.messageId, timestamp: changeSet.timestamp, state: 'unavailable', files: [], unavailableReason: 'El change set excede el límite seguro de persistencia.' };
+			content.changeSetsByMessageId[changeSet.messageId] = { messageId: changeSet.messageId, timestamp: changeSet.timestamp, state: 'unavailable', files: [], unavailableReason: 'El change set excede el límite seguro de persistencia.' };
 		} else {
-			session.changeSetsByMessageId[changeSet.messageId] = JSON.parse(encoded) as IMessageChangeSet;
+			content.changeSetsByMessageId[changeSet.messageId] = JSON.parse(encoded) as IMessageChangeSet;
 		}
-		this.persist();
+		this.persist(id, true);
 	}
 
 	removeChangeSets(id: string, messageIds: readonly string[]): void {
 		this.reviewChanges.delete(id);
 		const session = this.sessions.get(id);
 		if (!session) { return; }
-		for (const messageId of messageIds) { delete session.changeSetsByMessageId[messageId]; }
-		this.persist();
+		const content = this.contentOf(id);
+		for (const messageId of messageIds) { delete content.changeSetsByMessageId[messageId]; }
+		this.persist(id, true);
 	}
 
 	usageOf(id: string | undefined): IChatSessionUsage | undefined {
@@ -399,14 +640,14 @@ export class OpenideChatSessions {
 			return;
 		}
 		session.usage = normalizeUsage(usage);
-		this.persist();
+		this.persist(id);
 	}
 
 	clearUsage(id: string): void {
 		const session = this.sessions.get(id);
 		if (session?.usage) {
 			delete session.usage;
-			this.persist();
+			this.persist(id);
 		}
 	}
 
@@ -415,6 +656,7 @@ export class OpenideChatSessions {
 		if (this.activeId && this.sessions.has(this.activeId)) {
 			if (!this.openTabIds.includes(this.activeId) && !this.sessions.get(this.activeId)!.archived) {
 				this.openTabIds.push(this.activeId);
+				this.persist();
 			}
 			return this.activeId;
 		}
@@ -439,13 +681,13 @@ export class OpenideChatSessions {
 			}
 		}
 		const id = generateUuid();
-		const session: IChatSession = { id, title: 'Nuevo chat', updatedAt: Date.now(), archived: false, hasError: false, forked: false, kind: 'native', messages: [], changeSetsByMessageId: {} };
+		const session: IStoredChatSession = { id, title: 'Nuevo chat', updatedAt: Date.now(), archived: false, hasError: false, forked: false, kind: 'native', hasUserMessages: false };
 		this.sessions.set(id, session);
+		this.contents.set(id, { messages: [], changeSetsByMessageId: {} });
 		this.order.unshift(id);
 		this.openTabIds.push(id);
 		this.activeId = id;
-		this.prune();
-		this.persist();
+		this.persist(id, true, true);
 		return id;
 	}
 
@@ -464,7 +706,7 @@ export class OpenideChatSessions {
 		if (status === 'running') { session.subagentStartedAt ??= Date.now(); }
 		else { session.subagentCompletedAt = Date.now(); }
 		session.status = status === 'running' ? 'in-progress' : status === 'failed' ? 'failed' : 'completed';
-		this.persist();
+		this.persist(id);
 	}
 
 	linkSubagentParent(id: string, parentSessionId: string, task?: string, definitionName?: string): void {
@@ -474,13 +716,13 @@ export class OpenideChatSessions {
 		if (session.parentSessionId === parentSessionId && title === session.title) { return; }
 		session.parentSessionId = parentSessionId;
 		if (title !== session.title) { session.title = title; session.customTitle = title; }
-		this.persist();
+		this.persist(id);
 	}
 
 	createBackground(title: string, messages: IChatMessage[], subagentRunId?: string, parentSessionId?: string): string {
 		const id = generateUuid();
 		title = subagentRunId ? subagentTaskTitle(messages.find(message => message.role === 'user')?.content ?? '', title) : title.trim().slice(0, TITLE_MAX);
-		const session: IChatSession = {
+		const session: IStoredChatSession = {
 			id,
 			title: title.trim() || 'Subagente',
 			updatedAt: Date.now(),
@@ -491,16 +733,15 @@ export class OpenideChatSessions {
 			subagentRunId,
 			parentSessionId,
 			customTitle: title.trim() || undefined,
-			messages,
-			changeSetsByMessageId: {},
+			hasUserMessages: messages.some(message => message.role === 'user'),
 		};
 		this.sessions.set(id, session);
+		this.contents.set(id, { messages, changeSetsByMessageId: {} });
 		this.order.unshift(id);
 		// Transient: it is NOT added to openTabIds. The session lives in the Agents panel as a
 		// sub-branch; it only opens a tab if the user activates it manually. When the tab closes, the
 		// session stays archived in the panel without piling up in the strip.
-		this.prune();
-		this.persist();
+		this.persist(id, true, true);
 		return id;
 	}
 
@@ -534,8 +775,9 @@ export class OpenideChatSessions {
 		const newId = generateUuid();
 		// Deep copy via JSON. Forks share immutable references to the assets; the binary is not
 		// duplicated and both branches can restore the image after a restart.
-		const messages: IChatMessage[] = JSON.parse(JSON.stringify(src.messages));
-		const session: IChatSession = {
+		const content = this.contentOf(id);
+		const messages: IChatMessage[] = JSON.parse(JSON.stringify(content.messages));
+		const session: IStoredChatSession = {
 			id: newId,
 			title: src.title,
 			updatedAt: Date.now(),
@@ -543,16 +785,21 @@ export class OpenideChatSessions {
 			hasError: false,
 			forked: true,
 			kind: 'native',
-			messages,
-			changeSetsByMessageId: JSON.parse(JSON.stringify(src.changeSetsByMessageId)) as Record<string, IMessageChangeSet>,
+			hasUserMessages: messages.some(message => message.role === 'user'),
 			usage: src.usage ? { ...src.usage } : undefined,
 		};
+		// Forks own their archive records, so deleting either branch cannot break the other.
+		for (const archiveId of src.compactionArchiveIds ?? []) {
+			const archived = this.readArchive(id, archiveId);
+			this.storageService.store(this.archiveKey(newId, archiveId), JSON.stringify(archived), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+		}
+		session.compactionArchiveIds = src.compactionArchiveIds ? [...src.compactionArchiveIds] : undefined;
 		this.sessions.set(newId, session);
+		this.contents.set(newId, { messages, changeSetsByMessageId: JSON.parse(JSON.stringify(content.changeSetsByMessageId)) as Record<string, IMessageChangeSet> });
 		this.order.unshift(newId);
 		this.openTabIds.push(newId);
 		this.activeId = newId;
-		this.prune();
-		this.persist();
+		this.persist(newId, true, true);
 		return newId;
 	}
 
@@ -563,7 +810,7 @@ export class OpenideChatSessions {
 		s.archived = false;
 		if (!this.openTabIds.includes(id)) { this.openTabIds.push(id); }
 		this.activeId = id;
-		this.persist();
+		this.persist(id, false, true);
 	}
 
 	activate(id: string): void {
@@ -587,7 +834,6 @@ export class OpenideChatSessions {
 		this.openTabIds = this.openTabIds.filter(t => t !== id);
 		if (this.activeId === id) { this.activeId = this.openTabIds[this.openTabIds.length - 1]; }
 		this.persist();
-		this._onDidDelete.fire(id);
 	}
 
 	/** Moves a tab next to another one (drag and drop in the strip). */
@@ -606,14 +852,14 @@ export class OpenideChatSessions {
 		s.archived = true;
 		this.openTabIds = this.openTabIds.filter(t => t !== id);
 		if (this.activeId === id) { this.activeId = this.openTabIds[this.openTabIds.length - 1]; }
-		this.persist();
+		this.persist(id, false, true);
 	}
 
 	unarchive(id: string): void {
 		const s = this.sessions.get(id);
 		if (!s) { return; }
 		s.archived = false;
-		this.persist();
+		this.persist(id);
 	}
 
 	private readonly _onDidDelete = new Emitter<string>();
@@ -621,19 +867,23 @@ export class OpenideChatSessions {
 	readonly onDidDelete: Event<string> = this._onDidDelete.event;
 
 	delete(id: string): void {
-		this.sessions.delete(id);
+		if (!this.sessions.delete(id)) { return; }
+		this.contents.delete(id);
 		this.reviewChanges.delete(id);
 		this.order = this.order.filter(t => t !== id);
 		this.openTabIds = this.openTabIds.filter(t => t !== id);
 		if (this.activeId === id) { this.activeId = this.openTabIds[this.openTabIds.length - 1]; }
 		this.persist();
+		this.removePersistedSession(id);
+		this._onDidDelete.fire(id);
 	}
 
 	/** Persists the active conversation's state (messages + derived title + error). */
 	save(id: string, messages: IChatMessage[], hasError: boolean): void {
 		const s = this.sessions.get(id);
 		if (!s) { return; }
-		s.messages = messages;
+		this.contentOf(id).messages = messages;
+		s.hasUserMessages = messages.some(message => message.role === 'user');
 		this.messageVersions.set(s, (this.messageVersions.get(s) ?? 0) + 1);
 		s.updatedAt = Date.now();
 		s.hasError = hasError;
@@ -642,7 +892,7 @@ export class OpenideChatSessions {
 		// Compaction replaces the opening request with a synthetic summary. Keep the
 		// conversation's identity even when only later user turns remain in memory.
 		if (!s.customTitle && !messages.some(message => message.compaction)) { s.title = this.deriveTitle(messages); }
-		this.persist();
+		this.persist(id, true);
 	}
 
 	/** Renames a session. An empty title clears the manual name and returns to the derived one. */
@@ -650,9 +900,10 @@ export class OpenideChatSessions {
 		const s = this.sessions.get(id);
 		if (!s) { return; }
 		const trimmed = title.trim().slice(0, TITLE_MAX);
+		const nextTitle = trimmed || (s.kind === 'cli' ? getOpenideCli(s.cliId)?.name || s.title : this.deriveTitle(this.contentOf(id).messages));
 		s.customTitle = trimmed || undefined;
-		s.title = trimmed || (s.kind === 'cli' ? getOpenideCli(s.cliId)?.name || s.title : this.deriveTitle(s.messages));
-		this.persist();
+		s.title = nextTitle;
+		this.persist(id);
 	}
 
 	/** Pinning is a user preference, not activity: it never changes recency or starts a run. */
@@ -660,35 +911,42 @@ export class OpenideChatSessions {
 		const session = this.sessions.get(id);
 		if (!session || !!session.pinned === pinned) { return; }
 		session.pinned = pinned;
-		this.persist();
+		this.persist(id);
 	}
 
 	/** Deletes every session. The caller confirms first; this is VS Code's "clear history". */
 	deleteAll(): void {
 		const ids = [...this.sessions.keys()];
 		this.sessions.clear();
+		this.contents.clear();
+		this.archives.clear();
 		this.reviewChanges.clear();
 		this.order = [];
 		this.openTabIds = [];
 		this.activeId = undefined;
 		this.persist();
-		for (const id of ids) { this._onDidDelete.fire(id); }
+		this.storageService.remove(LEGACY_STORAGE_KEY, StorageScope.WORKSPACE);
+		// Also clear unreferenced records left by an interrupted migration or archive write.
+		for (const key of this.storageService.keys(StorageScope.WORKSPACE, StorageTarget.MACHINE)) {
+			if (key.startsWith(META_STORAGE_PREFIX) || key.startsWith(CONTENT_STORAGE_PREFIX) || key.startsWith(ARCHIVE_STORAGE_PREFIX)) {
+				this.storageService.remove(key, StorageScope.WORKSPACE);
+			}
+		}
+		for (const id of ids) {
+			this._onDidDelete.fire(id);
+		}
 	}
 
-	private prune(): void {
-		// Soft cap: with too many sessions we drop the oldest ones that are neither open nor active.
-		if (this.order.length <= MAX_SESSIONS) { return; }
-		const keep = new Set([...this.openTabIds, this.activeId].filter((x): x is string => !!x));
-		const sorted = this.order
-			.map(id => this.sessions.get(id))
-			.filter((s): s is IChatSession => !!s)
-			.sort((a, b) => b.updatedAt - a.updatedAt);
-		for (let i = sorted.length - 1; i >= 0 && this.sessions.size > MAX_SESSIONS; i--) {
-			const s = sorted[i];
-			if (!keep.has(s.id) && !s.pinned) {
-				this.sessions.delete(s.id);
-				this.reviewChanges.delete(s.id);
-				this.order = this.order.filter(t => t !== s.id);
+	private removePersistedSession(id: string): void {
+		// Explicit deletion also removes the migration backup: it must not resurrect deleted data.
+		this.storageService.remove(LEGACY_STORAGE_KEY, StorageScope.WORKSPACE);
+		this.storageService.remove(META_STORAGE_PREFIX + id, StorageScope.WORKSPACE);
+		this.storageService.remove(CONTENT_STORAGE_PREFIX + id, StorageScope.WORKSPACE);
+		const archivePrefix = `${ARCHIVE_STORAGE_PREFIX}${encodeURIComponent(id)}:`;
+		for (const key of this.storageService.keys(StorageScope.WORKSPACE, StorageTarget.MACHINE)) {
+			if (key.startsWith(archivePrefix)) {
+				this.storageService.remove(key, StorageScope.WORKSPACE);
+				this.archives.delete(key);
 			}
 		}
 	}

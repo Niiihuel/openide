@@ -1,0 +1,167 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* The customization manager belongs to Settings. Keep the native widgets and list
+ * behavior, but use the same surface, text and control roles as its parent screen.
+ * Scoped to this editor: document content and other extension views stay independent. */
+.ai-customization-management-editor {
+	background: var(--oi-surface);
+	color: var(--oi-text);
+	font-family: var(--oi-font);
+}
+
+.ai-customization-management-editor .management-sidebar,
+.ai-customization-management-editor .sidebar-content {
+	background: var(--oi-shell, var(--oi-sidebar));
+}
+
+.ai-customization-management-editor .sidebar-content {
+	padding: 8px 12px 20px;
+}
+
+.ai-customization-management-editor .sidebar-home-button,
+.ai-customization-management-editor .section-list-item {
+	border-radius: var(--oi-radius-item, var(--oi-radius-md));
+}
+
+.ai-customization-management-editor .sidebar-home-label,
+.ai-customization-management-editor .section-label {
+	font-size: var(--oi-text-md);
+}
+
+.ai-customization-management-editor .sidebar-home-icon,
+.ai-customization-management-editor .section-icon {
+	font-size: 16px;
+	opacity: 1;
+}
+
+.ai-customization-management-editor .management-content {
+	background: var(--oi-surface);
+}
+
+.ai-customization-management-editor .content-inner {
+	padding: 0;
+}
+
+.ai-customization-management-editor .content-inner > :is(.welcome-page-host, .prompts-content-container, .prompt-migration-content-container, .mcp-content-container, .plugin-content-container, .models-content-container, .tools-content-container) {
+	background: var(--oi-surface);
+	border: 0;
+	border-radius: 0;
+	padding: 40px 32px 24px;
+	min-height: 0;
+}
+
+.ai-customization-management-editor .section-title-header .section-title {
+	font-size: 28px;
+	line-height: 36px;
+	font-weight: 400;
+	letter-spacing: -0.01em;
+}
+
+.ai-customization-management-editor .section-title-header :is(.section-title-description, .section-title-link) {
+	font-size: var(--oi-text-md);
+	line-height: 1.5;
+}
+
+.ai-customization-management-editor .section-title-header .section-title-description {
+	color: var(--oi-text-muted);
+	min-height: 0;
+	margin-bottom: 8px;
+}
+
+.ai-customization-management-editor .plugin-card-section-title {
+	font-size: var(--oi-text-lg);
+	font-weight: 400;
+	line-height: 20px;
+}
+
+.ai-customization-management-editor .plugin-card-section-description {
+	color: var(--oi-text-muted);
+	font-size: var(--oi-text-sm);
+	line-height: 1.5;
+}
+
+.ai-customization-management-editor .plugin-card-grid.plugin-inventory-list {
+	gap: 4px;
+	padding: 4px;
+	border: 1px solid var(--vscode-contrastBorder, var(--oi-border-soft));
+	border-radius: var(--oi-radius-lg);
+	background: var(--oi-card);
+}
+
+.ai-customization-management-editor .plugin-list-widget .plugin-home-row {
+	border-radius: var(--oi-radius-md);
+	box-shadow: none;
+}
+
+.ai-customization-management-editor .plugin-list-widget .plugin-home-row:hover {
+	background: var(--oi-hover);
+}
+
+.ai-customization-management-editor .plugin-list-item-name,
+.ai-customization-management-editor .plugin-card-title {
+	font-size: var(--oi-text-md);
+	font-weight: 600;
+	line-height: 20px;
+}
+
+.ai-customization-management-editor .plugin-list-item-description,
+.ai-customization-management-editor .plugin-card-subtitle,
+.ai-customization-management-editor .plugin-card-description {
+	font-size: var(--oi-text-sm);
+	color: var(--oi-text-muted);
+	line-height: 1.5;
+}
+
+.ai-customization-management-editor .plugin-list-widget .plugin-card {
+	background: var(--oi-card);
+	border: 1px solid var(--vscode-contrastBorder, var(--oi-border-soft));
+	border-radius: var(--oi-radius-lg);
+	padding: 16px;
+}
+
+.ai-customization-management-editor .plugin-list-widget .plugin-card:hover {
+	background: var(--oi-hover);
+}
+
+/* Overflow is a quiet icon action, not another pill-shaped card in every row.
+ * These declarations intentionally override the product-wide secondary Button
+ * colors, which use !important to replace native Button inline styles. */
+.monaco-workbench .ai-customization-management-editor .plugin-list-widget .plugin-card-icon-button.monaco-button.secondary {
+	width: var(--oi-row-md);
+	min-width: var(--oi-row-md);
+	height: var(--oi-row-md);
+	padding: 0;
+	border: 0 !important;
+	border-radius: var(--oi-radius-md);
+	background: transparent !important;
+	color: var(--oi-text-muted) !important;
+	box-shadow: none;
+}
+
+.monaco-workbench .ai-customization-management-editor .plugin-list-widget .plugin-card-icon-button.monaco-button.secondary:not(.disabled):hover {
+	background: var(--oi-hover) !important;
+	color: var(--oi-text) !important;
+}
+
+.monaco-workbench .ai-customization-management-editor :is(.plugin-card-icon-button.monaco-button, .customization-card-primary-action):focus:not(:focus-visible) {
+	outline: none;
+}
+
+.monaco-workbench .ai-customization-management-editor :is(.plugin-card-icon-button.monaco-button, .customization-card-primary-action):focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.ai-customization-management-editor .plugin-list-widget.narrow-layout .plugin-marketplace-card {
+	padding: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.ai-customization-management-editor .section-list-item,
+	.ai-customization-management-editor .sidebar-home-button {
+		transition: none;
+	}
+}

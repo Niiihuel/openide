@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Browser agent fixture</title>
+	<style>
+		:root { color-scheme: light dark; font: 16px system-ui, sans-serif; }
+		body { margin: 0; background: light-dark(#f5f7fa, #181b22); color: light-dark(#202532, #eef1f7); }
+		main { max-width: 720px; padding: 40px; margin: auto; }
+		form, section { padding: 24px; border: 1px solid light-dark(#c9d0de, #424c60); border-radius: 12px; margin: 24px 0; }
+		label { display: block; margin-bottom: 8px; }
+		input, button, a { font: inherit; }
+		input { display: block; box-sizing: border-box; width: 100%; padding: 12px; margin-bottom: 20px; }
+		button, a { padding: 10px 16px; }
+		button { cursor: pointer; }
+		output { display: block; min-height: 24px; margin-top: 16px; }
+		.spacer { height: 1100px; display: grid; place-items: center; color: light-dark(#5c6578, #aeb9ce); }
+		footer { display: flex; gap: 12px; align-items: center; }
+	</style>
+</head>
+<body>
+	<main>
+		<h1 id="heading">Browser feedback</h1>
+		<p>A deterministic page for the native browser agent overlay.</p>
+		<button id="start" type="button">Start</button>
+		<form>
+			<label for="search">Search</label>
+			<input id="search" name="search" autocomplete="off">
+			<label for="password">Password</label>
+			<input id="password" type="password" autocomplete="new-password">
+			<button id="save" type="submit">Continue</button>
+			<output id="result" aria-live="polite"></output>
+		</form>
+		<div class="spacer">Scroll area</div>
+		<section><h2>Results</h2><p>The real page scrolls while the agent indicator describes the action.</p></section>
+		<footer><button id="bottom" type="button">Bottom</button><a id="settings" href="/settings">Open settings</a></footer>
+	</main>
+	<script>
+		const actions = JSON.parse(sessionStorage.getItem('fixture-actions') || '[]');
+		const record = (kind, detail) => {
+			actions.push({ kind, detail, time: performance.now() });
+			sessionStorage.setItem('fixture-actions', JSON.stringify(actions));
+		};
+		window.fixture = { actions, started: 0, submitted: 0, scrolls: 0 };
+		if (location.pathname === '/settings') {
+			document.title = 'Settings fixture';
+			document.querySelector('#heading').textContent = 'Settings';
+		}
+		record('navigate', location.pathname);
+		document.querySelector('#start').addEventListener('click', () => { window.fixture.started++; record('start'); });
+		document.querySelector('#search').addEventListener('input', () => record('input'));
+		document.querySelector('form').addEventListener('submit', event => {
+			event.preventDefault();
+			window.fixture.submitted++;
+			document.querySelector('#result').textContent = `Saved: ${document.querySelector('#search').value}`;
+			record('submit');
+		});
+		addEventListener('scroll', () => { window.fixture.scrolls++; record('scroll', scrollY); }, { passive: true });
+	</script>
+</body>
+</html>

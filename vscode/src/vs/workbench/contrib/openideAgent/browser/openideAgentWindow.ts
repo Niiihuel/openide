@@ -21,6 +21,7 @@ import { IKeybindingService } from '../../../../platform/keybinding/common/keybi
 import { AgentWindowAction } from '../common/openideAgentWindowShortcuts.js';
 import { OpenideAgentWindowCommands, AgentWindowCommand } from './openideAgentWindowCommands.js';
 import { OpenideAgentWindowSearch } from './openideAgentWindowSearch.js';
+import { OpenideAgentWindowProjects } from './openideAgentWindowProjects.js';
 import { IContextMenuService, IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { setupChatTooltip } from './chat/openideChatHover.js';
@@ -38,15 +39,15 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { hasCustomTitlebar } from '../../../../platform/window/common/window.js';
 import { Sash, Orientation, SashState } from '../../../../base/browser/ui/sash/sash.js';
 import { URI } from '../../../../base/common/uri.js';
-import { onUnexpectedError } from '../../../../base/common/errors.js';
+import { CancellationError, onUnexpectedError } from '../../../../base/common/errors.js';
 import { IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
 import { SettingsEditorInput } from '../../openideSettings/browser/openideSettingsInput.js';
 import { OpenideSettingsEditor } from '../../openideSettings/browser/openideSettingsEditor.js';
 import { OpenideAccountProfile } from '../../openideSettings/browser/openideAccountProfile.js';
 import { IOpenideCliChangesService, OpenideCliChangesService } from './openideCliChangesService.js';
 import { getOpenideCli } from '../common/openideAgentCliCatalog.js';
-import { createProviderIcon } from './openideProviderIcons.js';
 import { OpenideChangesInput } from './openideChangesEditor.js';
+import { OpenideAgentConversationInput } from './openideAgentConversationEditor.js';
 import { OpenideSubagentsInput } from './openideSubagentsEditor.js';
 import { OpenideAgentWindowMotion } from './openideAgentWindowMotion.js';
 import { OpenideAgentWindowEditors } from './openideAgentWindowEditors.js';
@@ -57,6 +58,7 @@ import { OpenideAgentWindowContext } from './openideAgentWindowContext.js';
 import { OpenideAgentWindowStatusbar } from './openideAgentWindowStatusbar.js';
 import { Action, Separator } from '../../../../base/common/actions.js';
 import { IHostService } from '../../../services/host/browser/host.js';
+import { ILifecycleService } from '../../../services/lifecycle/common/lifecycle.js';
 import { OpenideChatWidget } from './chat/openideChatWidget.js';
 import { OpenideChatSessionsPane } from './chat/openideChatSessionsPane.js';
 import { OpenideChatSessionKindPicker, OpenideCliAvailability } from './chat/openideChatSessionKindPicker.js';
@@ -93,14 +95,18 @@ export class OpenideAgentWindow extends Disposable {
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@IBrowserViewWorkbenchService private readonly browserService: IBrowserViewWorkbenchService,
 		@IOpenideCliChangesService private readonly cliChanges: OpenideCliChangesService,
+		@ILifecycleService lifecycleService: ILifecycleService,
 	) {
 		super();
-		// The auxiliary-window service preserves editor windows across reloads, but this
-		// companion is owned by the current chat/controller and must not outlive it.
+		// Close the companion when its shared runtime shuts down, before the owner can
+		// leave stale DOM behind with disposed services and removed theme stylesheets.
+		this._register(lifecycleService.onDidShutdown(() => this.dispose()));
 		this._register(addDisposableListener(mainWindow, 'pagehide', () => this.dispose()));
 	}
 
 	open(): Promise<void> {
+		if (this._store.isDisposed) { return Promise.reject(new CancellationError()); }
+		if (this.opening) { return this.opening; }
 		if (this.auxiliary) { return this.hostService.focus(this.auxiliary.window); }
 		return this.opening ??= this.openWindow().catch(error => {
 			this.auxiliary = undefined;
@@ -116,7 +122,7 @@ export class OpenideAgentWindow extends Disposable {
 			: { width: 1280, height: 860 };
 		const customTitle = hasCustomTitlebar(this.configurationService);
 		const auxiliary = await this.auxiliaryWindowService.open({ bounds, nativeTitlebar: !customTitle, noBackgroundThrottling: true, keepWorkbenchAlive: true });
-		if (this._store.isDisposed) { auxiliary.dispose(); return; }
+		if (this._store.isDisposed) { auxiliary.dispose(); throw new CancellationError(); }
 		this.auxiliary = auxiliary;
 		this.windowStore.add(auxiliary);
 		const store = this.windowStore;
@@ -127,7 +133,7 @@ export class OpenideAgentWindow extends Disposable {
 				resolve(true);
 			}));
 		});
-		if (await Promise.race([closed, auxiliary.whenStylesHaveLoaded.then(() => false)]) || this._store.isDisposed) { return; }
+		if (await Promise.race([closed, auxiliary.whenStylesHaveLoaded.then(() => false)]) || this._store.isDisposed || this.auxiliary !== auxiliary) { throw new CancellationError(); }
 		const workspace = this.workspaceContextService.getWorkspace();
 		const project = workspace.folders.map(folder => folder.name).join(', ') || t('agentWindow.noProject');
 		auxiliary.window.document.title = `${project} — OpenIDE Agent`;
@@ -143,12 +149,10 @@ export class OpenideAgentWindow extends Disposable {
 			}
 		}
 		const editors = store.add(this.instantiationService.createInstance(OpenideAgentWindowEditors, auxiliary.window.vscodeWindowId));
+		const projects = store.add(this.instantiationService.createInstance(OpenideAgentWindowProjects, auxiliary.window));
 		store.add(this.agentService.registerDiffEditorTarget(auxiliary.window.vscodeWindowId, () => editors.getEditorService()));
 		store.add(this.browserService.registerPreviewEditorTarget(auxiliary.window.vscodeWindowId, async modal => {
-			const service = await editors.getEditorService();
-			if (modal === true) { editors.showModal(); }
-			else if (modal === false) { editors.dock(); }
-			return service;
+			return modal === true ? editors.getModalEditorService() : editors.getEditorService();
 		}));
 		const openResource = async (resource: URI) => { await editors.openEditor({ resource, options: { pinned: true } }); };
 		const openBrowser = async (url?: string) => { await editors.openEditor(this.browserService.getOrCreatePreview(url)); };
@@ -193,7 +197,7 @@ export class OpenideAgentWindow extends Disposable {
 		const search: OpenideAgentWindowSearch = store.add(this.instantiationService.createInstance(OpenideAgentWindowSearch, auxiliary.container, this.source.sessionStore, {
 			openSession: (id: string) => companion.openSession(id),
 			newChat: () => this.source.newSession(),
-			openFolder: () => this.commandService.executeCommand('workbench.action.files.openFolder'),
+			openFolder: () => projects.openFolder(),
 			searchFiles: () => search.showFiles(),
 			openFile: openResource,
 		}));
@@ -236,8 +240,9 @@ export class OpenideAgentWindow extends Disposable {
 		store.add(setupChatTooltip(this.hoverService, switcher, () => t('openide.switch.ide'), { position: HoverPosition.BELOW }));
 		const sidebarToggle = this.button(header, t('agentWindow.toggleSidebar'), 'layout-sidebar-left', () => { root.classList.toggle('sidebar-hidden'); layout(); }, store, AgentWindowAction.sidebar);
 		sidebarToggle.setAttribute('aria-controls', sidebar.id);
-		const harnessIcon = append(header, $('span.openide-agent-window-harness-icon', { 'aria-hidden': 'true' }));
-		const title = append(header, $('.openide-agent-window-title'));
+		const identity = append(header, $('.openide-agent-window-identity'));
+		const title = append(identity, $('.openide-agent-window-title'));
+		const location = append(identity, $('.openide-agent-window-location'));
 		const harnessLabel = append(header, $('span.openide-agent-window-harness-label'));
 		const more = this.button(header, t('chat.header.more'), 'ellipsis', () => companion.showConversationMenu(more), store);
 		const openReview = () => {
@@ -246,6 +251,7 @@ export class OpenideAgentWindow extends Disposable {
 			const id = this.source.sessionStore.activeSessionId() ?? 'workspace';
 			let input = reviews.get(id);
 			if (!input || input.isDisposed()) { input = this.instantiationService.createInstance(OpenideChangesInput, id, []); reviews.set(id, input); }
+			configureReview(input, id);
 			void editors.openEditor(input, { pinned: true }).catch(onUnexpectedError);
 		};
 		const showViewMenu = (anchor: HTMLElement, workspaceOnly = false) => {
@@ -259,7 +265,7 @@ export class OpenideAgentWindow extends Disposable {
 				action(AgentWindowAction.terminal, t('agentWindow.terminal'), 'terminal', () => void openTerminal().catch(onUnexpectedError)),
 				new Separator(),
 				action('openide.workspace.conversations', t('agentWindow.conversations'), 'comment-discussion', () => { root.classList.remove('sidebar-hidden'); layout(); }),
-				action('openide.workspace.environment', t('agentWindow.environment'), 'settings', () => openEnvironment()),
+				action('openide.workspace.environment', t('agentWindow.environment'), 'layout', () => openEnvironment()),
 				action('openide.workspace.focusChat', t('agentWindow.focusChat'), 'layout-centered', () => { root.classList.add('sidebar-hidden', 'context-hidden'); closeTerminal(); }),
 			];
 			this.contextMenuService.showContextMenu({
@@ -280,17 +286,20 @@ export class OpenideAgentWindow extends Disposable {
 		let environmentHidden = false; let environmentForced = false;
 		let environmentVisible: boolean | undefined;
 		const reducedMotion = auxiliary.window.matchMedia('(prefers-reduced-motion: reduce)');
-		const environmentToggle = this.button(header, t('agentWindow.environment'), 'settings', () => { environmentHidden = environmentVisible === true; environmentForced = true; layout(); }, store);
+		const environmentToggle = this.button(header, t('conversationWorkspace.title'), 'layout', () => {
+			if (environmentVisible) { environmentHidden = true; environmentForced = true; layout(); }
+			else { openEnvironment(); }
+		}, store);
 		const contextToggle = this.button(header, t('agentWindow.toggleWorkspace'), 'layout-sidebar-right', () => { root.classList.toggle('context-hidden'); layout(); }, store, AgentWindowAction.workspace);
 		contextToggle.setAttribute('aria-controls', workspacePanel.id);
 		environmentToggle.setAttribute('aria-controls', 'openide-agent-window-context');
-		const openModalButton = this.button(workspaceHeader, t('agentWindow.openModal'), 'screen-full', () => editors.showModal(), store);
+		const openModalButton = this.button(workspaceHeader, t('agentWindow.openModal'), 'screen-full', () => void editors.showModal().catch(onUnexpectedError), store);
 		this.button(workspaceHeader, t('agentWindow.minimizeView'), 'layout-sidebar-right', () => openEnvironment(), store);
 		const conversationBody = append(main, $('.openide-agent-conversation-body'));
 		const chatHost = append(conversationBody, $('.openide-agent-window-chat'));
 		const companion = store.add(this.source.createCompanion(chatHost, (runId, parentId) => {
 			void showSubagents(parentId ?? this.source.sessionStore.activeSessionId(), runId).catch(onUnexpectedError);
-		}));
+		}, () => projects.openFolder()));
 		const terminalHost = append(center, $('.openide-agent-window-terminal-island.openide-agent-island', { id: 'openide-agent-window-terminal' }));
 		terminalHost.hidden = true;
 		const terminal = store.add(this.instantiationService.createInstance(OpenideAgentWindowTerminal, terminalHost, () => closeTerminal()));
@@ -307,22 +316,44 @@ export class OpenideAgentWindow extends Disposable {
 		contextHost.style.removeProperty('position');
 		const context = append(contextViewport, $('aside.openide-agent-window-context.openide-agent-island', { id: 'openide-agent-window-context' }));
 		const contextHeader = append(context, $('.openide-agent-window-context-header'));
-		
+		append(contextHeader, $('span', undefined, t('conversationWorkspace.title')));
+		const historyButton = this.button(contextHeader, t('conversationWorkspace.history'), 'history', () => {
+			const id = this.source.sessionStore.activeSessionId();
+			if (id && this.source.sessionStore.kindOf(id) === 'native') { void editors.openEditor(new OpenideAgentConversationInput(id, this.source), { pinned: true }).catch(onUnexpectedError); }
+		}, store);
+		historyButton.classList.add('icon-only');
 		this.button(contextHeader, t('chat.header.close'), 'close', () => { environmentHidden = true; layout(); environmentToggle.focus(); }, store).classList.add('icon-only');
 		store.add(addDisposableListener(context, 'keydown', event => { if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); environmentHidden = true; layout(); environmentToggle.focus(); } }));
 		const contextResize = new auxiliary.window.ResizeObserver(() => contextScroll.scanDomNode());
 		contextResize.observe(context); store.add(toDisposable(() => contextResize.disconnect()));
 		const reviews = new Map<string, OpenideChangesInput>();
+		const configureReview = (input: OpenideChangesInput, sessionId: string) => {
+			input.stageComment = comment => companion.stageReviewComment(sessionId, comment);
+			const pending = () => {
+				const session = this.source.sessionStore.metaOf(sessionId);
+				if (session?.kind !== 'native' || session.status === 'in-progress') { return []; }
+				const owned = new Set(this.agentService.pendingFileDiffs(sessionId).map(file => file.path));
+				return input.files.flatMap(file => file.pendingPath && owned.has(file.pendingPath) ? [file.pendingPath] : []);
+			};
+			input.acceptChanges = {
+				canAccept: () => pending().length > 0,
+				run: async () => { const paths = pending(); if (paths.length) { await this.agentService.keepEdits(paths); } input.refreshAcceptance(); },
+			};
+			input.refreshAcceptance();
+		};
+		store.add(this.source.sessionStore.onDidChange(() => { for (const input of reviews.values()) { input.refreshAcceptance(); } }));
+		store.add(this.agentService.onDidChangeFileDiff(() => { for (const input of reviews.values()) { input.refreshAcceptance(); } }));
 		store.add(this.instantiationService.createInstance(OpenideAgentWindowContext, context, this.source, {
 			review: (sessionId, files, open) => {
 				let input = reviews.get(sessionId);
 				if (input?.isDisposed()) { reviews.delete(sessionId); input = undefined; }
 				if (!input && open) { input = this.instantiationService.createInstance(OpenideChangesInput, sessionId, files); reviews.set(sessionId, input); }
+				if (input) { configureReview(input, sessionId); }
 				input?.update(files);
 				if (open && input) { void editors.openEditor(input, { pinned: true }).catch(onUnexpectedError); }
 			},
 			openTerminal: (id?: number) => void openTerminal(id).catch(onUnexpectedError), openFiles: (resource?: URI) => void openFiles(resource).catch(onUnexpectedError),
-			openProject: () => void this.commandService.executeCommand('workbench.action.files.openFolder').catch(onUnexpectedError),
+			openProject: () => void projects.openFolder().catch(onUnexpectedError),
 			createTerminal: async (cwd: URI) => { terminalHost.hidden = false; layout(); await terminal.create({ cwd }); layout(); },
 			openSubagents: () => void openSubagents().catch(onUnexpectedError),
 			openComparison: async input => { await editors.openEditor(input); },
@@ -339,7 +370,6 @@ export class OpenideAgentWindow extends Disposable {
 			},
 			addSource: () => companion.pickAttachments()
 		}));
-		context.querySelector('.openide-agent-window-section-heading')?.append(...Array.from(contextHeader.children)); contextHeader.remove();
 		const viewStore = store.add(new DisposableStore());
 		const viewLabels = store.add(this.instantiationService.createInstance(ResourceLabels, DEFAULT_LABELS_CONTAINER));
 		const viewsSection = append(context, $('.openide-agent-window-context-section.openide-agent-window-views'));
@@ -399,9 +429,9 @@ export class OpenideAgentWindow extends Disposable {
 				anchor = entry.row.nextSibling;
 			}
 			if (editors.isModal) {
-				const modalHeader = auxiliary.container.querySelector<HTMLElement>('.monaco-modal-editor-block:not(.embedded-editor) .modal-editor-action-container');
+				const modalHeader = auxiliary.container.querySelector<HTMLElement>('.openide-agent-expanded-surface .modal-editor-action-container');
 				if (modalHeader && !modalHeader.querySelector('.openide-return-to-workspace')) {
-					this.button(modalHeader, t('agentWindow.dockView'), 'layout-sidebar-right', () => editors.dock(), store).classList.add('openide-return-to-workspace');
+					this.button(modalHeader, t('agentWindow.dockView'), 'layout-sidebar-right', () => void editors.dock().catch(onUnexpectedError), store).classList.add('openide-return-to-workspace');
 				}
 			}
 		};
@@ -448,14 +478,14 @@ export class OpenideAgentWindow extends Disposable {
 			titleAction(AgentWindowAction.newChat, t('agentWindow.menu.newChat'), 'edit', () => { this.source.newSession(); companion.focus(); }),
 			new Separator(),
 			titleAction('workbench.action.quickOpen', t('agentWindow.menu.openFile'), 'file', () => search.showFiles()),
-			titleAction('workbench.action.files.openFolder', t('agentWindow.menu.openProject'), 'folder-opened', () => runCommand('workbench.action.files.openFolder')),
-			titleAction('workbench.action.openRecent', t('agentWindow.menu.openRecent'), 'history', () => runCommand('workbench.action.openRecent')),
+			titleAction('workbench.action.files.openFolder', t('agentWindow.menu.openProject'), 'folder-opened', () => void projects.openFolder().catch(onUnexpectedError)),
+			titleAction('workbench.action.openRecent', t('agentWindow.menu.openRecent'), 'history', () => void projects.openRecent().catch(onUnexpectedError)),
 			new Separator(),
 			titleAction('openide.agent.backToIde', t('agentWindow.menu.backToIde'), 'arrow-left', () => void this.focusIde().catch(onUnexpectedError)),
 		]);
 		addTitleMenu(t('agentWindow.menu.view'), () => [
 			titleAction('openide.workspace.conversations', t('agentWindow.conversations'), 'comment-discussion', () => { root.classList.remove('sidebar-hidden'); layout(); }),
-			titleAction('openide.workspace.environment', t('agentWindow.environment'), 'settings', () => openEnvironment()),
+			titleAction('openide.workspace.environment', t('agentWindow.environment'), 'layout', () => openEnvironment()),
 			new Separator(),
 			titleAction(AgentWindowAction.review, t('agentWindow.reviewChanges'), 'diff', () => openReview()),
 			titleAction(AgentWindowAction.files, t('agentWindow.filesTitle'), 'files', () => void openFiles().catch(onUnexpectedError)),
@@ -473,10 +503,11 @@ export class OpenideAgentWindow extends Disposable {
 			sessions.render();
 			const id = this.source.sessionStore.activeSessionId();
 			const active = this.source.sessionStore.metaOf(id);
+			historyButton.hidden = active?.kind !== 'native';
 			title.textContent = active?.title || project;
+			location.textContent = active?.cwd ?? project;
+			location.hidden = !location.textContent || location.textContent === title.textContent;
 			const cli = active?.cliId ? getOpenideCli(active.cliId) : undefined;
-			clearNode(harnessIcon);
-			append(harnessIcon, cli ? createProviderIcon(auxiliary.window.document, cli.icon, cli.name) : $('span.codicon.codicon-folder'));
 			harnessLabel.textContent = cli?.name ?? '';
 			harnessLabel.hidden = !cli;
 
@@ -650,6 +681,8 @@ export class OpenideAgentWindow extends Disposable {
 			['workbench.action.toggleAuxiliaryBar', () => contextToggle.click()],
 			['workbench.action.findInFiles', () => search.show()],
 			['workbench.action.quickOpen', () => search.showFiles()],
+			['workbench.action.files.openFolder', () => projects.openFolder()],
+			['workbench.action.openRecent', () => projects.openRecent()],
 			['workbench.action.files.newUntitledFile', () => this.source.newSession()],
 			['workbench.action.focusActiveEditorGroup', () => companion.focus()],
 			['workbench.action.openSettings', () => editors.openSettings(this.instantiationService.createInstance(SettingsEditorInput))],

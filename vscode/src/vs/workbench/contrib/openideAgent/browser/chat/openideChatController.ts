@@ -57,6 +57,8 @@ export interface IOpenideChatSendRequest {
 	readonly images?: readonly IChatImage[];
 	/** Workspace-relative paths picked from the `@` menu; attached as context, never as text. */
 	readonly references?: readonly string[];
+	/** Immutable review snapshots for selected references, avoiding duplicate whole-file reads. */
+	readonly referenceContexts?: readonly { readonly path: string; readonly context: string }[];
 	/** A request typed while Plan was working: integrate into the plan or replace it. */
 	readonly planFollowUp?: PlanFollowUpDisposition;
 	/** Pick & Polish selection: extra context plus, usually, a screenshot of the element. */
@@ -72,6 +74,12 @@ export interface IOpenideChatSendRequest {
 export interface IOpenideChatNotice {
 	readonly severity: 'info' | 'warning' | 'error';
 	readonly message: string;
+}
+
+export interface IOpenideChatUserAction {
+	readonly conversationId: string;
+	readonly requestId: string;
+	readonly kind: 'ask' | 'approval' | 'accountChoice' | 'modeSuggestion';
 }
 
 /**
@@ -181,6 +189,10 @@ export class OpenideChatController extends Disposable {
 
 	private readonly _onDidPublishNotice = this._register(new Emitter<IOpenideChatNotice>());
 	readonly onDidPublishNotice: Event<IOpenideChatNotice> = this._onDidPublishNotice.event;
+	private readonly _onDidRequireUserAction = this._register(new Emitter<IOpenideChatUserAction>());
+	readonly onDidRequireUserAction: Event<IOpenideChatUserAction> = this._onDidRequireUserAction.event;
+	private readonly _onDidStopConversation = this._register(new Emitter<string>());
+	readonly onDidStopConversation: Event<string> = this._onDidStopConversation.event;
 
 	private readonly _onDidFinishRun = this._register(new Emitter<{ readonly hadError: boolean; readonly conversationId: string }>());
 	/**
@@ -382,10 +394,11 @@ export class OpenideChatController extends Disposable {
 	private refreshSubagentCard(run: ISubagentRun): void {
 		const card = this._subagentCards.get(run.runId);
 		if (!card) { return; }
-		const snapshot = [run.model, run.providerId, run.status, run.progress, run.timeline.length, run.result?.summary].join('\u0000');
+		const snapshot = [run.model, run.providerId, run.status, run.progress, run.timeline.length, run.timeline.at(-1)?.sequence, run.timeline.at(-1)?.message, run.result?.summary].join('\u0000');
 		if (snapshot === card.snapshot) { return; }
 		card.snapshot = snapshot;
 		this.applySurface({ type: 'subagentRunUpdate', run }, card.conversationId);
+		this._effects.syncSubagentRun(run);
 	}
 
 	private deliverSubagentRun(run: { readonly runId: string; readonly parentConversationId: string; readonly status: string; readonly result?: { readonly summary?: string }; readonly error?: string }): void {
@@ -529,6 +542,12 @@ export class OpenideChatController extends Disposable {
 		// buildable, but a new plan can run while the user reads another chat.
 		const conversationId = request.conversationId || this.sessions.ensureActive();
 		const conversation = this.conversation(conversationId);
+		// A saved plan can be approved while its planning turn is still winding down. The
+		// explicit Build action takes over that conversation immediately; otherwise the
+		// request is refused and the card appears to run without ever starting an agent turn.
+		if (conversation.busy && !conversation.planBuild && !this._barrier.isActive) {
+			this.abort(conversationId);
+		}
 		if (conversation.busy || conversation.planBuild || this._barrier.isActive) {
 			// The editor's button is parked on this promise; leaving it spinning forever would be
 			// worse than the notification.
@@ -705,12 +724,15 @@ export class OpenideChatController extends Disposable {
 		} catch {
 			context = undefined; // an unresolvable mention never holds the turn back
 		}
-		if (references.length) {
+		const snapshots = new Map((request.referenceContexts ?? []).filter(reference => references.includes(reference.path)).map(reference => [reference.path, reference.context.slice(0, 8000)]));
+		const fullReferences = references.filter(path => !snapshots.has(path));
+		if (fullReferences.length) {
 			try {
-				const attached = await this.agentService.buildFileReferenceContext(references);
+				const attached = await this.agentService.buildFileReferenceContext(fullReferences);
 				if (attached) { context = context ? `${context}\n\n${attached}` : attached; }
 			} catch { /* a file deleted between picking and sending does not block the turn */ }
 		}
+		for (const snapshot of snapshots.values()) { context = context ? `${context}\n\n${snapshot}` : snapshot; }
 		// Editor selections: already in hand, nothing to read — the text was captured when the
 		// user pressed the shortcut, so it is what they saw, not what the file says now.
 		const snippetContext = buildSnippetContext(snippets);
@@ -969,6 +991,9 @@ export class OpenideChatController extends Disposable {
 		// The change-set is host-only metadata and the rollback's source of truth. It is applied even
 		// for a cancelled run, because the files it describes were already written to disk.
 		const conversation = this.conversation(conversationId);
+		if (event.type === 'compaction' && event.status === 'started' && conversation.runCts === runCts) {
+			this.sessions.archiveBeforeCompaction(conversationId, messages);
+		}
 		if (event.type === 'modelRoute') {
 			conversation.modelRoute = {
 				providerId: event.providerId, model: event.model,
@@ -1000,7 +1025,18 @@ export class OpenideChatController extends Disposable {
 			this._subagentCards.set(event.run.runId, { conversationId, snapshot: '' });
 		}
 		conversation.state = step.state;
+		if (!step.dropped) {
+			switch (event.type) {
+				case 'ask': this._onDidRequireUserAction.fire({ conversationId, requestId: event.id, kind: 'ask' }); break;
+				case 'approvalRequest': this._onDidRequireUserAction.fire({ conversationId, requestId: event.id, kind: 'approval' }); break;
+				case 'accountChoiceRequest': this._onDidRequireUserAction.fire({ conversationId, requestId: event.id, kind: 'accountChoice' }); break;
+				case 'suggestMode':
+					if (event.autoAcceptSeconds === undefined) { this._onDidRequireUserAction.fire({ conversationId, requestId: event.id, kind: 'modeSuggestion' }); }
+					break;
+			}
+		}
 		this._effects.apply({ conversationId, messages, targetWindowId: conversation.targetWindowId }, step.sessionEffects);
+		if (event.type === 'subagentRun') { this._effects.syncSubagentRun(event.run); }
 		this.applyRunLifecycle(conversationId, messages, step.sessionEffects);
 		if (!step.dropped) {
 			this.repaintOnNextFrame(conversationId);
@@ -1099,6 +1135,7 @@ export class OpenideChatController extends Disposable {
 			this._onDidChangeSessions.fire();
 		} else {
 			conversation.runStartedAt = undefined;
+			this._onDidStopConversation.fire(conversationId);
 		}
 		if (conversationId === this._activeId) {
 			this._onDidChangeBusy.fire(busy);
@@ -1191,6 +1228,7 @@ export class OpenideChatController extends Disposable {
 			// The card also has to be reachable from the run service's later updates, which carry no
 			// conversation of their own.
 			this._subagentCards.set(run.runId, { conversationId, snapshot: '' });
+			this._effects.syncSubagentRun(run);
 		}
 		return runs;
 	}

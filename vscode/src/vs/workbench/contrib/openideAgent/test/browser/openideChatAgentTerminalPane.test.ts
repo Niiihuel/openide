@@ -7,13 +7,13 @@ import assert from 'assert';
 import { mock } from '../../../../../base/test/common/mock.js';
 import { mainWindow } from '../../../../../base/browser/window.js';
 import { DeferredPromise, timeout } from '../../../../../base/common/async.js';
-import { Event } from '../../../../../base/common/event.js';
+import { Emitter, Event } from '../../../../../base/common/event.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
+import { IDialogService, IFileDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { IOpenideAgentHostService } from '../../../../../platform/openideAgentHost/common/openideAgentHost.js';
-import { IOpenideCodexGoalConnection } from '../../../../../platform/openideAgentHost/common/openideCodexGoal.js';
+import { IOpenideCodexGoalConnection, IOpenideCodexGoalEvent } from '../../../../../platform/openideAgentHost/common/openideCodexGoal.js';
 import { IPathService } from '../../../../services/path/common/pathService.js';
 import { ITerminalInstance, ITerminalService } from '../../../terminal/browser/terminal.js';
 import { OpenideChatAgentTerminalPane } from '../../browser/chat/parts/openideChatAgentTerminalPane.js';
@@ -37,16 +37,114 @@ suite('OpenIDE Codex terminal startup ownership', () => {
 		instantiation.stub(IFileService, {});
 		instantiation.stub(IPathService, {});
 		instantiation.stub(IDialogService, {});
+		instantiation.stub(IFileDialogService, { showOpenDialog: async () => undefined });
+		const goalEvents = store.add(new Emitter<IOpenideCodexGoalEvent>());
 		const host: Partial<IOpenideAgentHostService> = {
-			onDidChangeCodexGoal: Event.None,
+			onDidChangeCodexGoal: goalEvents.event,
 			codexGoalPrepare: async () => { prepares++; return deferred ? deferred.p : { endpoint: 'unix:///fixture', threadId: 'thread' }; },
 			codexGoalDispose: async id => { closed.push(id); },
 		};
 		instantiation.stub(IOpenideNativeServices, { available: true, host: host as IOpenideAgentHostService });
 		instantiation.stub(IOpenideIdeServerService, { onDidChangeIntegration: Event.None, mcpEndpointFor: async () => undefined, launchEnvironment: () => ({}), integrationState: () => 'configured', discoveryStatus: { toolCount: 0 } });
 		const pane = store.add(instantiation.createInstance(OpenideChatAgentTerminalPane, mainWindow.document.createElement('div')));
-		return { pane, closed, agent, counts: () => ({ prepares, terminals }) };
+		return { pane, closed, agent, goalEvents, counts: () => ({ prepares, terminals }) };
 	}
+
+	function pasteTerminal(send: (text: string, execute: boolean, bracketed?: boolean) => Promise<void>, bracketedPaste = true, onExit: ITerminalInstance['onExit'] = Event.None): ITerminalInstance {
+		return new class extends mock<ITerminalInstance>() {
+			override xterm = { raw: { modes: { bracketedPasteMode: bracketedPaste } } } as ITerminalInstance['xterm'];
+			override onData = Event.None;
+			override onDidInputData = Event.None;
+			override onExit = onExit;
+			override attachToElement(): void { }
+			override detachFromElement(): void { }
+			override setVisible(): void { }
+			override focus(): void { }
+			override layout(): void { }
+			override dispose(): void { }
+			override sendText(text: string, execute: boolean, bracketed?: boolean): Promise<void> { return send(text, execute, bracketed); }
+		};
+	}
+
+	test('an early failed resume preserves the conversation instead of launching a fresh provider session', async () => {
+		const exits = store.add(new Emitter<number>());
+		const f = fixture(undefined, pasteTerminal(async () => {}, true, exits.event));
+		await f.pane.open({ ...session, providerSessionId: 'existing-provider-session' });
+		exits.fire(1);
+		await timeout(0);
+		assert.deepStrictEqual({ terminals: f.counts().terminals, status: f.pane.statusOf(session.id), draftAccepted: f.pane.stagePrompt(session.id, 'message') }, { terminals: 1, status: 'failed', draftAccepted: false });
+		assert.ok(f.pane.domNode.querySelector('.openide-chat-agent-terminal-relaunch'));
+	});
+
+	test('a CLI without bracketed paste cannot receive multiline Enter presses', async () => {
+		let sends = 0;
+		const f = fixture(undefined, pasteTerminal(async () => { sends++; }, false));
+		await f.pane.open(session);
+		f.pane.stagePrompt(session.id, 'Line one\nline two');
+		f.pane.domNode.querySelector<HTMLButtonElement>('.openide-cli-composer-actions .primary')!.click();
+		await timeout(0);
+		assert.deepStrictEqual({ sends, draft: f.pane.domNode.querySelector('textarea')!.value, explained: !!f.pane.domNode.querySelector('.openide-cli-composer-error')!.textContent }, { sends: 0, draft: 'Line one\nline two', explained: true });
+	});
+
+	test('CLI drafts are isolated by conversation and explicit paste never submits', async () => {
+		const sent: { text: string; execute: boolean; bracketed?: boolean }[] = [];
+		const f = fixture(undefined, pasteTerminal(async (text, execute, bracketed) => { sent.push({ text, execute, bracketed }); }));
+		await f.pane.open(session);
+		f.pane.stagePrompt(session.id, 'First draft');
+		f.pane.stagePrompt(session.id, 'Review comment');
+		await f.pane.open({ ...session, id: 'second' });
+		f.pane.stagePrompt('second', 'Second draft');
+		f.pane.show(session.id);
+		const input = f.pane.domNode.querySelector('textarea')!;
+		assert.strictEqual(input.value, 'First draft\n\nReview comment');
+		assert.strictEqual(sent.length, 0);
+		f.pane.domNode.querySelector<HTMLButtonElement>('.openide-cli-composer-actions .primary')!.click();
+		await timeout(0);
+		assert.deepStrictEqual(sent, [{ text: 'First draft\n\nReview comment', execute: false, bracketed: true }]);
+		assert.strictEqual(input.value, '');
+		f.pane.show('second');
+		assert.strictEqual(f.pane.domNode.querySelector('textarea')!.value, 'Second draft');
+	});
+
+	test('review context staged while a provider connects survives into its composer', async () => {
+		const ready = new DeferredPromise<IOpenideCodexGoalConnection>();
+		const f = fixture(ready, pasteTerminal(async () => {}));
+		const opening = f.pane.open(session);
+		assert.strictEqual(f.pane.stagePrompt(session.id, 'Review the selected changes'), true);
+		await ready.complete({ endpoint: 'unix:///fixture', threadId: 'thread' });
+		await opening;
+		assert.strictEqual(f.pane.domNode.querySelector('textarea')!.value, 'Review the selected changes');
+	});
+
+	test('a rejected paste preserves the draft and later context appended during a paste is retained', async () => {
+		let reject = true;
+		const ready = new DeferredPromise<void>();
+		const f = fixture(undefined, pasteTerminal(async () => { if (reject) { throw new Error('PTY not ready'); } await ready.p; }));
+		await f.pane.open(session);
+		f.pane.stagePrompt(session.id, 'Keep this');
+		const paste = f.pane.domNode.querySelector<HTMLButtonElement>('.openide-cli-composer-actions .primary')!;
+		paste.click(); await timeout(0);
+		assert.strictEqual(f.pane.domNode.querySelector('textarea')!.value, 'Keep this');
+		assert.ok(f.pane.domNode.querySelector('.openide-cli-composer-error')!.textContent);
+		reject = false; paste.click();
+		f.pane.stagePrompt(session.id, 'Appended while pasting');
+		await ready.complete(); await timeout(0);
+		assert.strictEqual(f.pane.domNode.querySelector('textarea')!.value, 'Keep this\n\nAppended while pasting');
+	});
+
+	test('native control events update status independently of process lifetime and disconnect loses certainty', async () => {
+		const f = fixture(undefined, pasteTerminal(async () => {}));
+		await f.pane.open(session);
+		assert.strictEqual(f.pane.statusOf(session.id), 'unknown');
+		f.goalEvents.fire({ sessionId: 'foreign', kind: 'activity', status: 'in-progress' });
+		assert.strictEqual(f.pane.statusOf(session.id), 'unknown');
+		f.goalEvents.fire({ sessionId: session.id, kind: 'activity', status: 'needs-input', waitingReason: 'permission' });
+		assert.deepStrictEqual(f.pane.runtimeOf(session.id), { lifecycle: 'running', status: 'needs-input', source: 'control', waitingReason: 'permission' });
+		f.goalEvents.fire({ sessionId: session.id, kind: 'activity', status: 'completed' });
+		assert.strictEqual(f.pane.runtimeOf(session.id)?.lifecycle, 'running');
+		f.goalEvents.fire({ sessionId: session.id, kind: 'disconnected', reason: 'closed' });
+		assert.strictEqual(f.pane.statusOf(session.id), 'unknown');
+	});
 
 	test('moving a running terminal reattaches the same PTY and never launches another', async () => {
 		const element = mainWindow.document.createElement('div');

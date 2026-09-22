@@ -58,6 +58,8 @@ export interface IBaseOpenWindowsOptions {
 export interface IOpenWindowOptions extends IBaseOpenWindowsOptions {
 	readonly forceNewWindow?: boolean;
 	readonly preferNewWindow?: boolean;
+	/** Open the project's Agent companion, preserving the source IDE and replacing only this auxiliary surface. */
+	readonly openideAgentWindow?: { readonly sourceWindowId: number };
 
 	readonly noRecentEntry?: boolean;
 
@@ -437,6 +439,16 @@ export interface INativeRunKeybindingInWindowRequest {
 	readonly userSettingsLabel: string;
 }
 
+/** Acknowledged by the renderer only after its Agent companion has finished opening. */
+export interface IOpenideAgentWindowRequest {
+	readonly replyChannel: string;
+}
+
+export interface IOpenideAgentWindowResponse {
+	readonly success: boolean;
+	readonly error?: string;
+}
+
 export interface IColorScheme {
 	readonly dark: boolean;
 	readonly highContrast: boolean;
@@ -503,6 +515,8 @@ export interface INativeWindowConfiguration extends IWindowConfiguration, Native
 	policiesData?: IStringDictionary<{ definition: PolicyDefinition; value: PolicyValue }>;
 
 	isSessionsWindow?: boolean;
+	/** A workspace owner started in the background for its Agent companion. */
+	openideAgentWindowOwner?: boolean;
 }
 
 /**

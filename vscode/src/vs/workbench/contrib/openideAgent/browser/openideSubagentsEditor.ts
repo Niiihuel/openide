@@ -228,7 +228,7 @@ export class OpenideSubagentsEditor extends EditorPane {
 		const timeline = run.timeline ?? [];
 		const last = timeline[timeline.length - 1];
 		const key = JSON.stringify([
-			run.runId, this.fullHistory, run.status, timeline.length, last?.sequence,
+			run.runId, this.fullHistory, run.status, timeline.length, last?.sequence, last?.message,
 			run.progress, run.error, run.result?.summary,
 		]);
 		if (key === this.fallbackKey) { return; }

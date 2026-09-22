@@ -1,0 +1,36 @@
+.openide-project-map-settings { max-width: 980px; }
+.openide-project-map-settings > .openide-settings-section { gap: 14px; }
+.openide-project-map-index .openide-settings-section-desc,
+.openide-project-map-patterns .openide-settings-section-desc,
+.openide-project-map-learning .openide-settings-section-desc { max-width: 72ch; }
+.openide-project-map-index .openide-settings-status-headline {
+	align-self: flex-start;
+	padding: 7px 11px;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-control);
+	background: var(--oi-raised);
+}
+.openide-project-map-index .openide-settings-metrics,
+.openide-project-map-learning .openide-settings-metrics {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+	gap: 8px;
+}
+.openide-project-map-index .openide-settings-metric,
+.openide-project-map-learning .openide-settings-metric {
+	min-width: 0;
+	padding: 13px 15px;
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-control);
+	background: var(--oi-raised);
+}
+.openide-project-map-index .openide-settings-metric-value,
+.openide-project-map-learning .openide-settings-metric-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-project-map-index .openide-settings-section-actions { flex-wrap: wrap; }
+.openide-project-map-index .openide-settings-section-actions .danger { margin-inline-start: auto; }
+.openide-project-map-patterns .openide-settings-field { gap: 8px; }
+.openide-project-map-patterns .openide-settings-field + .openide-settings-field { margin-top: 10px; }
+.openide-project-map-patterns .openide-settings-field-label { font-weight: 600; }
+@media (max-width: 700px) {
+	.openide-project-map-index .openide-settings-section-actions .danger { margin-inline-start: 0; }
+}

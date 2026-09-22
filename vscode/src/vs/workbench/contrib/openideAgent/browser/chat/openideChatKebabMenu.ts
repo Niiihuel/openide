@@ -42,15 +42,15 @@ export interface IOpenideChatKebabActions {
  * beside it is the redundancy this header set out to remove.
  */
 const ITEMS: readonly IKebabItem[] = [
-	{ icon: 'edit', label: 'chat.menu.rename', run: actions => actions.rename() },
-	{ icon: 'repo-forked', label: 'chat.menu.fork', run: actions => actions.fork() },
+	{ icon: 'pencil', label: 'chat.menu.rename', run: actions => actions.rename() },
+	{ icon: 'git-branch', label: 'chat.menu.fork', run: actions => actions.fork() },
 	{ icon: 'export', label: 'chat.menu.copyTranscript', run: actions => actions.exportTranscript() },
 	{ separator: true },
 	{ icon: 'trash', label: 'chat.menu.delete', run: actions => actions.remove() },
 	{ icon: 'clear-all', label: 'chat.menu.deleteAll', run: actions => actions.removeAll() },
 	{ separator: true },
 	{ icon: 'link-external', label: 'agentWindow.open', run: actions => actions.openAgentWindow() },
-	{ icon: 'type-hierarchy', label: 'chat.menu.projectMap', run: actions => actions.openProjectMap() },
+	{ icon: 'graph', label: 'chat.menu.projectMap', run: actions => actions.openProjectMap() },
 ];
 
 export class OpenideChatKebabMenu extends OpenideChatMenuPopover {

@@ -135,6 +135,19 @@ suite('OpenIDE ChatConfirmationPart', () => {
 		assert.deepStrictEqual(scopeRows(part).map(row => row.textContent), [labels.once, labels.session]);
 	});
 
+	test('protected writes offer only an explicit once or deny decision', () => {
+		for (const decision of ['once', 'deny']) {
+			const { part, resolved } = create({ tool: 'rule_manage', risk: 'write', command: undefined, operationOnly: true });
+			assert.deepStrictEqual({
+				picker: part.domNode.querySelector('.openide-chat-approval-scope-trigger'),
+				scope: part.domNode.querySelector('.openide-chat-approval-scope-fixed')?.textContent,
+				buttons: buttons(part).map(button => button.textContent),
+			}, { picker: null, scope: labels.once, buttons: [t('chatSurface.approval.deny'), t('chatSurface.approval.allow')] });
+			buttons(part)[decision === 'deny' ? 0 : 1].click();
+			assert.deepStrictEqual(resolved, [{ id: 'req-1', decision }]);
+		}
+	});
+
 	test('changing scope alone does not authorize the tool', () => {
 		const { part, resolved } = create();
 		chooseScope(part, 'always');

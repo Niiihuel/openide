@@ -29,6 +29,21 @@ suite('OpenIDE shared tool executor', () => {
 		assert.strictEqual(effects, 0);
 	});
 
+	test('protected instruction consent cannot bypass the mandatory execution policy', async () => {
+		const executor = new OpenideToolExecutor(async () => true);
+		let prompts = 0;
+		let effects = 0;
+		const command: IOpenideExecutableTool = { def: { name: 'run_command', description: '', parameters: { type: 'object' } }, risk: 'exec' };
+		const context: IOpenideToolExecution = {
+			...execution,
+			guard: async () => { prompts++; return undefined; },
+			authorize: async () => true,
+		};
+		const result = await executor.execute(command, JSON.stringify({ command: 'rm -rf /; echo instructions > .openide/rules/rule.md' }), CancellationToken.None, context, async () => { effects++; return 'saved'; });
+		assert.match(result, /blocked by OpenIDE execution policy/);
+		assert.deepStrictEqual({ prompts, effects }, { prompts: 0, effects: 0 });
+	});
+
 	test('nested calls retain parent allowlist and cannot widen risk', async () => {
 		const executor = new OpenideToolExecutor(async () => true); let effects = 0;
 		const context: IOpenideToolExecution = { ...execution, allowedTools: new Set(['wrapper', 'write_file']), allowedRisks: new Set(['safe']) };
@@ -69,6 +84,23 @@ suite('OpenIDE shared tool executor', () => {
 	test('protected instruction guard applies to nested writable subagents', async () => {
 		const context = { ...execution, origin: 'subagent' as const, guard: async () => 'Error: protected Rules' };
 		assert.match(await new OpenideToolExecutor().execute(tool, '{"path":"RULES.md"}', CancellationToken.None, context, async () => { throw new Error('must not execute'); }), /protected Rules/);
+	});
+	test('explicit instruction confirmation is consumed by the exact prepared operation, never by a later call', async () => {
+		const confirmed = new WeakSet<Readonly<Record<string, unknown>>>();
+		let prompts = 0;
+		const effects: string[] = [];
+		const context: IOpenideToolExecution = {
+			...execution,
+			guard: async (_name, args) => {
+				if (++prompts === 1) { confirmed.add(args); return undefined; }
+				return 'Error: user declined';
+			},
+			authorize: async (_request, args) => !!args && confirmed.delete(args),
+		};
+		const executor = new OpenideToolExecutor(async () => true);
+		const first = await executor.execute(tool, '{"path":"rule.md"}', CancellationToken.None, context, async args => { effects.push(String(args['path'])); return 'saved'; });
+		const next = await executor.execute(tool, '{"path":"rule.md"}', CancellationToken.None, context, async () => { effects.push('second'); return 'saved'; });
+		assert.deepStrictEqual({ first, next, prompts, effects }, { first: 'saved', next: 'Error: user declined', prompts: 2, effects: ['rule.md'] });
 	});
 	test('typed results preserve explicit failures without interpreting ordinary error prose', async () => {
 		const executor = new OpenideToolExecutor();

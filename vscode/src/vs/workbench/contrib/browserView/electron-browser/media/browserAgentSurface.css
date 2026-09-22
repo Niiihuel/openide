@@ -1,0 +1,3 @@
+.browser-agent-surface { position: absolute; inset: 0; overflow: hidden; outline: none; isolation: isolate; background: var(--vscode-editor-background); }
+.browser-agent-surface[hidden] { display: none !important; }
+.browser-agent-frame-image { width: 100%; height: 100%; position: absolute; inset: 0; object-fit: contain; pointer-events: none; user-select: none; }

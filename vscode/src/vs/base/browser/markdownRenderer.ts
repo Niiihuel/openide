@@ -66,6 +66,8 @@ export interface MarkdownSanitizerConfig {
 	readonly allowedLinkSchemes?: {
 		readonly augment: readonly string[];
 	};
+	/** Allow relative links when the action handler resolves them without a base URI. */
+	readonly allowRelativeLinkPaths?: boolean;
 	readonly remoteImageIsAllowed?: (uri: URI) => boolean;
 }
 
@@ -675,7 +677,7 @@ function getDomSanitizerConfig(mdStrConfig: MdStrConfig, options: MarkdownSaniti
 		allowedLinkProtocols: {
 			override: allowedLinkSchemes,
 		},
-		allowRelativeLinkPaths: !!mdStrConfig.baseUri,
+		allowRelativeLinkPaths: !!mdStrConfig.baseUri || !!options.allowRelativeLinkPaths,
 		allowedMediaProtocols: {
 			override: [
 				Schemas.http,

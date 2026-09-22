@@ -7,6 +7,7 @@ import assert from 'assert';
 import { CodeWindow } from '../../../../../base/browser/window.js';
 import { DeferredPromise, timeout } from '../../../../../base/common/async.js';
 import { Emitter } from '../../../../../base/common/event.js';
+import { isCancellationError } from '../../../../../base/common/errors.js';
 import { upcastPartial } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { IContextMenuService, IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
@@ -16,6 +17,7 @@ import { IStorageService } from '../../../../../platform/storage/common/storage.
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { IAuxiliaryWindow, IAuxiliaryWindowService } from '../../../../services/auxiliaryWindow/browser/auxiliaryWindowService.js';
 import { IHostService } from '../../../../services/host/browser/host.js';
+import { ILifecycleService } from '../../../../services/lifecycle/common/lifecycle.js';
 import { ITitleService } from '../../../../services/title/browser/titleService.js';
 import { IStatusbarService } from '../../../../services/statusbar/browser/statusbar.js';
 import { IEditorGroupsService } from '../../../../services/editor/common/editorGroupsService.js';
@@ -30,6 +32,7 @@ suite('OpenIDE agent window lifecycle', () => {
 	function fixture() {
 		const requests: DeferredPromise<IAuxiliaryWindow>[] = [];
 		const focused: Window[] = [];
+		const shutdown = store.add(new Emitter<void>());
 		const window = store.add(new OpenideAgentWindow(
 			upcastPartial<OpenideChatWidget>({}),
 			undefined,
@@ -54,8 +57,9 @@ suite('OpenIDE agent window lifecycle', () => {
 			undefined!,
 			undefined!,
 			undefined!,
+			upcastPartial<ILifecycleService>({ onDidShutdown: shutdown.event }),
 		));
-		return { window, requests, focused };
+		return { window, requests, focused, shutdown };
 	}
 
 	function auxiliary(id: number) {
@@ -72,7 +76,7 @@ suite('OpenIDE agent window lifecycle', () => {
 		return { auxiliary, window, unload, get disposed() { return disposed; } };
 	}
 
-	test('concurrent opens share one native request and focus the window while styles load', async () => {
+	test('concurrent opens share the mounting promise even after the native window is created', async () => {
 		const f = fixture();
 		const first = f.window.open();
 		const second = f.window.open();
@@ -80,10 +84,10 @@ suite('OpenIDE agent window lifecycle', () => {
 		const target = auxiliary(100);
 		await f.requests[0].complete(target.auxiliary);
 		await timeout(0);
-		await f.window.open();
+		assert.strictEqual(f.window.open(), first);
 		target.unload.fire();
-		await first;
-		assert.deepStrictEqual({ requests: f.requests.length, focused: f.focused, disposed: target.disposed }, { requests: 1, focused: [target.window], disposed: true });
+		await assert.rejects(first, isCancellationError);
+		assert.deepStrictEqual({ requests: f.requests.length, focused: f.focused, disposed: target.disposed }, { requests: 1, focused: [], disposed: true });
 	});
 
 	test('closing before stylesheet completion settles opening and permits a fresh native window', async () => {
@@ -93,14 +97,14 @@ suite('OpenIDE agent window lifecycle', () => {
 		await f.requests[0].complete(initial.auxiliary);
 		await timeout(0);
 		initial.unload.fire();
-		await first;
+		await assert.rejects(first, isCancellationError);
 		const reopened = f.window.open();
 		assert.strictEqual(f.requests.length, 2);
 		const replacement = auxiliary(102);
 		await f.requests[1].complete(replacement.auxiliary);
 		await timeout(0);
 		replacement.unload.fire();
-		await reopened;
+		await assert.rejects(reopened, isCancellationError);
 		assert.deepStrictEqual({ disposed: [initial.disposed, replacement.disposed], focused: f.focused }, { disposed: [true, true], focused: [] });
 	});
 
@@ -111,7 +115,7 @@ suite('OpenIDE agent window lifecycle', () => {
 		await f.requests[0].complete(target.auxiliary);
 		await timeout(0);
 		f.window.dispose();
-		await pending;
+		await assert.rejects(pending, isCancellationError);
 		assert.strictEqual(target.disposed, true);
 	});
 
@@ -121,7 +125,35 @@ suite('OpenIDE agent window lifecycle', () => {
 		f.window.dispose();
 		const target = auxiliary(103);
 		await f.requests[0].complete(target.auxiliary);
-		await pending;
+		await assert.rejects(pending, isCancellationError);
 		assert.strictEqual(target.disposed, true);
+	});
+
+	test('workbench shutdown closes the companion before waiting for pagehide or pending styles', async () => {
+		const f = fixture();
+		const pending = f.window.open();
+		const target = auxiliary(105);
+		await f.requests[0].complete(target.auxiliary);
+		await timeout(0);
+		f.shutdown.fire();
+		assert.strictEqual(target.disposed, true);
+		await assert.rejects(pending, isCancellationError);
+	});
+
+	test('workbench shutdown fences a native window that arrives after its owner shuts down', async () => {
+		const f = fixture();
+		const pending = f.window.open();
+		f.shutdown.fire();
+		const target = auxiliary(106);
+		await f.requests[0].complete(target.auxiliary);
+		await assert.rejects(pending, isCancellationError);
+		assert.deepStrictEqual({ disposed: target.disposed, focused: f.focused }, { disposed: true, focused: [] });
+	});
+
+	test('opening a disposed runtime rejects without creating a native window', async () => {
+		const f = fixture();
+		f.window.dispose();
+		await assert.rejects(f.window.open(), isCancellationError);
+		assert.strictEqual(f.requests.length, 0);
 	});
 });

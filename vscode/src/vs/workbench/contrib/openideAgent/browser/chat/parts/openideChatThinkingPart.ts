@@ -3,11 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append, getWindow, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, getWindow, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
 import { MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { IOpenideChatContent, IOpenideChatThinkingContent, isOpenideChatThinkingContent } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
+import { createThinkingGlyph } from '../openideChatReasoning.js';
 import { OPENIDE_CHAT_SHIMMER_CLASS, setOpenideChatShimmer } from './openideChatActivityRow.js';
 import '../media/openideChatActivity.css';
 import { t } from '../../../common/openideStrings.js';
@@ -31,12 +32,8 @@ function thinkingLabel(content: IOpenideChatThinkingContent): string {
 }
 
 /**
- * The reasoning card.
- *
- * Ported from the webview's `.reasoning` block: a `<details>` that is OPEN while the model is
- * reasoning — the user watches it being written — and collapses itself the moment the block
- * settles, leaving the masked two-line peek behind. Nothing about it is a VS Code chat "thinking"
- * widget; the shimmer on the label and the mask on the body are the whole visual identity.
+ * A stable reasoning disclosure, open during streaming and folded when it settles.
+ * Manual disclosure and scroll choices take precedence over automatic following.
  */
 export class OpenideChatThinkingPart extends OpenideChatContentPart {
 
@@ -47,7 +44,8 @@ export class OpenideChatThinkingPart extends OpenideChatContentPart {
 	private readonly _think: HTMLElement;
 
 	private _content: IOpenideChatThinkingContent;
-	private _live = false;
+	private _userToggled = false;
+	private _followTail = true;
 
 	/**
 	 * Whether the auto-collapse already ran. Without it every later re-render of a finished turn
@@ -75,9 +73,14 @@ export class OpenideChatThinkingPart extends OpenideChatContentPart {
 		this.domNode = this._details;
 
 		const summary = append(this._details, $('summary.openide-chat-reasoning-summary'));
+		append(summary, createThinkingGlyph(summary.ownerDocument));
 		this._label = append(summary, $('span.openide-chat-reasoning-label'));
-		append(summary, $('span.codicon.codicon-chevron-right.openide-chat-reasoning-chevron'));
+		append(summary, $('span.codicon.codicon-chevron-right.openide-chat-reasoning-chevron', { 'aria-hidden': 'true' }));
 		this._think = append(this._details, $('div.openide-chat-think'));
+		this._register(addDisposableListener(summary, 'click', () => { this._userToggled = true; }));
+		this._register(addDisposableListener(this._think, 'scroll', () => {
+			this._followTail = this._think.scrollHeight - this._think.scrollTop - this._think.clientHeight <= 4;
+		}));
 
 		// A <details> resizes without any of our code running, so the list would keep the height it
 		// measured before the user clicked and clip (or leave a gap under) the card.
@@ -97,16 +100,24 @@ export class OpenideChatThinkingPart extends OpenideChatContentPart {
 		setOpenideChatShimmer(this._label, !this._content.isComplete);
 		// Plain text, never markdown: reasoning is the model's scratch pad and routinely contains
 		// half-open fences and stray angle brackets that a renderer would either eat or mangle.
-		this._think.textContent = this._content.text;
-		if (!this._content.isComplete) {
-			// The card is a 320px scroll box; while it streams the user wants the newest line, which
-			// is exactly what the webview does on every reasoning delta. Read at the next frame, not
-			// here: `scrollHeight` right after a write forces a synchronous layout of everything
-			// dirty, once per delta; by the next frame the layout is done and the read is free.
+		const previous = this._think.textContent ?? '';
+		if (this._content.text !== previous) {
+			// Append deltas to the existing text node so selection is not reset on every token.
+			if (this._content.text.startsWith(previous) && this._think.firstChild?.nodeType === 3) {
+				(this._think.firstChild as Text).appendData(this._content.text.slice(previous.length));
+			} else {
+				this._think.textContent = this._content.text;
+			}
+		}
+		if (!this._content.isComplete && this._details.open && this._followTail) {
 			this._pinToBottom.value = scheduleAtNextAnimationFrame(getWindow(this._think), () => {
 				this._pinToBottom.value = undefined;
-				this._think.scrollTop = this._think.scrollHeight;
+				if (this._followTail && this._details.open) {
+					this._think.scrollTop = this._think.scrollHeight;
+				}
 			});
+		} else {
+			this._pinToBottom.clear();
 		}
 	}
 
@@ -136,20 +147,13 @@ export class OpenideChatThinkingPart extends OpenideChatContentPart {
 
 		if (other.isComplete && !wasComplete && !this._collapsedOnComplete) {
 			this._collapsedOnComplete = true;
-			if (!this._defaultOpen) {
+			if (!this._defaultOpen && !this._userToggled) {
 				this._details.open = false;
 			}
 		}
 
 		this._onDidChangeHeight.fire();
 		return true;
-	}
-
-	/** The lattice owns the live heading; the streamed reasoning itself remains readable below it. */
-	setLive(live: boolean): void {
-		if (live === this._live) { return; }
-		this._live = live;
-		this._details.classList.toggle('openide-chat-reasoning-live', live);
 	}
 }
 

@@ -53,6 +53,7 @@ export interface IWindowCreationOptions {
 	readonly extensionDevelopmentPath?: string[];
 	readonly isExtensionTestHost?: boolean;
 	readonly isSessionsWindow?: boolean;
+	readonly openideAgentWindowOwner?: boolean;
 }
 
 interface ITouchBarSegment extends electron.SegmentedControlSegment {
@@ -764,11 +765,12 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 				additionalArguments: [`--vscode-window-config=${this.configObjectUrl.resource.toString()}`],
 				v8CacheOptions: this.environmentMainService.useCodeCache ? 'bypassHeatCheck' : 'none'
 			};
-			if (config.isSessionsWindow) {
+			if (config.isSessionsWindow || config.openideAgentWindowOwner) {
 				webPreferences.backgroundThrottling = false; // keep agents window responsive when in background
 			}
 
 			const options = instantiationService.invokeFunction(defaultBrowserWindowOptions, this.windowState, undefined, webPreferences);
+			if (config.openideAgentWindowOwner) { options.show = false; }
 
 			// Create the browser window
 			mark('code/willCreateCodeBrowserWindow');
@@ -779,7 +781,9 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			this.setWin(this._win, options);
 
 			// Apply some state after window creation
-			this.applyState(this.windowState, hasMultipleDisplays);
+			// Applying maximized/fullscreen state can show a window on Linux and Windows.
+			// This owner exists only to supply workspace services to an Agent companion.
+			if (!config.openideAgentWindowOwner) { this.applyState(this.windowState, hasMultipleDisplays); }
 
 			this._lastFocusTime = Date.now(); // since we show directly, we need to set the last focus time too
 		}
@@ -1279,7 +1283,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 		// Make window visible if it did not open in N seconds because this indicates an error
 		// Only do this when running out of sources and not when running tests
-		if (!this.environmentMainService.isBuilt && !this.environmentMainService.extensionTestsLocationURI) {
+		if (!configuration.openideAgentWindowOwner && !this.environmentMainService.isBuilt && !this.environmentMainService.extensionTestsLocationURI) {
 			this._register(new RunOnceScheduler(() => {
 				if (this._win && !this._win.isVisible() && !this._win.isMinimized()) {
 					this._win.show();

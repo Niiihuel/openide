@@ -8,6 +8,7 @@ import { IOpenideChatContent, isOpenideChatToolContent } from './openideChatCont
 export interface IOpenideChatWebPreview {
 	readonly url: string;
 	readonly title: string;
+	readonly toolCallId: string;
 }
 
 /** Recover the native navigation result from live calls and saved transcripts alike. */
@@ -18,6 +19,6 @@ export function webPreviewFromTool(content: IOpenideChatContent): IOpenideChatWe
 	try {
 		const url = new URL(match[1]);
 		if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) { return undefined; }
-		return { url: url.href, title: match[2] === 'untitled' ? '' : match[2].trim() };
+		return { url: url.href, title: match[2] === 'untitled' ? '' : match[2].trim(), toolCallId: content.callId };
 	} catch { return undefined; }
 }

@@ -11,9 +11,10 @@ import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { IOpenideChatLiveStatus } from '../../common/chat/openideChatLiveStatus.js';
 import { formatOpenideChatDuration } from './openideChatTurnDuration.js';
+import { setOpenideChatShimmer } from './parts/openideChatActivityRow.js';
 
 /**
- * The turn's live line: a small lattice, a progressive trace, and the current step.
+ * The turn's live line: the current step with a text shimmer.
  *
  * This is the vanilla equivalent of the React idiom the user asked for —
  *
@@ -23,8 +24,7 @@ import { formatOpenideChatDuration } from './openideChatTurnDuration.js';
  *   </AnimatePresence>
  *
  * — and `mode="wait"` is the part that matters: the outgoing current step leaves BEFORE the next
- * one arrives, so those labels never overlap. Completed real steps move into the muted trace;
- * generic waiting states do not, which keeps the trace useful instead of turning it into a log.
+ * one arrives, so those labels never overlap. Completed steps belong in the transcript.
  *
  * The animation is WAAPI and not CSS classes on purpose: `mode="wait"` needs to know when the exit
  * finished, and an `animationend` listener has nothing to fire under `prefers-reduced-motion`,
@@ -70,7 +70,6 @@ export class OpenideChatStatusLine extends Disposable {
 	readonly domNode: HTMLElement;
 
 	private readonly _label: HTMLElement;
-	private readonly _trace: HTMLElement;
 	private readonly _timer: HTMLElement;
 	private readonly _disclosure: HTMLButtonElement;
 	private _toggleActivity: (() => void) | undefined;
@@ -87,7 +86,6 @@ export class OpenideChatStatusLine extends Disposable {
 	private _animation: Animation | undefined;
 	private _disposed = false;
 	private _startedAt: number | undefined;
-	private _lastTraceText = '';
 
 	private readonly _stepMinMs: number;
 	private readonly _idleGraceMs: number;
@@ -104,14 +102,7 @@ export class OpenideChatStatusLine extends Disposable {
 		this._stepMinMs = timing?.stepMinMs ?? OPENIDE_CHAT_STEP_MIN_MS;
 		this._idleGraceMs = timing?.idleGraceMs ?? OPENIDE_CHAT_IDLE_GRACE_MS;
 		this.domNode = append(container, $('.openide-chat-response-working.hidden', { role: 'status', 'aria-live': 'polite' }));
-		const lattice = append(this.domNode, $('span.openide-chat-status-lattice', { 'aria-hidden': 'true' }));
-		// Orbit order from React Bits' Lattice Loader. The quiet centre keeps the mark from reading
-		// as a spinner or a product icon: it is simply a compact visualization of ongoing work.
-		for (const phase of [0, 1, 2, 7, -1, 3, 6, 5, 4]) {
-			append(lattice, $(`span.openide-chat-status-lattice-cell${phase < 0 ? '.openide-chat-status-lattice-cell-centre' : ''}`, phase < 0 ? undefined : { style: `--oi-lattice-phase:${phase}` }));
-		}
 		const flow = append(this.domNode, $('.openide-chat-status-flow'));
-		this._trace = append(flow, $('.openide-chat-status-trace', { 'aria-hidden': 'true' }));
 		const current = append(flow, $('.openide-chat-status-current'));
 		this._label = append(current, $('.openide-chat-response-working-label'));
 		this._timer = append(current, $('span.openide-chat-status-timer', { 'aria-hidden': 'true' }));
@@ -124,7 +115,7 @@ export class OpenideChatStatusLine extends Disposable {
 		this._register({ dispose: () => { this._disposed = true; this._animation?.cancel(); } });
 	}
 
-	/** The renderer supplies the existing detail owner; the trace remains presentation-only. */
+	/** The renderer supplies the existing activity detail owner. */
 	setDisclosure(toggle: (() => void) | undefined, expanded = false): void {
 		this._toggleActivity = toggle;
 		this._disclosure.classList.toggle('hidden', !toggle);
@@ -141,7 +132,7 @@ export class OpenideChatStatusLine extends Disposable {
 	 */
 	setStatus(status: IOpenideChatLiveStatus, startedAt?: number): void {
 		this.domNode.classList.remove('hidden');
-		this.domNode.classList.toggle('openide-chat-status-waiting', status.waitingForResponse === true);
+		setOpenideChatShimmer(this._label, !status.waitingForResponse);
 		if (this._startedAt === undefined || (startedAt !== undefined && startedAt < this._startedAt)) {
 			this._startedAt = startedAt ?? Date.now();
 		}
@@ -149,7 +140,6 @@ export class OpenideChatStatusLine extends Disposable {
 		if (status.text === this._pending?.text && status.idle === this._pending.idle) {
 			return;
 		}
-		this._remember(this._pending);
 		// Whatever was waiting its turn is stale now: only the newest status is ever shown, so a
 		// burst of steps ends on the present instead of replaying a queue.
 		this._pending = status;
@@ -165,7 +155,7 @@ export class OpenideChatStatusLine extends Disposable {
 	hide(): void {
 		this.setDisclosure(undefined);
 		this.domNode.classList.add('hidden');
-		this.domNode.classList.remove('openide-chat-status-waiting');
+		setOpenideChatShimmer(this._label, false);
 		this._animation?.cancel();
 		this._animation = undefined;
 		this._later.cancel();
@@ -176,31 +166,16 @@ export class OpenideChatStatusLine extends Disposable {
 		this._shownAt = 0;
 		this._pending = undefined;
 		this._startedAt = undefined;
-		this._lastTraceText = '';
 		this._label.textContent = '';
 		this._timer.textContent = '';
-		this._trace.replaceChildren();
 	}
 
 	/** Temporarily leaves the stage while prose or another rich surface is streaming. */
 	suspend(): void {
 		this.setDisclosure(undefined);
 		this.domNode.classList.add('hidden');
+		setOpenideChatShimmer(this._label, false);
 		this._clock.cancel();
-	}
-
-	private _remember(status: IOpenideChatLiveStatus | undefined): void {
-		if (!status || status.idle || status.waitingForResponse || status.text === this._lastTraceText) {
-			return;
-		}
-		this._lastTraceText = status.text;
-		const step = append(this._trace, $('span.openide-chat-status-trace-step'));
-		step.textContent = status.text;
-		// The trail is context, not a second transcript. Retaining its latest four steps makes rapid
-		// tool bursts legible while the existing disclosures remain the complete inspectable record.
-		while (this._trace.childElementCount > 4) {
-			this._trace.firstElementChild?.remove();
-		}
 	}
 
 	private _paintClock(): void {

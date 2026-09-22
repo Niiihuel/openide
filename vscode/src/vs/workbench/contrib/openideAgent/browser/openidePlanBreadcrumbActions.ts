@@ -271,12 +271,12 @@ export class OpenidePlanBreadcrumbActions extends Disposable {
 				const content = createMenuContent(container.ownerDocument);
 				container.appendChild(content);
 				const build = createMenuRow(container.ownerDocument, {
-					icon: 'play', label: completed ? t('chatSurface.plan.runAgain') : t('chat.plan.build'),
+					icon: 'rocket', label: completed ? t('chatSurface.plan.runAgain') : t('chat.plan.build'),
 					keybinding: PRIMARY_ENTER_HINT, active: true,
 				});
 				store.add(addDisposableListener(build, 'click', () => { this._morePopover.close(); this._launch(resource, completed); }));
 				content.appendChild(build);
-				const chat = createMenuRow(container.ownerDocument, { icon: 'comment-discussion', label: t('chatSurface.plan.openChat') });
+				const chat = createMenuRow(container.ownerDocument, { icon: 'comment', label: t('chatSurface.plan.openChat') });
 				store.add(addDisposableListener(chat, 'click', () => { this._morePopover.close(); void this._commandService.executeCommand('workbench.view.openideChat.view.focus'); }));
 				content.appendChild(chat);
 			},

@@ -3,6 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { RunOnceScheduler } from '../../../../../base/common/async.js';
+import { ISubagentRun, isTerminalSubagentStatus } from '../../common/openideSubagentTypes.js';
+import { subagentRunMessages } from '../../common/openideSubagentTranscript.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { IOpenideChatSessionEffect, IOpenideChatUsageEffect } from '../../common/chat/openideChatReducerState.js';
@@ -34,13 +37,15 @@ export interface IOpenideChatEffectTarget {
 
 interface IMirrorSession {
 	readonly sessionId: string;
-	readonly messages: IChatMessage[];
+	messages: IChatMessage[];
 }
 
 export class OpenideChatSessionEffects extends Disposable {
 
 	/** runId → the background conversation mirroring a specialist. Same map as the webview host. */
 	private readonly _mirrors = new Map<string, IMirrorSession>();
+	private readonly _pendingMirrors = new Map<string, boolean>();
+	private readonly _saveMirrors = this._register(new RunOnceScheduler(() => this.flushMirrors(), 100));
 
 	/**
 	 * Accumulated context usage of the visible conversation. The provider reports deltas field by
@@ -190,20 +195,46 @@ export class OpenideChatSessionEffects extends Disposable {
 			return;
 		}
 		const last = mirror.messages[mirror.messages.length - 1];
+		if (message.terminalOutput && last?.terminalOutput?.callId === message.terminalOutput.callId) {
+			last.terminalOutput.output += message.terminalOutput.output;
+			return;
+		}
 		// Streamed deltas grow the LAST assistant message instead of pushing one per token; a message
 		// that already carries tool calls is closed and must not absorb prose.
-		if (mergeText && last?.role === 'assistant' && !last.toolCalls?.length) {
-			last.content += message.content;
+		if (mergeText && last?.role === 'assistant' && !last.toolCalls?.length && !last.fileDiff && !last.terminalOutput && (last.reasoning !== undefined) === (message.reasoning !== undefined)) {
+			if (message.reasoning !== undefined) { last.reasoning = (last.reasoning ?? '') + message.reasoning; }
+			else { last.content += message.content; }
 			return;
 		}
 		mirror.messages.push(message);
 	}
 
+	/** Durable and in-loop runs share the same complete mirror format. */
+	syncSubagentRun(run: ISubagentRun): void {
+		this.startMirror(run.runId, run.definitionName, run.task, run.parentConversationId);
+		const mirror = this._mirrors.get(run.runId)!;
+		mirror.messages = subagentRunMessages(run);
+		this.sessions.setSubagentStatus(mirror.sessionId, isTerminalSubagentStatus(run.status) ? run.status as 'completed' | 'failed' | 'cancelled' | 'interrupted' : 'running');
+		this.saveMirror(run.runId, run.status === 'failed');
+		if (isTerminalSubagentStatus(run.status)) { this.flushMirrors(); }
+	}
+
 	private saveMirror(runId: string, isError: boolean): void {
-		const mirror = this._mirrors.get(runId);
-		if (mirror) {
-			this.sessions.save(mirror.sessionId, mirror.messages, isError);
+		this._pendingMirrors.set(runId, isError);
+		if (!this._saveMirrors.isScheduled()) { this._saveMirrors.schedule(); }
+	}
+
+	private flushMirrors(): void {
+		for (const [runId, isError] of this._pendingMirrors) {
+			const mirror = this._mirrors.get(runId);
+			if (mirror) { this.sessions.save(mirror.sessionId, mirror.messages, isError); }
 		}
+		this._pendingMirrors.clear();
+	}
+
+	override dispose(): void {
+		this.flushMirrors();
+		super.dispose();
 	}
 
 	private endMirror(runId: string, status: 'completed' | 'failed' | 'cancelled'): void {
@@ -211,6 +242,8 @@ export class OpenideChatSessionEffects extends Disposable {
 		if (!mirror) {
 			return;
 		}
+		this.saveMirror(runId, status === 'failed');
+		this.flushMirrors();
 		this.sessions.setSubagentStatus(mirror.sessionId, status);
 		// Transient tab: the specialist's strip entry closes when its run ends, but never while the
 		// user is reading it — the session itself stays reachable from the Agents panel either way.

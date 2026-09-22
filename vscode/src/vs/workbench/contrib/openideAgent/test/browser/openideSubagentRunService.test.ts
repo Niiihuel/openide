@@ -8,7 +8,8 @@ import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { ISubagentRun } from '../../common/openideSubagentTypes.js';
-import { ISubagentRunStorageService } from '../../browser/openideSubagentRunStorageService.js';
+import { InMemoryStorageService, StorageScope } from '../../../../../platform/storage/common/storage.js';
+import { ISubagentRunStorageService, SubagentRunStorageService } from '../../browser/openideSubagentRunStorageService.js';
 import { SubagentRunService } from '../../browser/openideSubagentRunService.js';
 
 class MemoryRunStorage implements ISubagentRunStorageService {
@@ -27,6 +28,20 @@ suite('OpenIDE subagent run leases', () => {
 		const controller = service.create({ definition: { id: 'reviewer', name: 'reviewer', description: '', model: 'default', readonly: true, isBackground: false, tools: [], systemPrompt: '', resource: URI.file('/reviewer.md'), scope: 'workspace', version: 1 }, parentConversationId: 'chat', parentMessageId: 'msg', task: 'review' });
 		return { service, runId: controller.run.runId };
 	}
+
+	test('streamed histories persist on shutdown and terminal updates persist immediately', () => {
+		const { service, runId } = createService();
+		const storage = disposables.add(new InMemoryStorageService());
+		const runs = disposables.add(new SubagentRunStorageService(storage));
+		const run = service.get(runId)!;
+		for (let i = 0; i < 10; i++) { runs.save({ ...run, timeline: [{ sequence: 1, timestamp: 1, type: 'reasoning', message: `Update ${i}` }] }); }
+		assert.strictEqual(storage.get('openide.subagents.runs.v2', StorageScope.WORKSPACE), undefined);
+		runs.dispose();
+		const restored = disposables.add(new SubagentRunStorageService(storage));
+		assert.strictEqual(restored.get(runId)?.timeline[0].message, 'Update 9');
+		restored.save({ ...run, status: 'completed', result: { summary: 'Done' } });
+		assert.ok(storage.get('openide.subagents.runs.v2', StorageScope.WORKSPACE)?.includes('Done'));
+	});
 
 	test('new attempt invalidates completions and events from the previous lease', () => {
 		const { service, runId } = createService();

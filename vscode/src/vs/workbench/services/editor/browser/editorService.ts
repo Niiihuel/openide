@@ -551,13 +551,19 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 	openEditor(editor: EditorInput | IUntypedEditorInput, optionsOrPreferredGroup?: IEditorOptions | PreferredGroup, preferredGroup?: PreferredGroup): Promise<IEditorPane | undefined>;
 	async openEditor(editor: EditorInput | IUntypedEditorInput, optionsOrPreferredGroup?: IEditorOptions | PreferredGroup, preferredGroup?: PreferredGroup): Promise<IEditorPane | undefined> {
 		const requestedGroup = isPreferredGroup(optionsOrPreferredGroup) ? optionsOrPreferredGroup : preferredGroup;
-		const windowTarget = !this.openEditorsInContainer && (requestedGroup === undefined || requestedGroup === ACTIVE_GROUP || requestedGroup === MODAL_GROUP) ? windowEditorTargets.get(getActiveWindow().vscodeWindowId) : undefined;
+		let options = isEditorInput(editor) ? optionsOrPreferredGroup as IEditorOptions : editor.options;
+		// A nested modal is a focused child workflow, not a request to expand the
+		// auxiliary workspace and bring all of its project tabs along with it.
+		const explicitModal = requestedGroup === MODAL_GROUP && (options?.modal?.nested || options?.modal?.targetWindowId !== undefined);
+		if (explicitModal && options?.modal) {
+			options = { ...options, modal: { ...options.modal, targetWindowId: options.modal.targetWindowId ?? getActiveWindow().vscodeWindowId } };
+		}
+		const windowTarget = !this.openEditorsInContainer && !explicitModal && (requestedGroup === undefined || requestedGroup === ACTIVE_GROUP || requestedGroup === MODAL_GROUP) ? windowEditorTargets.get(getActiveWindow().vscodeWindowId) : undefined;
 		if (windowTarget) {
 			const service = await windowTarget(requestedGroup === MODAL_GROUP);
 			return isEditorInput(editor) ? service.openEditor(editor, isPreferredGroup(optionsOrPreferredGroup) ? undefined : optionsOrPreferredGroup) : service.openEditor(editor);
 		}
 		let typedEditor: EditorInput | undefined = undefined;
-		let options = isEditorInput(editor) ? optionsOrPreferredGroup as IEditorOptions : editor.options;
 		let group: IEditorGroup | undefined = undefined;
 
 		if (isPreferredGroup(optionsOrPreferredGroup)) {
@@ -570,7 +576,7 @@ export class EditorService extends Disposable implements EditorServiceImpl {
 
 		// Resolve override unless disabled
 		if (!isEditorInput(editor)) {
-			const resolvedEditor = await this.editorResolverService.resolveEditor(editor, preferredGroup);
+			const resolvedEditor = await this.editorResolverService.resolveEditor(options === editor.options ? editor : { ...editor, options }, preferredGroup);
 
 			if (resolvedEditor === ResolvedStatus.ABORT) {
 				return; // skip editor if override is aborted

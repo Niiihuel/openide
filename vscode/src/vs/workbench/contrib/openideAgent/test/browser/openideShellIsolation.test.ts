@@ -19,18 +19,19 @@ suite('OpenIDE integrated shell isolation', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 	function fixture(unavailable = false, onRegister?: () => void) {
 		const requests: IOpenideProcessIsolationRequest[] = [];
-		const terminals: { cwd: URI; sent: string[]; disposed: boolean }[] = [];
+		const terminals: { cwd: URI; conversationId?: string; sent: string[]; disposed: boolean }[] = [];
 		const configuration = new TestConfigurationService({ openide: { agent: { processIsolation: 'required', processIsolationNetwork: 'deny' } } });
 		const registry = store.add(new OpenideToolRegistry(
 			{} as Dependencies[0], { getWorkspace: () => ({ folders: [{ uri: URI.file('/main') }] }) } as unknown as Dependencies[1],
 			{} as Dependencies[2], {} as Dependencies[3],
-			{ createTerminal: async (options: { config: { cwd: URI; isTransient: boolean } }) => {
+			{ createTerminal: async (options: { config: { cwd: URI; isTransient: boolean; env?: Record<string, string> } }) => {
 				assert.strictEqual(options.config.isTransient, true);
-				const entry = { cwd: options.config.cwd, sent: [] as string[], disposed: false }; terminals.push(entry);
+				const entry = { cwd: options.config.cwd, conversationId: options.config.env?.OPENIDE_CONVERSATION_ID, sent: [] as string[], disposed: false }; terminals.push(entry);
 				const finished = store.add(new Emitter<ITerminalCommand>());
 				const detection = { onCommandFinished: finished.event, onCommandExecuted: Event.None } as ICommandDetectionCapability;
 				return { processReady: Promise.resolve(), persistentProcessId: terminals.length, processId: 100 + terminals.length, get isDisposed() { return entry.disposed; }, dispose: () => { entry.disposed = true; },
 					capabilities: { get: () => detection }, onData: Event.None, onExit: Event.None,
+					rename: async () => { },
 					sendText: (command: string) => { entry.sent.push(command); queueMicrotask(() => finished.fire({ getOutput: () => 'captured', exitCode: 0 } as ITerminalCommand)); },
 				} as unknown as ITerminalInstance;
 			}, showBackgroundTerminal: async () => undefined, setActiveInstance: () => undefined } as unknown as Dependencies[4],
@@ -61,6 +62,7 @@ suite('OpenIDE integrated shell isolation', () => {
 		assert.ok(terminals[0].sent[0].startsWith("'/bwrap' '--' '--noprofile' '--norc' '-c' '"));
 		assert.strictEqual(terminals[0].disposed, true);
 		assert.strictEqual(terminals[1].cwd.toString(), URI.file('/lease-b').toString());
+		assert.deepStrictEqual(terminals.map(terminal => terminal.conversationId), ['child', 'child']);
 		registry.dispose();
 		assert.strictEqual(terminals[1].disposed, true);
 		await assert.rejects(registry.runShellCaptured('pwd', CancellationToken.None), /disconnected/);
@@ -76,6 +78,7 @@ suite('OpenIDE integrated shell isolation', () => {
 		assert.strictEqual(terminals[0].disposed, true);
 		assert.strictEqual(terminals[1].disposed, false);
 		assert.strictEqual(terminals[2].disposed, false);
+		assert.deepStrictEqual(terminals.map(terminal => terminal.conversationId), ['a', 'b', 'a']);
 		registry.dispose();
 		assert.ok(terminals.every(terminal => terminal.disposed));
 	});

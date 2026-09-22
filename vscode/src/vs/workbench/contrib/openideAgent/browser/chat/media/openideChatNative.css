@@ -52,6 +52,12 @@
 	cursor: default;
 }
 
+/* Workbench lists disable text selection. Transcript prose and live output are documents. */
+.openide-chat-list .openide-chat-row {
+	user-select: text;
+	-webkit-user-select: text;
+}
+
 /* A transcript has no hierarchy, but the tree still reserves its twistie column, and that pushed
    every row 16px to the right — the user's bubble stopped spanning the transcript's width the way
    `#messages` does in the webview. Collapsing it by width does not work: `abstractTree.ts:483`
@@ -261,12 +267,10 @@
    transcribed value by value from the webview, and keeping them here would have mixed that
    transcription with the transcript's own rules. */
 
-/* One continuous work surface, adapted from React Bits' Lattice Loader + Thought Line. It avoids
-   a technical event log: the square lattice carries the ongoing signal, the current sentence owns
-   attention, and at most four recent real steps fade upward as context. */
+/* A single current sentence carries the live signal through the shared text shimmer. */
 .openide-chat-response-working {
 	display: grid;
-	grid-template-columns: 18px minmax(0, 1fr) auto;
+	grid-template-columns: minmax(0, 1fr) auto;
 	align-items: end;
 	column-gap: 8px;
 	min-height: 24px;
@@ -276,64 +280,10 @@
 }
 .openide-chat-response-working.hidden { display: none; }
 
-.openide-chat-status-lattice {
-	align-self: end;
-	display: grid;
-	grid-template-columns: repeat(3, 4px);
-	grid-template-rows: repeat(3, 4px);
-	gap: 2px;
-	width: 16px;
-	height: 16px;
-	margin-bottom: 2px;
-	color: var(--vscode-progressBar-background);
-}
-.openide-chat-status-lattice-cell {
-	width: 4px;
-	height: 4px;
-	border-radius: 0;
-	background: currentColor;
-	opacity: .16;
-	animation: openide-chat-lattice-wave 864ms ease-in-out infinite;
-	animation-delay: calc(var(--oi-lattice-phase) * -108ms);
-}
-.openide-chat-status-lattice-cell-centre { animation: none; opacity: .08; }
-.openide-chat-status-waiting .openide-chat-status-lattice-cell { animation-play-state: paused; opacity: .3; }
-@keyframes openide-chat-lattice-wave {
-	0%, 30%, 100% { opacity: .16; transform: scale(.84); }
-	12% { opacity: 1; transform: scale(1); }
-}
-
 .openide-chat-status-flow { min-width: 0; overflow: hidden; }
-.openide-chat-status-trace {
-	display: flex;
-	flex-direction: column;
-	gap: 1px;
-	max-height: 49px;
-	overflow: hidden;
-	-webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 13px, #000 100%);
-	mask-image: linear-gradient(to bottom, transparent 0, #000 13px, #000 100%);
-}
-.openide-chat-status-trace:empty { display: none; }
-.openide-chat-status-trace-step {
-	display: block;
-	min-width: 0;
-	overflow: hidden;
-	white-space: nowrap;
-	text-overflow: ellipsis;
-	font-size: 11.5px;
-	line-height: 16px;
-	opacity: .46;
-	animation: openide-chat-trace-enter 160ms cubic-bezier(.2, .8, .2, 1) both;
-}
-.openide-chat-status-trace-step:nth-last-child(2) { opacity: .34; }
-.openide-chat-status-trace-step:nth-last-child(n + 3) { opacity: .22; }
-@keyframes openide-chat-trace-enter {
-	from { opacity: 0; transform: translateY(4px); filter: blur(2px); }
-	to { transform: translateY(0); filter: blur(0); }
-}
 .openide-chat-status-current { display: flex; align-items: baseline; gap: 7px; min-width: 0; line-height: 18px; }
 .openide-chat-response-working-label {
-	flex: 1;
+	flex: 0 1 auto;
 	min-width: 0;
 	overflow: hidden;
 	white-space: nowrap;
@@ -344,17 +294,11 @@
 }
 .openide-chat-status-timer {
 	flex: none;
+	margin-left: auto;
 	font-variant-numeric: tabular-nums;
 	font-size: 11px;
 	opacity: .58;
 }
-
-@media (prefers-reduced-motion: reduce) {
-	.openide-chat-status-lattice-cell { animation: none; opacity: .5; }
-	.openide-chat-status-trace-step { animation: none; }
-}
-.monaco-reduce-motion .openide-chat-status-lattice-cell { animation: none; opacity: .5; }
-.monaco-reduce-motion .openide-chat-status-trace-step { animation: none; }
 
 /* ---- Scrollbars: the shared skin in openideSurfaceCss.ts (thin pill, no track) selects on
    .openide-chat-native *, .openide-diagram * and .openide-diagram-scroll. Nothing local. */

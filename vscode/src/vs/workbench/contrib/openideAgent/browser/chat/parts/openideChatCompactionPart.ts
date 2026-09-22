@@ -8,6 +8,8 @@ import { IOpenideChatCompactionContent, IOpenideChatContent, isOpenideChatConten
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
 import { ICompactionSnapshot } from '../../../common/openideAgentTypes.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
+import { t } from '../../../common/openideStrings.js';
+import { setOpenideChatShimmer } from './openideChatActivityRow.js';
 import '../media/openideChatCompaction.css';
 
 export const OPENIDE_CHAT_COMPACTION_CLASS = 'openide-chat-compaction-card';
@@ -32,6 +34,7 @@ export class OpenideChatCompactionPart extends OpenideChatContentPart {
 	private readonly _title: HTMLElement;
 	private readonly _detail: HTMLElement;
 	private readonly _kind: HTMLElement;
+	private readonly _explanation: HTMLElement;
 
 	private _content: IOpenideChatCompactionContent;
 
@@ -39,10 +42,11 @@ export class OpenideChatCompactionPart extends OpenideChatContentPart {
 		super();
 
 		this._content = content;
-		this.domNode = $(`div.${OPENIDE_CHAT_COMPACTION_CLASS}`);
-		this._icon = append(this.domNode, $('span.openide-chat-compaction-icon'));
+		this.domNode = $(`div.${OPENIDE_CHAT_COMPACTION_CLASS}`, { role: 'status', 'aria-live': 'polite' });
+		this._icon = append(this.domNode, $('span.openide-chat-compaction-icon', { 'aria-hidden': 'true' }));
 		const copy = append(this.domNode, $('span.openide-chat-compaction-copy'));
 		this._title = append(copy, $('span.openide-chat-compaction-title'));
+		this._explanation = append(copy, $('span.openide-chat-compaction-explanation'));
 		this._detail = append(copy, $('span.openide-chat-compaction-detail'));
 		this._kind = append(this.domNode, $('span.openide-chat-compaction-kind'));
 
@@ -52,11 +56,13 @@ export class OpenideChatCompactionPart extends OpenideChatContentPart {
 	private _render(): void {
 		const status = this._content.status;
 		this.domNode.classList.toggle('openide-chat-compaction-failed', status === 'failed');
+		this.domNode.classList.toggle('openide-chat-compaction-running', status === 'started');
 
-		// The spin modifier is what makes `loading` a spinner rather than a static gear; it is added
-		// only while the summarisation is actually running.
+		// One quiet streaming label owns progress; the card remains stable through completion.
 		this._icon.className = `codicon codicon-${compactionGlyph(status)} openide-chat-compaction-icon`;
-		this._icon.classList.toggle('codicon-modifier-spin', status === 'started');
+		setOpenideChatShimmer(this._title, status === 'started');
+		this._explanation.textContent = t('chatSurface.compaction.explanation');
+		this._explanation.hidden = status !== 'started';
 
 		this._title.textContent = compactionTitle(status);
 
@@ -92,7 +98,7 @@ export class OpenideChatCompactionPart extends OpenideChatContentPart {
 /** the removed chat webview. */
 function compactionGlyph(status: CompactionStatus): string {
 	switch (status) {
-		case 'started': return 'loading';
+		case 'started': return 'fold';
 		case 'failed': return 'error';
 		case 'skipped': return 'info';
 		default: return 'check';
@@ -102,19 +108,19 @@ function compactionGlyph(status: CompactionStatus): string {
 /** the removed chat webview. */
 function compactionTitle(status: CompactionStatus): string {
 	switch (status) {
-		case 'started': return 'Compactando contexto…';
-		case 'failed': return 'No se pudo compactar';
-		case 'skipped': return 'Contexto sin cambios';
-		default: return 'Contexto compactado';
+		case 'started': return t('chatSurface.compaction.started');
+		case 'failed': return t('chatSurface.compaction.failed');
+		case 'skipped': return t('chatSurface.compaction.skipped');
+		default: return t('chatSurface.compaction.completed');
 	}
 }
 
 /** the removed chat webview. `automatic` is the unnamed default, as in the webview's ternary. */
 function compactionOrigin(origin: ICompactionSnapshot['origin']): string {
 	switch (origin) {
-		case 'manual': return 'Manual';
-		case 'recovery': return 'Recovery';
-		default: return 'Auto';
+		case 'manual': return t('chatSurface.compaction.manual');
+		case 'recovery': return t('chatSurface.compaction.recovery');
+		default: return t('chatSurface.compaction.automatic');
 	}
 }
 
@@ -126,11 +132,10 @@ function compactionOrigin(origin: ICompactionSnapshot['origin']): string {
  */
 function compactionDetail(status: CompactionStatus, snapshot: ICompactionSnapshot | undefined, message: string | undefined): string {
 	if (status === 'completed' && snapshot) {
-		const base = `${formatCompactionTokens(snapshot.beforeTokens)} → ${formatCompactionTokens(snapshot.afterTokens)} tokens`;
-		return `${base} · ${Math.round(snapshot.savingsPercent || 0)}% liberado`;
+		return t('chatSurface.compaction.tokens', formatCompactionTokens(snapshot.beforeTokens), formatCompactionTokens(snapshot.afterTokens), Math.round(snapshot.savingsPercent || 0));
 	}
 	if (status === 'started' && snapshot) {
-		return `${formatCompactionTokens(snapshot.beforeTokens)} tokens antes de resumir`;
+		return t('chatSurface.compaction.before', formatCompactionTokens(snapshot.beforeTokens));
 	}
 	return message ?? '';
 }

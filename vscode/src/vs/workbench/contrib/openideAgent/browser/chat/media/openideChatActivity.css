@@ -1,14 +1,6 @@
 /*---------------------------------------------------------------------------------------------
- *  OpenIDE — native chat: thinking card, tool rows and the collapsible "Exploring" block.
- *
- *  TRANSCRIBED, NOT DESIGNED: every value below comes from the chat webview this replaced (its
- *  `<style>` block; the webview itself was removed when the chat became native), with the rule it
- *  maps to named in the comment. The webview had already decided what this family looks like, and
- *  the native transcript has to be that surface rather than a second interpretation of it.
- *
- *  ONE DELIBERATE DEVIATION, marked in place: the webview hides `.part-icon` on every tool row
- *, which is why a tool call reads as a bare verb with a bullet. The icon
- *  is shown here. That was the reported defect, and the catalog has always carried the codicon.
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
 /* Live text uses OPENIDE_SHIMMER_CSS from the shared Workbench surface. */
@@ -54,66 +46,65 @@
 	.openide-chat-sk { animation: none; opacity: .76; }
 }
 
-/* ====================== reasoning / thinking =============================
-   the removed chat webview. Flat and integrated: no card, no border, no background. */
-
+/* Reasoning follows AI Elements: a quiet disclosure above an indented reading surface. */
 .openide-chat-reasoning {
 	display: block;
+	min-width: 0;
 }
 
 .openide-chat-reasoning-summary {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	cursor: pointer;
-	font-size: 12.5px;
-	color: var(--vscode-descriptionForeground);
+	gap: var(--vscode-spacing-size80);
+	width: fit-content;
+	max-width: 100%;
+	padding: var(--vscode-spacing-size40) 0;
 	list-style: none;
-	padding: 2px 0;
+	cursor: pointer;
+	color: var(--oi-text-muted);
+	font-size: var(--vscode-fontSize-body1);
+	line-height: 1.5;
+	border-radius: var(--oi-radius-control);
 }
 
-.openide-chat-reasoning-summary:hover {
-	color: var(--vscode-foreground);
+.openide-chat-reasoning-summary:hover { color: var(--oi-text); }
+.openide-chat-reasoning-summary:focus-visible {
+	outline: var(--vscode-strokeThickness) solid var(--oi-focus);
+	outline-offset: 2px;
 }
-
-/* While reasoning streams, the lattice line directly above is the heading. Keep the useful live
-   text, but never show a second "Thinking" label or a thought glyph for the same state. */
-.openide-chat-reasoning-live > .openide-chat-reasoning-summary { display: none; }
-.openide-chat-reasoning-live > .openide-chat-think { margin-top: 3px; }
-
-/* The default disclosure triangle is replaced by a codicon that rotates, so it has to go. */
-.openide-chat-reasoning-summary::-webkit-details-marker {
-	display: none;
+.openide-chat-reasoning-summary::-webkit-details-marker { display: none; }
+.openide-chat-reasoning-summary > .oi-glyph {
+	width: var(--vscode-codiconFontSize);
+	height: var(--vscode-codiconFontSize);
+	flex: none;
 }
-
+.openide-chat-reasoning-label { min-width: 0; overflow-wrap: anywhere; }
 .openide-chat-reasoning-chevron {
-	font-size: 12px;
+	flex: none;
+	font-size: var(--vscode-codiconFontSize-compact);
 	transition: transform 120ms ease;
 }
+.openide-chat-reasoning[open] .openide-chat-reasoning-chevron { transform: rotate(90deg); }
 
-.openide-chat-reasoning[open] .openide-chat-reasoning-chevron {
-	transform: rotate(90deg);
-}
-
-/* Its own scroll box, and that is load-bearing: the list runs with `horizontalScrolling: false`,
-   so a single unbroken line of reasoning that escaped this element would widen every row in the
-   transcript. `overflow-y: auto` alone already forces `overflow-x` to compute to `auto`. */
-.openide-chat-think {
-	margin: 2px 0 6px;
-	padding: 0;
-	border: none;
+.openide-chat-row .openide-chat-think {
+	margin: var(--vscode-spacing-size120) 0 var(--vscode-spacing-size40);
+	padding-left: var(--vscode-spacing-size160);
+	border-left: var(--vscode-strokeThickness) solid var(--oi-border);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	color: var(--vscode-descriptionForeground);
-	font-size: 12px;
-	line-height: 1.55;
+	color: var(--oi-text-muted);
+	font-size: var(--vscode-fontSize-body1);
+	line-height: 1.65;
 	max-height: 320px;
 	overflow-y: auto;
+	overscroll-behavior: contain;
 }
 
-/* Closed details must not paint outside their measured summary height in the virtual list. */
-.openide-chat-reasoning:not([open]) .openide-chat-think {
-	display: none;
+/* A collapsed disclosure must contribute only its summary to virtual row measurements. */
+.openide-chat-reasoning:not([open]) .openide-chat-think { display: none; }
+.monaco-reduce-motion .openide-chat-reasoning-chevron { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-reasoning-chevron { transition: none; }
 }
 
 /* ====================== "Exploring" group =================================
@@ -156,11 +147,7 @@
 	min-width: 0;
 }
 
-/* A folded phase is ONE line and nothing else. It used to keep the same 68px faded peek the
-   reasoning card does, which meant every settled phase left a stack of half-visible rows hanging
-   under it — the "tree view" the user asked to be rid of. The reasoning card keeps its peek
-   because there the peek is the content (the model's own words); here the content is a list of
-   files, and a list of files that is neither readable nor clickable is just texture. */
+/* Folded phases contribute only their summary to the virtual row height. */
 .openide-chat-activity-group:not([open]) > .openide-chat-activity-body {
 	display: none;
 }
@@ -505,3 +492,11 @@
 .openide-chat-tool-activity.openide-chat-part-cancelled .openide-chat-part-chevron { display: inline-flex !important; }
 .openide-chat-tool-activity.openide-chat-part-error .openide-chat-part-head,
 .openide-chat-tool-activity.openide-chat-part-cancelled .openide-chat-part-head { cursor: pointer; }
+
+/* Configuration names remain readable beside the operation. Errors retain their
+   target without forcing the explanation outside a narrow transcript. */
+.openide-chat-tool-authoring .openide-chat-part-head { cursor: pointer; }
+.openide-chat-tool-authoring .openide-chat-part-chevron { display: inline-flex !important; }
+.openide-chat-tool-authoring .openide-chat-part-spacer { display: none; }
+.openide-chat-tool-authoring.openide-chat-part-error .openide-chat-part-verb,
+.openide-chat-tool-authoring.openide-chat-part-cancelled .openide-chat-part-verb { flex: 1 1 auto; }

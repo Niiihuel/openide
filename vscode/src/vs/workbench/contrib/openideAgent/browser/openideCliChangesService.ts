@@ -198,7 +198,7 @@ export class OpenideCliChangesService extends Disposable {
 	/**
 	 * Inline previews, keyed by session and path. A preview reads the file and diffs it, and the
 	 * view repaints on every event, so without this each event would re-read every expanded
-	 * file. Dropped wholesale whenever a session changes or a tracked file is written: the two
+	 * file. Invalidated for the affected session or path when its state changes: the two
 	 * moments a preview can go stale.
 	 */
 	private readonly previews = new Map<string, Promise<IOpenideCliChangePreview | undefined>>();
@@ -235,7 +235,8 @@ export class OpenideCliChangesService extends Disposable {
 	}
 
 	private fireChange(sessionId: string): void {
-		this.previews.clear();
+		const prefix = `${sessionId}\0`;
+		for (const key of this.previews.keys()) { if (key.startsWith(prefix)) { this.previews.delete(key); } }
 		this._onDidChange.fire(sessionId);
 	}
 

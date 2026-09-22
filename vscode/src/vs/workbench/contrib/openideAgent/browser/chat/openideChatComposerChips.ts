@@ -108,6 +108,8 @@ export function composerPayload(inputText: string, capabilities: readonly IChatC
 
 export interface IComposerReference {
 	readonly path: string;
+	/** Review snapshot replaces whole-file context, and travels with this removable reference. */
+	readonly context?: string;
 	/** File icon theme classes, if the suggestion carried them. */
 	readonly iconClasses?: string;
 }
@@ -158,7 +160,8 @@ export class OpenideChatComposerChips extends Disposable {
 
 	/** Returns false when the limit is reached; the caller decides whether to say so. */
 	addReference(reference: IComposerReference): boolean {
-		if (this._references.some(candidate => candidate.path === reference.path)) { return true; }
+		const existing = this._references.findIndex(candidate => candidate.path === reference.path);
+		if (existing >= 0) { this._references[existing] = reference; this._render(); return true; }
 		if (this._references.length >= REFERENCE_LIMIT) { return false; }
 		this._references.push(reference);
 		this._render();

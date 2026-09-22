@@ -128,6 +128,15 @@ export function createProviderIcon(document: Document, providerId: string, label
 	return element;
 }
 
+/** A consistent settings-sized slot around a provider mark, independent of the SVG's shape. */
+export function createProviderIconTile(document: Document, providerId: string, label = '', className = ''): HTMLElement {
+	const tile = createOpenideElement(document, 'span');
+	tile.className = 'openide-provider-icon-tile';
+	tile.setAttribute('aria-hidden', 'true');
+	tile.appendChild(createProviderIcon(document, providerId, label, className));
+	return tile;
+}
+
 async function readAssetDataUri(fileService: IFileService, asset: ProviderBrandAsset): Promise<string | undefined> {
 	try {
 		const file = await fileService.readFile(FileAccess.asFileUri(`${ICON_ROOT}${asset}` as Parameters<typeof FileAccess.asFileUri>[0]));

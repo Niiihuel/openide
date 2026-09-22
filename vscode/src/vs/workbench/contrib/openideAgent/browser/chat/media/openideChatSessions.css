@@ -1,0 +1,123 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) OpenIDE. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Conversation navigation: quiet section labels, a leading title and secondary project context.
+   The native list owns geometry; no margins or animated height on virtual rows. */
+.openide-chat-sessions-pane .openide-chat-sessions-list {
+	display: block;
+	flex: 1;
+	min-height: 0;
+	padding: 0;
+	gap: 0;
+	overflow: hidden;
+}
+.openide-chat-sessions-list > .monaco-list { height: 100%; }
+.openide-chat-sessions-list .monaco-list-row { padding: 0 var(--vscode-spacing-size4, 4px); box-sizing: border-box; }
+.openide-chat-sessions-pane .openide-chat-sessions-group,
+.openide-chat-sessions-pane.compact .openide-chat-sessions-group:first-child {
+	width: 100%;
+	height: 32px;
+	min-height: 0;
+	margin: 0;
+	padding: var(--vscode-spacing-size4, 4px) var(--vscode-spacing-size8, 8px);
+	gap: var(--vscode-spacing-size8, 8px);
+	color: var(--oi-secondary);
+	font-size: var(--oi-text-sm);
+}
+.openide-chat-sessions-pane .openide-chat-sessions-group-title { flex: 1; text-align: left; font-weight: 400; }
+.openide-chat-sessions-pane .openide-chat-sessions-group-count { font-size: var(--oi-text-xs); }
+.openide-chat-sessions-pane .openide-chat-sessions-group > .codicon { font-size: var(--oi-icon-action, 16px); }
+.openide-chat-sessions-pane .openide-chat-sessions-group > .openide-chat-sessions-chevron { font-size: var(--oi-icon-compact, 12px); }
+.openide-chat-sessions-pane .openide-chat-sessions-row {
+	height: 52px;
+	min-height: 0;
+	border-radius: var(--oi-radius-control);
+}
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row { height: 40px; }
+.openide-chat-sessions-pane .openide-chat-sessions-open {
+	position: relative;
+	display: grid;
+	grid-template-columns: var(--oi-icon-action, 16px) minmax(0, 1fr) minmax(var(--oi-session-actions-width, 34px), max-content);
+	grid-template-rows: 18px 16px;
+	align-content: center;
+	height: 48px;
+	min-height: 0;
+	box-sizing: border-box;
+	gap: var(--vscode-spacing-size2, 2px) var(--vscode-spacing-size8, 8px);
+	padding: var(--vscode-spacing-size6, 6px) var(--vscode-spacing-size8, 8px);
+}
+.openide-chat-sessions-pane .openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-open { padding-right: var(--vscode-spacing-size8, 8px); }
+.openide-chat-sessions-pane .openide-chat-sessions-open.selected::before { display: none; }
+.openide-chat-sessions-pane .openide-chat-sessions-kind { grid-column: 1; grid-row: 1 / 3; }
+.openide-chat-sessions-native-icon { display: block; width: 16px; height: 16px; background: url('../../../../../browser/media/code-icon.svg') center / contain no-repeat; }
+.openide-chat-sessions-provider-icon { display: block; width: 16px; height: 16px; }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-open {
+	height: 40px;
+	grid-template-columns: 16px minmax(0, 1fr) 20px;
+	grid-template-rows: 20px;
+	padding: 5px 8px;
+	gap: 8px;
+}
+.openide-chat-sessions-pane.compact .openide-chat-sessions-kind { grid-row: 1; align-self: center; }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row-title { grid-row: 1; align-self: center; font-size: var(--oi-text-sm); }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row-context,
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row-time { display: none; }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-open > .openide-chat-sessions-activity { grid-row: 1; align-self: center; }
+.openide-chat-sessions-pane .openide-chat-sessions-body { display: contents; }
+.openide-chat-sessions-pane .openide-chat-sessions-row-title { grid-column: 2; grid-row: 1; min-width: 0; font-size: var(--oi-text-md); line-height: 18px; }
+.openide-chat-sessions-row-context { grid-column: 2; grid-row: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--oi-secondary); font-size: var(--oi-text-xs); line-height: 16px; }
+/* Recency owns the trailing metadata cell instead of floating over the title.
+   Keep that cell's measured width when actions appear so labels never shift. */
+.openide-chat-sessions-pane .openide-chat-sessions-row-time {
+	position: static;
+	grid-column: 3;
+	grid-row: 2;
+	justify-self: end;
+	font-size: var(--oi-text-xs);
+	line-height: 16px;
+	max-width: none;
+	white-space: nowrap;
+}
+.openide-chat-sessions-activity { display: inline-flex; align-items: center; flex: 0 0 auto; }
+.openide-chat-sessions-open > .openide-chat-sessions-activity { grid-column: 3; grid-row: 1; justify-self: end; }
+.openide-chat-sessions-pane .openide-chat-sessions-row-actions { right: var(--vscode-spacing-size8, 8px); }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row-actions {
+	display: inline-flex;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity var(--oi-duration-hover) var(--oi-ease);
+}
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-row-actions { opacity: 1; pointer-events: auto; }
+.openide-chat-sessions-pane .openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-row-time { display: block; visibility: hidden; }
+.openide-chat-sessions-pane.compact .openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-row-time { display: none; }
+.openide-chat-sessions-pane .openide-chat-sessions-row:is(:hover, :focus-within) .openide-chat-sessions-activity { visibility: hidden; }
+/* The complete row owns selection and hover paint, including the trailing action.
+   Painting the shorter button too leaves a lighter stripe above and below it. */
+.openide-chat-sessions-pane .openide-chat-sessions-row:is(:hover, :focus-within) { background: var(--oi-hover); }
+.openide-chat-sessions-pane .openide-chat-sessions-row.active { background: var(--oi-selected); }
+.openide-chat-sessions-pane .openide-chat-sessions-row > .openide-chat-sessions-open { background: transparent; }
+.openide-chat-sessions-unread { width: 6px; height: 6px; flex: 0 0 6px; border-radius: var(--oi-radius-circle); background: var(--vscode-notificationsInfoIcon-foreground, var(--oi-primary)); }
+.openide-chat-sessions-pane .openide-chat-sessions-children {
+	height: 32px;
+	margin: 0 0 0 var(--vscode-spacing-size16, 16px);
+	padding-left: var(--vscode-spacing-size8, 8px);
+	gap: 0;
+}
+.openide-chat-sessions-pane .openide-chat-sessions-children-toggle,
+.openide-chat-sessions-pane .openide-chat-sessions-child {
+	height: 32px;
+	min-height: 0;
+	box-sizing: border-box;
+}
+.openide-chat-sessions-pane .openide-chat-sessions-child { padding: var(--vscode-spacing-size4, 4px) var(--vscode-spacing-size12, 12px) var(--vscode-spacing-size4, 4px) var(--vscode-spacing-size32, 32px); }
+.openide-chat-sessions-pane .openide-chat-sessions-child-title { text-overflow: ellipsis; }
+.openide-chat-sessions-pane .openide-chat-sessions-rename { padding: 0 var(--vscode-spacing-size8, 8px); }
+.openide-chat-sessions-rename .monaco-inputbox { width: 100%; }
+.openide-chat-sessions-pane [aria-expanded="true"] > .openide-chat-sessions-chevron { transform: rotate(90deg); }
+.openide-chat-sessions-pane [hidden] { display: none !important; }
+.monaco-reduce-motion .openide-chat-sessions-pane .openide-chat-sessions-row-actions { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+	.openide-chat-sessions-pane .openide-chat-sessions-row-actions { transition: none; }
+}

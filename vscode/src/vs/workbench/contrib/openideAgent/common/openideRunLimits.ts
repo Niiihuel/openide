@@ -7,11 +7,9 @@
  *  OpenIDE — defensive limits for the agent loop.
  *--------------------------------------------------------------------------------------------*/
 
-// The loop must be long but finite: each iteration can mean a billable request.
-// Repetition detection still fires earlier, and the user can continue in another turn.
-// 200 by default so a long session is not cut off halfway; grok-cli uses 400 as an outer ceiling
-// but caps each turn at 120, so this lands in the same range.
-export const DEFAULT_AGENT_ITERATIONS = 200;
+// Zero means no cycle ceiling. Long runs continue in the same harness and compact as needed.
+// Positive values remain an explicit, optional per-run budget.
+export const DEFAULT_AGENT_ITERATIONS = 0;
 export const MIN_AGENT_ITERATIONS = 25;
 export const MAX_AGENT_ITERATIONS = 500;
 export const MAX_OUTPUT_CONTINUATIONS = 2;

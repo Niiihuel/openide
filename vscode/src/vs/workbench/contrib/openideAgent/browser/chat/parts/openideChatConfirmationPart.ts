@@ -81,18 +81,20 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 	}
 
 	private _renderActions(content: IOpenideChatConfirmationContent): void {
-		const scope = append(this._actions, $('button.oi-btn.ghost.openide-chat-approval-scope-trigger', {
+		const scope = content.operationOnly
+			? append(this._actions, $('span.openide-chat-approval-scope-fixed'))
+			: append(this._actions, $('button.oi-btn.ghost.openide-chat-approval-scope-trigger', {
 			type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false',
 			'aria-label': t('chatSurface.approval.scope'),
-		})) as HTMLButtonElement;
+		}));
 		const scopeText = append(scope, $('span.openide-chat-approval-scope-label'));
-		append(scope, $('span.codicon.codicon-chevron-down', { 'aria-hidden': 'true' }));
+		if (!content.operationOnly) { append(scope, $('span.codicon.codicon-chevron-down', { 'aria-hidden': 'true' })); }
 		let selected: ToolApprovalDecision = 'once';
 		const options: { label: string; decision: ToolApprovalDecision }[] = [
 			{ label: t('chatSurface.approval.scopeOnce'), decision: 'once' },
-			{ label: t('chatSurface.approval.scopeSession'), decision: 'session' },
 		];
-		if (!content.sensitive) { options.push({ label: t('chatSurface.approval.scopeAlways'), decision: 'always' }); }
+		if (!content.operationOnly) { options.push({ label: t('chatSurface.approval.scopeSession'), decision: 'session' }); }
+		if (!content.operationOnly && !content.sensitive) { options.push({ label: t('chatSurface.approval.scopeAlways'), decision: 'always' }); }
 		scopeText.textContent = options[0].label;
 		const buttons = append(this._actions, $('.openide-chat-approval-buttons'));
 		const choice = (label: string, decision: () => ToolApprovalDecision, extraClass: string) => {
@@ -104,13 +106,14 @@ export class OpenideChatConfirmationPart extends OpenideChatContentPart {
 		choice(t('chatSurface.approval.deny'), () => 'deny', '.deny');
 		choice(t('chatSurface.approval.allow'), () => {
 			// Only the offered scopes can be selected; sensitive actions never persist a grant.
+			if (content.operationOnly) { return 'once'; }
 			return selected === 'session' ? 'session' : selected === 'always' && !content.sensitive ? 'always' : 'once';
 		}, '.primary');
 		const hint = append(this._actions, $('.openide-chat-approval-scope-hint'));
 		hint.hidden = true;
 		hint.setAttribute('aria-live', 'polite');
 		this._register(addDisposableListener(scope, 'click', () => {
-			if (this._decision) { return; }
+			if (this._decision || content.operationOnly) { return; }
 			this._scopePopover.toggle(scope, {
 				anchorPosition: AnchorPosition.BELOW,
 				render: (container, store) => {

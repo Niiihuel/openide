@@ -12,6 +12,10 @@ import { OPENIDE_SURFACE_STRINGS } from './openideSurfaceStrings.js';
 import { OPENIDE_SERVICE_STRINGS } from './openideServiceStrings.js';
 import { OPENIDE_AGENT_SURFACE_STRINGS } from './openideAgentSurfaceStrings.js';
 import { OPENIDE_CHAT_SURFACE_STRINGS } from './openideChatSurfaceStrings.js';
+import { OPENIDE_CONVERSATION_WORKSPACE_STRINGS } from './openideConversationWorkspaceStrings.js';
+import { OPENIDE_CLI_INTEGRATION_STRINGS } from './openideCliIntegrationStrings.js';
+import { OPENIDE_CONVERSATION_NAVIGATION_STRINGS } from './openideConversationNavigationStrings.js';
+import { OPENIDE_PROVIDER_STRINGS } from './openideProviderStrings.js';
 
 /**
  * The fork's own UI strings (chat dock, settings, project map, plan, providers), in the two
@@ -74,6 +78,10 @@ const STRINGS = {
 	// contribution's commands: the surfaces that were still on `localize()`, where the default text
 	// was the only text any locale ever got.
 	...OPENIDE_CHAT_SURFACE_STRINGS,
+	...OPENIDE_CONVERSATION_WORKSPACE_STRINGS,
+	...OPENIDE_CLI_INTEGRATION_STRINGS,
+	...OPENIDE_CONVERSATION_NAVIGATION_STRINGS,
+	...OPENIDE_PROVIDER_STRINGS,
 	// ---- chat composer footer / session info (upstream chat-secondary-toolbar + ChatContextUsageDetails)
 	'chat.slash.agent': { es: 'Ejecuta la tarea en modo Agent', en: 'Runs the task in Agent mode' },
 	'chat.slash.plan': { es: 'Crea un plan de implementación revisable', en: 'Drafts an implementation plan you can review' },
@@ -102,6 +110,11 @@ const STRINGS = {
 	'chat.ask.next': { es: 'Siguiente', en: 'Next' },
 	'chat.ask.step': { es: 'Pregunta {0} de {1}', en: 'Question {0} of {1}' },
 	'chat.ask.single': { es: 'Pregunta', en: 'Question' },
+	'chat.actionRequired.ask': { es: 'El agente espera tu respuesta en el chat.', en: 'The agent is waiting for your answer in chat.' },
+	'chat.actionRequired.approval': { es: 'El agente espera tu permiso para continuar.', en: 'The agent is waiting for your permission to continue.' },
+	'chat.actionRequired.accountChoice': { es: 'El agente espera que elijas una cuenta para continuar.', en: 'The agent is waiting for you to choose an account.' },
+	'chat.actionRequired.modeSuggestion': { es: 'El agente espera que elijas cómo continuar.', en: 'The agent is waiting for you to choose how to continue.' },
+	'chat.actionRequired.open': { es: 'Abrir chat', en: 'Open chat' },
 	'chat.ask.answered': { es: 'Respondido', en: 'Answered' },
 	'chat.ask.free': { es: 'Otra respuesta…', en: 'Another answer…' },
 	'chat.ask.title': { es: 'Preguntas', en: 'Questions' },
@@ -260,7 +273,7 @@ const STRINGS = {
 	'chat.part.subagentOpen': { es: 'Abrir el chat del especialista', en: 'Open the specialist chat' },
 	'chat.part.subagentOpenAria': { es: 'Abrir el chat del especialista: {0}', en: 'Open the specialist chat: {0}' },
 	'chat.part.subagentNoSession': { es: 'Este especialista ya no tiene su chat disponible en esta ventana.', en: 'This specialist no longer has its chat available in this window.' },
-	'chat.part.subagentTail': { es: 'Ver las últimas líneas', en: 'Show the last few lines' },
+	'chat.part.subagentTail': { es: 'Ver actividad completa', en: 'Show full activity' },
 	'chat.part.subagentDefault': { es: 'Especialista', en: 'Specialist' },
 	'chat.part.subagentCancelled': { es: 'cancelado', en: 'cancelled' },
 	'chat.part.subagentRunning': { es: 'El especialista está trabajando', en: 'The specialist is working' },
@@ -497,6 +510,13 @@ const STRINGS = {
 	'settings.projectMap.version': { es: 'Versión', en: 'Version' },
 	'settings.projectMap.lastBuild': { es: 'Última construcción', en: 'Last build' },
 	'settings.projectMap.pending': { es: 'Archivos pendientes', en: 'Pending files' },
+	'settings.projectMap.entities': { es: 'Entidades', en: 'Entities' },
+	'settings.projectMap.relations': { es: 'Relaciones', en: 'Relations' },
+	'settings.projectMap.staleFiles': { es: '{0} archivos requieren actualización', en: '{0} files need updating' },
+	'settings.projectMap.lastScan': { es: 'Último análisis: {0}', en: 'Last scan: {0}' },
+	'settings.projectMap.scanExcluded': { es: '{0} excluidos por patrones', en: '{0} excluded by patterns' },
+	'settings.projectMap.scanTests': { es: '{0} tests omitidos', en: '{0} tests skipped' },
+	'settings.projectMap.scanLarge': { es: '{0} archivos demasiado grandes', en: '{0} files too large' },
 	'settings.projectMap.rebuild': { es: 'Reconstruir índice', en: 'Rebuild index' },
 	'settings.projectMap.rebuilding': { es: 'Reconstruyendo índice…', en: 'Rebuilding index…' },
 	'settings.projectMap.clear': { es: 'Limpiar índice', en: 'Clear index' },
@@ -506,12 +526,19 @@ const STRINGS = {
 	'settings.projectMap.exclude': { es: 'Excluir', en: 'Exclude' },
 	'settings.projectMap.patternsDesc': { es: 'Un patrón glob por línea. Excluir se suma a los excluidos por defecto (node_modules, dist, .git…); si Incluir tiene patrones, sólo se indexa lo que matchee. Cambiarlos dispara una reconstrucción.', en: 'One glob pattern per line. Exclude adds to the defaults (node_modules, dist, .git…); if Include has patterns, only what matches is indexed. Changing them triggers a rebuild.' },
 	'settings.projectMap.learned': { es: 'Entidades con historial', en: 'Entities with history' },
+	'settings.projectMap.learning': { es: 'Aprendizaje', en: 'Learning' },
+	'settings.projectMap.preferred': { es: 'Confiables', en: 'Trusted' },
+	'settings.projectMap.tentative': { es: 'Tentativas', en: 'Tentative' },
 	'settings.projectMap.learnedDesc': { es: 'El agente registra qué entidades resultaron útiles según lo que hacés después (aceptar o revertir sus cambios). Las lecciones pierden la mitad de su peso cada 30 días, así que lo aprendido sobre código ya cambiado se desvanece solo.', en: 'The agent records which entities proved useful based on what you do next (accepting or reverting its changes). Lessons lose half their weight every 30 days, so what it learned about code that has since changed fades on its own.' },
 	'settings.projectMap.disputed': { es: 'En disputa', en: 'Disputed' },
 	'settings.projectMap.forget': { es: 'Olvidar lo aprendido', en: 'Forget what was learned' },
 	'settings.subagents.routingState': { es: 'Estado del routing', en: 'Routing state' },
-	'settings.subagents.providers': { es: 'Providers y modelos conectados', en: 'Connected providers and models' },
-	'settings.subagents.noProviders': { es: 'No hay providers configurados.', en: 'No providers configured.' },
+	'settings.subagents.routingDesc': { es: 'Los subagentes usan los proveedores conectados según la política de cada tarea. Administrá cuentas y modelos en AI Providers.', en: 'Subagents use connected providers according to each task policy. Manage accounts and models in AI Providers.' },
+	'settings.subagents.providers': { es: 'Proveedores disponibles', en: 'Available providers' },
+	'settings.subagents.noProviders': { es: 'No hay proveedores conectados.', en: 'No connected providers.' },
+	'settings.subagents.connected': { es: 'Conectado', en: 'Connected' },
+	'settings.subagents.manageProviders': { es: 'Administrar proveedores', en: 'Manage providers' },
+	'settings.subagents.attempts': { es: '{0} intentos', en: '{0} attempts' },
 	'settings.subagents.health': { es: 'Health y cooldowns', en: 'Health and cooldowns' },
 	'settings.subagents.noFailures': { es: 'Sin fallos registrados.', en: 'No failures recorded.' },
 	'settings.subagents.decisions': { es: 'Últimas decisiones', en: 'Latest decisions' },

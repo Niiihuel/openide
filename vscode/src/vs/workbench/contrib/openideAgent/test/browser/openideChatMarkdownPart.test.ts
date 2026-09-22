@@ -75,6 +75,32 @@ suite('OpenIDE ChatMarkdownPart', () => {
 		assert.strictEqual(part.domNode.textContent?.trim(), 'One');
 	});
 
+	test('selected streaming text remains copyable as the same paragraph grows', () => {
+		const { part, element } = create('Keep **selected** text');
+		document.body.appendChild(part.domNode);
+		const selection = document.getSelection()!;
+		store.add({ dispose: () => { selection.removeAllRanges(); part.domNode.remove(); } });
+		const text = part.domNode.querySelector('strong')!.firstChild!;
+		selection.setBaseAndExtent(text, 0, text, 8);
+		part.tryUpdate(markdown('Keep **selected** text while the answer grows'), element);
+		assert.strictEqual(selection.toString(), 'selected');
+		part.tryUpdate(markdown('Keep **selected** text while the answer grows.'), { isComplete: true } as IOpenideChatItem);
+		assert.strictEqual(selection.toString(), 'selected');
+	});
+
+	test('backwards selection across stable and growing paragraphs keeps its direction', () => {
+		const { part, element } = create('First paragraph\n\nSecond paragraph');
+		document.body.appendChild(part.domNode);
+		const selection = document.getSelection()!;
+		store.add({ dispose: () => { selection.removeAllRanges(); part.domNode.remove(); } });
+		const first = part.domNode.children[0].firstChild!;
+		const last = part.domNode.children[1].firstChild!;
+		selection.setBaseAndExtent(last, 6, first, 6);
+		const selected = selection.toString();
+		part.tryUpdate(markdown('First paragraph\n\nSecond paragraph keeps growing'), element);
+		assert.deepStrictEqual({ text: selection.toString(), anchor: selection.anchorOffset, focus: selection.focusNode === first }, { text: selected, anchor: 6, focus: true });
+	});
+
 	test('a fence is tokenized synchronously and its source is what the copy button copies', async () => {
 		const { part, clipboard } = create('Look:\n\n```plaintext\nline one\nline two\n```\n');
 		const fence = part.domNode.querySelector('.openide-chat-codeblock');
@@ -126,10 +152,21 @@ suite('OpenIDE ChatMarkdownPart', () => {
 
 	test('workspace file links open in the clicked window editor target', () => {
 		const fixture = create('See [the source](src/app/main.ts).');
-		fixture.part.domNode.querySelector('a')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
-		assert.deepStrictEqual(fixture.files, ['src/app/main.ts']);
+		const full = store.add(fixture.renderer.render(new MarkdownString('[source](./src/app/main.ts)')));
+		for (const root of [fixture.part.domNode, full.element]) {
+			root.querySelector('a')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+		}
+		assert.deepStrictEqual(fixture.files, ['src/app/main.ts', 'src/app/main.ts']);
 		assert.deepStrictEqual(fixture.previews, []);
 		assert.deepStrictEqual(fixture.opened, []);
+	});
+
+	test('relative file links do not enable executable links or remote images', () => {
+		const fixture = create('[source](src/main.ts) [run](command:workbench.action.files.openFile) [script](javascript:alert) ![pixel](https://example.com/pixel)');
+		assert.strictEqual(fixture.part.domNode.querySelectorAll('a').length, 1);
+		assert.strictEqual(fixture.part.domNode.querySelector('img'), null);
+		assert.deepStrictEqual(fixture.opened, []);
+		assert.deepStrictEqual(fixture.files, []);
 	});
 
 	test('workspace file link detection rejects web and command links', () => {

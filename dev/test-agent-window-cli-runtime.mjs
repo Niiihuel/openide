@@ -17,6 +17,7 @@ const controls = path.join(temporary, 'controls');
 const binaries = path.join(temporary, 'bin');
 const profile = path.join(temporary, 'profile');
 const output = path.join(root, '.build/agent-window-cli-runtime');
+const composerOnly = process.env.OPENIDE_CLI_COMPOSER_ONLY === '1';
 for (const directory of [workspace, controls, binaries, path.join(profile, 'User'), output]) { fs.mkdirSync(directory, { recursive: true }); }
 fs.writeFileSync(path.join(workspace, 'fixture.txt'), 'before CLI edit\n');
 execFileSync('git', ['init', '-q'], { cwd: workspace });
@@ -44,6 +45,7 @@ async function until(predicate, label) {
 }
 const errors = [];
 const observe = page => {
+	page.on('dialog', dialog => { if (dialog.type() !== 'beforeunload') { void dialog.dismiss().catch(() => {}); } });
 	page.on('pageerror', error => errors.push(error.stack));
 	page.on('console', message => {
 		if (message.type() === 'error' && !message.text().includes('No default agent registered')) { errors.push(message.text()); }
@@ -106,6 +108,7 @@ try {
 	assert.equal(metadata.id, first.sessionId);
 	assert.equal(metadata.title, 'CLI custom title');
 	assert.equal(metadata.cwd, workspace);
+	assert.equal(metadata.status, 'unknown', 'a running PTY does not prove that an agent turn is running or waiting');
 	assert.equal(await agent.getByText('Native harness transcript', { exact: true }).isVisible(), false, 'native transcript does not leak into the CLI island');
 	assert.equal(await agent.locator('.openide-chat-goal-tray:visible').count(), 0, 'CLI owns its surface without an OpenIDE goal footer');
 	assert.equal(await agent.locator('.openide-chat-native > .openide-chat-goal-tray').count(), 0, 'goal tray stays inside the native composer');
@@ -118,7 +121,17 @@ try {
 	await input.pressSequentially('from-agent-window', {delay:15});
 	await until(() => generations()[0]?.input.includes('from-agent-window'), 'typing into auxiliary PTY');
 	assert.equal(generations().length, 1, 'moving into auxiliary does not launch a second process');
+	const richInput = agent.getByRole('textbox', { name: 'Draft for Gemini CLI', exact: true });
+	await richInput.fill('A multiline draft\nwith explicit routing');
+	assert.equal(generations()[0].input.includes('A multiline draft'), false, 'typing in the composer stages without sending');
+	await agent.getByRole('button', { name: 'Paste into Gemini CLI', exact: true }).click();
+	await until(() => generations()[0].input.includes('A multiline draft'), 'explicit bracketed paste reaches hosted CLI');
+	await until(async () => await richInput.inputValue() === '', 'successful paste clears only its submitted draft');
+	await new Promise(resolve => setTimeout(resolve, 3000));
+	assert.equal((await ide.evaluate(() => window.agentWindowCliFixture.selected())).status, 'unknown', 'silence never invents a needs-input state');
 	await agent.screenshot({path:path.join(output, 'cli-agent-window.png')});
+	if (!composerOnly) {
+	await agent.getByRole('tab', { name: 'Context', exact: true }).click();
 	const environmentAnchor = agent.locator('.openide-agent-window-context button').filter({ has: agent.locator('.openide-agent-window-row-label') }).filter({ hasText: 'Local · Gemini CLI' });
 	await environmentAnchor.click();
 	const environment = agent.getByRole('dialog', { name: 'Environment', exact: true });
@@ -143,6 +156,7 @@ try {
 	assert.equal(fs.readFileSync(cwdProof, 'utf8').trim(), workspace);
 	await agent.screenshot({ path: path.join(output, 'cli-environment-terminal.png') });
 	await agent.keyboard.press('Control+KeyJ');
+	await agent.getByRole('tab', { name: 'Changes', exact: true }).click();
 	fs.writeFileSync(path.join(controls, `${first.generation}.command.json`), JSON.stringify({ id: 'edit-file', action: 'write', content: 'after CLI edit\n' }));
 	await until(() => generations()[0]?.commands['edit-file']?.ok, 'controlled CLI workspace edit');
 	const changedFile = agent.locator('.openide-agent-window-review-summary');
@@ -154,6 +168,8 @@ try {
 	assert.equal(await ide.locator('.monaco-modal-editor-block').count(), 0, 'review stays in auxiliary workbench');
 	await ide.evaluate(() => window.agentWindowCliFixture.selectReview());
 	await agent.keyboard.press('Control+KeyL');
+	await until(async () => (await richInput.inputValue()).includes('after CLI edit'), 'Continue selection is staged in the exact CLI draft');
+	await agent.getByRole('button', { name: 'Paste into Gemini CLI', exact: true }).click();
 	await until(() => generations()[0].input.includes('after CLI edit'), 'Continue selection reaches same CLI PTY');
 	assert.equal((await ide.evaluate(() => window.agentWindowCliFixture.selected())).id, first.sessionId);
 	await agent.screenshot({path:path.join(output,'cli-inline-review.png')});
@@ -161,6 +177,7 @@ try {
 	await agent.locator('.modal-editor-header .codicon-close').click();
 	await agent.locator('.monaco-modal-editor-block').waitFor({ state: 'detached' });
 	assert.equal(generations()[0].pid, first.pid, 'reviewing edits preserves the live CLI process');
+	}
 	await agent.close();
 	const ideInput = ide.locator('.openide-chat-agent-terminal .xterm-helper-textarea').first();
 	await ideInput.waitFor();
@@ -171,7 +188,7 @@ try {
 	assert.deepEqual(returned.map(state => ({generation:state.generation,pid:state.pid,sessionId:state.sessionId})), [{generation:first.generation,pid:first.pid,sessionId:first.sessionId}], 'same PTY generation, process and conversation after close');
 	await ide.screenshot({path:path.join(output, 'cli-returned-ide.png')});
 	assert.deepEqual(errors, [], 'handoff produces no renderer errors');
-	fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({environmentActions:true,environmentTerminalCwd:true,exactExecutable:true,customTitle:true,automaticPresentation:true,nativeSessionDiff:true,realPty:true,auxiliaryKeyboard:true,sameProcess:true,closeReturnsToIde:true},null,2));
+	fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ ...(!composerOnly ? { environmentActions: true, environmentTerminalCwd: true, nativeSessionDiff: true } : {}), exactExecutable: true, customTitle: true, automaticPresentation: true, richDraft: true, explicitPaste: true, silenceUnverified: true, realPty: true, auxiliaryKeyboard: true, sameProcess: true, closeReturnsToIde: true },null,2));
 	console.log('PASS: detected fixture CLI, same live PTY and session, auxiliary input and return to IDE after close.');
 } finally {
 	if (app) { await app.close(); }

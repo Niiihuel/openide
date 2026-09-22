@@ -38,6 +38,7 @@ export interface IOpenideTurnRequest {
 	readonly provider: Omit<IProviderRequest, 'messages'>;
 	readonly token: CancellationToken;
 	readonly onEvent: (event: AgentLoopEvent) => void;
+	/** Zero keeps the same harness running until completion or cancellation. */
 	readonly maxIterations: number;
 	readonly messageId?: string;
 	readonly runtimeContext?: string;
@@ -73,7 +74,7 @@ export async function runOpenideTurn(request: IOpenideTurnRequest, ports: IOpeni
 			emit({ type: 'done', reason: 'compaction' });
 			return 'completed';
 		}
-		for (let iteration = 0; iteration < maxIterations; iteration++) {
+		for (let iteration = 0; maxIterations === 0 || iteration < maxIterations; iteration++) {
 			if (token.isCancellationRequested) { return 'cancelled'; }
 			const isOutputContinuation = continueTruncatedOutput;
 			continueTruncatedOutput = false;

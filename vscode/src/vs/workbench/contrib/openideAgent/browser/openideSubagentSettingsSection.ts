@@ -23,6 +23,8 @@ import { IOpenideAgentService } from './openideAgentService.js';
 import { ISubagentRoutingService } from './openideSubagentRoutingService.js';
 import { ISubagentRunService } from './openideSubagentRunService.js';
 import { t } from '../common/openideStrings.js';
+import { createProviderIcon } from './openideProviderIcons.js';
+import './media/openideSubagentSettings.css';
 
 const POLICY_SETTING = 'openide.subagents.routing.policy';
 
@@ -43,12 +45,12 @@ export class OpenideSubagentSettingsSection extends Disposable implements IOpeni
 		@ISubagentRunService private readonly runs: ISubagentRunService,
 	) { super(); }
 
-	render(container: HTMLElement, _context: IOpenideSettingsSectionContext): void {
+	render(container: HTMLElement, context: IOpenideSettingsSectionContext): void {
 		this.renderStore.clear();
 		const token = ++this.generation;
 
-		const policy = append(container, $('.openide-settings-section'));
-		append(policy, $('.openide-settings-section-title', undefined, t('settings.subagents.policy')));
+		const policy = append(container, $('details.openide-settings-section.openide-subagent-settings-policy')) as HTMLDetailsElement;
+		append(policy, $('summary.openide-settings-section-title', undefined, t('settings.subagents.policy')));
 		append(policy, $('.openide-settings-section-desc', undefined,
 			t('settings.subagents.policyDesc')));
 
@@ -101,18 +103,22 @@ export class OpenideSubagentSettingsSection extends Disposable implements IOpeni
 			showDiagnostics(this.routing.policyDiagnostics());
 		}));
 
-		const status = append(container, $('.openide-settings-section'));
+		const status = append(container, $('.openide-settings-section.openide-subagent-settings-status'));
+		// The live routing summary is the entry point; the JSON policy is an advanced control.
+		container.insertBefore(status, policy);
 		append(status, $('.openide-settings-section-title', undefined, t('settings.subagents.routingState')));
+		append(status, $('.openide-settings-section-desc', undefined, t('settings.subagents.routingDesc')));
 		const statusBody = append(status, $('.openide-settings-section-body'));
 		statusBody.textContent = t('settings.subagents.loading');
-		void this.renderStatus(statusBody, token);
+		void this.renderStatus(statusBody, token, context.navigate);
 	}
 
-	private async renderStatus(body: HTMLElement, token: number): Promise<void> {
+	private async renderStatus(body: HTMLElement, token: number, navigate?: (category: string) => void): Promise<void> {
 		const providers = await Promise.all(this.agentService.listProviders().map(async provider => ({
+			id: provider.id,
 			label: provider.label,
 			connected: await this.agentService.isConnected(provider.id).catch(() => false),
-			models: await this.agentService.resolveProviderModels(provider).catch(() => provider.defaultModel ? [provider.defaultModel] : []),
+			models: provider.defaultModel ? [provider.defaultModel] : [],
 		})));
 		// The editor may have repainted (config/scope change) while we waited: if this run is no
 		// longer the current one, `body` is orphaned and painting it would show another view's data.
@@ -125,41 +131,45 @@ export class OpenideSubagentSettingsSection extends Disposable implements IOpeni
 			return append(wrapper, $('.openide-settings-status-list'));
 		};
 
+		const connected = providers.filter(provider => provider.connected);
 		const providerList = group(t('settings.subagents.providers'));
-		if (!providers.length) {
+		providerList.classList.add('openide-subagent-provider-list');
+		if (!connected.length) {
 			append(providerList, $('.openide-settings-status-empty', undefined, t('settings.subagents.noProviders')));
 		}
-		for (const provider of providers) {
+		for (const provider of connected) {
 			const row = append(providerList, $('.openide-settings-status-row'));
+			append(row, createProviderIcon(row.ownerDocument, provider.id, provider.label, 'openide-subagent-provider-icon'));
 			append(row, $('span.openide-settings-status-name', undefined, provider.label));
-			append(row, $('span.openide-settings-status-detail', undefined, provider.models.join(', ') || 'Sin modelos conocidos'));
-			append(row, $(`span.openide-settings-status-state.${provider.connected ? 'ok' : 'off'}`, undefined, provider.connected ? 'Conectado' : 'Desconectado'));
+			append(row, $('span.openide-settings-status-detail', undefined, provider.models[0] || ''));
+			append(row, $('span.openide-settings-status-state.ok', undefined, t('settings.subagents.connected')));
+		}
+		if (navigate) {
+			const open = append(providerList, $('button.oi-btn.ghost.openide-subagent-providers-link', { type: 'button' }, t('settings.subagents.manageProviders'))) as HTMLButtonElement;
+			this.renderStore.add(addDisposableListener(open, 'click', () => navigate('openideAgent/providers')));
 		}
 
 		const health = this.routing.listHealth();
-		const healthList = group(t('settings.subagents.health'));
-		if (!health.length) {
-			append(healthList, $('.openide-settings-status-empty', undefined, t('settings.subagents.noFailures')));
-		}
-		for (const entry of health) {
+		if (health.length) {
+			const healthList = group(t('settings.subagents.health'));
+			for (const entry of health) {
 			const row = append(healthList, $('.openide-settings-status-row'));
 			append(row, $('span.openide-settings-status-name', undefined, `${entry.providerId}/${entry.model}`));
 			append(row, $('span.openide-settings-status-detail', undefined, entry.reason ?? ''));
 			append(row, $('span.openide-settings-status-state', undefined, entry.status));
+			}
 		}
 
-		const routed = this.runs.list().filter(run => run.routingDecision).slice(0, 20);
-		const runList = group(t('settings.subagents.decisions'));
-		if (!routed.length) {
-			append(runList, $('.openide-settings-status-empty', undefined, t('settings.subagents.noRuns')));
-		}
-		for (const run of routed) {
+		const routed = this.runs.list().filter(run => run.routingDecision).slice(0, 5);
+		if (routed.length) {
+			const runList = group(t('settings.subagents.decisions'));
+			for (const run of routed) {
 			const attempts = run.routingAttempts?.length ?? 0;
 			const row = append(runList, $('.openide-settings-status-row'));
 			append(row, $('span.openide-settings-status-name', undefined, run.definitionName));
 			append(row, $('span.openide-settings-status-detail', undefined, `${run.routingDecision!.profile} · ${run.providerId || 'default'}/${run.model}`));
-			append(row, $('span.openide-settings-status-state', undefined, `${attempts} intento${attempts === 1 ? '' : 's'}`));
+			append(row, $('span.openide-settings-status-state', undefined, t('settings.subagents.attempts', attempts)));
+			}
 		}
 	}
 }
-

@@ -90,19 +90,24 @@
 .openide-chat-request-images {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 6px;
-	margin-top: 6px;
+	gap: var(--vscode-spacing-size80);
+	margin-top: var(--vscode-spacing-size80);
 }
 
-/* A frame, not a button: the webview's thumbnail opens a lightbox that the native chat does not
-   have yet, and a `zoom-in` cursor over dead pixels is worse than no affordance. */
+/* AI Elements grid attachments retain a predictable square preview in the transcript. */
 .openide-chat-request-image {
-	width: 72px;
-	height: 72px;
-	border: 1px solid var(--oi-border-strong);
-	border-radius: 2px;
+	width: 96px;
+	height: 96px;
+	max-width: 100%;
+	padding: 0;
+	border: var(--vscode-strokeThickness) solid var(--oi-border);
+	border-radius: var(--oi-radius-control);
 	overflow: hidden;
-	background: transparent;
+	background: var(--oi-card);
+}
+.openide-chat-request-image:focus-visible {
+	outline: var(--vscode-strokeThickness) solid var(--oi-focus);
+	outline-offset: 2px;
 }
 
 .openide-chat-request-image img {

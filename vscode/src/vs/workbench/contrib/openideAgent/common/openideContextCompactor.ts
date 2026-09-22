@@ -79,6 +79,7 @@ export class OpenideContextCompactor {
 			if (!emergency || token.isCancellationRequested || JSON.stringify(messages) !== original) { return false; }
 			const sourceProjectionHash = await hashAsync(original);
 			if (token.isCancellationRequested || JSON.stringify(messages) !== original) { return false; }
+			onEvent({ type: 'compaction', status: 'started', origin, beforeTokens: used });
 			messages.splice(0, messages.length, ...emergency);
 			await appendOpenideJournal(request.journal, 'compaction', { origin, after: emergency, state: 'committed', sourceProjectionHash, deterministic: true });
 			onEvent({ type: 'compaction', status: 'completed', origin, beforeTokens: used, afterTokens: fixedTokens + estimateConversationTokens(emergency) });

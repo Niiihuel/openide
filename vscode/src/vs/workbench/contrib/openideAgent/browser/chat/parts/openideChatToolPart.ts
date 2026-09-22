@@ -8,7 +8,8 @@ import { onUnexpectedError } from '../../../../../../base/common/errors.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IOpenideChatContent, IOpenideChatToolContent, isOpenideChatToolContent } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
-import { getOpenideToolMeta, IOpenideToolMeta, toolDetailFor, toolVisualKind } from '../../../common/chat/openideChatToolMeta.js';
+import { getOpenideToolMeta, IOpenideToolMeta, toolVisualKind } from '../../../common/chat/openideChatToolMeta.js';
+import { openideChatToolPresentation } from '../../../common/chat/openideChatToolPresentation.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
 import { isOpenideChatTextClipped, setupChatTooltip } from '../openideChatHover.js';
 import {
@@ -27,29 +28,6 @@ import '../media/openideChatActivity.css';
 import { webPreviewFromTool } from '../../../common/chat/openideChatWebPreview.js';
 import { t } from '../../../common/openideStrings.js';
 import { IOpenideAgentService } from '../../openideAgentService.js';
-
-/**
- * Verb shown for a call, by state.
- *
- * Present tense while it runs, past tense once it settles: the wording is what tells the user the
- * call is over, because the row has no spinner and no status glyph. Both strings come from the
- * catalog, never from a hardcoded name — that is the drift the catalog exists to prevent.
- */
-function toolVerb(meta: IOpenideToolMeta, content: IOpenideChatToolContent): string {
-	switch (content.state) {
-		case 'running':
-			return meta.verb;
-		case 'error':
-		case 'cancelled':
-			// The outcome is not folded into the verb any more: it is a badge beside it (`_paintBadge`),
-			// which keeps the failure spelled out in text for a colour-blind reading while the verb
-			// stays the same word as on a row that succeeded.
-			return meta.done || content.name;
-		case 'success':
-		default:
-			return meta.done || meta.verb;
-	}
-}
 
 /**
  * A generic tool call: one flat row, icon + verb + target.
@@ -101,7 +79,7 @@ export class OpenideChatToolPart extends OpenideChatContentPart {
 
 	/**
 	 * A failed or cancelled call says so the way the workbench's own chat does: the row's icon
-	 * becomes `error` (or `circle-slash`), the verb stays the same word as on a row that succeeded,
+	 * becomes `error` (or `circle-slash`), the verb names the failed operation,
 	 * and the first line of what the tool answered follows in a muted note, so the failure is read
 	 * without opening the body and without a red sentence. One node, reused across repaints.
 	 */
@@ -127,21 +105,26 @@ export class OpenideChatToolPart extends OpenideChatContentPart {
 	private _render(): void {
 		const content = this._content;
 		const meta = this._meta;
+		const presentation = openideChatToolPresentation(content.name, content.argumentsJson, content.state);
+		this.domNode.classList.toggle('openide-chat-tool-authoring', !!presentation.authoring);
+		this.domNode.dataset.state = content.state;
 
-		// The workbench's chat swaps the tool's icon for the outcome on a failed call (`Codicon.error`,
-		// `circleSlash` when skipped); the verb keeps its wording.
-		setOpenideChatActivityIcon(this._row.icon, content.state === 'error' ? 'error' : content.state === 'cancelled' ? 'circle-slash' : meta.icon);
+		// Failure and cancellation have their own icon and verb; neither claims the write succeeded.
+		setOpenideChatActivityIcon(this._row.icon, content.state === 'error' ? 'error' : content.state === 'cancelled' ? 'circle-slash' : presentation.icon);
 
-		const verb = toolVerb(meta, content);
-		const detail = toolDetailFor(meta, content.argumentsJson);
+		const { verb, detail } = presentation;
 		// A path-like target joins the verb as a file chip (upstream's "Generating patch in
 		// [README.md]"); a command or free-form argument stays out of the line, as before.
-		renderOpenideChatActivityLine(
-			this._row.verb,
-			verb,
-			!meta.cmd && detail && /\.[A-Za-z0-9]+(\s|$)/.test(detail) ? detail : '',
-			path => void this._agentService.openDiff(path, undefined, getWindow(this.domNode).vscodeWindowId).catch(onUnexpectedError),
-		);
+		if (presentation.authoring) {
+			this._row.verb.textContent = detail ? `${verb} ${detail}` : verb;
+		} else {
+			renderOpenideChatActivityLine(
+				this._row.verb,
+				verb,
+				!meta.cmd && detail && /\.[A-Za-z0-9]+(\s|$)/.test(detail) ? detail : '',
+				path => void this._agentService.openDiff(path, undefined, getWindow(this.domNode).vscodeWindowId).catch(onUnexpectedError),
+			);
+		}
 		setOpenideChatShimmer(this._row.verb, content.state === 'running');
 
 		if (this._row.detail) {
@@ -201,8 +184,7 @@ export class OpenideChatToolPart extends OpenideChatContentPart {
 	}
 
 	private _headText(): string {
-		const verb = toolVerb(this._meta, this._content);
-		const detail = toolDetailFor(this._meta, this._content.argumentsJson);
+		const { verb, detail } = openideChatToolPresentation(this._content.name, this._content.argumentsJson, this._content.state);
 		return detail ? `${verb} ${detail}` : verb;
 	}
 

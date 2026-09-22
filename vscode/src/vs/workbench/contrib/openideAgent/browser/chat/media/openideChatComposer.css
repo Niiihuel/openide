@@ -238,43 +238,70 @@
 	background: var(--oi-hover);
 }
 
-.openide-chat-attach-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+/* AI Elements inline attachments: preview, readable filename, and a separate remove action. */
+.openide-chat-attach-strip { display: flex; flex-wrap: wrap; gap: var(--vscode-spacing-size80); }
 .openide-chat-attach-strip[hidden] { display: none; }
 
 .openide-attach-chip {
-	position: relative;
-	width: 44px;
-	height: 44px;
-	border: 1px solid var(--oi-border-strong);
-	border-radius: 2px;
-	overflow: hidden;
+	display: inline-flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size40);
+	max-width: min(100%, 240px);
+	min-width: 0;
+	padding: var(--vscode-spacing-size40);
+	border: var(--vscode-strokeThickness) solid var(--oi-border);
+	border-radius: var(--oi-radius-control);
+	background: var(--oi-card);
+	color: var(--oi-text);
+}
+.openide-attach-preview {
+	display: flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size80);
+	min-width: 0;
+	padding: 0;
+	border: none;
+	border-radius: var(--oi-radius-control);
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	font-size: var(--vscode-fontSize-label1);
 	cursor: zoom-in;
 }
-
-.openide-attach-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
-
-/* Restored attachment whose bytes are still being read back from its asset. Holds the frame so
-   the strip does not jump when the thumbnail lands. */
-.openide-attach-chip.pending { background: var(--oi-tint-2); cursor: default; }
-
+.openide-attach-preview:disabled { cursor: default; }
+.openide-attach-preview img {
+	width: var(--vscode-spacing-size320);
+	height: var(--vscode-spacing-size320);
+	flex: none;
+	object-fit: cover;
+	border-radius: var(--oi-radius-control);
+}
+.openide-attach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-attach-chip.pending { min-height: var(--vscode-spacing-size320); }
 .openide-attach-remove {
-	position: absolute;
-	top: 1px;
-	right: 1px;
-	width: 16px;
-	height: 16px;
+	flex: none;
+	width: var(--vscode-spacing-size240);
+	height: var(--vscode-spacing-size240);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	padding: 0;
 	border: none;
-	border-radius: var(--oi-radius-control);
-	background: rgba(0, 0, 0, 0.55);
-	color: #fff;
+	border-radius: var(--oi-radius-circle);
+	background: transparent;
+	color: var(--oi-text-muted);
 	cursor: pointer;
 }
-
-.monaco-workbench .openide-chat-native .openide-chat-input-card .openide-attach-remove .codicon[class*="codicon-"] { font-size: 11px; color: inherit; }
+.openide-attach-remove:hover { background: var(--oi-hover); color: var(--oi-text); }
+.openide-attach-preview:focus-visible,
+.openide-attach-remove:focus-visible {
+	outline: var(--vscode-strokeThickness) solid var(--oi-focus);
+	outline-offset: 2px;
+}
+.monaco-workbench .openide-chat-native .openide-chat-input-card .openide-attach-remove .codicon[class*="codicon-"] {
+	font-size: var(--vscode-codiconFontSize-compact);
+	color: inherit;
+}
 
 /* ---- Control row ------------------------------------------------------------------------ */
 

@@ -45,8 +45,26 @@ suite('OpenIDE structured Codex goal ownership', () => {
 		f.connection.accept({ method: 'turn/started', params: { threadId: 'thread', turn: { id: 'manual' } } });
 		assert.strictEqual((await result).stop, true);
 		assert.deepStrictEqual(f.calls, ['thread/goal/get', 'thread/read', 'turn/start', 'turn/interrupt']);
-		assert.strictEqual(f.events[0].kind, 'manualTurn');
+		assert.ok(f.events.some(event => event.kind === 'manualTurn'));
 		await assert.rejects(f.connection.start('other', 'goal'), /controlled/);
+	});
+
+	test('manual CLI activity is correlated to the hosted thread without answering terminal approvals', () => {
+		const f = fixture();
+		f.connection.accept({ method: 'turn/started', params: { threadId: 'foreign', turn: { id: 'foreign' } } });
+		f.connection.accept({ method: 'turn/started', params: { threadId: 'thread', turn: { id: 'manual' } } });
+		f.connection.accept({ id: 9, method: 'item/commandExecution/requestApproval', params: { threadId: 'thread', turnId: 'manual' } });
+		f.connection.accept({ method: 'item/completed', params: { threadId: 'thread', turnId: 'manual' } });
+		f.connection.accept({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'stale', status: 'failed' } } });
+		f.connection.accept({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'manual', status: 'completed' } } });
+		assert.deepStrictEqual({ activity: f.events.filter(event => event.kind === 'activity'), replies: f.replies, denied: f.denied }, {
+			activity: [
+				{ sessionId: 'session', kind: 'activity', status: 'in-progress' },
+				{ sessionId: 'session', kind: 'activity', status: 'needs-input', waitingReason: 'permission' },
+				{ sessionId: 'session', kind: 'activity', status: 'in-progress' },
+				{ sessionId: 'session', kind: 'activity', status: 'completed' },
+			], replies: [], denied: [],
+		});
 	});
 
 	test('cancellation before the start acknowledgement interrupts only the acknowledged turn', async () => {

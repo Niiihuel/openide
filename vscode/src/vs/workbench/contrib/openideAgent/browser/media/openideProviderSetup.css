@@ -1,0 +1,150 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.openide-provider-setup {
+	max-width: 800px;
+	min-width: 0;
+	color: var(--oi-text);
+	font-family: var(--oi-font);
+}
+
+.openide-provider-setup-intro {
+	margin: 0 0 24px;
+	color: var(--oi-text-muted);
+	font-size: var(--oi-text-lg);
+	line-height: 1.5;
+}
+
+.openide-provider-setup-card {
+	display: flex;
+	flex-direction: column;
+	gap: 24px;
+	padding: 24px;
+	background: var(--oi-card);
+	border: 1px solid var(--oi-border);
+	border-radius: var(--oi-radius-lg);
+}
+
+.openide-provider-setup-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+	gap: 24px;
+}
+
+.openide-provider-setup-field {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 0;
+}
+
+.openide-provider-setup-field[hidden],
+.openide-provider-setup-error[hidden] {
+	display: none;
+}
+
+.openide-provider-setup-label {
+	font-size: var(--oi-text-lg);
+	font-weight: 600;
+}
+
+.openide-provider-setup-control {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.openide-provider-setup-control > .monaco-inputbox,
+.openide-provider-setup-control > .openide-settings-dropdown {
+	flex: 1;
+	width: 100%;
+	min-width: 0;
+	min-height: var(--oi-row-lg);
+	border-radius: var(--oi-radius-md);
+}
+
+.monaco-workbench .openide-provider-setup .monaco-inputbox > .ibwrapper > input.input {
+	min-height: var(--oi-row-lg);
+	padding: 6px 12px;
+	font-size: var(--oi-text-md);
+}
+
+.openide-provider-setup input[readonly] {
+	color: var(--oi-text-muted);
+}
+
+.openide-provider-setup-help,
+.openide-provider-setup-error {
+	margin: 0;
+	font-size: var(--oi-text-sm);
+	line-height: 1.5;
+}
+
+.openide-provider-setup-help {
+	color: var(--oi-text-muted);
+}
+
+.openide-provider-setup-error,
+.openide-provider-setup-status.error {
+	color: var(--vscode-errorForeground);
+}
+
+.openide-provider-setup-field.invalid .monaco-inputbox {
+	border-color: var(--vscode-inputValidation-errorBorder) !important;
+}
+
+.openide-provider-setup-status {
+	min-height: 20px;
+	margin-top: 12px;
+	font-size: var(--oi-text-md);
+	line-height: 1.5;
+	color: var(--oi-text-muted);
+	overflow-wrap: anywhere;
+}
+
+.openide-provider-setup-status.success {
+	color: var(--oi-text);
+}
+
+.openide-provider-setup-actions,
+.openide-provider-setup-actions-end {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.openide-provider-setup-actions {
+	justify-content: space-between;
+	margin-top: 12px;
+}
+
+.openide-provider-setup-actions-end {
+	margin-left: auto;
+}
+
+.openide-provider-setup .monaco-button {
+	width: auto;
+	min-height: var(--oi-row-lg);
+	padding: 6px 16px;
+	white-space: nowrap;
+}
+
+.monaco-workbench .openide-provider-setup .openide-provider-setup-reveal.monaco-button.secondary {
+	background: transparent !important;
+	border-color: transparent !important;
+	box-shadow: none;
+	padding: 6px 8px;
+}
+
+.monaco-workbench .openide-provider-setup .openide-provider-setup-reveal.monaco-button.secondary:hover {
+	background: var(--oi-hover) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.openide-provider-setup .monaco-button,
+	.openide-provider-setup .monaco-inputbox { transition: none; }
+}

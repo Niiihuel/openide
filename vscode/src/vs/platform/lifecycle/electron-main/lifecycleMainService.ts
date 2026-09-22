@@ -427,7 +427,14 @@ export class LifecycleMainService extends Disposable implements ILifecycleMainSe
 		this.windowCounter++;
 
 		// Window Will Load
-		windowListeners.add(window.onWillLoad(e => this._onWillLoadWindow.fire({ window, workspace: e.workspace, reason: e.reason })));
+		windowListeners.add(window.onWillLoad(e => {
+			// Dedicated Agents runtimes start hidden, so they never pass through the
+			// editor-close path below that normally records background workbenches.
+			if (window.config?.openideAgentWindowOwner) {
+				this.backgroundWorkbenches.set(window.id, window);
+			}
+			this._onWillLoadWindow.fire({ window, workspace: e.workspace, reason: e.reason });
+		}));
 
 		// Window Before Closing: Main -> Renderer
 		const win = assertReturnsDefined(window.win);
@@ -453,6 +460,9 @@ export class LifecycleMainService extends Disposable implements ILifecycleMainSe
 			e.preventDefault();
 			this.unload(window, UnloadReason.CLOSE).then(veto => {
 				if (veto) {
+					// A hidden Workbench may have a dirty-buffer veto. Reveal it only when the
+					// user actually needs to resolve that veto, never on the normal close path.
+					if (this.backgroundWorkbenches.delete(windowId) && !win.isVisible()) { win.show(); }
 					this.windowToCloseRequest.delete(windowId);
 					return;
 				}
@@ -515,8 +525,9 @@ export class LifecycleMainService extends Disposable implements ILifecycleMainSe
 			this.companionWindows.delete(auxWindow);
 			const owner = this.backgroundWorkbenches.get(auxWindow.parentId);
 			if (owner && !this._quitRequested && ![...this.companionWindows].some(companion => companion.keepWorkbenchAlive && companion.parentId === owner.id)) {
-				this.backgroundWorkbenches.delete(owner.id);
-				if (owner.win && !owner.win.isVisible()) { owner.win.show(); owner.close(); }
+				// Closing a hidden BrowserWindow works directly. Showing it first flashed the
+				// IDE behind Agents for one frame as the final companion disappeared.
+				if (owner.win && !owner.win.isVisible()) { owner.close(); }
 			}
 
 			windowListeners.dispose();

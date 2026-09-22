@@ -316,6 +316,22 @@ suite('OpenIDE chat transcript restore', () => {
 		assert.strictEqual((contentOf(items, 1)[0] as IOpenideChatSubagentContent).status, 'cancelled');
 	});
 
+	test('restores specialist reasoning, changed files and terminal output in order', () => {
+		const messages: IChatMessage[] = [
+			{ role: 'user', content: 'Build chat' },
+			{ role: 'assistant', content: '', reasoning: 'Inspect styles' },
+			{ role: 'assistant', content: '', fileDiff: { path: 'chat.css', created: true, editAdded: 1, diffLines: [{ t: 'add', x: 'new' }] } },
+			{ role: 'assistant', content: '', terminalOutput: { callId: 'test', output: 'checks passed' } },
+			{ role: 'assistant', content: '', reasoning: 'Review result' },
+		];
+		const items = buildOpenideChatTranscript(messages, { streaming: true });
+		const content = contentOf(items, 1);
+		assert.deepStrictEqual(content.map(part => part.kind), ['thinking', 'edit', 'terminal', 'thinking']);
+		assert.strictEqual(content[0].kind === 'thinking' && content[0].isComplete, true);
+		assert.strictEqual(content[3].kind === 'thinking' && content[3].isComplete, false);
+		assert.strictEqual(contentOf(build(messages), 1).at(-1)?.kind, 'thinking');
+	});
+
 	test('compaction restores as a settled card, including threads saved before it had metadata', () => {
 		const items = build([
 			{ role: 'user', content: '[Resumen histórico compacto] lo que pasó antes' },

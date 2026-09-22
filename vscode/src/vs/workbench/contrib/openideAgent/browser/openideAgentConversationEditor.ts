@@ -9,6 +9,7 @@ import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { observableValue } from '../../../../base/common/observable.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IEditorOptions } from '../../../../platform/editor/common/editor.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
@@ -20,6 +21,7 @@ import { IEditorGroup } from '../../../services/editor/common/editorGroupsServic
 import { buildOpenideChatTranscript, reconcileOpenideChatTranscript } from '../common/chat/openideChatTranscript.js';
 import { t } from '../common/openideStrings.js';
 import { OpenideChatListWidget } from './chat/openideChatListWidget.js';
+import { hydrateOpenideChatImages } from './chat/openideChatImageHydration.js';
 import { OpenideChatRequestRenderer } from './chat/openideChatRequestRenderer.js';
 import { OpenideChatResponseRenderer } from './chat/openideChatResponseRenderer.js';
 import type { OpenideChatWidget } from './chat/openideChatWidget.js';
@@ -55,7 +57,9 @@ export class OpenideAgentConversationEditor extends EditorPane {
 	private list!: OpenideChatListWidget;
 	private readonly width = observableValue('agentConversationWidth', 0);
 	private readonly visibility = this._register(new Emitter<boolean>());
-	private renderedRevision: number | undefined;
+	private renderedRevision: string | undefined;
+	private hydrationGeneration = 0;
+	private readonly imageData = new Map<string, string>();
 	private transcriptVersion = 0;
 	private transcriptVisible = false;
 	private scrollPresentationToStart = false;
@@ -70,6 +74,7 @@ export class OpenideAgentConversationEditor extends EditorPane {
 		@IThemeService theme: IThemeService,
 		@IStorageService storage: IStorageService,
 		@IInstantiationService private readonly instantiation: IInstantiationService,
+		@IFileService private readonly files: IFileService,
 	) { super(OpenideAgentConversationEditor.ID, group, telemetry, theme, storage); }
 	protected createEditor(parent: HTMLElement): void {
 		this.root = append(parent, $('.openide-chat-native.openide-agent-conversation-editor.show-file-icons'));
@@ -87,29 +92,51 @@ export class OpenideAgentConversationEditor extends EditorPane {
 	}
 	override async setInput(input: OpenideAgentConversationInput, options: IEditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
 		await super.setInput(input, options, context, token);
-		if (token.isCancellationRequested) { return; }
+		if (token.isCancellationRequested || this.input !== input) { return; }
 		this.sessionStore.clear();
+		this.imageData.clear();
 		this.refreshScheduler.cancel();
 		this.renderedRevision = undefined;
 		this.sessionStore.add(input.onDidChangePresentation(() => { this.renderedRevision = undefined; this.scrollPresentationToStart = true; if (this.transcriptVisible) { this.refreshScheduler.schedule(0); } }));
 		this.sessionStore.add(input.source.sessionStore.onDidChange(() => {
-			if (this.transcriptVisible && input.source.sessionStore.messageVersionOf(input.sessionId) !== this.renderedRevision && !this.refreshScheduler.isScheduled()) { this.refreshScheduler.schedule(); }
+			if (this.transcriptVisible && this.revisionOf(input) !== this.renderedRevision && !this.refreshScheduler.isScheduled()) { this.refreshScheduler.schedule(); }
 		}));
 		this.refreshTranscript(); this.list.scrollToEnd();
 		if (this.transcriptVisible) { this.refreshScheduler.schedule(0); }
 	}
+	private revisionOf(input: OpenideAgentConversationInput): string {
+		return `${input.source.sessionStore.messageVersionOf(input.sessionId)}:${input.source.sessionStore.metaOf(input.sessionId)?.subagentStatus === 'running'}:${input.summaryOnly}`;
+	}
 	private refreshTranscript(): void {
 		if (!(this.input instanceof OpenideAgentConversationInput)) { return; }
-		const { source, sessionId } = this.input;
-		const revision = source.sessionStore.messageVersionOf(sessionId);
+		const input = this.input;
+		const { source, sessionId } = input;
+		const streaming = source.sessionStore.metaOf(sessionId)?.subagentStatus === 'running';
+		const revision = this.revisionOf(input);
 		if (revision === this.renderedRevision) { return; }
 		this.renderedRevision = revision;
-		const messages = source.sessionStore.messagesOf(sessionId);
-		const summary = this.input.summaryOnly ? [...messages].reverse().find(message => message.role === 'assistant' && !message.hidden && message.content.trim()) : undefined;
-		const snapshot = summary ? [{ ...summary, toolCalls: undefined }] : messages;
-		this.list.setItems(reconcileOpenideChatTranscript(this.list.getItems(), buildOpenideChatTranscript(snapshot), ++this.transcriptVersion));
+		const messages = source.sessionStore.transcriptOf(sessionId);
+		const summary = input.summaryOnly ? [...messages].reverse().find(message => message.role === 'assistant' && !message.hidden && message.content.trim()) : undefined;
+		// Archives and the live model window can share messages. Hydrate a presentation snapshot
+		// so opening the complete history never changes the harness's context or stored archives.
+		const snapshot = summary ? [{ ...summary, toolCalls: undefined }] : messages.map(message => ({
+			...message,
+			images: message.images?.map(image => !image.data && image.assetUri && this.imageData.has(image.assetUri) ? { ...image, data: this.imageData.get(image.assetUri)! } : image),
+		}));
+		const generation = ++this.hydrationGeneration;
+		const render = () => this.list.setItems(reconcileOpenideChatTranscript(this.list.getItems(), buildOpenideChatTranscript(snapshot, { streaming: streaming && !input.summaryOnly }), ++this.transcriptVersion));
+		render();
+		void hydrateOpenideChatImages(this.files, snapshot).then(hydrated => {
+			if (!hydrated || this._store.isDisposed || this.input !== input) { return; }
+			for (const message of snapshot) {
+				for (const image of message.images ?? []) {
+					if (image.assetUri && image.data) { this.imageData.set(image.assetUri, image.data); }
+				}
+			}
+			if (generation === this.hydrationGeneration && this.revisionOf(input) === revision) { render(); }
+		});
 	}
-	override clearInput(): void { this.refreshScheduler.cancel(); this.renderedRevision = undefined; this.scrollPresentationToStart = false; this.sessionStore.clear(); this.list.setItems([]); super.clearInput(); }
+	override clearInput(): void { this.refreshScheduler.cancel(); this.hydrationGeneration++; this.imageData.clear(); this.renderedRevision = undefined; this.scrollPresentationToStart = false; this.sessionStore.clear(); this.list.setItems([]); super.clearInput(); }
 	protected override setEditorVisible(visible: boolean): void {
 		super.setEditorVisible(visible);
 		if (this.transcriptVisible === visible) { return; }

@@ -253,6 +253,20 @@ suite('OpenIDE ChatController — plan and canvas wiring', () => {
 		assert.strictEqual(turn.messageId, harness.runs[0].messageId);
 	});
 
+	test('Build takes over a planning turn that is still running', () => {
+		const harness = createHarness();
+		harness.controller.restore();
+		const id = harness.sessions.ensureActive();
+		const conversation = (harness.controller as unknown as { conversation(id: string): { busy: boolean } }).conversation(id);
+		conversation.busy = true;
+		assert.strictEqual(harness.controller.isBusy, true);
+		harness.requestPlanBuild(PLAN, URI.file('/w/' + PLAN));
+		assert.strictEqual(harness.runs.length, 1, 'approval must start the build immediately');
+		assert.strictEqual(harness.runs[0].mode, 'agent');
+		assert.strictEqual(harness.failed.length, 0, 'the approved plan must not be refused');
+		assert.strictEqual(harness.controller.isBusy, true);
+	});
+
 	test('a resolved input updates its background conversation and clears the wait', async () => {
 		const harness = createHarness();
 		harness.controller.restore();
@@ -268,6 +282,25 @@ suite('OpenIDE ChatController — plan and canvas wiring', () => {
 		const choice = contentOf(harness).find(content => content.kind === 'accountChoice');
 		assert.ok(choice?.kind === 'accountChoice' && choice.decision === 'stop');
 		assert.ok(!openideChatLiveStatusLabel(contentOf(harness), false)?.waitingForResponse);
+		await harness.finishRun();
+	});
+
+	test('live requests notify their owning conversation; automatic mode handoffs do not', async () => {
+		const harness = createHarness();
+		harness.controller.restore();
+		const conversationId = harness.sessions.ensureActive();
+		const required: { conversationId: string; requestId: string; kind: string }[] = [];
+		store.add(harness.controller.onDidRequireUserAction(action => required.push(action)));
+		harness.requestPlanBuild(PLAN, URI.file('/w/' + PLAN));
+		harness.emitAgent({ type: 'ask', id: 'question', questions: [] });
+		harness.emitAgent({ type: 'approvalRequest', id: 'permission', tool: 'run_command', title: 'Run', risk: 'exec' });
+		harness.emitAgent({ type: 'accountChoiceRequest', id: 'account', spentLabel: 'A', candidates: [] });
+		harness.emitAgent({ type: 'suggestMode', id: 'automatic', mode: 'agent', reason: 'Continue', autoAcceptSeconds: 2 });
+		assert.deepStrictEqual(required, [
+			{ conversationId, requestId: 'question', kind: 'ask' },
+			{ conversationId, requestId: 'permission', kind: 'approval' },
+			{ conversationId, requestId: 'account', kind: 'accountChoice' },
+		]);
 		await harness.finishRun();
 	});
 

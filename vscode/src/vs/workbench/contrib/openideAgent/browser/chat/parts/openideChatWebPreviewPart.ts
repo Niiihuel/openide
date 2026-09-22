@@ -13,6 +13,7 @@ import { IHoverService } from '../../../../../../platform/hover/browser/hover.js
 import { INotificationService } from '../../../../../../platform/notification/common/notification.js';
 import { IOpenerService } from '../../../../../../platform/opener/common/opener.js';
 import { IBrowserViewWorkbenchService } from '../../../../browserView/common/browserView.js';
+import { IBrowserAgentSessionService } from '../../../../browserView/common/browserAgentSessionService.js';
 import { IOpenideChatContent } from '../../../common/chat/openideChatContent.js';
 import { IOpenideChatWebPreview, webPreviewFromTool } from '../../../common/chat/openideChatWebPreview.js';
 import { t } from '../../../common/openideStrings.js';
@@ -25,6 +26,7 @@ export class OpenideChatWebPreviewPart extends OpenideChatContentPart {
 	constructor(
 		private readonly preview: IOpenideChatWebPreview,
 		@IBrowserViewWorkbenchService browsers: IBrowserViewWorkbenchService,
+		@IBrowserAgentSessionService sessions: IBrowserAgentSessionService,
 		@IOpenerService opener: IOpenerService,
 		@IClipboardService clipboard: IClipboardService,
 		@IHoverService hover: IHoverService,
@@ -36,7 +38,8 @@ export class OpenideChatWebPreviewPart extends OpenideChatContentPart {
 			if (this.opening || this._store.isDisposed) { return; }
 			this.opening = true;
 			try {
-				await browsers.openPreview(preview.url, undefined, { targetWindowId: getWindow(this.domNode).vscodeWindowId, modal, reveal: true });
+				const browserId = sessions.sessionForToolCall(preview.toolCallId)?.state.currentAction?.pageId;
+				await browsers.openPreview(preview.url, undefined, { targetWindowId: getWindow(this.domNode).vscodeWindowId, modal, reveal: true, browserId });
 			} catch (error) { notifications.error(error); }
 			finally { this.opening = false; }
 		};
@@ -59,6 +62,6 @@ export class OpenideChatWebPreviewPart extends OpenideChatContentPart {
 	}
 	hasSameContent(other: IOpenideChatContent): boolean {
 		const next = webPreviewFromTool(other);
-		return next?.url === this.preview.url && next?.title === this.preview.title;
+		return next?.url === this.preview.url && next?.title === this.preview.title && next?.toolCallId === this.preview.toolCallId;
 	}
 }

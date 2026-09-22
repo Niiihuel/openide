@@ -33,6 +33,8 @@ import { ISubagentRun } from '../openideSubagentTypes.js';
 export interface IOpenideChatTranscriptOptions {
 	/** Injected clock, for the durations the draft stamps. Restore never has real timings anyway. */
 	readonly now?: number;
+	/** An active specialist mirror keeps its newest reasoning block live. */
+	readonly streaming?: boolean;
 	/**
 	 * Specialist runs recovered from the run store, by runId.
 	 *
@@ -99,9 +101,15 @@ export function buildOpenideChatTranscript(
 		state = restoreAssistantMessage(state, message, results, now, runs);
 	}
 	// Replay time is not elapsed work time. Older messages do not persist turn timestamps.
-	return closeTurn(state, now).items.map(item => {
+	const items = closeTurn(state, now).items;
+	return items.map((item, index) => {
 		if (item.kind !== 'response') { return item; }
 		const { startedAt, completedAt, ...restored } = item;
+		if (options.streaming && index === items.length - 1) {
+			return { ...restored, isComplete: false, content: restored.content.map((content, contentIndex) =>
+				content.kind === 'thinking' && contentIndex === restored.content.length - 1 && messages.at(-1)?.reasoning !== undefined
+					? { ...content, isComplete: false } : content) };
+		}
 		return restored;
 	});
 }
@@ -185,6 +193,19 @@ function restoreAssistantMessage(
 	runs: ReadonlyMap<string, ISubagentRun> | undefined,
 ): IOpenideChatReducerState {
 	const draft = createOpenideChatDraft(state, now);
+	if (message.terminalOutput) {
+		interrupt(draft);
+		pushOpenideChatContent(draft, { kind: 'terminal', callId: message.terminalOutput.callId, output: message.terminalOutput.output, command: '', background: false, state: 'exited' });
+	}
+	if (message.reasoning) {
+		interrupt(draft);
+		pushOpenideChatContent(draft, { kind: 'thinking', text: message.reasoning, isComplete: true });
+	}
+	if (message.fileDiff) {
+		interrupt(draft);
+		pushOpenideChatContent(draft, { kind: 'edit', diff: message.fileDiff, added: message.fileDiff.editAdded ?? 0, removed: message.fileDiff.editRemoved ?? 0 });
+	}
+
 	if (message.content) {
 		// Each message is its own paragraph block, like the webview's one `.msg.assistant` per
 		// message. `markdownIndex` is deliberately left closed so the next one cannot fold into it.

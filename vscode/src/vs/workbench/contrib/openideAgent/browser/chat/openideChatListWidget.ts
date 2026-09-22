@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append } from '../../../../../base/browser/dom.js';
+import { $, addDisposableListener, append } from '../../../../../base/browser/dom.js';
 import { IMouseWheelEvent } from '../../../../../base/browser/mouseEvent.js';
 import { Button } from '../../../../../base/browser/ui/button/button.js';
 import { IListAccessibilityProvider } from '../../../../../base/browser/ui/list/listWidget.js';
@@ -34,6 +34,14 @@ export interface IOpenideChatListWidgetOptions {
 	readonly renderers: readonly ITreeRenderer<IOpenideChatItem, FuzzyScore, unknown>[];
 	readonly delegateOptions?: IOpenideChatListDelegateOptions;
 	readonly styles?: IOpenideChatListStyles;
+}
+
+/** A presentation-local reading position; measured heights seed the next virtual layout. */
+export interface IOpenideChatReadingState {
+	readonly scrollTop: number;
+	readonly following: boolean;
+	readonly heights: ReadonlyMap<string, number>;
+	readonly anchor?: { readonly id: string; readonly offset: number };
 }
 
 /** Number of pixels of slack allowed before the list stops counting as "at the bottom". */
@@ -105,13 +113,16 @@ export class OpenideChatListWidget extends Disposable {
 	private _repinning = false;
 	private _visibleChangeCount = 0;
 	private _refreshEpoch = 0;
+	private _restoreHeights: ReadonlyMap<string, number> | undefined;
+	private _readingAnchor: IOpenideChatReadingState['anchor'];
+	private _restoringAnchor = false;
 
 	get domNode(): HTMLElement { return this._container; }
 	get contentHeight(): number { return this._tree.contentHeight; }
 	get renderHeight(): number { return this._tree.renderHeight; }
 	get scrollHeight(): number { return this._tree.scrollHeight; }
 	get scrollTop(): number { return this._tree.scrollTop; }
-	set scrollTop(value: number) { this._tree.scrollTop = value; }
+	set scrollTop(value: number) { this._readingAnchor = undefined; this._tree.scrollTop = value; }
 	get lastItem(): IOpenideChatItem | undefined { return this._lastItem; }
 	get isFollowingTail(): boolean { return this._followTail; }
 
@@ -162,7 +173,14 @@ export class OpenideChatListWidget extends Disposable {
 				// computed from the row heights, not from the DOM.
 				paddingBottom: 40,
 				accessibilityProvider: new OpenideChatListAccessibilityProvider(),
-				overrideStyles: {
+					overrideStyles: {
+						// This is a readable document. Interactive controls retain their own focus
+						// indicators; selecting prose must not paint an Explorer-style row outline.
+						listFocusOutline: undefined,
+						listFocusAndSelectionOutline: undefined,
+						listSelectionOutline: undefined,
+						listInactiveFocusOutline: undefined,
+						listHoverOutline: undefined,
 					listFocusBackground: styles.listBackground,
 					listInactiveFocusBackground: styles.listBackground,
 					listActiveSelectionBackground: styles.listBackground,
@@ -198,18 +216,26 @@ export class OpenideChatListWidget extends Disposable {
 		}));
 
 		this._register(this._tree.onDidScroll(event => {
-			if (!this._mutating) {
+			if (!this._mutating && event.scrollTopChanged) {
+				this._readingAnchor = undefined;
 				this.setFollowTail(this.isScrolledToBottom);
 			}
 			this._onDidScroll.fire(event);
 			this.updateScrollDownButton();
 		}));
 		this._register(this._tree.onDidChangeContentHeight(height => {
-			this.repinToTail();
+			if (this._readingAnchor) { this.restoreReadingAnchor(); } else { this.repinToTail(); }
 			this._onDidChangeContentHeight.fire(height);
 		}));
 		this._register(this._tree.onDidFocus(() => this._onDidFocus.fire()));
 		this._register(this._tree.onContextMenu(event => this._onContextMenu.fire(event)));
+		this._register(addDisposableListener(this._container.ownerDocument, 'selectionchange', () => {
+			if (this.hasTextSelection()) {
+				// Copying live output is also reading it. New tokens must not scroll the
+				// selection out of view; the existing jump-to-end control resumes following.
+				this.setFollowTail(false);
+			}
+		}));
 
 		this.updateScrollDownButton();
 	}
@@ -248,6 +274,12 @@ export class OpenideChatListWidget extends Disposable {
 	}
 
 	setItems(items: readonly IOpenideChatItem[]): void {
+		if (this._restoreHeights) {
+			for (const item of items) {
+				const height = this._restoreHeights.get(item.id);
+				if (height !== undefined) { item.currentRenderedHeight = height; }
+			}
+		}
 		this._items = items;
 		this._lastItem = items.at(-1);
 
@@ -267,6 +299,60 @@ export class OpenideChatListWidget extends Disposable {
 
 	getItems(): readonly IOpenideChatItem[] {
 		return this._items;
+	}
+
+	captureReadingState(): IOpenideChatReadingState {
+		const heights = new Map<string, number>();
+		let anchor: IOpenideChatReadingState['anchor'];
+		for (const node of this._tree.getNode(null).children) {
+			const item = node.element;
+			if (!item) { continue; }
+			const height = this._delegate.getHeight(item);
+			heights.set(item.id, height);
+			const top = this._tree.getElementTop(item);
+			if (!anchor && top !== undefined && top + height > this.scrollTop) { anchor = { id: item.id, offset: Math.max(0, this.scrollTop - top) }; }
+		}
+		return { scrollTop: this.scrollTop, following: this._followTail, heights, anchor };
+	}
+
+	/** Restore around the synchronous controller publication as well as its final setItems call.
+	 * A saved pixel offset alone is clamped against unmeasured rows and can silently attach the tail. */
+	withReadingState(state: IOpenideChatReadingState | undefined, restoreItems: () => void): void {
+		const wasSuppressed = this._suppressAutoScroll;
+		const wasMutating = this._mutating;
+		this._suppressAutoScroll = true;
+		this._mutating = true;
+		this._restoreHeights = state?.heights;
+		this._readingAnchor = state && !state.following ? state.anchor : undefined;
+		this.setFollowTail(state?.following ?? true);
+		try {
+			restoreItems();
+			// Controller notifications can contain an idle edge; a restore is not a new turn.
+			this._readingAnchor = state && !state.following ? state.anchor : undefined;
+			this.setFollowTail(state?.following ?? true);
+			if (state && !state.following) {
+				if (this._readingAnchor) { this.restoreReadingAnchor(); }
+				else { this._tree.scrollTop = state.scrollTop; }
+			} else { this.scrollToEnd(); }
+		} finally {
+			this._restoreHeights = undefined;
+			this._suppressAutoScroll = wasSuppressed;
+			this._mutating = wasMutating;
+		}
+	}
+
+	/** Keep the same row and intra-row offset while asynchronous Markdown/image measurements settle. */
+	private restoreReadingAnchor(): void {
+		if (!this._readingAnchor || this._restoringAnchor) { return; }
+		const anchor = this._tree.getNode(null).children.find(node => node.element?.id === this._readingAnchor!.id)?.element;
+		if (!anchor) { return; }
+		const top = this._tree.getElementTop(anchor);
+		if (top === undefined) { return; }
+		const wasMutating = this._mutating;
+		this._restoringAnchor = true;
+		this._mutating = true;
+		try { this._tree.scrollTop = top + this._readingAnchor.offset; }
+		finally { this._mutating = wasMutating; this._restoringAnchor = false; }
 	}
 
 	/**
@@ -328,7 +414,7 @@ export class OpenideChatListWidget extends Disposable {
 			fn();
 			return;
 		}
-		const wasFollowing = this._followTail || this.isScrolledToBottom;
+		const wasFollowing = !this.hasTextSelection() && !this._readingAnchor && (this._followTail || this.isScrolledToBottom);
 		this._mutating = true;
 		try {
 			fn();
@@ -343,7 +429,9 @@ export class OpenideChatListWidget extends Disposable {
 			//
 			// The symptom was that the model's reply appeared BELOW the fold — for a virtualised list
 			// that means not rendered at all — while the run had completed perfectly.
-			if (wasFollowing) {
+			if (this._readingAnchor) {
+				this.restoreReadingAnchor();
+			} else if (wasFollowing) {
 				this.scrollToEnd();
 			}
 		} finally {
@@ -367,7 +455,7 @@ export class OpenideChatListWidget extends Disposable {
 	 * the scroll event this fires is ours, and reading it as user intent would detach the tail.
 	 */
 	private repinToTail(): void {
-		if (!this._followTail || this._suppressAutoScroll || this._repinning) {
+		if (!this._followTail || this._suppressAutoScroll || this._repinning || this.hasTextSelection()) {
 			return;
 		}
 		this._repinning = true;
@@ -381,7 +469,14 @@ export class OpenideChatListWidget extends Disposable {
 		this.updateScrollDownButton();
 	}
 
+	private hasTextSelection(): boolean {
+		const selection = this._container.ownerDocument.getSelection();
+		return !!selection && !selection.isCollapsed
+			&& (this._container.contains(selection.anchorNode) || this._container.contains(selection.focusNode));
+	}
+
 	setFollowTail(value: boolean): void {
+		if (value) { this._readingAnchor = undefined; }
 		if (this._followTail === value) {
 			return;
 		}

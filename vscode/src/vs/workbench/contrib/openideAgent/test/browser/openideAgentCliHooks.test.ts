@@ -26,10 +26,10 @@ suite('Openide CLI hooks — installation into settings.json', () => {
 
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('installs all five events, StopFailure included', () => {
+	test('installs turn, permission and tool-completion events', () => {
 		const merged = mergeOpenideClaudeHooks({});
 		const hooks = hooksOf(merged);
-		for (const event of ['UserPromptSubmit', 'PreToolUse', 'Stop', 'StopFailure', 'Notification']) {
+		for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'Stop', 'StopFailure', 'Notification']) {
 			assert.strictEqual(ourCommands(hooks, event).length, 1, event);
 		}
 		assert.strictEqual(hooks['PreToolUse'][0].matcher, '*');
@@ -112,8 +112,18 @@ suite('Openide CLI hooks — payloads', () => {
 		assert.deepStrictEqual(claudeHookEventOf({ hook_event_name: 'PreToolUse' }), { type: 'hook:tool' });
 		assert.deepStrictEqual(claudeHookEventOf({ hook_event_name: 'Stop' }), { type: 'hook:stop' });
 		assert.deepStrictEqual(claudeHookEventOf({ hook_event_name: 'StopFailure' }), { type: 'hook:stop', failed: true });
-		assert.deepStrictEqual(claudeHookEventOf({ hook_event_name: 'Notification' }), { type: 'hook:notification' });
+		assert.strictEqual(claudeHookEventOf({ hook_event_name: 'Notification' }), undefined);
 		assert.strictEqual(claudeHookEventOf({ hook_event_name: 'SubagentStop' }), undefined);
+	});
+
+	test('only typed notifications and explicit questions request user input', () => {
+		assert.deepStrictEqual([
+			claudeHookEventOf({ hook_event_name: 'Notification', notification_type: 'auth_success' }),
+			claudeHookEventOf({ hook_event_name: 'Notification', notification_type: 'permission_prompt' }),
+			claudeHookEventOf({ hook_event_name: 'PermissionRequest' }),
+			claudeHookEventOf({ hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion' }),
+			claudeHookEventOf({ hook_event_name: 'PostToolUse' }),
+		], [undefined, { type: 'hook:notification', reason: 'permission' }, { type: 'hook:notification', reason: 'permission' }, { type: 'hook:notification', reason: 'question' }, { type: 'hook:tool-complete' }]);
 	});
 
 	test('a drop with an envelope is read whole, with the dock session id', () => {

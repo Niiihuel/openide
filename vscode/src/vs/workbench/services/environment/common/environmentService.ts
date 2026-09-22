@@ -36,6 +36,8 @@ export interface IWorkbenchEnvironmentService extends IEnvironmentService {
 	readonly skipWelcome: boolean;
 	readonly disableWorkspaceTrust: boolean;
 	readonly isSessionsWindow: boolean;
+	/** This runtime hosts a separate Agents surface instead of restoring IDE windows. */
+	readonly openideAgentWindowOwner?: boolean;
 	readonly webviewExternalEndpoint: string;
 
 	// --- Development

@@ -154,6 +154,8 @@ export class NativeWorkbenchEnvironmentService extends AbstractNativeEnvironment
 	@memoize
 	get isSessionsWindow(): boolean { return !!this.configuration.isSessionsWindow; }
 
+	get openideAgentWindowOwner(): boolean { return !!this.configuration.openideAgentWindowOwner; }
+
 	constructor(
 		private readonly configuration: INativeWindowConfiguration,
 		productService: IProductService

@@ -6,7 +6,7 @@
 import { IToolApprovalRequest } from './openideAgentTypes.js';
 
 const HARDLINE_DENY: RegExp[] = [
-	/\brm\s+(-[a-z]*\s+)*-[a-z]*[rf][a-z]*\s+(\/|\/\*|~|\$HOME)(\s|$)/i,
+	/\brm\s+(-[a-z]*\s+)*-[a-z]*[rf][a-z]*\s+(\/|\/\*|~|\$HOME)(?=\s|[;&|)<>]|$)/i,
 	/\bmkfs(\.\w+)?\b/i,
 	/\bdd\b[^\n]*\bof=\/dev\/(sd|nvme|hd|vd|disk)/i,
 	/:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/,

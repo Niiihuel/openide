@@ -1,0 +1,27 @@
+.browser-agent-overlay { --browser-agent-cursor-size: 20px; position: absolute; inset: 0; overflow: hidden; pointer-events: none; contain: layout style paint; z-index: 4; color: var(--vscode-foreground); }
+.browser-agent-overlay[hidden], .browser-agent-overlay [hidden] { display: none !important; }
+.browser-agent-cursor-layer, .browser-agent-target-layer, .browser-agent-effects-layer { position: absolute; inset: 0; pointer-events: none; }
+.browser-agent-cursor, .browser-agent-trail { position: absolute; left: 0; top: 0; width: var(--browser-agent-cursor-size); height: var(--browser-agent-cursor-size); will-change: transform; }
+/* Original Bibata artwork and hotspot (55,17 on a 256px canvas). Both strokes stay
+ * intact across themes; unlike UI colors, recoloring would change the chosen cursor. */
+.browser-agent-cursor-glyph { position: absolute; left: calc(var(--browser-agent-cursor-size) * -.21484375); top: calc(var(--browser-agent-cursor-size) * -.06640625); width: 100%; height: 100%; background: url('./bibataModernClassic.svg') center / contain no-repeat; transform-origin: 21.484375% 6.640625%; }
+.browser-agent-trail { opacity: .12; }
+.browser-agent-trail + .browser-agent-trail { opacity: .06; }
+.browser-agent-target { position: absolute; left: 0; top: 0; border: 1px solid var(--vscode-focusBorder); border-radius: var(--vscode-cornerRadius-small); background: color-mix(in srgb, var(--vscode-focusBorder) 10%, transparent); box-sizing: border-box; will-change: transform; }
+.browser-agent-target[data-state="success"] { border-color: var(--vscode-testing-iconPassed); background: color-mix(in srgb, var(--vscode-testing-iconPassed) 8%, transparent); }
+.browser-agent-target[data-state="error"] { border-color: var(--vscode-errorForeground); background: color-mix(in srgb, var(--vscode-errorForeground) 12%, transparent); }
+.browser-agent-ripple { position: absolute; left: -18px; top: -18px; width: 36px; height: 36px; border-radius: var(--vscode-cornerRadius-circle); border: 1px solid var(--vscode-focusBorder); background: color-mix(in srgb, var(--vscode-focusBorder) 16%, transparent); opacity: 0; will-change: transform, opacity; }
+.browser-agent-scroll { position: absolute; top: 0; left: 0; color: var(--vscode-focusBorder); font-size: 20px; font-weight: 600; }
+.browser-agent-hud { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: calc(100% - 32px); display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--vscode-cornerRadius-large); border: 1px solid var(--vscode-widget-border, transparent); background: var(--vscode-editorWidget-background); color: var(--vscode-editorWidget-foreground); box-shadow: var(--vscode-shadow-lg); font-size: var(--vscode-bodyFontSize-small, 12px); line-height: 1.4; transition: opacity 160ms ease-out; }
+.browser-agent-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.browser-agent-step { color: var(--vscode-descriptionForeground); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.browser-agent-status-icon { flex-shrink: 0; width: 6px; height: 6px; border-radius: var(--vscode-cornerRadius-circle); background: var(--vscode-focusBorder); }
+.browser-agent-overlay[data-action="navigate"] .browser-agent-status-icon, .browser-agent-overlay[data-action="wait"] .browser-agent-status-icon { animation: browser-agent-breathe 1s ease-in-out infinite alternate; }
+.browser-agent-overlay[data-status="error"] .browser-agent-status-icon { background: var(--vscode-errorForeground); }
+.browser-agent-overlay[data-status="completed"] .browser-agent-status-icon { background: var(--vscode-testing-iconPassed); }
+.browser-agent-overlay.settled .browser-agent-target { opacity: .4; }
+.browser-agent-overlay.settled .browser-agent-scroll { opacity: 0; }
+.browser-agent-overlay.settled .browser-agent-status-icon { animation: none; }
+.hc-black .browser-agent-target, .hc-light .browser-agent-target, .hc-black .browser-agent-hud, .hc-light .browser-agent-hud { border-color: var(--vscode-contrastActiveBorder); border-width: 2px; }
+@keyframes browser-agent-breathe { from { opacity: .4; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .browser-agent-hud { transition: none; } .browser-agent-status-icon { animation: none !important; } .browser-agent-trail, .browser-agent-ripple { display: none; } }

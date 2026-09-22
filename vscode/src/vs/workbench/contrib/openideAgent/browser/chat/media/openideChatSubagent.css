@@ -128,9 +128,7 @@
 }
 .openide-chat-sub .openide-chat-sub-status.hidden { display: none; }
 
-/* The tail: the last few lines, NOT a scrolling window onto the whole trace. The full transcript
-   is one click away in the specialist's own tab, and a scrollbar inside a chat row is a trap — the
-   wheel stops belonging to the conversation you are reading. */
+/* Complete history expands within the conversation scroll. */
 .openide-chat-sub .openide-chat-sub-tail {
 	padding: 1px 0 4px calc(var(--openide-chat-gutter, 16px) + 6px);
 }
@@ -161,3 +159,22 @@
 	overflow-wrap: anywhere;
 }
 .openide-chat-sub .openide-chat-sub-result { margin-top: 3px; color: var(--vscode-foreground); }
+
+.openide-chat-sub .openide-chat-sub-chevron { opacity: 1; }
+.openide-chat-sub-disclosure { margin: 6px 0; min-width: 0; }
+.openide-chat-sub-disclosure > summary {
+	cursor: pointer;
+	color: var(--oi-text-muted, var(--vscode-descriptionForeground));
+	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+.openide-chat-sub-disclosure > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+.openide-chat-sub-disclosure > .openide-chat-sub-text {
+	margin: 6px 0 10px 5px;
+	padding-left: 12px;
+	border-left: 1px solid var(--oi-border);
+}
+.openide-chat-row .openide-chat-sub-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.openide-chat-sub-disclosure[data-kind="output"] > pre { font-family: var(--vscode-editor-font-family, monospace); }
+
+.openide-chat-sub-disclosure[open] > summary > .openide-chat-sub-disclosure-chevron { transform: rotate(90deg); }

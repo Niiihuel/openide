@@ -19,13 +19,13 @@
  *  the card that asked for it makes its origin visible, which a separate modal loses.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, append, clearNode } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, clearNode, isHTMLInputElement } from '../../../../base/browser/dom.js';
 import { AnchorAlignment } from '../../../../base/browser/ui/contextview/contextview.js';
 import { IContextViewService } from '../../../../platform/contextview/browser/contextView.js';
 import { DeferredPromise } from '../../../../base/common/async.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { AnchorPosition } from '../../../../base/common/layout.js';
-import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
@@ -41,16 +41,35 @@ import type { IOpenideSettingsNavigationEntry } from '../../openideSettings/comm
 import { ISectionFilter, ISectionStatus, OpenideSectionRenderer } from '../../openideSettings/browser/openideSettingsSectionBuilder.js';
 import { filterProviderModels, orderProviderModels, PROVIDER_MODEL_SEARCH_THRESHOLD } from '../common/openideProviderModels.js';
 import { providerSupportsUsage } from '../common/openideUsage.js';
-import { IOpenideProviderService } from './openideProviderService.js';
+import { IOpenideProviderService, IProviderConnectionCheck } from './openideProviderService.js';
+import { IProviderEntry } from '../common/openideProviderCatalog.js';
+import { createProviderSetupDraft, IOpenideProviderSetupDraft } from '../common/openideProviderSetup.js';
+import { OpenideProviderSetupForm } from './openideProviderSetupForm.js';
 import { IOpenidePickerModel } from '../common/openidePickerModels.js';
 import { IOAuthInteraction } from './openideOAuth.js';
 import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { openideInputBoxStyles } from './openideControlStyles.js';
-import { createProviderIcon } from './openideProviderIcons.js';
+import { createProviderIconTile } from './openideProviderIcons.js';
 import { IRegistryProvider } from './openideModelCatalog.js';
 import { ICredentialOrigin } from '../../../../platform/openideAgentHost/common/openideCredentialSources.js';
 import { createMenuContent, createMenuRow, IMenuRowOptions, OpenideComposerPopover } from './chat/openideComposerMenu.js';
 import { t } from '../common/openideStrings.js';
+import './media/openideProvidersSettings.css';
+
+const providerSetupPage = 'openideAgent/providers/setup/new';
+
+function connectionMessage(check: IProviderConnectionCheck): string {
+	switch (check.status) {
+		case 'available': return check.models?.length
+			? t('openide.provider.check.available', check.models.length)
+			: t('openide.provider.check.empty');
+		case 'unverified': return t('openide.provider.check.unverified');
+		case 'missing-credentials': return t('openide.provider.check.missing');
+		case 'auth-error': return t('openide.provider.check.auth');
+		case 'endpoint-error': return t('openide.provider.check.endpoint', check.statusCode ?? '—');
+		case 'unreachable': return t('openide.provider.check.unreachable');
+	}
+}
 
 interface IProviderView {
 	readonly id: string;
@@ -108,7 +127,7 @@ type ProviderEntry = { id: string; label: string; company: string; auth: string;
 export function providerPageId(providerId: string): string { return 'openideAgent/providers/' + providerId; }
 export function providerIdFromPage(category: string | undefined): string | undefined {
 	const prefix = 'openideAgent/providers/';
-	return category && category.startsWith(prefix) ? category.slice(prefix.length) : undefined;
+	return category && category !== providerSetupPage && category.startsWith(prefix) ? category.slice(prefix.length) : undefined;
 }
 
 /**
@@ -138,6 +157,7 @@ function describeAge(at: number): string {
 
 export class OpenideProvidersSettingsSection extends Disposable implements IOpenideSettingsSection {
 	readonly ownedSettings: readonly string[] = [];
+	readonly retainOnRefresh = true;
 
 	private readonly _onDidChangeNavigation = this._register(new Emitter<void>());
 	/** Fired when the provider list changes, so the sidebar picks up a new page. */
@@ -182,6 +202,14 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	private readonly modelQuery = new Map<string, string>();
 	private readonly keyDraft = new Map<string, string>();
 	private busyKey: string | undefined;
+	private checkingKey: string | undefined;
+	private readonly connectionChecks = new Map<string, IProviderConnectionCheck>();
+	private readonly keyErrors = new Map<string, string>();
+	private providerQuery = '';
+	private setupMode = false;
+	private setupDraft: IOpenideProviderSetupDraft | undefined;
+	private readonly setupForm = this._register(new MutableDisposable<OpenideProviderSetupForm>());
+	private pendingFocus: { id: string; start: number | null; end: number | null } | undefined;
 	private enablingStore = false;
 
 	constructor(
@@ -202,6 +230,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			this.statusStale = true;
 			this.detailStale = true;
 			this.invalidation++;
+			this.connectionChecks.clear();
 			this.refreshNavigation();
 			this.paint();
 		}));
@@ -210,6 +239,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 
 	render(container: HTMLElement, context: IOpenideSettingsSectionContext): void {
 		this.activeProviderId = providerIdFromPage(context.category);
+		this.setupMode = context.category === providerSetupPage;
 		this.navigate = context.navigate;
 		// No scope and no filter of its own: a credential belongs to the user, and search filtering
 		// is applied by the editor over what this section draws.
@@ -219,20 +249,43 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 
 	override dispose(): void {
 		this.cancelOAuth();
+		this.keyDraft.clear();
+		if (this.setupDraft) { this.setupDraft.apiKey = ''; }
 		super.dispose();
 	}
 
 	private paint(): void {
 		const root = this.root;
-		if (!root?.isConnected) { return; }
+		if (!root?.isConnected || this._store.isDisposed) { return; }
+		// Background discovery must never replace a form while the user is typing in it.
+		if (this.setupMode && this.setupForm.value?.domNode.isConnected) { return; }
+		const focused = root.ownerDocument.activeElement;
+		if (isHTMLInputElement(focused) && root.contains(focused) && focused.dataset.providerFocus) {
+			this.pendingFocus = { id: focused.dataset.providerFocus, start: focused.selectionStart, end: focused.selectionEnd };
+		}
 		this.popover.close();
+		this.setupForm.clear();
 		this.renderStore.clear();
 		clearNode(root);
 		const token = ++this.generation;
-		void this.paintAll(root, token);
+		void this.paintAll(root, token).then(() => {
+			if (token !== this.generation || this._store.isDisposed) { return; }
+			const restore = this.pendingFocus;
+			if (!restore || root.ownerDocument.activeElement !== root.ownerDocument.body) { return; }
+			const input = Array.from(root.querySelectorAll<HTMLInputElement>('input[data-provider-focus]')).find(element => element.dataset.providerFocus === restore.id);
+			if (input && !input.disabled) {
+				this.pendingFocus = undefined;
+				input.focus({ preventScroll: true });
+				input.setSelectionRange(restore.start, restore.end);
+			}
+		});
 	}
 
 	private async paintAll(root: HTMLElement, token: number): Promise<void> {
+		if (this.setupMode) {
+			this.paintSetup(root);
+			return;
+		}
 		// The old version awaited connectivity probes, model discovery and account lists for EVERY
 		// provider before painting anything: one slow endpoint (or one rejection — Promise.all)
 		// left the page permanently blank. Now the index paints synchronously from the catalog and
@@ -272,13 +325,58 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 
 	// ---- index ----
 
+	private openSetup(entry?: IProviderEntry): void {
+		this.setupDraft = createProviderSetupDraft(entry);
+		this.navigate?.(providerSetupPage);
+	}
+
+	private paintSetup(root: HTMLElement): void {
+		this.setupDraft ??= createProviderSetupDraft();
+		const draft = this.setupDraft;
+		this.setupForm.value = new OpenideProviderSetupForm(root, draft, {
+			existingIds: this.providerService.listProviders().map(provider => provider.id),
+			onCancel: () => {
+				draft.apiKey = '';
+				this.setupDraft = undefined;
+				this.navigate?.(draft.originalId ? providerPageId(draft.originalId) : 'openideAgent/providers');
+			},
+			onCheck: async (config, key) => {
+				const existing = draft.originalId ? this.providerService.findProvider(draft.originalId) : undefined;
+				const check = await this.providerService.checkProviderConnection({ ...existing, ...config }, key);
+				return {
+					ok: check.status === 'available', message: connectionMessage(check),
+					canSave: check.status === 'available' || check.status === 'unverified',
+					canSaveUnchecked: check.status === 'unreachable' || check.status === 'endpoint-error',
+				};
+			},
+			onSubmit: async (config, key) => {
+				if (draft.originalId) { await this.providerService.updateCustomProvider(config, key); }
+				else { await this.providerService.addCustomProvider(config, key); }
+				draft.apiKey = '';
+				this.setupDraft = undefined;
+				this.registryCache = undefined;
+				this.navigate?.(providerPageId(config.id));
+			},
+		}, this.contextViewService);
+	}
+
 	private paintIndex(root: HTMLElement, token: number): void {
 		const entries = this.providerService.listProviders();
 		const statuses = this.statusCache;
 		const activeId = this.providerService.getActiveProviderId();
 
 		// The h1 above ("AI Providers") is the editor's; the page opens on its one-line explanation.
-		append(root, $('.openide-settings-provider-intro', undefined, t('openide.providers.desc')));
+		const toolbar = append(root, $('.openide-settings-provider-toolbar'));
+		append(toolbar, $('.openide-settings-provider-intro', undefined, t('openide.providers.desc')));
+		const actions = append(toolbar, $('.openide-settings-section-actions'));
+		this.ui.button(actions, {
+			label: t('openide.providers.detect'), icon: 'refresh', ghost: true,
+			enabled: !this.statusLoading,
+			run: () => { this.connectionChecks.clear(); this.providerService.refreshProviderConnections(); },
+		});
+		this.ui.button(actions, {
+			label: t('openide.providers.addCustom'), icon: 'add', primary: true, run: () => this.openSetup(),
+		});
 
 		if (!statuses) {
 			this.paintIndexSkeleton(root, Math.min(6, Math.max(3, entries.length)));
@@ -317,10 +415,12 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			const noMatch = $('.openide-settings-provider-nomatch.hidden');
 			const filter = this.ui.filter(root, {
 				placeholder: t('openide.providers.filter'),
+				value: this.providerQuery,
 				clearLabel: t('openide.providers.filterClear'),
-				change: query => this.applyFilter(query, rows, groups, filter, noMatch),
+				change: query => { this.providerQuery = query; this.applyFilter(query, rows, groups, filter, noMatch); },
 			});
 			filter.element.classList.add('openide-settings-provider-filter');
+			filter.element.querySelector('input')!.dataset.providerFocus = 'provider-filter';
 
 			const paintGroup = (caption: string, list: readonly ProviderEntry[], withCustom: boolean) => {
 				const card = this.ui.card(root, { caption, keywords: ['proveedor', 'provider', 'modelo', 'api key', 'oauth', 'cuenta'] });
@@ -335,11 +435,12 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			};
 
 			if (connected.length) {
-				paintGroup(t('openide.providers.groupConnected'), connected, false);
+				paintGroup(t('openide.providers.configured'), connected, false);
 			}
 			paintGroup(connected.length ? t('openide.providers.groupAvailable') : t('openide.providers.groupAll'), rest, true);
 			this.paintRegistryGroup(root, rows, groups, token);
 			append(root, noMatch);
+			this.applyFilter(this.providerQuery, rows, groups, filter, noMatch);
 		}
 
 		this.paintCatalogFooter(root);
@@ -375,7 +476,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		});
 		groups.push(card.parentElement!.parentElement!);
 		for (const provider of list) {
-			const logo = createProviderIcon(card.ownerDocument, provider.id, provider.name, 'openide-settings-provider-logo');
+			const logo = createProviderIconTile(card.ownerDocument, provider.id, provider.name, 'openide-settings-provider-logo');
 			const value = this.ui.cardRow(card, {
 				leading: logo,
 				label: provider.name,
@@ -411,7 +512,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		} finally {
 			this.registryLoading = false;
 		}
-		if (token === this.generation) { this.paint(); }
+		if (!this.activeProviderId && !this.setupMode) { this.paint(); }
 	}
 
 	/**
@@ -471,11 +572,12 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		// permanently; here the only useful extra is where a credential came from, because that is
 		// the one thing nobody can guess.
 		const source = describeOrigin(status?.origin);
+		const ready = entry.auth === 'apiKey' ? t('openide.providers.keyAvailable') : t('openide.providers.rowConnected');
 		const subtitle = status?.connected
-			? (source ? `${t('openide.providers.rowConnected')} · ${source}` : t('openide.providers.rowConnected'))
+			? (source ? `${ready} · ${source}` : ready)
 			: this.authLabel(entry.auth);
 		const open = () => this.navigate?.(providerPageId(entry.id));
-		const logo = createProviderIcon(card.ownerDocument, entry.id, entry.label, 'openide-settings-provider-logo');
+		const logo = createProviderIconTile(card.ownerDocument, entry.id, entry.label, 'openide-settings-provider-logo');
 		const value = this.ui.cardRow(card, {
 			leading: logo,
 			label: entry.label,
@@ -498,7 +600,9 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		if (isActive) { row.setAttribute('aria-current', 'true'); }
 
 		if (status?.connected) {
-			append(value, $('span.openide-settings-provider-dot.ok', { title: t('openide.providers.stConnected') }));
+			const state = append(value, $('span.openide-settings-provider-state.connected', { title: t('openide.providers.stConnected') }));
+			append(state, $('span.codicon.codicon-check', { 'aria-hidden': 'true' }));
+			append(state, $('span', undefined, t('openide.providers.rowConnected')));
 		} else {
 			// Filled, in the product's amber: connecting is THE action of an available provider (Cursor
 			// paints it the same way), and a ghost label read as a hint rather than a button.
@@ -517,7 +621,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			description: t('openide.providers.addCustomSub'),
 			keywords: ['proveedor personalizado', 'custom provider', 'endpoint', 'baseurl'],
 			icon: 'chevron-right',
-			run: () => this.navigate?.('openideAgent/advanced'),
+			run: () => this.openSetup(),
 		});
 		const row = value.parentElement!;
 		row.classList.add('openide-settings-provider-row', 'openide-settings-provider-add');
@@ -586,6 +690,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	/** Cheap per-provider status: secret-store checks and a 1.5s-capped local probe. No model
 	 *  discovery, no account lists — those belong to the detail page. */
 	private async loadStatuses(token: number): Promise<void> {
+		if (this._store.isDisposed) { return; }
 		this.statusLoading = true;
 		const invalidation = this.invalidation;
 		try {
@@ -593,7 +698,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			const next = new Map<string, ProviderStatus>();
 			await Promise.all(entries.map(async entry => {
 				const connected = await this.providerService.isConnected(entry.id).catch(() => false);
-				const hasKey = entry.auth === 'apiKey' ? await this.providerService.hasApiKey(entry.id).catch(() => false) : false;
+				const hasKey = entry.auth === 'apiKey' && connected;
 				// Where the key comes from, not just whether there is one: a provider can now be
 				// connected because of the environment or another tool, and a row that does not say
 				// so leaves "why is it using THAT key?" unanswerable.
@@ -606,10 +711,11 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			this.statusLoading = false;
 		}
 		// Same dead end as `loadDetail`: re-run rather than wait for a paint that will not come.
+		if (this._store.isDisposed) { return; }
 		if (this.statusStale) {
 			return this.loadStatuses(this.generation);
 		}
-		if (token === this.generation) { this.paint(); }
+		if (!this.activeProviderId && !this.setupMode) { this.paint(); }
 	}
 
 	// ---- fallback chain ----
@@ -635,7 +741,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			const health = model ? this.routing.healthFor({ providerId: step.providerId, model }) : undefined;
 			const cooling = isModelCoolingDown(health, Date.now());
 			const value = this.ui.cardRow(card, {
-				leading: entry ? createProviderIcon(card.ownerDocument, entry.id, entry.label, 'openide-settings-provider-logo') : undefined,
+				leading: entry ? createProviderIconTile(card.ownerDocument, entry.id, entry.label, 'openide-settings-provider-logo') : undefined,
 				label: t('openide.chain.step', index + 1, name || step.providerId),
 				description: !entry
 					? t('openide.chain.gone')
@@ -739,16 +845,15 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 
 	/** Loads the FULL view (models, accounts, usage support) for one provider only. */
 	private async loadDetail(id: string, token: number): Promise<void> {
+		if (this._store.isDisposed) { return; }
 		this.detailLoading = true;
 		const invalidation = this.invalidation;
 		try {
 			const entry = this.providerService.listProviders().find(provider => provider.id === id);
 			if (!entry) { return; }
 			const connected = await this.providerService.isConnected(entry.id).catch(() => false);
-			// Warms the models.dev registry (and the 5-min dynamic-models cache) BEFORE describing
-			// models: `describeModel` is sync against the registry, and on a cold start it would
-			// return bare ids without names, context or cost.
-			await this.providerService.getConnectedModelGroups().catch(() => undefined);
+			// resolveProviderModels warms the registry itself. Loading every connected provider
+			// here made one detail page wait for unrelated endpoints and credential refreshes.
 			const resolvedModels = orderProviderModels(
 				await this.providerService.resolveProviderModels(entry).catch(() => entry.defaultModel ? [entry.defaultModel] : []),
 				entry.defaultModel ?? '',
@@ -783,10 +888,13 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		// follows a load is gated on the generation token, which a repaint in between has moved
 		// past. That dead end is why the chip kept saying "not connected" under a notification
 		// that said the opposite.
+		if (this._store.isDisposed) { return; }
 		if (this.detailStale && this.activeProviderId === id) {
 			return this.loadDetail(id, this.generation);
 		}
-		if (token === this.generation && this.activeProviderId === id) { this.paint(); }
+		// Navigation may have changed while this request was running. Repaint the current page
+		// so its missing detail can load; otherwise the second provider stays on its skeleton.
+		if (this.activeProviderId && !this.setupMode) { this.paint(); }
 	}
 
 	/** The ghost "Back" over the page: the sidebar does not list provider pages, so this is the
@@ -846,24 +954,33 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	 */
 	private paintDetailHead(root: HTMLElement, view: IProviderView, activeId: string, isActive: boolean): void {
 		const head = append(root, $('.openide-settings-provider-head'));
-		head.appendChild(createProviderIcon(head.ownerDocument, view.id, view.label, 'openide-settings-provider-logo'));
+		head.appendChild(createProviderIconTile(head.ownerDocument, view.id, view.label, 'openide-settings-provider-logo'));
 		const copy = append(head, $('.openide-settings-provider-copy'));
 		append(copy, $('.openide-settings-provider-name', undefined, view.label));
 		append(copy, $('.openide-settings-provider-sub', undefined, view.blurb || view.company));
 		const status = this.statusFor(view, activeId);
 		this.pill(head, status.label, status.tone === 'ok' ? 'ok' : undefined);
 		const actions = append(head, $('.openide-settings-section-actions'));
+		const entry = this.providerService.findProvider(view.id);
+		if (entry?.custom) {
+			this.ui.button(actions, {
+				label: t('openide.providers.edit'), icon: 'edit', ghost: true,
+				run: () => this.openSetup(entry),
+			});
+		}
 		// No "Use this provider" here. This page answers one question — connected or not — and the
 		// composer's model chip already answers the other one, permanently and where the work
 		// happens: picking a model IS picking its provider. A second way to set it only created a
 		// state the page then had to display ("Active"), which was the redundancy we just removed.
-		if (!view.connected && (view.auth === 'none' || (view.auth === 'apiKey' && view.hasKey))) {
+		if (view.auth === 'none' || view.auth === 'oauth' && view.connected) {
 			this.ui.button(actions, {
-				label: t('openide.providers.retryProbe'),
-				icon: 'sync',
+				label: t('openide.providers.check'),
+				icon: 'plug',
 				ghost: true,
-				run: () => this.recheck(),
+				enabled: this.checkingKey !== view.id,
+				run: () => void this.checkConnection(view),
 			});
+			this.paintConnectionFeedback(root, view.id);
 		}
 	}
 
@@ -873,6 +990,11 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		this.detailStale = true;
 		this.invalidation++;
 		this.paint();
+	}
+
+	private refreshDetection(): void {
+		this.providerService.refreshProviderConnections();
+		this.recheck();
 	}
 
 	/**
@@ -916,7 +1038,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 			this.ui.cardRow(card, {
 				label: t('openide.providers.retryProbe'),
 				icon: 'sync',
-				run: () => this.recheck(),
+				run: () => this.refreshDetection(),
 			});
 		});
 	}
@@ -970,45 +1092,119 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	 */
 	private paintKeyRow(card: HTMLElement, view: IProviderView, redraw: () => void): void {
 		const draft = this.keyDraft.get(view.id) ?? '';
-		const busy = this.busyKey === view.id;
+		const busy = this.busyKey === view.id || this.checkingKey === view.id;
 		const value = this.ui.cardRow(card, {
 			label: 'API key',
-			description: view.hasKey ? t('openide.providers.keyStored') : t('openide.providers.keyPaste', view.label),
+			description: describeOrigin(view.origin) ?? (view.hasKey ? t('openide.providers.keyStored') : t('openide.providers.keyPaste', view.label)),
 			keywords: ['api key', 'clave', view.id],
 		});
-		const input = this.renderStore.add(new InputBox(value, undefined, {
+		value.parentElement!.classList.add('openide-provider-key-row');
+		const field = append(value, $('.openide-provider-key-field'));
+		const input = this.renderStore.add(new InputBox(field, undefined, {
 			inputBoxStyles: openideInputBoxStyles,
 			placeholder: view.hasKey ? t('openide.providers.keyReplace') : t('openide.providers.keyPaste', view.label),
-			ariaLabel: 'API key',
-			type: 'password',
+			ariaLabel: 'API key', type: 'password',
 		}));
 		input.value = draft;
+		input.inputElement.dataset.providerFocus = `key:${view.id}`;
+		input.inputElement.setAttribute('data-provider-key-input', '');
+		input.inputElement.autocomplete = 'new-password';
+		input.inputElement.spellcheck = false;
 		input.setEnabled(!busy);
-		// Not connected yet → the button IS the connect action. Replacing a key on a live provider
-		// keeps the quieter wording.
-		const button = this.ui.button(value, {
-			label: busy
-				? (view.connected ? t('openide.providers.saving') : t('openide.providers.connecting'))
-				: (view.connected ? t('openide.providers.saveKey') : t('openide.providers.connectKey')),
-			icon: busy ? 'loading~spin' : (view.connected ? 'save' : 'plug'),
-			primary: true,
-			enabled: !busy && !!draft.trim(),
+		const reveal = this.ui.iconButton(field, {
+			label: t('openide.providers.showKey'), icon: 'eye', enabled: !busy,
+			run: () => {
+				const show = input.inputElement.type === 'password';
+				input.inputElement.type = show ? 'text' : 'password';
+				reveal.setAttribute('aria-pressed', String(show));
+				reveal.setAttribute('aria-label', show ? t('openide.providers.hideKey') : t('openide.providers.showKey'));
+			},
+		});
+		reveal.setAttribute('aria-pressed', 'false');
+		const controls = append(value, $('.openide-settings-section-actions'));
+		const check = this.ui.button(controls, {
+			label: this.checkingKey === view.id ? t('openide.providers.checking') : t('openide.providers.check'),
+			ghost: true, enabled: !busy && (!!draft.trim() || view.hasKey),
+			run: () => void this.checkConnection(view),
+		});
+		check.element.dataset.providerAction = 'check-key';
+		const button = this.ui.button(controls, {
+			label: this.busyKey === view.id ? t('openide.providers.saving') : t('openide.providers.saveKey'),
+			primary: true, enabled: !busy && !!draft.trim(),
 			run: () => void this.saveKey(view, input.value.trim(), 'default', undefined, redraw),
 		});
+		button.element.dataset.providerAction = 'save-key';
 		this.renderStore.add(input.onDidChange(next => {
 			this.keyDraft.set(view.id, next);
+			this.connectionChecks.delete(view.id);
+			this.keyErrors.delete(view.id);
+			feedback.hidden = true;
 			button.enabled = !busy && !!next.trim();
+			check.enabled = !busy && (!!next.trim() || view.hasKey);
 		}));
 		this.renderStore.add(addDisposableListener(input.inputElement, 'keydown', event => {
-			if ((event as KeyboardEvent).key === 'Enter' && button.enabled) { event.preventDefault(); void this.saveKey(view, input.value.trim(), 'default', undefined, redraw); }
+			if (event.key === 'Enter' && button.enabled) { event.preventDefault(); void this.saveKey(view, input.value.trim(), 'default', undefined, redraw); }
 		}));
+		const feedback = this.paintConnectionFeedback(card, view.id);
+		const result = this.connectionChecks.get(view.id);
+		if (draft.trim() && (result?.status === 'unreachable' || result?.status === 'endpoint-error')) {
+			const save = this.ui.button(feedback, {
+				label: t('openide.providers.saveUnchecked'), ghost: true, enabled: !busy,
+				run: () => void this.saveKey(view, input.value.trim(), 'default', undefined, redraw, true),
+			});
+			save.element.dataset.providerAction = 'save-unchecked';
+		}
 	}
 
-	private async saveKey(view: IProviderView, key: string, mode: 'default' | 'new' | 'reauth', accountId: string | undefined, redraw: () => void): Promise<void> {
-		if (!key) { return; }
-		this.busyKey = view.id;
-		redraw();
+	private paintConnectionFeedback(parent: HTMLElement, providerId: string): HTMLElement {
+		const result = this.connectionChecks.get(providerId);
+		const error = this.keyErrors.get(providerId);
+		const checking = this.checkingKey === providerId;
+		const feedback = append(parent, $('.openide-provider-connection-feedback', { role: 'status', 'aria-live': 'polite' }));
+		feedback.hidden = !result && !error && !checking;
+		feedback.dataset.providerCheck = error ? 'error' : checking ? 'checking' : result?.status ?? '';
+		feedback.classList.toggle('error', !!error || result?.status === 'auth-error');
+		feedback.classList.toggle('ok', result?.status === 'available');
+		append(feedback, $('span', undefined, error ?? (checking ? t('openide.providers.checking') : result ? connectionMessage(result) : '')));
+		return feedback;
+	}
+
+	private async checkConnection(view: IProviderView): Promise<void> {
+		if (this.checkingKey || this.busyKey) { return; }
+		this.checkingKey = view.id;
+		this.keyErrors.delete(view.id);
+		const draft = this.keyDraft.get(view.id)?.trim();
+		const invalidation = this.invalidation;
+		this.paint();
 		try {
+			const result = await this.providerService.checkProviderConnection(view.id, draft || undefined);
+			if (!this._store.isDisposed && invalidation === this.invalidation) { this.connectionChecks.set(view.id, result); }
+		} catch {
+			if (!this._store.isDisposed && invalidation === this.invalidation) {
+				this.keyErrors.set(view.id, t('openide.providers.checkFailed'));
+			}
+		} finally {
+			this.checkingKey = undefined;
+			this.paint();
+		}
+	}
+
+	private async saveKey(view: IProviderView, key: string, mode: 'default' | 'new' | 'reauth', accountId: string | undefined, redraw: () => void, unchecked = false): Promise<void> {
+		if (!key || this.busyKey || this.checkingKey) { return; }
+		this.keyDraft.set(view.id, key);
+		this.keyErrors.delete(view.id);
+		this.busyKey = view.id;
+		const invalidation = this.invalidation;
+		this.paint();
+		try {
+			let checked: IProviderConnectionCheck | undefined;
+			if (!unchecked) {
+				const check = await this.providerService.checkProviderConnection(view.id, key);
+				if (this._store.isDisposed || invalidation !== this.invalidation) { return; }
+				checked = check;
+				this.connectionChecks.set(view.id, check);
+				if (check.status !== 'available' && check.status !== 'unverified') { return; }
+			}
 			await this.providerService.ensureAccountTracked(view.id);
 			if (mode === 'reauth' && accountId) { await this.providerService.switchAccount(view.id, accountId); }
 			await this.providerService.setApiKey(view.id, key);
@@ -1029,12 +1225,12 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 					await this.providerService.setModel(this.draftModel.get(view.id) ?? '');
 					this.draftModel.delete(view.id);
 				}
-				this.notificationService.notify({ severity: Severity.Info, message: t('openide.providers.keyConnected', view.label) });
+				this.notificationService.notify({ severity: Severity.Info, message: checked?.status === 'available' ? t('openide.providers.keyConnected', view.label) : t('openide.providers.keySavedUnverified', view.label) });
 			} else {
 				this.notificationService.notify({ severity: Severity.Warning, message: t('openide.providers.keySavedNoAnswer', view.label) });
 			}
 		} catch (error) {
-			this.fail(error);
+			this.keyErrors.set(view.id, t('openide.providers.keySaveFailed'));
 		} finally {
 			this.busyKey = undefined;
 			// Saving a key changes what every probe on this page measured: re-run them rather than
@@ -1174,7 +1370,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	 * the flow.
 	 */
 	private paintModelsCard(root: HTMLElement, view: IProviderView, activeId: string, activeModel: string): void {
-		if (!view.modelInfos.length) {
+		if (!view.modelInfos.length && !view.connected) {
 			return; // nothing the catalog or the endpoint can name: no card beats an empty one
 		}
 		const isActiveProvider = view.connected && view.id === activeId;
@@ -1199,6 +1395,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 				change: query => { this.modelQuery.set(view.id, query); redrawList?.(); },
 			});
 			search.element.classList.add('openide-settings-provider-modelsearch');
+			search.element.querySelector('input')!.dataset.providerFocus = `models:${view.id}`;
 			group.insertBefore(search.element, card);
 		}
 
@@ -1267,23 +1464,17 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		if (selected) { append(check, $('span.codicon.codicon-check')); }
 	}
 
-	/**
-	 * Picking a model on the ACTIVE provider applies immediately — the selection IS the intent,
-	 * making the user hunt for an "apply" button afterwards was the dead step this flow removes.
-	 * On any other provider it stays a draft that "Use this provider" applies atomically.
-	 */
+	/** Picking a model selects its provider too. There is no separate apply button to strand a draft. */
 	private async chooseModel(view: IProviderView, modelId: string, isActiveProvider: boolean, redraw: () => void): Promise<void> {
 		const value = modelId === view.defaultModel ? '' : modelId;
-		if (isActiveProvider) {
+		try {
 			this.draftModel.delete(view.id);
+			if (!isActiveProvider) { await this.providerService.setActiveProvider(view.id); }
 			await this.providerService.setModel(value);
 			this.paint();
-			return;
+		} catch (error) {
+			this.fail(error);
 		}
-		this.draftModel.set(view.id, value);
-		// The whole page and not the list: the card's footer says the draft is pending, and the
-		// footer lives outside the repainted host.
-		this.paint();
 	}
 
 	private async askCustomModel(view: IProviderView, redraw: () => void): Promise<void> {
@@ -1295,14 +1486,7 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 		if (value === undefined) { return; }
 		const trimmed = value.trim();
 		const isActiveProvider = view.connected && view.id === this.providerService.getActiveProviderId();
-		if (isActiveProvider) {
-			this.draftModel.delete(view.id);
-			await this.providerService.setModel(trimmed === view.defaultModel ? '' : trimmed);
-			this.paint();
-			return;
-		}
-		this.draftModel.set(view.id, trimmed);
-		this.paint();
+		await this.chooseModel(view, trimmed, isActiveProvider, redraw);
 	}
 
 	/** Runs a painter with a `redraw` that repaints ONLY its own card, so typing in an input never
@@ -1323,7 +1507,10 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	private refreshNavigation(): void {
 		// `hidden`: the sub-pages must stay resolvable (breadcrumb "AI Providers › OpenAI", deep
 		// links) but the sidebar must not list fifteen providers — the index page is the directory.
-		const next = this.providerService.listProviders().map(provider => ({ id: providerPageId(provider.id), label: provider.label, hidden: true }));
+		const next = [
+			{ id: providerSetupPage, label: t('openide.providers.addCustom'), hidden: true },
+			...this.providerService.listProviders().map(provider => ({ id: providerPageId(provider.id), label: provider.label, hidden: true })),
+		];
 		const same = next.length === this._navigationChildren.length
 			&& next.every((entry, index) => entry.id === this._navigationChildren[index].id && entry.label === this._navigationChildren[index].label);
 		if (same) { return; }
@@ -1351,9 +1538,18 @@ export class OpenideProvidersSettingsSection extends Disposable implements IOpen
 	}
 
 	private statusFor(view: IProviderView, activeId: string): ISectionStatus {
+		const check = this.connectionChecks.get(view.id);
+		if (check?.status === 'auth-error') {
+			return { tone: 'error', label: this.keyDraft.get(view.id)?.trim()
+				? t('openide.providers.draftRejected')
+				: t('openide.providers.rejected') };
+		}
+		if (view.auth === 'apiKey' && view.hasKey && check?.status !== 'available') {
+			return { tone: 'neutral', label: t('openide.providers.keyAvailable') };
+		}
 		if (view.id === activeId && view.connected) { return { tone: 'ok', label: t('openide.providers.stActive') }; }
 		if (view.connected) { return { tone: 'ok', label: t('openide.providers.stConnected') }; }
-		if (view.auth === 'none') { return { tone: 'neutral', label: t('openide.providers.stNoAuth') }; }
+		if (view.auth === 'none') { return { tone: 'neutral', label: t('openide.providers.offline') }; }
 		return { tone: 'neutral', label: t('openide.providers.stDisconnected') };
 	}
 

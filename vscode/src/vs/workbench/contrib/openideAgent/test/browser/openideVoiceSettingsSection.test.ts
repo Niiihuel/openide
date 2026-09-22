@@ -54,7 +54,8 @@ suite('OpenIDE VoiceSettingsSection', () => {
 			badge: host.querySelector('.openide-settings-voice-test .openide-settings-status-pill')?.textContent,
 			model: host.querySelector('.openide-settings-voice-test .openide-settings-card')?.textContent?.includes('audio-model'),
 			hasTranscript: !host.querySelector<HTMLElement>('.openide-settings-voice-transcript')?.hidden,
-		}, { badge: t('settings.voice.configured'), model: true, hasTranscript: false });
+			automaticLooksUsable: !!host.querySelector('.openide-settings-voice .openide-settings-row.selected'),
+		}, { badge: t('settings.voice.configured'), model: true, hasTranscript: false, automaticLooksUsable: false });
 	});
 
 	test('unavailable dictation explains the reason and links to providers', async () => {
@@ -119,13 +120,16 @@ suite('OpenIDE VoiceSettingsSection', () => {
 		h.agent.listVoiceModels = async () => ({ ...initial, excluded: [{ id: 'text-only', label: 'Text Provider', reason: 'noAudioModel' }] });
 		h.changed.fire();
 		await flush();
-		assert.strictEqual(h.host.querySelectorAll('details.openide-settings-voice-provider').length, 2);
-		assert.ok(h.host.querySelector('[data-provider-id="text-only"] summary .openide-settings-provider-logo'));
+		const excluded = h.host.querySelector<HTMLDetailsElement>('details.openide-settings-voice-excluded')!;
+		assert.strictEqual(excluded.open, false);
+		assert.strictEqual(excluded.querySelector('.openide-settings-voice-excluded-count')?.textContent, '1');
+		assert.ok(excluded.querySelector('.openide-settings-provider-logo'));
+		assert.ok(excluded.textContent?.includes('Text Provider'));
 		h.agent.listVoiceModels = async () => ({ groups: [], excluded: [{ id: 'text-only', label: 'Text Provider', reason: 'noAudioModel' }] });
 		h.changed.fire();
 		await flush();
 		assert.strictEqual(h.host.querySelector('[data-provider-id="audio"]'), null);
-		assert.ok(h.host.querySelector('[data-provider-id="text-only"]'));
+		assert.ok(h.host.querySelector('details.openide-settings-voice-excluded'));
 	});
 
 });

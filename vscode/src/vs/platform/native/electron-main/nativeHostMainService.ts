@@ -33,7 +33,7 @@ import { IProductService } from '../../product/common/productService.js';
 import { IPartsSplash } from '../../theme/common/themeService.js';
 import { IThemeMainService } from '../../theme/electron-main/themeMainService.js';
 import { defaultWindowState, ICodeWindow } from '../../window/electron-main/window.js';
-import { IColorScheme, IOpenedAuxiliaryWindow, IOpenedMainWindow, IOpenEmptyWindowOptions, IOpenWindowOptions, IPoint, IRectangle, IWindowOpenable } from '../../window/common/window.js';
+import { IColorScheme, IOpenedAuxiliaryWindow, IOpenedMainWindow, IOpenEmptyWindowOptions, IOpenWindowOptions, IOpenideAgentWindowRequest, IOpenideAgentWindowResponse, IPoint, IRectangle, IWindowOpenable, isFileToOpen } from '../../window/common/window.js';
 import { defaultBrowserWindowOptions, IWindowsMainService, OpenContext } from '../../windows/electron-main/windows.js';
 import { isWorkspaceIdentifier, toWorkspaceIdentifier } from '../../workspace/common/workspace.js';
 import { IWorkspacesManagementMainService } from '../../workspaces/electron-main/workspacesManagementMainService.js';
@@ -50,6 +50,8 @@ import { IProxyAuthService } from './auth.js';
 import { AuthInfo, Credentials, IRequestService } from '../../request/common/request.js';
 import { randomPath } from '../../../base/common/extpath.js';
 import { CancellationToken, CancellationTokenSource } from '../../../base/common/cancellation.js';
+import { DeferredPromise, RunOnceScheduler } from '../../../base/common/async.js';
+import { generateUuid } from '../../../base/common/uuid.js';
 
 export interface INativeHostMainService extends AddFirstParameterToFunctions<ICommonNativeHostService, Promise<unknown> /* only methods, not events */, number | undefined /* window ID */> { }
 
@@ -276,13 +278,21 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 
 	private async doOpenWindow(windowId: number | undefined, toOpen: IWindowOpenable[], options: IOpenWindowOptions = Object.create(null)): Promise<void> {
 		if (toOpen.length > 0) {
+			const sourceAgentWindow = options.openideAgentWindow
+				? this.auxiliaryWindowsMainService.getWindows().find(window => window.id === options.openideAgentWindow?.sourceWindowId && window.parentId === windowId)
+				: undefined;
+			if (options.openideAgentWindow && (!sourceAgentWindow?.win || toOpen.length !== 1 || isFileToOpen(toOpen[0]) || options.addMode || options.removeMode)) {
+				throw new Error(localize('openideAgent.invalidProjectHandoff', "Select one project from an open Agent window to switch projects."));
+			}
+			const existingWindowIds = sourceAgentWindow ? new Set(this.windowsMainService.getWindows().map(window => window.id)) : undefined;
 			const windows = await this.windowsMainService.open({
 				context: OpenContext.API,
 				contextWindowId: windowId,
 				urisToOpen: toOpen,
 				cli: this.environmentMainService.args,
-				forceNewWindow: options.forceNewWindow,
-				forceReuseWindow: options.forceReuseWindow,
+				forceNewWindow: sourceAgentWindow ? true : options.forceNewWindow,
+				forceReuseWindow: sourceAgentWindow ? false : options.forceReuseWindow,
+				openideAgentWindow: !!sourceAgentWindow,
 				preferNewWindow: options.preferNewWindow,
 				diffMode: options.diffMode,
 				mergeMode: options.mergeMode,
@@ -295,6 +305,19 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 				forceProfile: options.forceProfile,
 				forceTempProfile: options.forceTempProfile,
 			});
+			if (sourceAgentWindow) {
+				if (windows.length !== 1) { throw new Error(localize('openideAgent.projectNotOpened', "The selected Agent project could not be opened.")); }
+				const destination = windows[0];
+				try {
+					await this.openAgentCompanion(destination, sourceAgentWindow);
+				} catch (error) {
+					// A failed hidden startup must leave a recoverable surface. Never close the
+					// source or alter an existing destination IDE after a failed handoff.
+					if (!existingWindowIds?.has(destination.id)) { destination.focus(); }
+					throw error;
+				}
+				return;
+			}
 
 			// Hand off a chat session to the opened window so it restores both the
 			// folder and the session (e.g. the Agents window "Open in VS Code" flow).
@@ -305,6 +328,34 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 				windows[0].sendWhenReady('vscode:openChatSession', CancellationToken.None, URI.revive(chatSessionToOpen).toString());
 			}
 		}
+	}
+
+	private async openAgentCompanion(destination: ICodeWindow, source: IAuxiliaryWindow): Promise<void> {
+		if (!source.win || source.win.isDestroyed()) { throw new CancellationError(); }
+		const contents = destination.win?.webContents;
+		if (!contents || contents.isDestroyed()) { throw new Error(localize('openideAgent.destinationUnavailable', "The destination workspace is no longer available.")); }
+		const request: IOpenideAgentWindowRequest = { replyChannel: `vscode:openideAgentWindowOpened:${generateUuid()}` };
+		const response = new DeferredPromise<IOpenideAgentWindowResponse>();
+		const store = new DisposableStore();
+		try {
+			const cancellation = new CancellationTokenSource();
+			store.add(toDisposable(() => cancellation.dispose(true)));
+			store.add(Event.fromNodeEventEmitter(contents, 'ipc-message', (_event, channel: string, reply: IOpenideAgentWindowResponse | undefined) => ({ channel, reply }))(({ channel, reply }) => {
+				if (channel === request.replyChannel && typeof reply?.success === 'boolean') { void response.complete(reply); }
+			}));
+			store.add(destination.onDidClose(() => void response.error(new Error(localize('openideAgent.destinationClosed', "The destination workspace was closed.")))));
+			store.add(source.onDidClose(() => void response.error(new CancellationError())));
+			const timeout = store.add(new RunOnceScheduler(() => void response.error(new Error(localize('openideAgent.destinationTimeout', "The Agent window did not finish opening."))), 60000));
+			timeout.schedule();
+			destination.sendWhenReady('vscode:openOpenideAgentWindow', cancellation.token, request);
+			const result = await response.p;
+			if (!result.success) { throw new Error(result.error || localize('openideAgent.destinationFailed', "The Agent window could not be opened.")); }
+		} finally {
+			store.dispose();
+		}
+		// The original IDE remains loaded with its workspace and editors intact.
+		// Selecting an already-owned workspace merely focuses its existing companion.
+		if (source.parentId !== destination.id) { source.win?.close(); }
 	}
 
 	private async doOpenEmptyWindow(windowId: number | undefined, options?: IOpenEmptyWindowOptions): Promise<void> {

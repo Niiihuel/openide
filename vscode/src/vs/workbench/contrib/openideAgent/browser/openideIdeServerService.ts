@@ -57,7 +57,7 @@ export const IOpenideIdeServerService = createDecorator<OpenideIdeServerService>
 /** Executes one Tier 2 tool. Registered by whoever owns those tools, not by this file. */
 export interface IIdeExtraTool {
 	readonly schema: IIdeToolSchema;
-	invoke(args: unknown, token: CancellationToken, targetWindowId?: number): Promise<IIdeToolResult>;
+	invoke(args: unknown, token: CancellationToken, targetWindowId?: number, context?: { readonly toolCallId?: string; readonly conversationId?: string }): Promise<IIdeToolResult>;
 }
 
 export type OpenideCliIntegrationState = 'preparing' | 'configured' | 'unavailable' | 'manual' | 'failed';
@@ -118,7 +118,7 @@ export class OpenideIdeServerService extends Disposable {
 			this.pending.set(request.requestId, cancellation);
 			let result: IIdeToolResult;
 			try {
-				result = await this.invoke(request.tool, request.args, cancellation.token, request.sessionId);
+				result = await this.invoke(request.tool, request.args, cancellation.token, request.sessionId, request.requestId);
 			} catch (error) {
 				// A thrown tool still has to answer, or the CLI waits on a reply that never comes.
 				result = toolError(error instanceof Error ? error.message : String(error));
@@ -311,7 +311,7 @@ export class OpenideIdeServerService extends Disposable {
 	 */
 	bridgeAgentTools(
 		definitions: readonly IToolDefinition[],
-		invoke: (name: string, argumentsJson: string, token: CancellationToken, targetWindowId?: number) => Promise<{ readonly output: string; readonly isError: boolean }>,
+		invoke: (name: string, argumentsJson: string, token: CancellationToken, targetWindowId?: number, context?: { readonly toolCallId?: string; readonly conversationId?: string }) => Promise<{ readonly output: string; readonly isError: boolean }>,
 		completions?: ReadonlyMap<string, (output: string, token: CancellationToken) => Promise<string>>,
 	): void {
 		this.registerTools(definitions.map(definition => ({
@@ -321,8 +321,8 @@ export class OpenideIdeServerService extends Disposable {
 				inputSchema: definition.parameters as IIdeToolSchema['inputSchema'],
 				blocking: completions?.has(definition.name),
 			},
-			invoke: async (args: unknown, token: CancellationToken, targetWindowId?: number): Promise<IIdeToolResult> => {
-				const result = await invoke(definition.name, JSON.stringify(args ?? {}), token, targetWindowId);
+			invoke: async (args: unknown, token: CancellationToken, targetWindowId?: number, context?: { readonly toolCallId?: string; readonly conversationId?: string }): Promise<IIdeToolResult> => {
+				const result = await invoke(definition.name, JSON.stringify(args ?? {}), token, targetWindowId, context);
 				if (result.isError) { return { ...text(result.output), isError: true }; }
 				let output = result.output;
 				// A completion turns a tool that merely DID something into one that waits for a
@@ -397,7 +397,7 @@ export class OpenideIdeServerService extends Disposable {
 
 	// ---- Dispatch ------------------------------------------------------------------------------
 
-	private async invoke(tool: string, rawArgs: unknown, token: CancellationToken, sessionId?: string): Promise<IIdeToolResult> {
+	private async invoke(tool: string, rawArgs: unknown, token: CancellationToken, sessionId?: string, toolCallId?: string): Promise<IIdeToolResult> {
 		const targetWindowId = sessionId ? this.sessionWindows.get(sessionId) : mainWindow.vscodeWindowId;
 		if (targetWindowId === undefined) { return toolError('The CLI session presentation is no longer available'); }
 		if (token.isCancellationRequested) { return toolError('IDE request cancelled'); }
@@ -420,7 +420,7 @@ export class OpenideIdeServerService extends Disposable {
 				if (!extra) {
 					return toolError(`unknown tool: ${tool}`);
 				}
-				return extra.invoke(rawArgs, token, targetWindowId);
+				return extra.invoke(rawArgs, token, targetWindowId, { toolCallId, conversationId: sessionId });
 			}
 		}
 	}

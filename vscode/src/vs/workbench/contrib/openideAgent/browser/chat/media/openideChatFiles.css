@@ -430,3 +430,10 @@
 		display: none;
 	}
 }
+/* Instruction and integration changes name their purpose above the native diff. */
+.openide-chat-authoring-edit-label {
+	padding: var(--vscode-spacing-size8, 8px) var(--vscode-spacing-size12, 12px) 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+}
+.openide-chat-authoring-edit-label[hidden] { display: none; }

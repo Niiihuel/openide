@@ -85,6 +85,9 @@
 .openide-agent-window-header > button { flex-shrink: 0; }
 .openide-agent-window-header > button > span:last-child { display: none; }
 .openide-agent-window-title { flex: 1; min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.openide-agent-window-identity { display: flex; flex: 1; flex-direction: column; min-width: 0; padding-block: var(--vscode-spacing-size4, 4px); }
+.openide-agent-window-identity .openide-agent-window-title { flex: initial; font-weight: var(--vscode-font-weight, 400); }
+.openide-agent-window-location { padding-inline: var(--vscode-spacing-size8, 8px); color: var(--oi-secondary); font-size: var(--oi-label-font-size, 12px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .openide-agent-window-chat { isolation: isolate; flex: 1; min-width: 0; min-height: 0; position: relative; }
 .openide-agent-window-chat > .openide-chat-native { height: 100%; }
 .openide-agent-window-chat .openide-chat-headbar { display: none; }
@@ -100,6 +103,18 @@
 	border-radius: var(--oi-radius-composer);
 }
 .openide-agent-window-context-header { display: flex; align-items: center; justify-content: space-between; min-height: 24px; padding: 0 8px; }
+.openide-agent-window-context-header > span { color: var(--oi-secondary); font-size: var(--oi-label-font-size, 12px); }
+.openide-conversation-context-tabs { display: flex; gap: var(--vscode-spacing-size4, 4px); padding: var(--vscode-spacing-size8, 8px) 0; border-bottom: var(--vscode-strokeThickness, 1px) solid var(--oi-border); }
+.openide-conversation-context-tab { flex: 1; min-width: 0; padding: var(--vscode-spacing-size6, 6px) var(--vscode-spacing-size4, 4px); border: 0; border-radius: var(--oi-radius-control); background: transparent; color: var(--oi-secondary); font: inherit; font-size: var(--oi-label-font-size, 12px); cursor: pointer; }
+.openide-conversation-context-tab:hover { background: var(--oi-hover); color: var(--oi-text); }
+.openide-conversation-context-tab[aria-selected="true"] { background: var(--oi-hover); color: var(--oi-text); }
+.openide-conversation-context-tab:focus-visible { outline: var(--vscode-strokeThickness, 1px) solid var(--vscode-focusBorder); outline-offset: -1px; }
+.openide-conversation-context-panel { min-width: 0; padding-block: var(--vscode-spacing-size8, 8px); }
+.openide-conversation-context-panel > .openide-agent-window-context-section:first-child { padding-top: 0; }
+.openide-conversation-changes-provenance { padding: var(--vscode-spacing-size8, 8px); color: var(--oi-secondary); font-size: var(--oi-label-font-size, 12px); line-height: 1.5; }
+.openide-conversation-changes-files { display: flex; flex-direction: column; gap: var(--oi-navigation-row-gap); }
+.openide-agent-window-change-icon { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 16px; }
+.openide-agent-window-change-icon::before { display: inline-block; width: 16px; height: 16px; font-size: 16px; line-height: 16px; background-size: 16px; background-position: center; background-repeat: no-repeat; }
 .openide-agent-window-context-section { padding: 6px 0; }
 .openide-agent-window-context-section ~ .openide-agent-window-context-section { border-top: 1px solid var(--oi-border); }
 .openide-agent-window-section-heading { display: flex; align-items: center; gap: 4px; padding: 0 8px 4px; min-height: 24px; }
@@ -152,7 +167,8 @@
 /* Window-wide actions stay in the native titlebar; pane toggles flank the conversation. */
 .openide-agent-titlebar .action-toolbar-container { display: none !important; }
 .openide-agent-titlebar .window-appicon { display: none !important; }
-.openide-agent-menubar { display: flex; align-items: center; gap: 2px; height: 100%; padding-inline: 4px; -webkit-app-region: no-drag; }
+/* Match the Workbench menubar layer: no-drag alone cannot receive clicks below the drag region. */
+.openide-agent-menubar { display: flex; align-items: center; gap: 2px; height: 100%; padding-inline: 4px; position: relative; z-index: 2500; -webkit-app-region: no-drag; }
 .openide-agent-menubar-button {
 	appearance: none; border: 0; outline: 0; min-height: 26px; padding: 0 8px;
 	border-radius: var(--oi-radius-sm); background: transparent;
@@ -163,8 +179,6 @@
 .openide-agent-menubar-button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .openide-agent-window-actions { display: flex; align-items: center; gap: 2px; padding: 0 6px; position: relative; z-index: 2500; -webkit-app-region: no-drag; }
 
-.openide-agent-window-harness-icon { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 16px; }
-.openide-agent-window-harness-icon > .openide-provider-icon { width: 16px; height: 16px; }
 .openide-agent-window-harness-label { color: var(--vscode-descriptionForeground); font-size: 12px; flex-shrink: 0; padding-inline: 6px; }
 
 .openide-agent-window-context .openide-agent-window-changes-review { width: 24px; min-width: 24px; height: 24px; min-height: 24px; flex: 0 0 24px; padding: 0; }

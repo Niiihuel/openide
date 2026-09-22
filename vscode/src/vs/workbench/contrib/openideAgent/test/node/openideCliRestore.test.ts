@@ -91,7 +91,7 @@ suite('OpenIDE CLI snapshot restore (real Git and filesystem)', () => {
 			override getWorkspace() { return new Workspace('fixture', [new WorkspaceFolder({ uri: URI.file(cwd), name: 'fixture', index: 0 })], false, null, () => false); }
 		};
 		runState = new OpenideAgentRunStateService();
-		service = store.add(new OpenideCliChangesService(native, new class extends mock<IOpenideReviewDiffService>() {}, log, new class extends mock<IEditorService>() { }, new class extends mock<IModelService>() { }, new class extends mock<ILanguageService>() { }, models, files, workingCopies, context, runState));
+		service = store.add(new OpenideCliChangesService(native, new class extends mock<IOpenideReviewDiffService>() { override async summarize() { return undefined; } }, log, new class extends mock<IEditorService>() { }, new class extends mock<IModelService>() { }, new class extends mock<ILanguageService>() { }, models, files, workingCopies, context, runState));
 		session = { id: 'fixture', cliId: 'claude', cwd, title: 'Fixture' };
 	});
 
@@ -111,6 +111,20 @@ suite('OpenIDE CLI snapshot restore (real Git and filesystem)', () => {
 		await finished;
 		if (exited) { service.noteExited(session.id); }
 	}
+
+	test('updating one conversation retains cached previews for other conversations', async () => {
+		await service.prepareSession(session);
+		await service.prepareSession({ ...session, id: 'other' });
+		const file = { path: 'file.txt', status: 'modified' as const };
+		const first = service.preview(session.id, file);
+		const second = service.preview('other', file);
+		await Promise.all([first, second]);
+		service.noteTyping(session.id, true);
+		const refreshed = service.preview(session.id, file);
+		assert.notStrictEqual(refreshed, first);
+		assert.strictEqual(service.preview('other', file), second);
+		await refreshed;
+	});
 
 	test('preserves tracked dirty work from before execution and restores an explicitly selected snapshot', async () => {
 		await write('file.txt', 'user work before CLI\n');

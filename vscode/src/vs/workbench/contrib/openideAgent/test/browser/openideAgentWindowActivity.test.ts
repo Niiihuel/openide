@@ -14,16 +14,19 @@ import { IWorkspaceContextService } from '../../../../../platform/workspace/comm
 import { ITerminalInstance, ITerminalService } from '../../../terminal/browser/terminal.js';
 import { OpenideChatController } from '../../browser/chat/openideChatController.js';
 import { OpenideChatWidget } from '../../browser/chat/openideChatWidget.js';
+import { IOpenideAgentService } from '../../browser/openideAgentService.js';
 import { agentConversationSources, OpenideAgentWindowActivity } from '../../browser/openideAgentWindowActivity.js';
 import { OpenideChatSessions } from '../../browser/openideChatSessions.js';
 import { ISubagentOrchestrationService } from '../../browser/openideSubagentOrchestrationService.js';
-import { IChatMessage } from '../../common/openideAgentTypes.js';
+import { IBackgroundTerminalEvent, IChatMessage } from '../../common/openideAgentTypes.js';
 import { ISubagentRun, SubagentRunEvent } from '../../common/openideSubagentTypes.js';
 
 suite('OpenIDE agent window activity', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 	function fixture() {
 		const navigation = store.add(new Emitter<void>()), runsChanged = store.add(new Emitter<SubagentRunEvent>()), terminalsChanged = store.add(new Emitter<void>());
+		const backgroundChanged = store.add(new Emitter<IBackgroundTerminalEvent>());
+		const backgroundTerminalInstanceIds: number[] = [];
 		let selected = 'one';
 		const messages = new Map<string, IChatMessage[]>([['one', [{ role: 'user', content: 'Review', snippets: [{ path: 'one.ts', startLine: 1, endLine: 2, text: 'first' }] }]], ['two', [{ role: 'user', content: 'https://example.com/docs', images: [{ mimeType: 'image/png', data: '', assetUri: 'file:///project/image.png' }] }]]]);
 		const instances: ITerminalInstance[] = [], runs: ISubagentRun[] = [], stopped: number[] = [], opened: string[] = [], browsers: string[] = [], focused: (number | undefined)[] = [], sessionsOpened: string[] = [];
@@ -38,9 +41,10 @@ suite('OpenIDE agent window activity', () => {
 			upcastPartial<ISubagentOrchestrationService>({ onDidChangeRun: runsChanged.event, getRunsForParent: id => runs.filter(run => run.parentConversationId === id) }),
 			upcastPartial<ITerminalService>({ instances, onDidChangeInstances: terminalsChanged.event, safeDisposeTerminal: async instance => { stopped.push(instance.instanceId); } }),
 			upcastPartial<IWorkspaceContextService>({ getWorkspace: () => ({ id: 'project', folders: [{ uri: URI.file('/project'), name: 'project', index: 0, toResource: path => URI.file('/project/' + path) }] }) }),
-			NullHoverService));
+			NullHoverService,
+			upcastPartial<IOpenideAgentService>({ backgroundTerminalInstanceIds, onDidChangeBackgroundTerminal: backgroundChanged.event })));
 		const section = (name: string) => parent.querySelector<HTMLElement>(`[data-activity="${name}"]`)!;
-		return { parent, activity, section, messages, instances, runs, runsChanged, terminalsChanged, opened, browsers, focused, stopped, sessionsOpened, navigate: async () => { selected = 'two'; navigation.fire(); await timeout(100); } };
+		return { parent, activity, section, messages, instances, runs, runsChanged, terminalsChanged, backgroundChanged, backgroundTerminalInstanceIds, opened, browsers, focused, stopped, sessionsOpened, navigate: async () => { selected = 'two'; navigation.fire(); await timeout(100); } };
 	}
 
 	test('sources follow selection, deduplicate user context, and preserve shared openers', async () => {
@@ -83,6 +87,37 @@ suite('OpenIDE agent window activity', () => {
 		assert.deepStrictEqual(f.sessionsOpened, ['subagents']);
 		await f.navigate();
 		assert.strictEqual(summary.querySelectorAll('img').length, 1);
+	});
+
+	test('background tools remain discoverable and scoped without exposing hidden CLI terminals', async () => {
+		const f = fixture();
+		for (const [id, owner] of [[1, 'one'], [2, 'two'], [3, 'one']] as const) {
+			f.instances.push(upcastPartial<ITerminalInstance>({ instanceId: id, title: `Background ${id}`, shellLaunchConfig: { hideFromUser: true, env: { OPENIDE_CONVERSATION_ID: owner } }, onTitleChanged: Event.None }));
+		}
+		f.terminalsChanged.fire();
+		const visible = () => [...f.section('processes').querySelectorAll<HTMLElement>('[data-terminal-id]')].map(row => row.dataset.terminalId);
+		assert.deepStrictEqual(visible(), []);
+		f.backgroundTerminalInstanceIds.push(1, 2);
+		f.backgroundChanged.fire({ id: 'tool', command: 'npm run dev', status: 'running' });
+		f.section('processes').querySelector<HTMLButtonElement>('[data-terminal-id="1"] button')!.click();
+		assert.deepStrictEqual({ visible: visible(), focused: f.focused }, { visible: ['1'], focused: [1] });
+		await f.navigate();
+		assert.deepStrictEqual(visible(), ['2']);
+		f.backgroundTerminalInstanceIds.length = 0;
+		f.backgroundChanged.fire({ id: 'tool', command: 'npm run dev', status: 'exited' });
+		assert.deepStrictEqual(visible(), []);
+	});
+
+	test('conversation terminals stay scoped while unowned workspace terminals remain shared', async () => {
+		const f = fixture();
+		for (const [id, owner] of [[1, 'one'], [2, 'two'], [3, undefined]] as const) {
+			f.instances.push(upcastPartial<ITerminalInstance>({ instanceId: id, title: `Terminal ${id}`, shellLaunchConfig: { env: owner ? { OPENIDE_CONVERSATION_ID: owner } : undefined }, onTitleChanged: Event.None }));
+		}
+		f.terminalsChanged.fire();
+		const visible = () => [...f.section('processes').querySelectorAll<HTMLElement>('[data-terminal-id]')].map(row => row.dataset.terminalId);
+		assert.deepStrictEqual(visible(), ['1', '3']);
+		await f.navigate();
+		assert.deepStrictEqual(visible(), ['2', '3']);
 	});
 
 	test('streaming progress preserves summary icons while counts reflect status changes', async () => {

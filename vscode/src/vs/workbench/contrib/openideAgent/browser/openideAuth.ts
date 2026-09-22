@@ -11,6 +11,7 @@
 import { ISecretStorageService } from '../../../../platform/secrets/common/secrets.js';
 import { chooseCredential, CREDENTIAL_KEY, ICredentialOrigin, ICredentialSourcesSnapshot, IResolvedCredential, oauthSignalsFor } from '../../../../platform/openideAgentHost/common/openideCredentialSources.js';
 import { ICredential } from '../common/openideAgentTypes.js';
+import { t } from '../common/openideStrings.js';
 import { IProviderEntry } from '../common/openideProviderCatalog.js';
 import { OpenideOAuthManager } from './openideOAuth.js';
 
@@ -41,6 +42,8 @@ export class OpenideAuthManager {
 
 	private snapshot: { at: number; value: ICredentialSourcesSnapshot } | undefined;
 	private pending: Promise<ICredentialSourcesSnapshot> | undefined;
+	private generation = 0;
+	private environmentSignature = '';
 	private facts: (providerId: string) => IProviderRegistryFacts = () => ({});
 	private allEnvNames: () => readonly string[] = () => [];
 	private read: ((envNames: readonly string[]) => Promise<ICredentialSourcesSnapshot>) | undefined;
@@ -59,16 +62,25 @@ export class OpenideAuthManager {
 		this.facts = facts;
 		this.allEnvNames = allEnvNames;
 		this.read = read;
+		this.forgetExternalCredentials();
 	}
 
 	/** Invalidates the snapshot so the next lookup re-reads the machine. */
 	forgetExternalCredentials(): void {
 		this.snapshot = undefined;
+		this.pending = undefined;
+		this.generation++;
 	}
 
 	private async snapshotNow(): Promise<ICredentialSourcesSnapshot | undefined> {
 		if (!this.read) {
 			return undefined;
+		}
+		const envNames = [...new Set(this.allEnvNames())].sort();
+		const signature = JSON.stringify(envNames);
+		if (signature !== this.environmentSignature) {
+			this.environmentSignature = signature;
+			this.forgetExternalCredentials();
 		}
 		if (this.snapshot && Date.now() - this.snapshot.at < SNAPSHOT_TTL_MS) {
 			return this.snapshot.value;
@@ -76,11 +88,17 @@ export class OpenideAuthManager {
 		if (!this.pending) {
 			// One read for every provider: the answer is the whole machine's picture, and asking
 			// per provider would spawn a login shell per row of the settings page.
-			this.pending = this.read(this.allEnvNames())
-				.then(value => { this.snapshot = { at: Date.now(), value }; return value; })
-				.finally(() => { this.pending = undefined; });
+			const generation = this.generation;
+			this.pending = this.read(envNames)
+				.then(value => {
+					if (generation === this.generation) { this.snapshot = { at: Date.now(), value }; }
+					return value;
+				})
+				.finally(() => { if (generation === this.generation) { this.pending = undefined; } });
 		}
-		return this.pending.catch(() => undefined);
+		const generation = this.generation;
+		const value = await this.pending.catch(() => undefined);
+		return generation === this.generation ? value : this.snapshotNow();
 	}
 
 	/** The credential in force for a provider, with where it came from. */
@@ -104,7 +122,11 @@ export class OpenideAuthManager {
 	}
 
 	async setApiKey(providerId: string, key: string): Promise<void> {
-		await this.secretStorage.set(SECRET_APIKEY_PREFIX + providerId, key);
+		const normalized = key.trim();
+		if (!normalized || /[\s\x00-\x1f\x7f]/.test(normalized)) {
+			throw new Error(t('openide.invalidApiKey'));
+		}
+		await this.secretStorage.set(SECRET_APIKEY_PREFIX + providerId, normalized);
 	}
 
 	async clearApiKey(providerId: string): Promise<void> {

@@ -9,6 +9,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { URI } from '../../../../base/common/uri.js';
+import type { IPersistedFileDiff } from './openideAgentTypes.js';
 import { ISubagentRoutingAttempt, ISubagentRoutingDecision, SubagentTaskProfile } from './openideSubagentRouting.js';
 
 export type SubagentScope = 'workspace' | 'user' | 'imported';
@@ -86,7 +87,7 @@ export interface ISubagentRunMetrics {
 	readonly timeToFirstEventMs?: number;
 }
 
-export type SubagentTimelineEventType = 'status' | 'progress' | 'toolStart' | 'toolResult' | 'permissionDenied' | 'result' | 'error';
+export type SubagentTimelineEventType = 'status' | 'progress' | 'reasoning' | 'text' | 'terminal' | 'fileChange' | 'toolStart' | 'toolResult' | 'permissionDenied' | 'result' | 'error';
 
 export interface ISubagentTimelineEvent {
 	readonly sequence: number;
@@ -98,6 +99,7 @@ export interface ISubagentTimelineEvent {
 	readonly argumentsJson?: string;
 	readonly isError?: boolean;
 	readonly path?: string;
+	readonly fileDiff?: IPersistedFileDiff;
 }
 
 export interface ISubagentRun {

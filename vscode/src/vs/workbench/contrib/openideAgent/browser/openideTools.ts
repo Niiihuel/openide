@@ -117,6 +117,8 @@ export interface IToolApprovalInfo {
 
 export interface IAgentToolContext {
 	readonly targetWindowId?: number;
+	/** Invocation identity for linking runtime activity to its originating chat tool card. */
+	readonly toolCallId?: string;
 	/** Internal receipt observer; never accepted from model arguments. */
 	readonly onCommandResult?: (result: ShellCaptureResult) => void;
 	readonly execution?: IOpenideToolExecution;
@@ -1343,7 +1345,7 @@ export class OpenideToolRegistry extends Disposable {
 		if (owner.terminal && !owner.terminal.isDisposed) {
 			return owner.terminal;
 		}
-		const term = await this.terminalService.createTerminal({ config: { cwd: workspaceRoot, isTransient: true } });
+		const term = await this.terminalService.createTerminal({ config: { cwd: workspaceRoot, isTransient: true, env: shell === SHARED_SHELL ? undefined : { OPENIDE_CONVERSATION_ID: shell } } });
 		this.ownTerminal(term);
 		owner.terminal = term;
 		owner.workspaceKey = workspaceKey;
@@ -1377,6 +1379,7 @@ export class OpenideToolRegistry extends Disposable {
 			config: {
 				name: command.replace(/\s+/g, ' ').trim(),
 				cwd: scope.root,
+				env: context?.conversationId ? { OPENIDE_CONVERSATION_ID: context.conversationId } : undefined,
 				// persistent: visible in the dock from the start. Normal background: hidden until reveal.
 				hideFromUser: !revealInIde,
 				// Persistence means across turns, never beyond the owning renderer.
@@ -1463,6 +1466,11 @@ export class OpenideToolRegistry extends Disposable {
 	/** A persistent dock can remain visible after its command exits; only live owned work blocks completion. */
 	getGoalPendingBackgroundReason(sessionId: string): string | undefined {
 		return openideGoalPendingBackgroundReason(sessionId, [...this.bgTerminals.values()].map(entry => ({ conversationId: entry.conversationId, command: entry.command, running: entry.running, disposed: entry.term.isDisposed })));
+	}
+
+	/** Discoverable terminal instances owned by background tools, including persistent shells. */
+	get backgroundTerminalInstanceIds(): readonly number[] {
+		return [...this.bgTerminals.values()].filter(entry => !entry.term.isDisposed).map(entry => entry.term.instanceId);
 	}
 
 	/** Reveals and focuses a background terminal in the IDE panel (click on the chat widget). */

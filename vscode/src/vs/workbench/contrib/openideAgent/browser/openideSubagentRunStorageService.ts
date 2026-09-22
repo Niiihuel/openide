@@ -7,6 +7,8 @@
  *  OpenIDE — persistencia acotada de ejecuciones de subagentes por workspace.
  *--------------------------------------------------------------------------------------------*/
 
+import { RunOnceScheduler } from '../../../../base/common/async.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { cloneSubagentRun, isTerminalSubagentStatus, ISubagentRun } from '../common/openideSubagentTypes.js';
@@ -26,11 +28,20 @@ export interface ISubagentRunStorageService {
 	remove(runId: string): void;
 }
 
-export class SubagentRunStorageService implements ISubagentRunStorageService {
+export class SubagentRunStorageService extends Disposable implements ISubagentRunStorageService {
 	declare readonly _serviceBrand: undefined;
 	private readonly runs = new Map<string, ISubagentRun>();
 
-	constructor(@IStorageService private readonly storageService: IStorageService) { this.load(); }
+	private readonly saveScheduler = this._register(new RunOnceScheduler(() => this.persist(), 100));
+	constructor(@IStorageService private readonly storageService: IStorageService) {
+		super();
+		this.load();
+		this._register(storageService.onWillSaveState(() => { if (this.saveScheduler.isScheduled()) { this.saveScheduler.cancel(); this.persist(); } }));
+	}
+	override dispose(): void {
+		if (this.saveScheduler.isScheduled()) { this.persist(); }
+		super.dispose();
+	}
 
 	private load(): void {
 		const currentRaw = this.storageService.get(STORAGE_KEY, StorageScope.WORKSPACE);
@@ -72,7 +83,11 @@ export class SubagentRunStorageService implements ISubagentRunStorageService {
 
 	private persist(): void {
 		let runs = [...this.runs.values()].sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_RUNS);
-		while (runs.length && JSON.stringify({ runs }).length > MAX_CHARS) { runs = runs.slice(0, -1); }
+		while (runs.length > 1 && JSON.stringify({ runs }).length > MAX_CHARS) {
+			const removable = runs.findLastIndex((run, index) => index > 0 && isTerminalSubagentStatus(run.status));
+			if (removable < 0) { break; }
+			runs.splice(removable, 1);
+		}
 		this.storageService.store(STORAGE_KEY, JSON.stringify({ runs }), StorageScope.WORKSPACE, StorageTarget.MACHINE);
 		// The current write is already confirmed by IStorageService: do not let a stale v1
 		// resurface if the new value gets corrupted in the future.
@@ -81,6 +96,6 @@ export class SubagentRunStorageService implements ISubagentRunStorageService {
 
 	list(): readonly ISubagentRun[] { return Object.freeze([...this.runs.values()].map(cloneSubagentRun).sort((a, b) => b.createdAt - a.createdAt)); }
 	get(runId: string): ISubagentRun | undefined { const run = this.runs.get(runId); return run ? cloneSubagentRun(run) : undefined; }
-	save(run: ISubagentRun): void { this.runs.set(run.runId, cloneSubagentRun(run)); this.persist(); }
+	save(run: ISubagentRun): void { this.runs.set(run.runId, cloneSubagentRun(run)); if (isTerminalSubagentStatus(run.status)) { this.saveScheduler.cancel(); this.persist(); } else if (!this.saveScheduler.isScheduled()) { this.saveScheduler.schedule(); } }
 	remove(runId: string): void { this.runs.delete(runId); this.persist(); }
 }

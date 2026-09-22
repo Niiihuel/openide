@@ -15,9 +15,13 @@ import { registerEditorWindowTarget } from '../../../services/editor/browser/edi
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IAuxiliaryWindowService } from '../../../services/auxiliaryWindow/browser/auxiliaryWindowService.js';
 
-/** Opens real workbench editor inputs in the owning agent window's native modal part. */
+/** Keeps the workspace dock and expanded native modal in separate editor parts. */
 export class OpenideAgentWindowEditors extends Disposable {
 	private part: IModalEditorPart | undefined;
+	private modalPart: IModalEditorPart | undefined;
+	private modalService: IEditorService | undefined;
+	private modalCreating: Promise<IEditorService> | undefined;
+	private readonly modalStore = this._register(new DisposableStore());
 	private settingsPart: IModalEditorPart | undefined;
 	private settingsService: IEditorService | undefined;
 	private settingsCreating: Promise<IEditorService> | undefined;
@@ -56,24 +60,25 @@ export class OpenideAgentWindowEditors extends Disposable {
 	}
 
 	get tabs(): readonly EditorInput[] { return this.scopedEditorService?.editors ?? []; }
-	get isModal(): boolean { return !!this.part && !this.part.embedded; }
+	get isModal(): boolean { return !!this.modalPart; }
 	get activeEditor(): EditorInput | undefined { return this.scopedEditorService?.activeEditor; }
 
-	dock(): void {
-		if (!this.part || !this.dockHost) { return; }
-		this.part.setEmbeddedContainer(this.dockHost);
+	async dock(): Promise<boolean> {
+		if (this.modalPart && !await this.modalPart.requestClose()) { return false; }
+		if (!this.part || !this.dockHost) { return false; }
 		this.part.setEmbeddedVisible(true);
 		this.syncToolbar();
 		this.revealDock?.();
 		this.changed.fire();
+		return true;
 	}
 
-	showModal(): void {
-		if (!this.part) { return; }
-		this.part.setEmbeddedVisible(true);
-		this.part.setEmbeddedContainer(undefined);
-		this.syncToolbar();
-		this.part.activeGroup.focus();
+	async showModal(): Promise<void> {
+		const input = this.activeEditor;
+		if (!input) { return; }
+		const service = await this.getModalEditorService();
+		await service.openEditor(input, { pinned: true });
+		this.modalPart?.activeGroup.focus();
 		this.changed.fire();
 	}
 
@@ -84,7 +89,7 @@ export class OpenideAgentWindowEditors extends Disposable {
 
 	async activate(input: EditorInput): Promise<void> {
 		if (!this.scopedEditorService) { return; }
-		this.dock();
+		if (!await this.dock()) { return; }
 		await this.scopedEditorService.openEditor(input, { pinned: true });
 	}
 
@@ -104,7 +109,7 @@ export class OpenideAgentWindowEditors extends Disposable {
 		@IAuxiliaryWindowService auxiliaryWindowService: IAuxiliaryWindowService,
 	) {
 		super();
-		this._register(registerEditorWindowTarget(targetWindowId, async modal => { const service = await this.getEditorService(); if (modal) { this.showModal(); } return service; }));
+		this._register(registerEditorWindowTarget(targetWindowId, modal => modal ? this.getModalEditorService() : this.getEditorService()));
 		const auxiliary = auxiliaryWindowService.getWindow(targetWindowId);
 		if (auxiliary) { this._register(auxiliary.onBeforeUnload(event => event.join(() => this.prepareClose()))); }
 	}
@@ -112,7 +117,7 @@ export class OpenideAgentWindowEditors extends Disposable {
 	private async prepareClose(): Promise<boolean> {
 		this.closing = true;
 		try {
-			await this.creating;
+			await Promise.all([this.creating, this.modalCreating, this.settingsCreating]);
 			const closed = await this.close();
 			if (!closed) { this.closing = false; }
 			return closed;
@@ -121,16 +126,32 @@ export class OpenideAgentWindowEditors extends Disposable {
 
 	getEditorService(): Promise<IEditorService> {
 		if (this.closing || this._store.isDisposed) { return Promise.reject(new Error('The agent editor window has closed')); }
-		if (this.scopedEditorService) {
-			// Resolving the service is also used by actions inside an expanded editor.
-			// Keep that presentation; only an explicit dock action should collapse it.
-			if (this.part?.embedded) { this.dock(); }
-			return Promise.resolve(this.scopedEditorService);
-		}
+		if (this.scopedEditorService) { return Promise.resolve(this.scopedEditorService); }
 		return this.creating ??= (async () => {
-			await this.settingsCreating;
+			await Promise.all([this.modalCreating, this.settingsCreating]);
 			return this.create();
 		})().finally(() => { this.creating = undefined; });
+	}
+
+	getModalEditorService(): Promise<IEditorService> {
+		if (this.closing || this._store.isDisposed) { return Promise.reject(new Error('The agent editor window has closed')); }
+		if (this.modalService) { return Promise.resolve(this.modalService); }
+		return this.modalCreating ??= (async () => {
+			await Promise.all([this.creating, this.settingsCreating]);
+			const part = await this.editorGroupsService.createModalEditorPart({ targetWindowId: this.targetWindowId, maximized: true, nested: true });
+			if (this.closing || this._store.isDisposed) { await part.close(); throw new Error('The agent editor window has closed'); }
+			this.modalPart = part;
+			(part.modalElement as HTMLElement).classList.add('openide-agent-editor-surface', 'openide-agent-expanded-surface');
+			const service = this.modalService = this.editorService.createScoped(part, this.modalStore, { openEditorsInContainer: true });
+			this.modalStore.add(part.onWillDispose(() => {
+				this.modalPart = undefined;
+				this.modalService = undefined;
+				this.modalStore.clear();
+				this.changed.fire();
+			}));
+			this.changed.fire();
+			return service;
+		})().finally(() => { this.modalCreating = undefined; });
 	}
 
 	private async create(): Promise<IEditorService> {
@@ -190,7 +211,7 @@ export class OpenideAgentWindowEditors extends Disposable {
 
 	private async createSettingsSurface(): Promise<IEditorService> {
 		// Wait for an existing creation without opening or revealing the workspace panel.
-		await this.creating;
+		await Promise.all([this.creating, this.modalCreating]);
 		const part = await this.editorGroupsService.createModalEditorPart({ targetWindowId: this.targetWindowId, maximized: true, nested: true });
 		if (this.closing || this._store.isDisposed) { await part.close(); throw new Error('The agent editor window has closed'); }
 		this.settingsPart = part;
@@ -217,6 +238,8 @@ export class OpenideAgentWindowEditors extends Disposable {
 	async close(): Promise<boolean> {
 		await this.settingsCreating;
 		if (this.settingsPart && !await this.settingsPart.close()) { return false; }
+		await this.modalCreating;
+		if (this.modalPart && !await this.modalPart.close()) { return false; }
 		return this.part ? this.part.close() : true;
 	}
 

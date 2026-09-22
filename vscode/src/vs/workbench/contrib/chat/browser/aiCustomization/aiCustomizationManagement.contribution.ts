@@ -19,6 +19,7 @@ import { Action2, MenuRegistry, registerAction2 } from '../../../../../platform/
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../platform/contextkey/common/contextkey.js';
+import { IModalEditorPartOptions } from '../../../../../platform/editor/common/editor.js';
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { ExtensionIdentifier } from '../../../../../platform/extensions/common/extensions.js';
 import { FileSystemProviderCapabilities, IFileService } from '../../../../../platform/files/common/files.js';
@@ -32,7 +33,7 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { EditorExtensions, IEditorFactoryRegistry, IEditorSerializer } from '../../../../common/editor.js';
 import { EditorInput } from '../../../../common/editor/editorInput.js';
 import { SYNCED_CUSTOMIZATION_SCHEME } from '../../../../services/agentHost/common/agentHostFileSystemService.js';
-import { IEditorService } from '../../../../services/editor/common/editorService.js';
+import { IEditorService, MODAL_GROUP } from '../../../../services/editor/common/editorService.js';
 import { IWorkbenchExtensionManagementService } from '../../../../services/extensionManagement/common/extensionManagement.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { AICustomizationSources, getCustomizationMigrationHintDismissedStorageKey, IAICustomizationWorkspaceService } from '../../common/aiCustomizationWorkspaceService.js';
@@ -824,10 +825,10 @@ class AICustomizationManagementActionsContribution extends Disposable implements
 				});
 			}
 
-			async run(accessor: ServicesAccessor, section?: AICustomizationManagementSection): Promise<void> {
+			async run(accessor: ServicesAccessor, section?: AICustomizationManagementSection, modal?: IModalEditorPartOptions): Promise<void> {
 				const editorService = accessor.get(IEditorService);
 				const input = AICustomizationManagementEditorInput.getOrCreate();
-				const pane = await editorService.openEditor(input, { pinned: true });
+				const pane = await editorService.openEditor(input, { pinned: true, modal }, modal ? MODAL_GROUP : undefined);
 				if (pane instanceof AICustomizationManagementEditor) {
 					const targetSection = section ?? AICustomizationManagementSection.McpServers;
 					pane.selectSectionById(targetSection, { showMarketplace: true });

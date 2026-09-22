@@ -23,6 +23,7 @@ import type { IOpenideSettingsSection, IOpenideSettingsSectionContext } from '..
 import { ICodebaseMemoryService } from './openideCodebaseMemoryService.js';
 import { IOpenideProjectMapLearningService } from './openideProjectMapLearningService.js';
 import { t } from '../common/openideStrings.js';
+import './media/openideProjectMapSettings.css';
 
 const GLOB_SETTINGS = ['openide.memory.exclude', 'openide.memory.include'] as const;
 
@@ -51,7 +52,7 @@ export class OpenideProjectMapSettingsSection extends Disposable implements IOpe
 	}
 
 	render(container: HTMLElement, _context: IOpenideSettingsSectionContext): void {
-		this.root = append(container, $('.openide-settings-sections'));
+		this.root = append(container, $('.openide-settings-sections.openide-project-map-settings'));
 		this.paint();
 	}
 
@@ -64,7 +65,7 @@ export class OpenideProjectMapSettingsSection extends Disposable implements IOpe
 		clearNode(root);
 		const token = ++this.generation;
 
-		const status = append(root, $('.openide-settings-section'));
+		const status = append(root, $('.openide-settings-section.openide-project-map-index'));
 		append(status, $('.openide-settings-section-title', undefined, t('settings.projectMap.title')));
 		append(status, $('.openide-settings-section-desc', undefined,
 			t('settings.projectMap.desc')));
@@ -80,9 +81,9 @@ export class OpenideProjectMapSettingsSection extends Disposable implements IOpe
 		warnBox.classList.toggle('visible', !!this.warning);
 
 		const actions = append(status, $('.openide-settings-section-actions'));
-		const rebuild = append(actions, $('button.oi-btn.openide-settings-section-button.primary', { type: 'button' }, t('settings.projectMap.rebuild'))) as HTMLButtonElement;
+		const open = append(actions, $('button.oi-btn.openide-settings-section-button.primary', { type: 'button' }, t('settings.projectMap.open'))) as HTMLButtonElement;
+		const rebuild = append(actions, $('button.oi-btn.openide-settings-section-button', { type: 'button' }, t('settings.projectMap.rebuild'))) as HTMLButtonElement;
 		const clear = append(actions, $('button.oi-btn.openide-settings-section-button.danger', { type: 'button' }, t('settings.projectMap.clear'))) as HTMLButtonElement;
-		const open = append(actions, $('button.oi-btn.openide-settings-section-button', { type: 'button' }, t('settings.projectMap.open'))) as HTMLButtonElement;
 		rebuild.disabled = this.busy;
 
 		this.renderStore.add(addDisposableListener(rebuild, 'click', () => void this.rebuild()));
@@ -118,7 +119,7 @@ export class OpenideProjectMapSettingsSection extends Disposable implements IOpe
 			ui.headlineText.textContent = t('settings.projectMap.notBuilt');
 		} else if (version.staleCount) {
 			ui.dot.classList.add('warn');
-			ui.headlineText.textContent = `${version.staleCount} archivo(s) requieren actualización`;
+			ui.headlineText.textContent = t('settings.projectMap.staleFiles', version.staleCount);
 		} else {
 			ui.headlineText.textContent = t('settings.projectMap.upToDate');
 		}
@@ -130,21 +131,21 @@ export class OpenideProjectMapSettingsSection extends Disposable implements IOpe
 			append(cell, $('span.openide-settings-metric-label', undefined, label));
 		};
 		metric(version ? `v${version.version}` : '—', t('settings.projectMap.version'));
-		metric(version ? Number(version.nodeCount || 0).toLocaleString() : '0', 'Entidades');
-		metric(version ? Number(version.edgeCount || 0).toLocaleString() : '0', 'Relaciones');
+		metric(version ? Number(version.nodeCount || 0).toLocaleString() : '0', t('settings.projectMap.entities'));
+		metric(version ? Number(version.edgeCount || 0).toLocaleString() : '0', t('settings.projectMap.relations'));
 		metric(version ? Number(version.staleCount || 0).toLocaleString() : '0', t('settings.projectMap.pending'));
 		metric(version?.builtAt ? new Date(version.builtAt).toLocaleString() : '—', t('settings.projectMap.lastBuild'));
 
 		// What was left out of the index is stated, not hidden.
 		const parts: string[] = [];
-		if (scan?.excludedByUser) { parts.push(`${scan.excludedByUser} excluidos por tus patrones`); }
-		if (scan?.excludedTests) { parts.push(`${scan.excludedTests} tests omitidos`); }
-		if (scan?.skippedTooLarge) { parts.push(`${scan.skippedTooLarge} archivos demasiado grandes`); }
-		ui.scanReport.textContent = parts.length ? `Último scan: ${parts.join(' · ')}.` : '';
+		if (scan?.excludedByUser) { parts.push(t('settings.projectMap.scanExcluded', scan.excludedByUser)); }
+		if (scan?.excludedTests) { parts.push(t('settings.projectMap.scanTests', scan.excludedTests)); }
+		if (scan?.skippedTooLarge) { parts.push(t('settings.projectMap.scanLarge', scan.skippedTooLarge)); }
+		ui.scanReport.textContent = parts.length ? t('settings.projectMap.lastScan', parts.join(' · ')) : '';
 	}
 
 	private renderGlobs(root: HTMLElement): void {
-		const section = append(root, $('.openide-settings-section'));
+		const section = append(root, $('.openide-settings-section.openide-project-map-patterns'));
 		append(section, $('.openide-settings-section-title', undefined, t('settings.projectMap.patterns')));
 		append(section, $('.openide-settings-section-desc', undefined,
 			t('settings.projectMap.patternsDesc')));
@@ -180,8 +181,8 @@ export class OpenideProjectMapSettingsSection extends Disposable implements IOpe
 
 	private renderLearning(root: HTMLElement): void {
 		const stats = this.learning.stats();
-		const section = append(root, $('.openide-settings-section'));
-		append(section, $('.openide-settings-section-title', undefined, 'Aprendizaje'));
+		const section = append(root, $('.openide-settings-section.openide-project-map-learning'));
+		append(section, $('.openide-settings-section-title', undefined, t('settings.projectMap.learning')));
 		append(section, $('.openide-settings-section-desc', undefined,
 			t('settings.projectMap.learnedDesc')));
 
@@ -192,8 +193,8 @@ export class OpenideProjectMapSettingsSection extends Disposable implements IOpe
 			append(cell, $('span.openide-settings-metric-label', undefined, label));
 		};
 		metric(stats.tracked, t('settings.projectMap.learned'));
-		metric(stats.preferred, 'Confiables');
-		metric(stats.tentative, 'Tentativas');
+		metric(stats.preferred, t('settings.projectMap.preferred'));
+		metric(stats.tentative, t('settings.projectMap.tentative'));
 		metric(stats.contested, t('settings.projectMap.disputed'));
 
 		const actions = append(section, $('.openide-settings-section-actions'));

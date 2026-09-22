@@ -1,71 +1,52 @@
 /*---------------------------------------------------------------------------------------------
- *  OpenIDE — native chat: the context-compaction card.
- *
- *  SOURCE OF TRUTH: the removed chat webview. Neutral and persistent, with the same
- *  vocabulary as a tool card but WITHOUT the side accent: compaction is something the runtime did
- *  to the conversation, not a step the agent took, and the accent is what marks the latter.
+ * Copyright (c) Microsoft Corporation. All rights reserved.
+ * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+/* Context maintenance reads as a quiet checkpoint within the conversation. */
 .openide-chat-compaction-card {
 	display: flex;
-	align-items: center;
-	gap: 9px;
+	align-items: flex-start;
+	gap: var(--vscode-spacing-size120);
 	min-width: 0;
-	margin: 6px 0;
-	border: 0;
-	border-radius: 0;
-	background: transparent;
-	padding: 4px 0;
-	color: var(--vscode-descriptionForeground);
+	margin: var(--vscode-spacing-size80) 0;
+	padding: var(--vscode-spacing-size120);
+	border: var(--vscode-strokeThickness) solid var(--oi-border);
+	border-radius: var(--oi-radius-control);
+	background: var(--oi-card);
+	color: var(--oi-text-muted);
 }
-
 .openide-chat-compaction-icon {
-	width: 18px;
-	height: 18px;
-	flex: 0 0 18px;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	font-size: 14px;
+	flex: none;
+	margin-top: var(--vscode-spacing-size20);
+	font-size: var(--vscode-codiconFontSize);
 }
-
-/* `min-width: 0` is what lets the detail line ellipsise instead of forcing the card wider than the
-   list, which does not scroll horizontally. */
 .openide-chat-compaction-copy {
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
+	align-items: flex-start;
+	gap: var(--vscode-spacing-size40);
 	min-width: 0;
 	flex: 1;
 }
-
 .openide-chat-compaction-title {
-	color: var(--vscode-descriptionForeground);
-	font-size: 12.5px;
-	line-height: 1.35;
+	font-size: var(--vscode-fontSize-body1);
+	color: var(--oi-text);
+	line-height: 1.5;
 }
-
+.openide-chat-compaction-explanation,
 .openide-chat-compaction-detail {
-	color: var(--vscode-descriptionForeground);
-	font-size: 11.5px;
-	line-height: 1.35;
+	font-size: var(--vscode-fontSize-label1);
+	line-height: 1.5;
 	overflow-wrap: anywhere;
 }
-
 .openide-chat-compaction-kind {
-	flex: 0 0 auto;
-	padding: 2px 5px;
-	border-radius: var(--oi-radius-control);
-	font-size: 9px;
-	font-weight: 400;
-	letter-spacing: normal;
-	text-transform: none;
-	background: transparent;
-	color: var(--vscode-descriptionForeground);
+	flex: none;
+	padding: var(--vscode-spacing-size20) var(--vscode-spacing-size60);
+	border: var(--vscode-strokeThickness) solid var(--oi-border);
+	border-radius: var(--oi-radius-circle);
+	font-size: var(--vscode-fontSize-label2);
+	line-height: 1.5;
 }
-
-/* Keep a failed compaction distinguishable in the flat status row. */
-
-.openide-chat-compaction-card.openide-chat-compaction-failed .openide-chat-compaction-icon {
-	color: var(--vscode-errorForeground);
-}
+.openide-chat-compaction-failed .openide-chat-compaction-icon { color: var(--oi-danger); }
+.openide-chat-compaction-explanation[hidden] { display: none; }

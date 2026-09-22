@@ -98,6 +98,7 @@ export interface IOpenConfiguration extends IBaseOpenConfiguration {
 	readonly waitMarkerFileURI?: URI;
 	readonly preferNewWindow?: boolean;
 	readonly forceNewWindow?: boolean;
+	readonly openideAgentWindow?: boolean;
 	readonly forceNewTabbedWindow?: boolean;
 	readonly forceReuseWindow?: boolean;
 	readonly forceEmpty?: boolean;

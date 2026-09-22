@@ -5,6 +5,7 @@
 
 import { Event } from '../../../base/common/event.js';
 import { createDecorator } from '../../instantiation/common/instantiation.js';
+import { BrowserAgentEvent } from './browserAgentEvents.js';
 
 export const IPlaywrightService = createDecorator<IPlaywrightService>('playwrightService');
 
@@ -23,6 +24,12 @@ export interface IInvokeFunctionResult {
 	deferredResultId?: string;
 }
 
+/** Correlation only; presentation never receives the executed source or arguments. */
+export interface IPlaywrightExecutionContext {
+	readonly toolCallId?: string;
+	readonly executionId?: string;
+}
+
 /**
  * A service for using Playwright to connect to and automate the integrated browser.
  *
@@ -36,6 +43,10 @@ export interface IPlaywrightService {
 
 	/** Actual execution lifetime, including deferred runs; scoped to the target browser view. */
 	readonly onDidChangeActivity: Event<{ pageId: string; active: boolean }>;
+	/** Runtime-independent, sanitized browser activity for native presentation. */
+	readonly onDidBrowserAgentEvent: Event<BrowserAgentEvent>;
+	/** Reports a native capture that intentionally bypasses Playwright's screenshot implementation. */
+	reportBrowserAgentAction(sessionId: string, pageId: string, action: 'screenshot', phase: 'started' | 'completed' | 'error', context: IPlaywrightExecutionContext): Promise<void>;
 
 	/** Waits for a newly created browser view to become available and returns its initial summary. */
 	waitForPageAndGetSummary(sessionId: string, pageId: string, expectedUrl: string, discoveryTimeoutMs: number): Promise<string>;
@@ -58,6 +69,8 @@ export interface IPlaywrightService {
 	 * @returns The result of the function execution.
 	 */
 	invokeFunctionRaw<T>(sessionId: string, pageId: string, fnDef: string, ...args: unknown[]): Promise<T>;
+	/** The explicit context variant keeps metadata separate from the function's variadic arguments. */
+	invokeFunctionRawWithContext<T>(sessionId: string, pageId: string, fnDef: string, context: IPlaywrightExecutionContext | undefined, ...args: unknown[]): Promise<T>;
 
 	/**
 	 * Run a function with access to a Playwright page and return a result for tool output, including error handling.
@@ -76,7 +89,7 @@ export interface IPlaywrightService {
 	 * @param timeoutMs Maximum time (in ms) to wait for the function to complete before deferring. When omitted the call awaits indefinitely.
 	 * @returns The result of the function execution, including a page summary and optionally a deferredResultId if the call did not complete.
 	 */
-	invokeFunction(sessionId: string, pageId: string, fnDef: string, args?: unknown[], timeoutMs?: number): Promise<IInvokeFunctionResult>;
+	invokeFunction(sessionId: string, pageId: string, fnDef: string, args?: unknown[], timeoutMs?: number, context?: IPlaywrightExecutionContext): Promise<IInvokeFunctionResult>;
 
 	/**
 	 * Continue waiting for a previously deferred function invocation.

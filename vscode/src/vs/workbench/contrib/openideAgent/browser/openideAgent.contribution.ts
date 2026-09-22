@@ -227,7 +227,7 @@ class OpenideIdeServerContribution extends Disposable implements IWorkbenchContr
 		]);
 		ideServer.bridgeAgentTools(
 			agentService.externalTools(),
-			(name, args, token, targetWindowId) => agentService.invokeExternalToolResult(name, args, token, targetWindowId),
+			(name, args, token, targetWindowId, context) => agentService.invokeExternalToolResult(name, args, token, targetWindowId, context),
 			completions,
 		);
 		// A read of the shared memory, which has no native counterpart: OpenIDE's own loop gets it
@@ -1499,8 +1499,8 @@ configurationRegistry.registerConfiguration({
 		},
 		'openide.agent.maxAgentIterations': {
 			type: 'number',
-			default: 200,
-			minimum: 25,
+			default: 0,
+			minimum: 0,
 			maximum: 500,
 			order: 11.25,
 			description: t('contrib.config.maxAgentIterations.desc'),

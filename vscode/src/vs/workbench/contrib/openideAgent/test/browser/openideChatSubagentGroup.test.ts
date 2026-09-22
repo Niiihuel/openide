@@ -39,7 +39,7 @@ suite('OpenIDE compact subagent activity', () => {
 			return { domNode: node, dispose() { node.remove(); }, hasSameContent: () => true };
 		};
 		for (const entry of content) { const part = makePart(entry); parts.push(part); host.append(part.domNode); }
-		const render = () => groups.render(content, parts, false, false, false);
+		const render = () => groups.render(content, parts, false, false);
 		render();
 		return { host, groups, parts, render, append(entry: IOpenideChatContent) { content.push(entry); const part = makePart(entry); parts.push(part); host.append(part.domNode); render(); } };
 	}
@@ -92,6 +92,31 @@ suite('OpenIDE compact subagent activity', () => {
 		const first = f.host.querySelector('details')!;
 		assert.strictEqual(mainWindow.getComputedStyle(first.querySelector('.openide-chat-delegation')!).display, 'none');
 		assert.strictEqual(first.querySelectorAll('.openide-chat-sub').length, 2);
+	});
+
+	test('expanded history keeps all steps, full outputs and stable streaming blocks', () => {
+		const content = { ...worker('a', 'Build UI'), timeline: [
+			{ sequence: 1, timestamp: 1, type: 'reasoning' as const, message: 'Check layout' },
+			{ sequence: 2, timestamp: 2, type: 'toolStart' as const, toolCallId: 'write', toolName: 'write_file' },
+			{ sequence: 3, timestamp: 3, type: 'fileChange' as const, fileDiff: { path: 'chat.ts', created: true, editAdded: 1, diffLines: [{ t: 'add' as const, x: 'export const chat = true;' }] } },
+			{ sequence: 4, timestamp: 4, type: 'toolResult' as const, toolCallId: 'write', message: 'output '.repeat(200) },
+			{ sequence: 5, timestamp: 5, type: 'text' as const, message: 'Done' },
+		] };
+		const part = store.add(new OpenideChatSubagentPart(content, context, NullHoverService));
+		part.domNode.querySelector<HTMLButtonElement>('.openide-chat-sub-chevron')!.click();
+		const body = part.domNode.querySelector('.openide-chat-sub-tail')!;
+		assert.strictEqual(body.children.length, 5);
+		assert.ok(body.textContent?.includes('+export const chat = true;'));
+		assert.ok(body.textContent?.includes('output '.repeat(200)));
+		const reasoning = body.querySelector('details')!; reasoning.open = true;
+		const last = body.lastElementChild!;
+		const next = { ...content, timeline: [...content.timeline.slice(0, -1), { ...content.timeline[4], message: 'Next' }] };
+		assert.strictEqual(part.hasSameContent(next, [], item), false);
+		part.tryUpdate(next, item);
+		assert.strictEqual(body.lastElementChild, last);
+		assert.strictEqual(last.textContent, 'Next');
+		assert.strictEqual(body.querySelector('details'), reasoning);
+		assert.strictEqual(reasoning.open, true);
 	});
 
 	test('actions identify their owning window and keyboard use on a child control never opens the chat', () => {

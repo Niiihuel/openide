@@ -95,15 +95,41 @@ suite('OpenIDE ChatResponseRenderer layout', () => {
 		assert.strictEqual(h.host.querySelector('.openide-chat-ask')?.hasAttribute('hidden'), false);
 	});
 
-	test('live reasoning shares the lattice heading instead of painting a second thinking label', () => {
+	test('live reasoning keeps an accessible disclosure and one streaming label', () => {
 		const h = create([reasoning(false)]);
 		const details = h.template.partsHost.querySelector<HTMLDetailsElement>('.openide-chat-reasoning')!;
 		assert.deepStrictEqual({
-			statusBeforeReasoning: h.template.status.domNode.nextSibling === details,
-			label: h.template.status.domNode.querySelector('.openide-chat-response-working-label')?.textContent,
+			statusHidden: h.template.status.domNode.classList.contains('hidden'),
+			label: details.querySelector('.openide-chat-reasoning-label')?.textContent,
 			summary: getComputedStyle(details.querySelector('summary')!).display,
 			body: getComputedStyle(details.querySelector('.openide-chat-think')!).display,
-		}, { statusBeforeReasoning: true, label: t('chat.working.thinking'), summary: 'none', body: 'block' });
+			whitespace: getComputedStyle(details.querySelector('.openide-chat-think')!).whiteSpace,
+			open: details.open,
+		}, { statusHidden: true, label: t('chatSurface.thinking'), summary: 'flex', body: 'block', whitespace: 'pre-wrap', open: true });
+	});
+
+	test('manual reasoning disclosure survives deltas, completion, and adjacent settled tools', async () => {
+		const h = create([reasoning(false)]);
+		const part = h.template.parts[0];
+		const details = part.domNode as HTMLDetailsElement;
+		const summary = details.querySelector('summary')!;
+		summary.click();
+		h.update([{ kind: 'thinking', text: 'More reasoning', isComplete: false }]);
+		assert.strictEqual(details.open, false, 'a streamed delta cannot reopen the disclosure');
+		summary.click();
+		const command: IOpenideChatContent = { kind: 'terminal', callId: 'check', command: 'npm test', output: 'passed', state: 'exited', exitCode: 0, background: false };
+		h.update([reasoning(true), command, { kind: 'markdown', value: new MarkdownString('Done') }], true);
+		await flush();
+		assert.deepStrictEqual({ samePart: h.template.parts[0] === part, open: details.open, parent: details.parentElement === h.template.partsHost, first: h.template.partsHost.firstElementChild === details }, { samePart: true, open: true, parent: true, first: true });
+	});
+
+	test('reasoning appends streamed text without replacing its text node', () => {
+		const h = create([{ kind: 'thinking', text: 'Checking', isComplete: false }]);
+		const body = h.host.querySelector('.openide-chat-think')!;
+		const text = body.firstChild;
+		h.update([{ kind: 'thinking', text: 'Checking the implementation', isComplete: false }]);
+		assert.strictEqual(body.firstChild, text);
+		assert.strictEqual(body.textContent, 'Checking the implementation');
 	});
 
 	test('finished reasoning leaves no painted text below its collapsed summary', async () => {

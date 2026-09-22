@@ -29,6 +29,19 @@ import { stubOpenideChatControllerHostServices } from './openideChatControllerTe
 suite('OpenIDE ChatController — send path', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 
+	test('archives original messages before compacting the model window', async () => {
+		const h = createHarness({ compactConversation: async (messages, emit) => {
+			emit({ type: 'compaction', status: 'started', origin: 'manual' });
+			messages.splice(0, messages.length, { role: 'user', content: 'Compacted summary', compaction: { origin: 'manual', beforeTokens: 100, afterTokens: 10, savingsPercent: 90 } });
+			emit({ type: 'compaction', status: 'completed', origin: 'manual', beforeTokens: 100, afterTokens: 10 });
+		} });
+		const id = h.sessions.ensureActive();
+		h.sessions.save(id, [{ role: 'user', content: 'Original question', messageId: 'original' }, { role: 'assistant', content: 'Original answer' }], false);
+		h.controller.restore(id);
+		await h.controller.compact();
+		assert.deepStrictEqual({ model: h.sessions.messagesOf(id).map(message => message.content), archive: h.sessions.archivedMessagesOf(id).map(message => message.content) }, { model: ['Compacted summary'], archive: ['Original question', 'Original answer'] });
+	});
+
 	interface IRun { messages: IChatMessage[]; options: { mode?: string; messageId?: string; modeInstruction?: string; conversationId?: string; targetWindowId?: number }; token: CancellationToken; emit: (event: AgentLoopEvent) => void; settle: (error?: Error) => void }
 
 	function createHarness(overrides: Partial<IOpenideAgentService> = {}, fileOverrides: Partial<IFileService> = {}) {
@@ -195,6 +208,18 @@ suite('OpenIDE ChatController — send path', () => {
 		assert.ok(turn.context?.includes('CAP:skill/review'));
 		assert.ok(turn.context?.includes('HOOK'));
 		assert.deepStrictEqual(turn.capabilities, [{ kind: 'skill', name: 'review' }]);
+	});
+
+	test('review snapshot reference avoids a whole-file read and excludes removed chips', async () => {
+		const h = createHarness();
+		h.controller.restore();
+		await h.controller.send({ text: 'Review the change', references: ['src/review.ts', 'src/other.ts'], referenceContexts: [
+			{ path: 'src/review.ts', context: 'DIFF:-old\n+new' }, { path: 'src/removed.ts', context: 'REMOVED_CHIP' },
+		] });
+		const turn = h.runs[0].messages.at(-1)!;
+		assert.deepStrictEqual(h.references, [['src/other.ts']]);
+		assert.ok(turn.context?.includes('DIFF:-old\n+new') && !turn.context.includes('REMOVED_CHIP'));
+		assert.strictEqual(turn.content, 'Review the change');
 	});
 
 	test('bare /compact compacts without a user turn; /compact <msg> compacts then sends', async () => {

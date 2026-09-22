@@ -21,7 +21,8 @@ import { IClipboardService } from '../../../../../platform/clipboard/common/clip
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
-import { INotificationService } from '../../../../../platform/notification/common/notification.js';
+import { INotificationHandle, INotificationService, Severity } from '../../../../../platform/notification/common/notification.js';
+import { AcknowledgeDocCommentsToken, IAccessibilitySignalService, Sound } from '../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
 import { IOpenideChatItem, IOpenideChatRequestItem } from '../../common/chat/openideChatItem.js';
 import { IOpenideChatAskContent } from '../../common/chat/openideChatContent.js';
 import { OpenideChatRequestRail } from './openideChatRequestRail.js';
@@ -31,9 +32,10 @@ import { IOpenideProjectMapLearningService } from '../openideProjectMapLearningS
 import { IChatSessionUsage, OpenideChatSessions } from '../openideChatSessions.js';
 import { IOpenideCliChangesService, OpenideCliChangesService } from '../openideCliChangesService.js';
 import { applyOpenideSurfaceCss } from '../openideSurfaceStyle.js';
-import { IOpenideChatNotice, OpenideChatController } from './openideChatController.js';
+import { IOpenideChatNotice, IOpenideChatUserAction, OpenideChatController } from './openideChatController.js';
 import { IOpenideComposerSubmit, OpenideChatComposer } from './openideChatComposer.js';
 import { IComposerQueueEntry } from './openideChatComposerQueue.js';
+import { IOpenideReviewComment, reviewCommentContext, reviewCommentPrompt } from '../../common/openideReviewComment.js';
 import { IComposerSnippet } from '../../common/chat/openideChatSnippet.js';
 
 /** Whether a selection sent while a hosted CLI's tab is active goes into that CLI's prompt. */
@@ -50,7 +52,7 @@ import { ILanguageService } from '../../../../../editor/common/languages/languag
 import { FileKind } from '../../../../../platform/files/common/files.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { OpenideChatHeader } from './openideChatHeader.js';
-import { OpenideChatListWidget } from './openideChatListWidget.js';
+import { IOpenideChatReadingState, OpenideChatListWidget } from './openideChatListWidget.js';
 import { OpenideChatPresentation } from './openideChatPresentation.js';
 import { OpenideChatRequestRenderer } from './openideChatRequestRenderer.js';
 import { OpenideChatPinnedRequest } from './openideChatPinnedRequest.js';
@@ -98,6 +100,7 @@ const SESSIONS_SIDE_WIDTH = 300;
 interface IOpenideChatCompanionOptions {
 	readonly primary: OpenideChatWidget;
 	readonly openSubagent?: (runId: string, parentSessionId?: string) => void;
+	readonly openProject?: () => Promise<void>;
 }
 
 const selectionTargets = new WeakMap<Window, OpenideChatWidget>();
@@ -113,7 +116,10 @@ export class OpenideChatWidget extends Disposable {
 
 	private readonly _companion: IOpenideChatCompanionOptions | undefined;
 	private readonly _companions = new Set<OpenideChatWidget>();
+	private readonly _pendingActionNotifications = new Map<string, { conversationId: string; handle: INotificationHandle }>();
 	private _shownSession: string | undefined;
+	private readonly _sessionDrafts = new Map<string, IOpenideComposerSubmit>();
+	private readonly _readingPositions = new Map<string, IOpenideChatReadingState>();
 	private _terminalMirror: HTMLElement | undefined;
 	private _terminalPresenter: OpenideChatWidget = this;
 	/** Mount only when the regular IDE chat is explicitly opened. */
@@ -129,9 +135,9 @@ export class OpenideChatWidget extends Disposable {
 
 	showConversationMenu(anchor: HTMLElement): void { this._header.showConversationMenu(anchor); }
 
-	createCompanion(parent: HTMLElement, openSubagent?: (runId: string, parentSessionId?: string) => void): OpenideChatWidget {
+	createCompanion(parent: HTMLElement, openSubagent?: (runId: string, parentSessionId?: string) => void, openProject?: () => Promise<void>): OpenideChatWidget {
 		const primary = this._companion?.primary ?? this;
-		companionParents.set(parent, { primary, openSubagent });
+		companionParents.set(parent, { primary, openSubagent, openProject });
 		try {
 			const widget = this._instantiationService.createInstance(OpenideChatWidget, parent, primary.sessions);
 			primary._companions.add(widget);
@@ -154,8 +160,7 @@ export class OpenideChatWidget extends Disposable {
 		if (this.sessions.metaOf(id)?.kind === 'cli') { this._presentTerminal(); }
 		primary._header.switchSession(id);
 		if (id === primary._shownSession && !primary._controller.isBusy) {
-			primary._restoreTranscript(id);
-			for (const companion of primary._companions) { companion._restoreTranscript(id); }
+			primary._restorePresentations(id);
 		} else { primary._switchSession(id); }
 	}
 
@@ -189,7 +194,7 @@ export class OpenideChatWidget extends Disposable {
 	private readonly _presentation = new OpenideChatPresentation();
 	private readonly _filesTray: OpenideChatFilesTray;
 	private readonly _questionsCard: OpenideChatQuestionsCard;
-	private readonly _terminalsTray: OpenideChatTerminalsTray;
+	private readonly _terminalsTray: OpenideChatTerminalsTray | undefined;
 	private readonly _goalTray: OpenideChatGoalTray;
 	private readonly _goalRequests = new Map<string, IOpenideComposerSubmit>();
 	private readonly _cliGoalRuns = new Map<string, CancellationTokenSource>();
@@ -230,6 +235,7 @@ export class OpenideChatWidget extends Disposable {
 		@IOpenideProjectMapLearningService private readonly learningService: IOpenideProjectMapLearningService,
 		@IClipboardService private readonly clipboardService: IClipboardService,
 		@INotificationService private readonly notificationService: INotificationService,
+		@IAccessibilitySignalService private readonly accessibilitySignalService: IAccessibilitySignalService,
 		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
 		@IModelService private readonly modelService: IModelService,
 		@ILanguageService private readonly languageService: ILanguageService,
@@ -301,11 +307,25 @@ export class OpenideChatWidget extends Disposable {
 		// card belongs where the user is already looking. The transcript keeps a shimmer line.
 		this._questionsCard = this._register(instantiationService.createInstance(OpenideChatQuestionsCard, this._composer.questionsHost));
 		this._filesTray = this._register(instantiationService.createInstance(OpenideChatFilesTray, this._composer.trayHost, sessions));
-		// Stacked UNDER the changed files, which is the order the webview had too (its `#filesStack`
-		// appended `terms` after `files`): the files are a decision waiting for the user,
-		// the terminals are just running — the thing to act on sits closest to the composer.
-		this._terminalsTray = this._register(instantiationService.createInstance(OpenideChatTerminalsTray, this._composer.trayHost));
+		// Agents presents background work in Conversation workspace > Terminals. Keep the IDE's
+		// tray subscribed to the shared process owner, without mounting a duplicate in its companion.
+		this._terminalsTray = this._companion ? undefined : this._register(instantiationService.createInstance(OpenideChatTerminalsTray, this._composer.trayHost));
 		this._controller = this._companion?.primary._controller ?? this._register(instantiationService.createInstance(OpenideChatController, sessions));
+		if (!this._companion) {
+			this._register(this._controller.onDidRequireUserAction(action => this._notifyUserAction(action)));
+			if (this.agentService.onDidResolveUserAction) {
+				this._register(this.agentService.onDidResolveUserAction(id => this._pendingActionNotifications.get(id)?.handle.close()));
+			}
+			this._register(this._controller.onDidStopConversation(conversationId => {
+				for (const pending of this._pendingActionNotifications.values()) {
+					if (pending.conversationId === conversationId) { pending.handle.close(); }
+				}
+			}));
+			this._register(toDisposable(() => {
+				for (const pending of this._pendingActionNotifications.values()) { pending.handle.close(); }
+				this._pendingActionNotifications.clear();
+			}));
+		}
 		if (this._companion) { this._composer.shareQueueWith(this._companion.primary._composer); }
 		this._goalTray = this._register(instantiationService.createInstance(OpenideChatGoalTray, this._composer.trayHost, async (sessionId: string, objective: string) => {
 			const owner = this._companion?.primary ?? this;
@@ -349,6 +369,9 @@ export class OpenideChatWidget extends Disposable {
 		this._register(responseRenderer.onDidChangeItemHeight(event => this._list.updateItemHeight(event.element, event.height)));
 		this._register(requestRenderer.onDidChangeItemHeight(event => this._list.updateItemHeight(event.element, event.height)));
 		this._register(this._controller.onDidChangeItems(() => {
+			// The owner switches first. Companions must capture their old viewport before loading
+			// the new conversation in _restoreTranscript, rather than measuring the owner's rows.
+			if (this._shownSession && this._controller.activeConversationId !== this._shownSession) { return; }
 			this._list.setItems(this._presentation.items(this._controller.activeConversationId ?? '', this._controller.items));
 			this._requestRail?.update();
 			this._syncQuestionsCard();
@@ -360,7 +383,7 @@ export class OpenideChatWidget extends Disposable {
 		// ask it to re-measure and the autorun below re-lays out the list. Laying out the list here
 		// instead would run it against a `composer.height` that has not seen the tray yet.
 		this._register(this._filesTray.onDidChangeHeight(() => this._composer.remeasure()));
-		this._register(this._terminalsTray.onDidChangeHeight(() => this._composer.remeasure()));
+		if (this._terminalsTray) { this._register(this._terminalsTray.onDidChangeHeight(() => this._composer.remeasure())); }
 		this._register(this._goalTray.onDidChangeHeight(() => { this._composer.remeasure(); this._layoutList(); }));
 		this._register(this._filesTray.onDidRequestStop(() => this._controller.abort()));
 		this._register(this._filesTray.onDidResolveFiles(resolved => {
@@ -373,6 +396,7 @@ export class OpenideChatWidget extends Disposable {
 			}
 		}));
 		this._register(this._controller.onDidChangeBusy(() => {
+			if (this._shownSession && this._controller.activeConversationId !== this._shownSession) { return; }
 			this._composer.setBusy(this._controller.isBusy);
 			const busy = this._controller.isBusy;
 			this._filesTray.setBusy(busy);
@@ -531,6 +555,21 @@ export class OpenideChatWidget extends Disposable {
 		this._composer.focus();
 	}
 
+	/** Stages review feedback in its originating conversation without starting a turn. */
+	stageReviewComment(sessionId: string, comment: IOpenideReviewComment): boolean {
+		const session = this.sessions.metaOf(sessionId);
+		if (!session || !comment.text.trim()) { return false; }
+		this.openSession(sessionId);
+		if (session.kind === 'cli') { return this._terminalPane.stagePrompt(sessionId, reviewCommentPrompt(comment)); }
+		if (!this._composer.addReference({
+			path: comment.path,
+			context: reviewCommentContext(comment),
+			iconClasses: getIconClasses(this.modelService, this.languageService, URI.file('/' + comment.path), FileKind.FILE).join(' '),
+		})) { return false; }
+		this.injectCanvasPrompt(comment.text.trim(), false);
+		return true;
+	}
+
 	/**
 	 * A question from ANOTHER surface — the Project Map's "Ask the agent" — gets its own
 	 * conversation and is sent.
@@ -630,14 +669,10 @@ export class OpenideChatWidget extends Disposable {
 		if (id === this._shownSession && !this._listMode) { return; }
 		this._leaveListMode();
 		this._hideNotice();
-		this._composer.value = '';
 		for (const companion of this._companions) {
 			companion._leaveListMode();
-			companion._composer.value = '';
-			companion._composer.setConversation(id);
 		}
-		this._restoreTranscript(id);
-		for (const companion of this._companions) { companion._restoreTranscript(id); }
+		this._restorePresentations(id);
 	}
 
 	/**
@@ -743,7 +778,11 @@ export class OpenideChatWidget extends Disposable {
 		// A deleted conversation leaves the Changes view too: the service indexes sessions by id
 		// and nothing else ever told it a session was gone, so a deleted CLI chat kept its
 		// section — and a new chat with the same title showed as a second one.
-		this._register(this.sessions.onDidDelete(id => this._cliChanges.forget(id)));
+		this._register(this.sessions.onDidDelete(id => {
+			this._cliChanges.forget(id);
+			this._sessionDrafts.delete(id);
+			this._readingPositions.delete(id);
+		}));
 		this._register(this._terminalPane.onDidChangeStatus(({ sessionId, status }) => {
 			// The Changes view reads the SAME transition the status dot does, so the two can never
 			// disagree about whether the agent is working — which is what makes a turn's file list
@@ -923,7 +962,9 @@ export class OpenideChatWidget extends Disposable {
 		const workspaceName = append(workspaceCopy, $('span.openide-chat-empty-workspace-name'));
 		const workspaceHint = append(workspaceCopy, $('span.openide-chat-empty-workspace-hint'));
 		this._register(addDisposableListener(workspace, 'click', () => {
-			void this.commandService.executeCommand('workbench.action.files.openFolder').catch(onUnexpectedError);
+			const opening = this._companion?.openProject ? this._companion.openProject()
+				: this.commandService.executeCommand('workbench.action.files.openFolder');
+			void opening.catch(onUnexpectedError);
 		}));
 		const syncWorkspace = () => {
 			const folders = this.contextService.getWorkspace().folders;
@@ -967,33 +1008,53 @@ export class OpenideChatWidget extends Disposable {
 	 * Loads a conversation and lands on its LAST turn, like the webview's `restoreThread` ending in
 	 * `scrollDown()`.
 	 *
-	 * Re-arming the tail is the load-bearing part, not the `scrollToEnd` call: rows are measured
-	 * asynchronously, so the position right after `setItems` is provisional and only the tail lock
-	 * keeps re-pinning the list as each row reports its real height. If the user had scrolled up in
-	 * the conversation being left, the lock would still be off and the new one would open somewhere
-	 * in the middle of its own history.
+	 * Each presentation keeps its reading position while the shared owner keeps drafts by session.
+	 * New conversations follow the tail as asynchronous row measurements settle. Returning to an
+	 * earlier reading position leaves that tail lock off, including while other turns keep streaming.
 	 */
-	private _restoreTranscript(id?: string): void {
+	private _capturePresentationState(): void {
+		if (this._shownSession) {
+			this._readingPositions.set(this._shownSession, this._list.captureReadingState());
+			if (!this._companion) { this._sessionDrafts.set(this._shownSession, this._composer.draft); }
+		}
+	}
+
+	private _restorePresentations(id: string): void {
+		// Capture every viewport before the shared controller synchronously publishes new rows.
+		this._capturePresentationState();
+		for (const companion of this._companions) { companion._capturePresentationState(); }
+		this._restoreTranscript(id, false);
+		for (const companion of this._companions) { companion._restoreTranscript(id, false); }
+	}
+
+	private _restoreTranscript(id?: string, capture = true): void {
 		const conversationId = id ?? this.sessions.ensureActive();
+		const primary = this._companion?.primary ?? this;
+		if (capture) { this._capturePresentationState(); }
+		const draft = primary._sessionDrafts.get(conversationId) ?? {
+			...this._composer.draft, text: '', inputText: '', images: [], references: [], referenceChips: [], capabilities: [], links: [], snippets: [], pick: undefined
+		};
+		const position = this._readingPositions.get(conversationId);
 		this._syncCliMode(conversationId);
-		this._list.setFollowTail(true);
 		// The queue of messages typed while a run was busy is per conversation: the composer swaps
 		// it together with the transcript, and it swaps FIRST — `restore` publishes the busy state
 		// of the conversation being entered, and an idle one drains the queue on the spot. With the
 		// composer still pointing at the queue of the conversation being left, that drain would send
 		// its message into the wrong conversation.
 		this._composer.setConversation(conversationId);
+		this._composer.setSharedDraft(draft);
 		this._shownSession = conversationId;
-		if (!this._companion) { this._controller.restore(id); }
-		this._list.setItems(this._presentation.items(this._controller.activeConversationId ?? '', this._controller.items));
-			this._requestRail?.update();
+		this._list.withReadingState(position, () => {
+			if (!this._companion) { this._controller.restore(id); }
+			this._list.setItems(this._presentation.items(this._controller.activeConversationId ?? '', this._controller.items));
+		});
+		this._requestRail?.update();
 		this._composer.setBusy(this._controller.isBusy);
 		this._syncEmptyState();
 		// So does the context: `usage` is per conversation (`usageOf(activeId)`), but nothing pushed
 		// it on a switch — the ring kept showing the PREVIOUS conversation's percentage until that
 		// one's next turn produced a `usage` event, which on an idle conversation is never.
 		this._composer.setUsage(this._controller.usage, this._capabilityCounts);
-		this._list.scrollToEnd();
 	}
 
 	/**
@@ -1021,7 +1082,7 @@ export class OpenideChatWidget extends Disposable {
 	}
 
 	private async _exportTranscript(): Promise<void> {
-		const markdown = openideChatTranscriptToMarkdown(this.sessions.messagesOf(this.sessions.activeSessionId()));
+		const markdown = openideChatTranscriptToMarkdown(this.sessions.transcriptOf(this.sessions.activeSessionId()));
 		if (!markdown) {
 			this.notificationService.info(OPENIDE_CHAT_TRANSCRIPT_EMPTY);
 			return;
@@ -1063,6 +1124,7 @@ export class OpenideChatWidget extends Disposable {
 			pick: request.pick,
 			capabilities: request.capabilities?.length ? request.capabilities : undefined,
 			references: request.references?.length ? request.references : undefined,
+			referenceContexts: request.referenceChips?.filter((reference): reference is { path: string; context: string } => typeof reference.context === 'string'),
 			snippets: request.snippets?.length ? request.snippets : undefined,
 			mode: request.mode,
 			providerId: request.providerId,
@@ -1345,6 +1407,38 @@ export class OpenideChatWidget extends Disposable {
 			return;
 		}
 		this._composer.focus();
+	}
+
+	private _notifyUserAction(action: IOpenideChatUserAction): void {
+		if (this._pendingActionNotifications.has(action.requestId)) { return; }
+		const message = t(`chat.actionRequired.${action.kind}`);
+		const handle = this.notificationService.prompt(Severity.Info, message, [{
+			label: t('chat.actionRequired.open'),
+			run: () => void this._openPendingAction(action.conversationId),
+		}]);
+		this._pendingActionNotifications.set(action.requestId, { conversationId: action.conversationId, handle });
+		const listener = handle.onDidClose(() => {
+			this._pendingActionNotifications.delete(action.requestId);
+			listener.dispose();
+		});
+		// This request explicitly asks for sound even without a screen reader. Keep an explicit
+		// accessibility "off" setting authoritative; "auto" still sounds for this agent wait.
+		const sound = this.configurationService.getValue<{ sound?: string }>('accessibility.signals.chatUserActionRequired')?.sound;
+		if (sound !== 'off' && sound !== 'never') {
+			void this.accessibilitySignalService.playSound(Sound.chatUserActionRequired, false, AcknowledgeDocCommentsToken).catch(onUnexpectedError);
+		}
+	}
+
+	private async _openPendingAction(conversationId: string): Promise<void> {
+		let target = [this, ...this._companions].find(widget => widget._root.isConnected && getWindow(widget._root).document.hasFocus())
+			?? [this, ...this._companions].find(widget => widget._root.isConnected);
+		if (!target) {
+			await this.commandService.executeCommand('openide.agent.openAgentWindow');
+			target = [...this._companions].find(widget => widget._root.isConnected);
+		}
+		if (!target) { return; }
+		target.openSession(conversationId);
+		getWindow(target._root).focus();
 	}
 
 	get onDidChangeBusy(): Event<boolean> {

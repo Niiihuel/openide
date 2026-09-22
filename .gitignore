@@ -41,6 +41,8 @@ result-*
 /.build/
 /tmp/
 /vendor/
+/refs/
+/vscode/tmp/
 
 # Agent state in the workspace: the indexes are derived and heavy; what is
 # written by hand (skills, plans, MEMORY.md) is versioned.
@@ -82,3 +84,6 @@ docs/i18n-pendientes.md
 
 # Agent handoffs are local; durable Markdown notes may be versioned.
 **/.openide/memory/sessions/
+
+# Local browser acceptance captures are not release assets.
+/vscode/e2e/capturas/

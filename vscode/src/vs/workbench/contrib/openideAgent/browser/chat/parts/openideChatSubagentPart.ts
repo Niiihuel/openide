@@ -13,15 +13,13 @@ import { t } from '../../../common/openideStrings.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
 import { setupChatTooltip } from '../openideChatHover.js';
 import { setOpenideChatShimmer } from './openideChatActivityRow.js';
-import { appendSubagentTimelineEvent, lastSubagentTimelineRows, lastSubagentToolStart, subagentStatusText, subagentToolCount } from './openideChatSubagentTimeline.js';
+import { appendSubagentTimelineEvent, updateSubagentTimelineRow, lastSubagentToolStart, subagentStatusText, subagentToolCount } from './openideChatSubagentTimeline.js';
+import { OpenideChatThinkingPart } from './openideChatThinkingPart.js';
 import { createSubagentAvatar, subagentAvatarKind } from '../../openideSubagentAvatar.js';
 import { subagentTaskTitle } from '../../../common/openideSubagentTitle.js';
 import '../media/openideChatSubagent.css';
 
 export const OPENIDE_CHAT_SUB_CARD_CLASS = 'openide-chat-sub';
-
-/** How much of the specialist's trace the row shows when expanded. */
-const TAIL_ROWS = 3;
 
 /** What the status glyph means, for its tooltip: a coloured dot has to be readable in words too. */
 function statusText(status: OpenideChatSubagentStatus): string {
@@ -74,22 +72,7 @@ const _onDidRequestAction = new Emitter<IOpenideChatSubagentAction>();
  */
 export const onDidRequestOpenideChatSubagentAction: Event<IOpenideChatSubagentAction> = _onDidRequestAction.event;
 
-/**
- * A delegated specialist, as a ROW.
- *
- * It used to be a bordered card with a 40px head and a 240px scrolling body — a shape transcribed
- * wholesale from the chat webview this replaced, never decided natively, and one that reads as a
- * foreign object sitting between the `project_map_query` and `Thought for 10s` lines around it.
- * Now it is a member of the activity family: the same 16px glyph column, the same 22px line, the
- * same vertical thread running through its neighbours — which is why the root carries
- * `openide-chat-tool-activity` even though nothing else about it is a tool call. The thread is
- * drawn by `+` and `:has(+)` selectors matching that exact class; a class of its own would break
- * the chain at every specialist.
- *
- * The row itself OPENS the specialist's own conversation, the way Cursor does it: the full
- * transcript belongs in that tab, not inlined twice. What the chevron expands is only the tail —
- * the last few lines — so you can tell what it is doing without leaving the page you are reading.
- */
+/** A specialist with a complete, lazily rendered activity history. */
 export class OpenideChatSubagentPart extends OpenideChatContentPart {
 
 	readonly domNode: HTMLElement;
@@ -109,17 +92,21 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 
 	/** `toolCallId` → its row, so a failing result can tint the call it belongs to. */
 	private readonly _toolRows = new Map<string, HTMLElement>();
-	/** The hovers of the tail rows, cleared with the body they belong to. */
+	/** Disclosures and hovers owned by the expanded history. */
 	private readonly _tailStore = this._register(new DisposableStore());
 
 	private _content: IOpenideChatSubagentContent;
 	private _open = false;
-	/** What the body is currently showing, so an unchanged tail is not rebuilt on every frame. */
-	private _renderedTail = '';
+	/** Stable rows retain selection and disclosure state across streaming updates. */
+	private readonly _timelineRows = new Map<number, HTMLElement>();
+	private _renderedCount = 0;
+	private _firstSequence: number | undefined;
+	private readonly _thinkingParts = new Map<number, OpenideChatThinkingPart>();
+	private _summary: HTMLElement | undefined;
 
 	constructor(
 		content: IOpenideChatSubagentContent,
-		_context: IOpenideChatContentPartContext,
+		private readonly _context: IOpenideChatContentPartContext,
 		private readonly _hoverService: IHoverService,
 	) {
 		super();
@@ -156,6 +143,7 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 		// specialist", which is what activating it actually does.
 		this._chevron = append(this._head, $('button.openide-chat-sub-chevron')) as HTMLButtonElement;
 		this._chevron.type = 'button';
+		this._chevron.setAttribute('aria-expanded', 'false');
 		this._register(setupChatTooltip(this._hoverService, this._chevron, () => t('chat.part.subagentTail')));
 		append(this._chevron, $('span.codicon.codicon-chevron-right'));
 		this._register(addDisposableListener(this._chevron, 'click', event => {
@@ -224,7 +212,7 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 
 		// No chevron when there is nothing under it: an expander that opens onto an empty box is a
 		// promise the row cannot keep. Same rule the edit card measures for.
-		const hasTail = this._tailText().length > 0;
+		const hasTail = content.timeline.length > 0 || !!content.run?.result?.summary;
 		this._chevron.classList.toggle('hidden', !hasTail);
 		if (!hasTail && this._open) { this._toggle(); }
 
@@ -243,35 +231,48 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 	 * on a flex container it sweeps the box instead of the letters.
 	 */
 	private _renderStatusLine(running: boolean): void {
-		const last = running ? lastSubagentToolStart(this._content.timeline) : undefined;
+		const latest = this._content.timeline.at(-1);
+		const toolActive = latest && (latest.type === 'toolStart' || latest.type === 'fileChange' || latest.type === 'terminal');
+		const last = running && toolActive ? lastSubagentToolStart(this._content.timeline) : undefined;
 		const text = last?.toolName ? subagentStatusText(last.toolName, last.argumentsJson) : '';
 		this._status.textContent = text;
 		this._status.classList.toggle('hidden', !text);
 		setOpenideChatShimmer(this._status, !!text);
 	}
 
-	/** The events the tail would draw, as an identity — cheap to compare frame to frame. */
-	private _tailText(): string {
-		const summary = this._content.run?.result?.summary ?? '';
-		const rows = lastSubagentTimelineRows(this._content.timeline, TAIL_ROWS);
-		return rows.map(event => `${event.sequence}`).join(',') + (summary ? `|${summary.length}` : '');
-	}
-
 	private _renderTail(): void {
 		if (!this._open) { return; }
-		const identity = this._tailText();
-		if (identity === this._renderedTail) { return; }
-		this._renderedTail = identity;
-		this._body.textContent = '';
-		this._tailStore.clear();
-		this._toolRows.clear();
-		for (const event of lastSubagentTimelineRows(this._content.timeline, TAIL_ROWS)) {
-			appendSubagentTimelineEvent(this._body, this._toolRows, event, this._hoverService, this._tailStore);
+		const timeline = this._content.timeline;
+		if (timeline.length < this._renderedCount || (this._renderedCount && this._firstSequence !== timeline[0]?.sequence)) {
+			this._body.replaceChildren(); this._tailStore.clear(); this._toolRows.clear(); this._timelineRows.clear(); this._thinkingParts.clear(); this._renderedCount = 0; this._summary = undefined;
 		}
+		// Only the last existing block can grow. Prior rows and their disclosure state stay intact.
+		for (let index = Math.max(0, this._renderedCount - 1); index < timeline.length; index++) {
+			const event = timeline[index];
+			const existing = this._timelineRows.get(event.sequence);
+			if (event.type === 'reasoning') {
+				const content = { kind: 'thinking' as const, text: event.message ?? '', isComplete: this._content.status !== 'running' || index < timeline.length - 1 };
+				const previous = this._thinkingParts.get(event.sequence);
+				if (previous) { previous.tryUpdate(content, this._context.element); }
+				else {
+					const part = this._tailStore.add(new OpenideChatThinkingPart(content, this._context));
+					this._tailStore.add(part.onDidChangeHeight(() => this._onDidChangeHeight.fire()));
+					this._thinkingParts.set(event.sequence, part); this._timelineRows.set(event.sequence, part.domNode); this._body.append(part.domNode);
+				}
+			} else if (existing) { updateSubagentTimelineRow(existing, event); }
+			else {
+				const row = appendSubagentTimelineEvent(this._body, this._toolRows, event, this._hoverService, this._tailStore);
+				if (row) { this._timelineRows.set(event.sequence, row.node); }
+			}
+		}
+		this._renderedCount = timeline.length;
+		this._firstSequence = timeline[0]?.sequence;
 		const summary = this._content.run?.result?.summary;
-		if (summary) {
-			append(this._body, $('div.openide-chat-sub-text.openide-chat-sub-result')).textContent = summary;
-		}
+		if (summary && summary !== timeline.at(-1)?.message) {
+			this._summary ??= $('div.openide-chat-sub-text.openide-chat-sub-result');
+			if (this._summary.textContent !== summary) { this._summary.textContent = summary; }
+			this._body.append(this._summary);
+		} else { this._summary?.remove(); }
 	}
 
 	hasSameContent(other: IOpenideChatContent, _followingContent: readonly IOpenideChatContent[], _element: IOpenideChatItem): boolean {
@@ -287,7 +288,7 @@ export class OpenideChatSubagentPart extends OpenideChatContentPart {
 			&& other.run?.routingDecision?.profile === this._content.run?.routingDecision?.profile
 			&& other.model === this._content.model
 			&& other.parentModel === this._content.parentModel
-			&& other.timeline.length === this._content.timeline.length
+			&& other.timeline === this._content.timeline
 			&& other.run?.result?.summary === this._content.run?.result?.summary;
 	}
 

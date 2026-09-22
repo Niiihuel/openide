@@ -364,50 +364,83 @@ export function stripClaudeResumeArgs(args: readonly string[]): string[] {
 // ---- Session status
 
 /** VS Code's `ChatSessionStatus`, spelled out. */
-export type OpenideCliSessionStatus = 'in-progress' | 'needs-input' | 'completed' | 'failed';
+export type OpenideCliSessionStatus = 'unknown' | 'in-progress' | 'needs-input' | 'completed' | 'failed';
+
+export type OpenideCliWaitingReason = 'permission' | 'question' | 'prompt';
+
+/** Process lifetime and turn progress are independent: a completed turn keeps its PTY alive. */
+export interface IOpenideCliRuntimeState {
+	readonly lifecycle: 'running' | 'exited';
+	readonly status: OpenideCliSessionStatus;
+	readonly source: 'unverified' | 'hooks' | 'control' | 'process';
+	readonly waitingReason?: OpenideCliWaitingReason;
+}
+
+export const OPENIDE_CLI_INITIAL_STATE: IOpenideCliRuntimeState = { lifecycle: 'running', status: 'unknown', source: 'unverified' };
 
 /**
- * What a hosted CLI can tell the dock. `hook:*` come from native hooks (Claude Code's
- * UserPromptSubmit / Stop / Notification / PreToolUse), `quiet` from the output heuristic, `exit`
- * from the process.
+ * Native hook events describe turn boundaries. `output` and `quiet` are retained for callers
+ * observing PTY activity, but carry no evidence of turn status. `exit` describes the process.
  */
 export type OpenideCliSessionEvent =
 	| { readonly type: 'launched' }
 	| { readonly type: 'hook:prompt' }
 	| { readonly type: 'hook:tool' }
+	| { readonly type: 'hook:tool-complete' }
 	| { readonly type: 'hook:stop'; readonly failed?: boolean }
-	| { readonly type: 'hook:notification' }
+	| { readonly type: 'hook:notification'; readonly reason?: OpenideCliWaitingReason }
 	| { readonly type: 'output' }
 	| { readonly type: 'quiet' }
+	| { readonly type: 'connection:lost' }
 	| { readonly type: 'exit'; readonly code: number | undefined };
 
 /**
- * Pure transition table. Hooks are authoritative: once a session has reported through hooks the
- * output heuristic stops moving it (`hooked`), otherwise a burst of output on a waiting agent
- * would mark it working again although it is only repainting its prompt.
+ * Pure transition table. Only typed provider events or an exit can prove a status transition.
+ * The third argument remains for existing callers; having hooks does not make silence evidence.
  */
-export function reduceOpenideCliStatus(current: OpenideCliSessionStatus, event: OpenideCliSessionEvent, hooked: boolean): OpenideCliSessionStatus {
+export function reduceOpenideCliStatus(current: OpenideCliSessionStatus, event: OpenideCliSessionEvent, _hooked: boolean): OpenideCliSessionStatus {
 	switch (event.type) {
 		case 'launched':
-			return 'in-progress';
+		case 'connection:lost':
+			return 'unknown';
 		case 'hook:prompt':
 		case 'hook:tool':
 			return 'in-progress';
 		case 'hook:stop':
-			return event.failed ? 'failed' : 'needs-input';
+			return event.failed ? 'failed' : 'completed';
+		case 'hook:tool-complete':
+			return current === 'needs-input' ? 'in-progress' : current;
 		case 'hook:notification':
-			return 'needs-input';
+			// An idle reminder must not overwrite an already completed or failed turn. Generic
+			// notifications (authentication, tips, etc.) are not requests for user input.
+			return !event.reason || event.reason === 'prompt' && (current === 'completed' || current === 'failed') ? current : 'needs-input';
 		case 'output':
-			return hooked || current === 'completed' || current === 'failed' ? current : 'in-progress';
 		case 'quiet':
-			return hooked || current !== 'in-progress' ? current : 'needs-input';
+			// Output includes prompt repainting; silence also includes model/tool work. Neither
+			// proves a turn boundary or that the user has been asked to do anything.
+			return current;
 		case 'exit':
-			return event.code === undefined || event.code === 0 ? 'completed' : 'failed';
+			return event.code === undefined ? current === 'failed' ? 'failed' : 'unknown' : event.code === 0 ? 'completed' : 'failed';
 	}
 }
 
+/** Late hooks cannot resurrect an exited process; the next launch starts a fresh lifetime. */
+export function reduceOpenideCliRuntime(current: IOpenideCliRuntimeState, event: OpenideCliSessionEvent, source: 'hooks' | 'control' = 'hooks'): IOpenideCliRuntimeState {
+	if (event.type === 'launched') { return OPENIDE_CLI_INITIAL_STATE; }
+	if (current.lifecycle === 'exited') { return current; }
+	if (event.type === 'connection:lost') { return OPENIDE_CLI_INITIAL_STATE; }
+	if (event.type === 'output' || event.type === 'quiet') { return current; }
+	const status = reduceOpenideCliStatus(current.status, event, current.source !== 'unverified');
+	if (event.type === 'hook:notification' && (!event.reason || event.reason === 'prompt' && (current.status === 'completed' || current.status === 'failed'))) { return current; }
+	const waitingReason = status === 'needs-input' ? event.type === 'hook:notification' ? event.reason : current.waitingReason : undefined;
+	const lifecycle = event.type === 'exit' ? 'exited' : 'running';
+	const nextSource = event.type === 'exit' ? 'process' : source;
+	if (status === current.status && lifecycle === current.lifecycle && waitingReason === current.waitingReason && nextSource === current.source) { return current; }
+	return { lifecycle, status, source: nextSource, ...(waitingReason ? { waitingReason } : {}) };
+}
+
 export function isOpenideCliSessionStatus(value: unknown): value is OpenideCliSessionStatus {
-	return value === 'in-progress' || value === 'needs-input' || value === 'completed' || value === 'failed';
+	return value === 'unknown' || value === 'in-progress' || value === 'needs-input' || value === 'completed' || value === 'failed';
 }
 
 // ---- Recency groups

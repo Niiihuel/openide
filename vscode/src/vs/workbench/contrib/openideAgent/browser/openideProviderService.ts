@@ -3,11 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { disposableTimeout, raceCancellationError } from '../../../../base/common/async.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
-import { Disposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
 import { isLinux, isMacintosh, isWindows, language } from '../../../../base/common/platform.js';
-import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IEncryptionService, PasswordStoreCLIOption } from '../../../../platform/encryption/common/encryptionService.js';
 import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
@@ -22,7 +23,7 @@ import { ISecretStorageService } from '../../../../platform/secrets/common/secre
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IJSONEditingService } from '../../../services/configuration/common/jsonEditing.js';
 import { IHostService } from '../../../services/host/browser/host.js';
-import { IFastModeCapability, ILLMProvider } from '../common/openideAgentTypes.js';
+import { ICredential, IFastModeCapability, ILLMProvider } from '../common/openideAgentTypes.js';
 import { formatContextTokens, formatCostPerMillion, humanizeModelId } from '../common/openideModelDisplay.js';
 import { IOpenideNativeServices } from '../common/openideNativeServices.js';
 import { IOpenidePickerGroup, IOpenidePickerModel } from '../common/openidePickerModels.js';
@@ -44,6 +45,18 @@ import { ISubagentRoutingService } from './openideSubagentRoutingService.js';
 import { IOpenideUsageService } from './openideUsageService.js';
 
 export const IOpenideProviderService = createDecorator<IOpenideProviderService>('openideProviderService');
+/** An explicit, non-generating connection check. Never includes credentials or response bodies. */
+export interface IProviderConnectionCheck {
+	readonly status: 'available' | 'unverified' | 'missing-credentials' | 'auth-error' | 'endpoint-error' | 'unreachable';
+	readonly checkedAt: number;
+	readonly models?: readonly string[];
+	readonly statusCode?: number;
+}
+
+interface IProviderModelDiscovery extends IProviderConnectionCheck {
+	readonly modalities?: ReturnType<typeof modelModalitiesFromProviderResponse>;
+}
+
 export interface IOpenideProviderService {
 	readonly _serviceBrand: undefined;
 	customProviders(): unknown[] | undefined;
@@ -64,6 +77,10 @@ export interface IOpenideProviderService {
 	ensureModelCatalog(): Promise<void>;
 	listRegistryProviders(): Promise<IRegistryProvider[]>;
 	addRegistryProvider(id: string): Promise<void>;
+	addCustomProvider(entry: IProviderEntry, apiKey?: string): Promise<void>;
+	updateCustomProvider(entry: IProviderEntry, apiKey?: string): Promise<void>;
+	checkProviderConnection(entryOrId: IProviderEntry | string, apiKey?: string): Promise<IProviderConnectionCheck>;
+	refreshProviderConnections(): void;
 	refreshModelCatalog(): Promise<IModelCatalogStatus>;
 	credentialOrigin(providerId: string): Promise<ICredentialOrigin | undefined>;
 	oauthElsewhere(providerId: string): Promise<{ readonly sourceId: string; readonly label: string }[]>;
@@ -106,6 +123,9 @@ export class OpenideProviderService extends Disposable implements IOpenideProvid
 	private readonly accounts: OpenideProviderAccountsService;
 	private readonly agentHost: IOpenideAgentHostService;
 	private readonly netRequests: IOpenideNativeServices['requests'];
+	private readonly connectionRequests = this._register(new DisposableStore());
+	private discoveryGeneration = 0;
+	private connectionRequestId = 0;
 	private readonly _onDidChange = this._register(new Emitter<void>());
 	readonly onDidChange = this._onDidChange.event;
 
@@ -154,6 +174,7 @@ export class OpenideProviderService extends Disposable implements IOpenideProvid
 		this.accounts = new OpenideProviderAccountsService(this.secretStorage);
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration('openide.agent')) {
+				if (e.affectsConfiguration('openide.agent.customProviders')) { this.invalidateConnections(); }
 				this._onDidChange.fire();
 			}
 		}));
@@ -162,7 +183,7 @@ export class OpenideProviderService extends Disposable implements IOpenideProvid
 		this._register(this.secretStorage.onDidChangeSecret(key => {
 			const prefix = [SECRET_APIKEY_PREFIX, SECRET_OAUTH_PREFIX].find(prefix => key.startsWith(prefix));
 			if (!prefix) { return; }
-			this.dynamicModelsCache.delete(key.slice(prefix.length));
+			this.invalidateProvider(key.slice(prefix.length));
 			this._onDidChange.fire();
 		}));
 
@@ -171,11 +192,12 @@ export class OpenideProviderService extends Disposable implements IOpenideProvid
 	}
 
 	/** Short cache of the ping to local providers (avoids hammering the server on every refresh). */
-	private readonly localProbeCache = new Map<string, { at: number; ok: boolean }>();
+	private readonly localProbeCache = new Map<string, { signature: string; at: number; ok: boolean }>();
+	private readonly localProbes = new Map<string, { signature: string; id: number; promise: Promise<boolean> }>();
 
-	/** Cache of GET /models for providers with dynamicModels (TTL 5 min). */
-	/** Live `GET /models` per provider, for the life of the window. See `resolveProviderModels`. */
-	private readonly dynamicModelsCache = new Map<string, { models: string[]; fetchedAt: number; modalities?: ReturnType<typeof modelModalitiesFromProviderResponse> }>();
+	/** Successful discovery lasts 30 minutes; failed discovery backs off briefly, without polling. */
+	private readonly dynamicModelsCache = new Map<string, { signature: string; models: string[]; fetchedAt: number; ttl: number; modalities?: ReturnType<typeof modelModalitiesFromProviderResponse> }>();
+	private readonly pendingModels = new Map<string, { signature: string; id: number; promise: Promise<string[]> }>();
 
 	customProviders(): unknown[] | undefined {
 		return this.configurationService.getValue<unknown[]>('openide.agent.customProviders');
@@ -441,6 +463,7 @@ export class OpenideProviderService extends Disposable implements IOpenideProvid
 			protocol: 'openai',
 			baseUrl: provider.api,
 			auth: provider.env.length ? 'apiKey' : 'none',
+			dynamicModels: true,
 			// The registry's `doc` is where the key is minted, so it belongs in the link slot, not
 			// in the blurb — a bare URL printed as the row's description is not a description.
 			apiKeysUrl: provider.doc,
@@ -448,14 +471,68 @@ export class OpenideProviderService extends Disposable implements IOpenideProvid
 		await this.configurationService.updateValue('openide.agent.customProviders', custom);
 	}
 
+	async addCustomProvider(entry: IProviderEntry, apiKey?: string): Promise<void> {
+		if (this.listProviders().some(provider => provider.id.toLowerCase() === entry.id.toLowerCase())) {
+			throw new Error(t('openide.duplicateProvider'));
+		}
+		const current = this.customProviders();
+		await this.storeCustomProvider(entry, [...(Array.isArray(current) ? current : []), entry], apiKey);
+	}
+
+	async updateCustomProvider(entry: IProviderEntry, apiKey?: string): Promise<void> {
+		const current = this.customProviders();
+		const custom = Array.isArray(current) ? [...current] : [];
+		const index = custom.findIndex(raw => !!raw && typeof raw === 'object' && (raw as { id?: string }).id === entry.id);
+		if (index < 0) { throw new Error(t('openide.missingCustomProvider')); }
+		const updates = Object.fromEntries(Object.entries(entry).filter(([key, value]) => value !== undefined || key === 'defaultModel'));
+		custom[index] = { ...custom[index] as object, ...updates };
+		await this.storeCustomProvider(entry, custom, apiKey);
+	}
+
+	private async storeCustomProvider(entry: IProviderEntry, custom: unknown[], apiKey?: string): Promise<void> {
+		const key = SECRET_APIKEY_PREFIX + entry.id;
+		const previous = apiKey === undefined ? undefined : await this.secretStorage.get(key);
+		if (apiKey !== undefined) { await this.auth.setApiKey(entry.id, apiKey); }
+		try {
+			await this.configurationService.updateValue('openide.agent.customProviders', custom, ConfigurationTarget.USER);
+		} catch (error) {
+			if (apiKey !== undefined) {
+				if (previous === undefined) { await this.secretStorage.delete(key); }
+				else { await this.secretStorage.set(key, previous); }
+			}
+			throw error;
+		}
+		this.invalidateProvider(entry.id);
+		this._onDidChange.fire();
+	}
+
+	private invalidateProvider(providerId: string): void {
+		this.dynamicModelsCache.delete(providerId);
+		this.pendingModels.delete(providerId);
+		this.localProbeCache.delete(providerId);
+		this.localProbes.delete(providerId);
+	}
+
+	private invalidateConnections(): void {
+		this.discoveryGeneration++;
+		this.dynamicModelsCache.clear();
+		this.pendingModels.clear();
+		this.localProbeCache.clear();
+		this.localProbes.clear();
+	}
+
+	refreshProviderConnections(): void {
+		this.invalidateConnections();
+		this.auth.forgetExternalCredentials();
+		this._onDidChange.fire();
+	}
+
 	async refreshModelCatalog(): Promise<IModelCatalogStatus> {
 		try {
 			await this.catalog.refreshNow();
 		} finally {
 			// Provider discovery must refresh even when the public registry is unavailable.
-			this.dynamicModelsCache.clear();
-			this.auth.forgetExternalCredentials();
-			this._onDidChange.fire();
+			this.refreshProviderConnections();
 		}
 		return this.catalog.status();
 	}
@@ -607,7 +684,7 @@ export class OpenideProviderService extends Disposable implements IOpenideProvid
 	}
 
 	private resetProviderRuntime(providerId: string): void {
-		this.dynamicModelsCache.delete(providerId);
+		this.invalidateProvider(providerId);
 		const entry = findProvider(this.customProviders(), providerId);
 		if (entry) {
 			this.protocols.get(entry.protocol)?.resetSessionState?.();
@@ -620,8 +697,16 @@ export class OpenideProviderService extends Disposable implements IOpenideProvid
 			return false;
 		}
 		if (entry.auth === 'none') {
+			// An explicitly manual connection need not implement /models. Like a stored API key,
+			// this means configured for use; the separate connection check still reports unverified.
+			if (entry.custom && entry.dynamicModels === false && entry.defaultModel?.trim() && entry.baseUrl) {
+				try {
+					const url = new URL(entry.baseUrl);
+					if ((url.protocol === 'http:' || url.protocol === 'https:') && !url.username && !url.password) { return true; }
+				} catch { /* malformed manual endpoint is not usable */ }
+			}
 			// Local (Ollama/LM Studio/llama.cpp): "connected" = the server is listening.
-			return this.probeLocalProvider(entry.id, entry.baseUrl ?? '');
+			return this.probeLocalProvider(entry);
 		}
 		if (entry.auth === 'oauth') {
 			return this.oauth.isSignedIn(providerId);
@@ -718,101 +803,141 @@ export class OpenideProviderService extends Disposable implements IOpenideProvid
 		await this.hostService.reload();
 	}
 
-	/** Ping with a short timeout to a local provider's baseUrl. Any HTTP response (even 404)
-	 *  counts as alive; only a connection failure counts as down. */
-	private async probeLocalProvider(providerId: string, baseUrl: string): Promise<boolean> {
-		if (!baseUrl) {
-			return true; // sin URL no hay qué probar (no bloquear providers custom raros)
-		}
-		const cached = this.localProbeCache.get(providerId);
-		if (cached && Date.now() - cached.at < 5_000) {
-			return cached.ok;
-		}
-		let ok = false;
-		const cts = new CancellationTokenSource();
-		const timer = setTimeout(() => cts.cancel(), 1_500);
-		try {
-			const url = `${baseUrl.replace(/\/+$/, '')}/models`;
-			const ctx = await this.netRequests.request({ type: 'GET', url, callSite: 'openideAgentLocalProbe' }, cts.token);
-			ok = typeof ctx.res.statusCode === 'number';
-		} catch {
-			ok = false;
-		} finally {
-			clearTimeout(timer);
-			cts.dispose();
-		}
-		this.localProbeCache.set(providerId, { at: Date.now(), ok });
-		return ok;
+	private connectionSignature(entry: IProviderEntry): string {
+		return JSON.stringify([entry.protocol, entry.auth, entry.baseUrl, entry.dynamicModels, entry.defaultModel, entry.extraHeaders]);
 	}
 
-	/** Model list for a provider, from the freshest source that answers:
-	 *   1. the provider's own endpoint — the only one that knows what THIS account can reach;
-	 *   2. models.dev, for providers whose catalog is public and 1:1 with a registry entry;
-	 *   3. `defaultModel`, so the picker is never empty on a cold offline start.
-	 *  OpenIDE keeps no model list of its own — see openideModelCatalog.ts. */
+	/** Bound both the request and response body, even if a transport ignores cancellation. */
+	private async withConnectionTimeout<T>(operation: (token: CancellationToken) => Promise<T>, timeoutMs = 8_000): Promise<T> {
+		const lifetime = this.connectionRequests.add(new DisposableStore());
+		const cts = new CancellationTokenSource();
+		lifetime.add(toDisposable(() => cts.dispose(true)));
+		lifetime.add(disposableTimeout(() => cts.cancel(), timeoutMs));
+		try {
+			return await raceCancellationError(operation(cts.token), cts.token);
+		} finally {
+			this.connectionRequests.delete(lifetime);
+		}
+	}
+
+	/** Checks a draft or saved connection without writing credentials or generating tokens. */
+	async checkProviderConnection(entryOrId: IProviderEntry | string, apiKey?: string): Promise<IProviderConnectionCheck> {
+		const entry = typeof entryOrId === 'string' ? this.findProvider(entryOrId) : entryOrId;
+		if (!entry) { return { status: 'unverified', checkedAt: Date.now() }; }
+		const { modalities: _modalities, ...result } = await this.discoverProviderModels(entry, apiKey);
+		return result;
+	}
+
+	private async discoverProviderModels(entry: IProviderEntry, apiKey?: string, timeoutMs?: number): Promise<IProviderModelDiscovery> {
+		try {
+			return await this.withConnectionTimeout<IProviderModelDiscovery>(async token => {
+				let credential: ICredential;
+				try {
+					if (apiKey !== undefined && entry.auth === 'apiKey') {
+						const key = apiKey.trim();
+						if (!key || /[\s\x00-\x1f\x7f]/.test(key)) { return { status: 'missing-credentials', checkedAt: Date.now() }; }
+						credential = { kind: 'apiKey', value: key };
+					} else {
+						credential = await this.auth.resolveCredential(entry);
+					}
+				} catch {
+					return { status: 'missing-credentials', checkedAt: Date.now() };
+				}
+				if (token.isCancellationRequested) { return { status: 'unreachable', checkedAt: Date.now() }; }
+				const adapter = this.protocols.get(entry.protocol);
+				if (adapter?.listModels) {
+					const models = [...new Set(await adapter.listModels({ credential, providerId: entry.id, baseUrl: entry.baseUrl, extraHeaders: entry.extraHeaders, cloudCodeMetadata: entry.cloudCodeMetadata }, token))]
+						.filter(id => typeof id === 'string' && id.length > 0).sort((a, b) => a.localeCompare(b));
+					return { status: 'available', checkedAt: Date.now(), models };
+				}
+				if (!entry.baseUrl) { return { status: 'unverified', checkedAt: Date.now() }; }
+				const base = entry.baseUrl.replace(/\/+$/, '');
+				const url = `${base}${entry.protocol === 'anthropic' ? '/v1/models' : '/models'}`;
+				const headers: Record<string, string> = { ...(entry.extraHeaders ?? {}) };
+				const bearer = credential.kind === 'apiKey' ? credential.value : credential.token;
+				if (entry.protocol === 'anthropic') {
+					headers['anthropic-version'] = '2023-06-01';
+					if (credential.kind === 'apiKey' && bearer) { headers['x-api-key'] = bearer; }
+					else if (bearer) { headers['Authorization'] = `Bearer ${bearer}`; }
+				} else if (bearer) { headers['Authorization'] = `Bearer ${bearer}`; }
+				const ctx = await this.netRequests.request({ type: 'GET', url, headers, callSite: 'openideAgentModels' }, token);
+				const statusCode = ctx.res.statusCode ?? 0;
+				if (statusCode === 401 || statusCode === 403) { return { status: 'auth-error', checkedAt: Date.now(), statusCode }; }
+				if (statusCode === 404 || statusCode === 405) { return { status: 'unverified', checkedAt: Date.now(), statusCode }; }
+				if (statusCode < 200 || statusCode >= 300) { return { status: 'endpoint-error', checkedAt: Date.now(), statusCode }; }
+				let discovery: unknown;
+				try { discovery = JSON.parse(await asText(ctx) || ''); } catch { return { status: 'unverified', checkedAt: Date.now(), statusCode }; }
+				const record = discovery && typeof discovery === 'object' ? discovery as Record<string, unknown> : undefined;
+				if (!record || (!Array.isArray(record.data) && !Array.isArray(record.models) && (!record.models || typeof record.models !== 'object'))) {
+					return { status: 'unverified', checkedAt: Date.now(), statusCode };
+				}
+				return { status: 'available', checkedAt: Date.now(), statusCode, models: modelIdsFromProviderResponse(discovery), modalities: modelModalitiesFromProviderResponse(discovery) };
+			}, timeoutMs);
+		} catch {
+			// Network errors may contain URLs, request headers or server bodies. Expose only a kind.
+			return { status: 'unreachable', checkedAt: Date.now() };
+		}
+	}
+
+	/** A listening web server is not necessarily a usable model endpoint. Share simultaneous probes. */
+	private async probeLocalProvider(entry: IProviderEntry): Promise<boolean> {
+		const signature = this.connectionSignature(entry);
+		const cached = this.localProbeCache.get(entry.id);
+		if (cached?.signature === signature && Date.now() - cached.at < 5_000) { return cached.ok; }
+		const pending = this.localProbes.get(entry.id);
+		if (pending?.signature === signature) { return pending.promise; }
+		const generation = this.discoveryGeneration;
+		const id = ++this.connectionRequestId;
+		const promise = (async () => {
+			const result = await this.discoverProviderModels(entry, undefined, 1_500);
+			const current = generation === this.discoveryGeneration && this.localProbes.get(entry.id)?.id === id;
+			const ok = result.status === 'available';
+			if (current) { this.localProbeCache.set(entry.id, { signature, at: Date.now(), ok }); }
+			return current && ok;
+		})();
+		this.localProbes.set(entry.id, { signature, id, promise });
+		try { return await promise; }
+		finally { if (this.localProbes.get(entry.id)?.promise === promise) { this.localProbes.delete(entry.id); } }
+	}
+
+	/** Live models win; registry/defaults remain available when discovery cannot answer. */
 	async resolveProviderModels(entry: IProviderEntry): Promise<string[]> {
-		// Warms the registry for the surfaces that call this without going through the picker
-		// (settings pages, subagent config). getConnectedModelGroups awaits it before painting.
 		await this.catalog.ensureFresh();
+		// The Codex subscription endpoint can omit a model that the user has already selected
+		// (for example while the account-scoped catalogue catches up with a rollout). The picker
+		// deliberately keeps that selection visible. Build and the turn runner must see the same
+		// choice; the actual response endpoint remains the authority on whether it can run.
+		const withSelectedCodexModel = (models: string[]): string[] => {
+			const selected = entry.protocol === 'codex' ? this.modelForProvider(entry.id) : '';
+			return selected && !models.includes(selected) ? [...models, selected] : models;
+		};
 		const fallback = (): string[] => {
 			const known = this.catalog.modelsFor(entry.id);
-			if (known.length) {
-				// The persisted default may predate the registry's current naming; keeping it
-				// visible avoids a silent switch on a list the user did not ask to change.
-				return entry.defaultModel && !known.includes(entry.defaultModel) ? [entry.defaultModel, ...known] : known;
-			}
-			return entry.defaultModel ? [entry.defaultModel] : [];
+			if (known.length) { return withSelectedCodexModel(entry.defaultModel && !known.includes(entry.defaultModel) ? [entry.defaultModel, ...known] : known); }
+			return withSelectedCodexModel(entry.defaultModel ? [entry.defaultModel] : []);
 		};
 		const adapter = this.protocols.get(entry.protocol);
-		// OpenAI-compatible built-ins usually publish GET /models. Custom providers are only probed
-		// when explicitly asked, so a manual list is not turned into an error.
 		const genericDiscovery = !!entry.baseUrl && (entry.dynamicModels === true || (!entry.custom && (entry.protocol === 'openai' || entry.protocol === 'openai-responses')));
-		if (!adapter?.listModels && !genericDiscovery) {
-			return fallback();
-		}
-		// Refresh on demand after 30 minutes: long-lived IDE sessions must discover releases
-		// without a restart. No background polling; explicit refresh and account changes invalidate.
+		if (!adapter?.listModels && !genericDiscovery) { return fallback(); }
+		const signature = this.connectionSignature(entry);
 		const cached = this.dynamicModelsCache.get(entry.id);
-		if (cached && Date.now() - cached.fetchedAt < 30 * 60 * 1000) {
-			return cached.models;
-		}
-		try {
-			const credential = await this.auth.resolveCredential(entry);
-			if (adapter?.listModels) {
-				const ids = [...await adapter.listModels({ credential, providerId: entry.id, baseUrl: entry.baseUrl, extraHeaders: entry.extraHeaders, cloudCodeMetadata: entry.cloudCodeMetadata }, CancellationToken.None)]
-					.filter(id => typeof id === 'string' && id.length > 0)
-					.sort((a, b) => a.localeCompare(b));
-				if (ids.length) {
-					this.dynamicModelsCache.set(entry.id, { models: ids, fetchedAt: Date.now() });
-					return ids;
-				}
+		if (cached?.signature === signature && Date.now() - cached.fetchedAt < cached.ttl) { return withSelectedCodexModel([...cached.models]); }
+		const pending = this.pendingModels.get(entry.id);
+		if (pending?.signature === signature) { return withSelectedCodexModel([...await pending.promise]); }
+		const generation = this.discoveryGeneration;
+		const id = ++this.connectionRequestId;
+		const promise = (async () => {
+			const discovery = await this.discoverProviderModels(entry);
+			const models = discovery.status === 'available' ? [...(discovery.models ?? [])] : fallback();
+			if (generation === this.discoveryGeneration && this.pendingModels.get(entry.id)?.id === id) {
+				this.dynamicModelsCache.set(entry.id, { signature, models, fetchedAt: Date.now(), ttl: discovery.status === 'available' ? 30 * 60_000 : 5_000, modalities: discovery.modalities });
+				return withSelectedCodexModel([...models]);
 			}
-			if (!genericDiscovery || !entry.baseUrl) {
-				return fallback();
-			}
-			const url = `${entry.baseUrl.replace(/\/+$/, '')}/models`;
-			const headers: Record<string, string> = { ...(entry.extraHeaders ?? {}) };
-			const bearer = credential.kind === 'apiKey' ? credential.value : credential.kind === 'oauth' ? credential.token : '';
-			if (bearer) {
-				headers['Authorization'] = `Bearer ${bearer}`;
-			}
-			const ctx = await this.netRequests.request({ type: 'GET', url, headers, callSite: 'openideAgentModels' }, CancellationToken.None);
-			const status = ctx.res.statusCode ?? 0;
-			if (status < 200 || status >= 300) {
-				throw new Error(`HTTP ${status}`);
-			}
-			const text = await asText(ctx);
-			if (!text) {
-				throw new Error('empty body');
-			}
-			const discovery: unknown = JSON.parse(text);
-			const ids = modelIdsFromProviderResponse(discovery);
-			if (ids.length) {
-				this.dynamicModelsCache.set(entry.id, { models: ids, fetchedAt: Date.now(), modalities: modelModalitiesFromProviderResponse(discovery) });
-				return ids;
-			}
-		} catch { /* sin red o API caída: fallback estático */ }
-		return fallback();
+			return fallback();
+		})();
+		this.pendingModels.set(entry.id, { signature, id, promise });
+		try { return await promise; }
+		finally { if (this.pendingModels.get(entry.id)?.promise === promise) { this.pendingModels.delete(entry.id); } }
 	}
 
 	/** Everything the picker renders for one model. Built here rather than in the webview so the
@@ -847,8 +972,8 @@ export class OpenideProviderService extends Disposable implements IOpenideProvid
 			try {
 				if (!(await this.isConnected(provider.id))) { return; }
 				const ids = [...await this.resolveProviderModels(provider)];
-				// Same as the historical composer: the persisted/manual value stays visible even when
-				// discovery changes. Build revalidates it before running and gives an actionable error if stale.
+				// Keep a persisted/manual value visible even if discovery changes. For Codex the
+				// resolver already includes the selected model so Build and runtime agree with the picker.
 				if (provider.id === selectedProviderId && selectedModel && !ids.includes(selectedModel)) { ids.push(selectedModel); }
 				if (ids.length || includeEmpty) {
 					groups.push({

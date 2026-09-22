@@ -254,6 +254,13 @@ suite('OpenIDE chat reducer', () => {
 		assert.deepStrictEqual(contentOf(step).map(content => (content as { requestId?: string }).requestId), ['a1', 'q1', 's1']);
 	});
 
+	test('protected write approval keeps its one-operation scope through reduction', () => {
+		const step = run([{ type: 'approvalRequest', id: 'rule', tool: 'rule_manage', title: 'Save rule', risk: 'write', operationOnly: true }]);
+		const content = contentOf(step)[0];
+		assert.ok(content.kind === 'confirmation');
+		assert.strictEqual(content.operationOnly, true);
+	});
+
 	test('the ask card settles live when ask_user returns, one answer per question', () => {
 		const step = run([
 			{ type: 'ask', id: 'q1', questions: [{ question: '¿color?' }, { question: '¿tema?', allowMultiple: true }], allowFreeText: true },

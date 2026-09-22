@@ -12,6 +12,7 @@ import { runOpenideChatRollback } from '../../browser/chat/openideChatRollbackOp
 import { IChatMessage, IMessageChangeSet, IMessageRollbackResult } from '../../common/openideAgentTypes.js';
 import { IOpenideAgentService } from '../../browser/openideAgentService.js';
 import { OpenideChatSessions } from '../../browser/openideChatSessions.js';
+import { TestStorageService } from '../../../../test/common/workbenchTestServices.js';
 
 /**
  * The reliability gate over "volver a un mensaje" (`dev/reliability-gates.json`). Rolling back is
@@ -43,6 +44,7 @@ function fakeSessions(messages: IChatMessage[], changeSet?: IMessageChangeSet): 
 	const sessions = {
 		messagesOf: () => messages,
 		changeSetOf: (_id: string, messageId: string) => changeSet?.messageId === messageId ? changeSet : undefined,
+		truncateArchiveBefore: () => { },
 		removeChangeSets: (id: string, messageIds: readonly string[]) => { calls.removed.push({ id, messageIds }); },
 		clearUsage: (id: string) => { calls.cleared.push(id); },
 		save: (id: string, saved: IChatMessage[], hasError: boolean) => { calls.saved.push({ id, count: saved.length, hasError }); },
@@ -67,7 +69,28 @@ const CHANGE_SET = { messageId: 'u2' } as unknown as IMessageChangeSet;
 
 suite('OpenIDE chat rollback', () => {
 
-	ensureNoDisposablesAreLeakedInTestSuite();
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('reverted compacted turns stay removed from full history after restart while forks retain them', async () => {
+		const storage = store.add(new TestStorageService());
+		const sessions = new OpenideChatSessions(storage);
+		const messages = [userMessage('u1'), assistantMessage('a1'), userMessage('u2'), assistantMessage('a2')];
+		const id = sessions.createBackground('History', messages);
+		sessions.archiveBeforeCompaction(id, messages);
+		const summary: IChatMessage = { role: 'user', content: '[Resumen histórico compacto]\nEarlier work' };
+		messages.splice(0, 2, summary);
+		sessions.save(id, messages, false);
+		const fork = sessions.fork(id)!;
+		const { agentService } = fakeAgentService([]);
+		const outcome = await runOpenideChatRollback({ sessions, agentService, conversationId: id, messageId: 'u2', restoreComposer: true, drainRun: async () => { } });
+		const restored = new OpenideChatSessions(storage);
+		assert.deepStrictEqual({
+			committed: outcome.committed,
+			transcript: restored.transcriptOf(id).map(message => message.messageId),
+			model: restored.messagesOf(id).map(message => message.content),
+			fork: restored.transcriptOf(fork).map(message => message.messageId),
+		}, { committed: true, transcript: ['u1', 'a1', undefined], model: [summary.content], fork: ['u1', 'a1', 'u2', 'a2', undefined] });
+	});
 
 	test('cuts the thread once at the target turn and reports what was discarded', async () => {
 		const messages = [userMessage('u1'), assistantMessage('a1'), userMessage('u2'), assistantMessage('a2')];

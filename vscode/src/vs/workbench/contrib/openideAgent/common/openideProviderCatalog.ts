@@ -373,7 +373,7 @@ function normalizeCustom(raw: any): IProviderEntry | undefined {
 	if (!raw || typeof raw.id !== 'string' || !raw.id) {
 		return undefined;
 	}
-	const protocol: ProtocolId = raw.protocol === 'anthropic' ? 'anthropic' : 'openai';
+	const protocol: ProtocolId = raw.protocol === 'anthropic' ? 'anthropic' : raw.protocol === 'openai-responses' ? 'openai-responses' : 'openai';
 	const auth: AuthKind = raw.auth === 'oauth' ? 'oauth' : raw.auth === 'none' ? 'none' : 'apiKey';
 	return {
 		id: raw.id,
@@ -382,6 +382,9 @@ function normalizeCustom(raw: any): IProviderEntry | undefined {
 		protocol,
 		baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : undefined,
 		auth,
+		dynamicModels: typeof raw.dynamicModels === 'boolean' ? raw.dynamicModels : undefined,
+		extraHeaders: raw.extraHeaders && typeof raw.extraHeaders === 'object' && !Array.isArray(raw.extraHeaders)
+			? Object.fromEntries(Object.entries(raw.extraHeaders).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : undefined,
 		// Where this provider's key is minted. A custom entry could not carry it before, so a
 		// provider added from the registry had nowhere to put its documentation link except the
 		// blurb — where a bare URL reads as the row's description instead of as a link.

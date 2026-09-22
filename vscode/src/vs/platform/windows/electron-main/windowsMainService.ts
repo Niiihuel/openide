@@ -77,6 +77,7 @@ interface IOpenBrowserWindowOptions {
 	readonly filesToOpen?: IFilesToOpen;
 
 	readonly forceNewWindow?: boolean;
+	readonly openideAgentWindow?: boolean;
 	readonly forceNewTabbedWindow?: boolean;
 	readonly windowToUse?: ICodeWindow;
 
@@ -730,6 +731,10 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	private doOpenFilesInExistingWindow(configuration: IOpenConfiguration, window: ICodeWindow, filesToOpen?: IFilesToOpen): ICodeWindow {
 		this.logService.trace('windowsManager#doOpenFilesInExistingWindow', { filesToOpen });
 
+		// Switching Agent projects reuses the execution owner without revealing its IDE,
+		// changing its editors, or replaying restoration requests into a live workspace.
+		if (configuration.openideAgentWindow) { return window; }
+
 		this.focusMainOrChildWindow(window); // make sure window or any of the children has focus
 
 		const params: INativeOpenFileRequest = {
@@ -816,6 +821,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			initialStartup: openConfig.initialStartup,
 			remoteAuthority: folderOrWorkspace.remoteAuthority,
 			forceNewWindow,
+			openideAgentWindow: openConfig.openideAgentWindow,
 			forceNewTabbedWindow: openConfig.forceNewTabbedWindow,
 			filesToOpen,
 			windowToUse,
@@ -1599,6 +1605,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			cssModules: this.cssDevelopmentService.isEnabled ? await this.cssDevelopmentService.getCssModules() : undefined,
 
 			isSessionsWindow: isWorkspaceIdentifier(options.workspace) && isEqual(options.workspace.configPath, this.environmentMainService.agentSessionsWorkspace),
+			openideAgentWindowOwner: options.openideAgentWindow,
 		};
 
 		// New window
@@ -1611,7 +1618,8 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 				state,
 				extensionDevelopmentPath: configuration.extensionDevelopmentPath,
 				isExtensionTestHost: !!configuration.extensionTestsPath,
-				isSessionsWindow: configuration.isSessionsWindow
+				isSessionsWindow: configuration.isSessionsWindow,
+				openideAgentWindowOwner: configuration.openideAgentWindowOwner
 			});
 			mark('code/didCreateCodeWindow');
 

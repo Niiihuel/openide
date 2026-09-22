@@ -17,7 +17,7 @@ export interface IOpenideToolExecution {
 	readonly allowedTools?: ReadonlySet<string>;
 	readonly allowedRisks?: ReadonlySet<ToolRisk>;
 	readonly journal?: IOpenideJournalContext;
-	readonly authorize?: (request: IToolApprovalRequest) => Promise<boolean>;
+	readonly authorize?: (request: IToolApprovalRequest, args?: Readonly<Record<string, unknown>>) => Promise<boolean>;
 	readonly guard?: (name: string, args: Record<string, unknown>) => Promise<string | undefined>;
 }
 
@@ -63,7 +63,7 @@ export class OpenideToolExecutor {
 		if (blocked) { return { error: blocked }; }
 		if (tool.risk !== 'safe' && !memoryWrite) {
 			const authorize = execution?.authorize ?? this.authorize;
-			if (!authorize || !await authorize({ ...info, tool: name, risk: tool.risk })) { return { error: `Error: action denied (${name}).` }; }
+			if (!authorize || !await authorize({ ...info, tool: name, risk: tool.risk }, args)) { return { error: `Error: action denied (${name}).` }; }
 		}
 		if (token.isCancellationRequested) { return { error: 'Error: tool call cancelled before execution.' }; }
 		return { args };

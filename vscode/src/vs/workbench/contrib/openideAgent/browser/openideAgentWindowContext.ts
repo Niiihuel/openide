@@ -6,6 +6,8 @@
 import { $, append, clearNode } from '../../../../base/browser/dom.js';
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
+import { ILanguageService } from '../../../../editor/common/languages/language.js';
+import { getIconClasses } from '../../../../editor/common/services/getIconClasses.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { ITextModelService } from '../../../../editor/common/services/resolverService.js';
 import { RunOnceScheduler } from '../../../../base/common/async.js';
@@ -14,6 +16,7 @@ import { autorun } from '../../../../base/common/observable.js';
 import { basename, extUriBiasedIgnorePathCase, joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
+import { FileKind } from '../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IResourceMultiDiffEditorInput } from '../../../common/editor.js';
@@ -31,6 +34,7 @@ import { countDiff } from '../common/openideDiffPreview.js';
 import { IOpenideReviewFile } from './openideChangesEditor.js';
 import { OpenideAgentWindowGit } from './openideAgentWindowGit.js';
 import { IOpenideCliChangesService, OpenideCliChangesService } from './openideCliChangesService.js';
+import { OpenideAgentWindowContextTabs } from './openideAgentWindowContextTabs.js';
 
 interface IAgentWindowContextActions {
 	readonly review: (sessionId: string, files: readonly IOpenideReviewFile[], open: boolean) => void;
@@ -61,10 +65,15 @@ export class OpenideAgentWindowContext extends Disposable {
 	private	readonly repositoryStore = this._register(new DisposableStore());
 	private	readonly changesSummary: HTMLButtonElement;
 	private entries: ContextChange[] = [];
+	private entriesSessionId: string | undefined;
 	private receipts: ReturnType<OpenideChatWidget['sessionStore']['changesOf']> | undefined;
 	private statsRequest: CancellationTokenSource | undefined;
 	private readonly statsCache = new Map<string, IAgentWindowChangeStats>();
 	private readonly statsResources = new Set<string>();
+	private readonly panels: OpenideAgentWindowContextTabs;
+	private readonly changeProvenance: HTMLElement;
+	private readonly changeList: HTMLElement;
+	private readonly changeRows = this._register(new DisposableMap<string, { element: HTMLElement; label: HTMLElement; stats: HTMLElement; dispose(): void }>());
 	private readonly changesTotals: HTMLElement;
 	private sessionId: string | undefined;
 	private	readonly branch: HTMLButtonElement;
@@ -88,10 +97,14 @@ export class OpenideAgentWindowContext extends Disposable {
 		@IInstantiationService instantiation: IInstantiationService,
 		@ITextModelService _textModels: ITextModelService,
 		@IModelService private readonly modelService: IModelService,
+		@ILanguageService private readonly languageService: ILanguageService,
 		@IOpenideReviewDiffService private readonly diffs: IOpenideReviewDiffService,
 	) {
 		super();
-		const environment = createContextSection(parent, t('agentWindow.environment'), this._store, hoverService);
+		this.panels = this._register(new OpenideAgentWindowContextTabs(parent));
+		const contextPanel = this.panels.panel('context');
+		const changesPanel = this.panels.panel('changes');
+		const environment = createContextSection(contextPanel, t('agentWindow.environment'), this._store, hoverService);
 		this.environment = this._register(instantiation.createInstance(OpenideAgentWindowEnvironment, environment,
 			() => source.sessionStore.metaOf(source.sessionStore.activeSessionId()),
 			{ openFiles: actions.openFiles, openTerminal: actions.createTerminal, openProject: actions.openProject }));
@@ -99,22 +112,24 @@ export class OpenideAgentWindowContext extends Disposable {
 			{ getRepository: () => this.selectedRepository(), openComparison: actions.openComparison }));
 		this.branch = this.row(environment, t('agentWindow.branch'), 'git-branch', () => { void git.showBranches(); });
 		append(this.branch, $('span.codicon.codicon-chevron-down', { 'aria-hidden': 'true' }));
-		const changes = append(environment, $('.openide-agent-window-changes'));
+		const changes = append(changesPanel, $('.openide-agent-window-changes'));
 		const heading = append(changes, $('.openide-agent-window-changes-heading'));
-		this.changesSummary = this.row(heading, t('openide.changes'), 'diff', () => this.actions.review(this.source.sessionStore.activeSessionId() ?? '', this.entries, true));
+		this.changesSummary = this.row(heading, t('openide.changes'), 'diff', () => this.openReview());
 		this.changesSummary.classList.add('openide-agent-window-review-summary');
 		this.changesTotals = append(this.changesSummary, $('span.openide-agent-window-row-meta.openide-agent-window-changes-totals'));
-		environment.prepend(changes);
+		this.changeProvenance = append(changes, $('.openide-conversation-changes-provenance'));
+		this.changeList = append(changes, $('.openide-conversation-changes-files.show-file-icons'));
 
 		this.commit = this.row(environment, t('agentWindow.commit'), 'git-commit', () => git.showCommit());
 		this.compare = this.row(environment, t('agentWindow.compare'), 'git-compare', () => { void git.showCompare(); });
-		this._register(instantiation.createInstance(OpenideAgentWindowActivity, parent, source, {
-			openTerminal: actions.openTerminal, addSource: actions.addSource, openResource: actions.openResource, openBrowser: actions.openBrowser, openSubagents: actions.openSubagents
+		this._register(instantiation.createInstance(OpenideAgentWindowActivity, contextPanel, source, {
+			openTerminal: actions.openTerminal, addSource: actions.addSource, openResource: actions.openResource, openBrowser: actions.openBrowser, openSubagents: actions.openSubagents,
+			processesParent: this.panels.panel('terminals')
 		}));
 		const refresh = this._register(new RunOnceScheduler(() => this.refresh(), 100));
 		this._register(source.sessionStore.onDidChange(() => refresh.schedule()));
 		this._register(source.onDidChangeNavigation(() => refresh.schedule()));
-		this._register(this.cliChanges.onDidChange(() => this.changesRefresh.schedule()));
+		this._register(this.cliChanges.onDidChange(id => { if (id === this.source.sessionStore.activeSessionId()) { this.changesRefresh.schedule(); } }));
 		this._register(agentService.onDidChangeFileDiff(() => this.changesRefresh.schedule()));
 		const modelListeners = this._register(new DisposableMap<ITextModel, DisposableStore>());
 		const watchModel = (model: ITextModel) => {
@@ -140,9 +155,16 @@ export class OpenideAgentWindowContext extends Disposable {
 			this.workspaceService.getWorkspace().folders, [...this.scmService.repositories]).repository;
 	}
 
+	private openReview(): void {
+		// The selected session can change before a debounced repaint. Always open the owner
+		// of the files actually displayed, including for a reused row of the same workspace file.
+		if (this.entriesSessionId) { this.actions.review(this.entriesSessionId, this.entries, true); }
+	}
+
 	private refresh(): void {
 		this.changesRefresh.cancel();
 		const id = this.source.sessionStore.activeSessionId();
+		this.panels.setSession(id);
 		if (this.sessionId !== id) {
 			this.sessionId = id;
 			this.statsCache.clear();
@@ -167,7 +189,9 @@ export class OpenideAgentWindowContext extends Disposable {
 		this.statsRequest?.dispose(true);
 		const request = this.statsRequest = new CancellationTokenSource();
 		const selectedId = this.source.sessionStore.activeSessionId();
+		this.entriesSessionId = selectedId;
 		const selected = this.source.sessionStore.metaOf(selectedId);
+		this.changeProvenance.textContent = t(selected?.kind === 'cli' ? 'conversationWorkspace.observed' : 'conversationWorkspace.recorded');
 		this.statsResources.clear();
 		const pending: (() => Promise<void>)[] = [];
 		if (selected?.kind === 'cli') {
@@ -193,7 +217,7 @@ export class OpenideAgentWindowContext extends Disposable {
 				// compare immutable states, so subsequent edits in another chat never leak in.
 				const live = pendingFile && this.agentService.reviewBaseline(pendingFile.path) === file.before;
 				const resource = live ? original : URI.from({ scheme: 'inmemory', path: original.path, query: JSON.stringify(['openide-chat-review', selectedId, file.id]) });
-				const entry: ContextChange = { resource, modifiedContent: live ? undefined : file.after, deleted: file.deleted, baseline: async () => file.before,
+				const entry: ContextChange = { resource, modifiedContent: live ? undefined : file.after, pendingPath: live ? pendingFile.path : undefined, deleted: file.deleted, baseline: async () => file.before,
 					path: file.uri.includes('://') ? original.fsPath : file.uri, label: basename(original),
 					open: () => this.actions.openResource(original) };
 				const cached = this.statsCache.get(file.id);
@@ -260,6 +284,30 @@ export class OpenideAgentWindowContext extends Disposable {
 	}
 
 	private renderTotals(): void {
+		const current = new Set(this.entries.map(entry => entry.resource.toString()));
+		for (const [key] of this.changeRows) { if (!current.has(key)) { this.changeRows.deleteAndDispose(key); } }
+		let anchor = this.changeList.firstChild;
+		for (const file of this.entries) {
+			const key = file.resource.toString();
+			let entry = this.changeRows.get(key);
+			if (!entry) {
+				const store = new DisposableStore();
+				const row = createContextRow(this.changeList, file.label, 'file', () => this.openReview(), store, this.hoverService);
+				const icon = row.querySelector<HTMLElement>('.codicon-file')!;
+				icon.className = `openide-agent-window-change-icon ${getIconClasses(this.modelService, this.languageService, URI.file('/' + file.label), FileKind.FILE).join(' ')}`;
+				const stats = append(row, $('span.openide-agent-window-row-meta'));
+				entry = { element: row, label: row.querySelector<HTMLElement>('.openide-agent-window-row-label')!, stats, dispose: () => { store.dispose(); row.remove(); } };
+				this.changeRows.set(key, entry);
+			}
+			entry.label.textContent = file.label;
+			entry.element.setAttribute('aria-label', file.path);
+			clearNode(entry.stats);
+			if (file.added !== undefined) { append(entry.stats, $('span.openide-agent-window-changes-added', undefined, `+${file.added}`)); }
+			if (file.removed !== undefined) { append(entry.stats, $('span.openide-agent-window-changes-removed', undefined, `−${file.removed}`)); }
+			if (entry.element !== anchor) { this.changeList.insertBefore(entry.element, anchor); }
+			anchor = entry.element.nextSibling;
+		}
+		this.changeProvenance.hidden = !this.entries.length;
 		clearNode(this.changesTotals);
 		const stats = sumAgentWindowChangeStats(this.entries);
 		if (!this.entries.length || !stats) { return; }

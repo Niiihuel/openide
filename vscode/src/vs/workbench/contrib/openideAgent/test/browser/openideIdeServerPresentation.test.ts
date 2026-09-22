@@ -34,6 +34,7 @@ suite('OpenIDE CLI presentation routing', () => {
 		let counter = 0, available = true;
 		const opens: string[] = [];
 		const routed: (number | undefined)[] = [];
+		const invocations: { readonly toolCallId?: string; readonly conversationId?: string }[] = [];
 		const instantiation = store.add(new TestInstantiationService());
 		instantiation.stub(IOpenideNativeServices, { host: {
 			onDidChangeIdeDiscovery: Event.None, onDidRequestIdeTool: requests.event, onDidCancelIdeTool: Event.None,
@@ -62,7 +63,8 @@ suite('OpenIDE CLI presentation routing', () => {
 		instantiation.stub(IOpenideAgentService, { resolveEditorTarget: async windowId => available && windowId === auxiliary ? companion : undefined });
 		const service = store.add(instantiation.createInstance(OpenideIdeServerService));
 		if (registerCatalog) {
-			service.bridgeAgentTools([{ name: 'fixture', description: '', parameters: { type: 'object', properties: {} } }], async (_name, _args, _token, windowId) => {
+			service.bridgeAgentTools([{ name: 'fixture', description: '', parameters: { type: 'object', properties: {} } }], async (_name, _args, _token, windowId, context) => {
+				invocations.push(context ?? {});
 				routed.push(windowId); return { output: 'ok', isError: false };
 			});
 		}
@@ -73,7 +75,7 @@ suite('OpenIDE CLI presentation routing', () => {
 			requests.fire({ requestId, connectionId: requestId, tool, args, sessionId });
 			return reply.p;
 		}
-		return { endpoint, call, opens, routed, scratch, textFile, service, close: () => { available = false; } };
+		return { endpoint, call, opens, routed, invocations, scratch, textFile, service, close: () => { available = false; } };
 	}
 
 	test('injected CLI file and native tools keep their launch presentation', async () => {
@@ -88,6 +90,7 @@ suite('OpenIDE CLI presentation routing', () => {
 		f.service.setSessionWindowId('agent-session', auxiliary);
 		assert.deepStrictEqual(f.opens, ['agent']);
 		assert.deepStrictEqual(f.routed, [auxiliary]);
+		assert.deepStrictEqual(f.invocations, [{ toolCallId: '2', conversationId: 'agent-session' }]);
 		const unknown = await f.call('openFile', { filePath: '/fixture/file.ts' }, 'unknown-session');
 		assert.strictEqual(unknown.isError, true);
 		f.close();

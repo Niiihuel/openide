@@ -231,15 +231,16 @@ export class BrowserViewWorkbenchService extends Disposable implements IBrowserV
 		return toDisposable(() => { if (this._previewEditorTargets.get(windowId) === resolve) { this._previewEditorTargets.delete(windowId); } });
 	}
 
-	async openPreview(url?: string, initialState?: IBrowserEditorViewState, options?: { readonly preserveFocus?: boolean; readonly targetWindowId?: number; readonly modal?: boolean; readonly reveal?: boolean }): Promise<BrowserEditorInput> {
+	async openPreview(url?: string, initialState?: IBrowserEditorViewState, options?: { readonly preserveFocus?: boolean; readonly targetWindowId?: number; readonly modal?: boolean; readonly reveal?: boolean; readonly browserId?: string }): Promise<BrowserEditorInput> {
 		const windowId = options?.targetWindowId ?? getActiveWindow().vscodeWindowId;
 		if (options?.targetWindowId !== undefined && windowId !== mainWindow.vscodeWindowId && !this._previewEditorTargets.has(windowId)) {
 			throw new Error('The preview window has closed');
 		}
 		const resolve = this._previewEditorTargets.get(windowId);
 		const existing = options?.reveal ? this.getPreview() : undefined;
+		const linked = options?.browserId ? this._known.get(options.browserId) : undefined;
 		// Revealing a card or expanding it must preserve the page's live DOM and history.
-		const input = existing && existing.url === url ? existing : this.getOrCreatePreview(url, initialState);
+		const input = linked ?? (existing && existing.url === url ? existing : this.getOrCreatePreview(url, initialState));
 		const editorService = resolve ? await resolve(options?.modal) : this.editorService;
 		if (!resolve || this._previewEditorTargets.get(windowId) === resolve) {
 			await editorService.openEditor(input, { pinned: true, preserveFocus: options?.preserveFocus, modal: { targetWindowId: windowId, maximized: true } }, !resolve && options?.modal ? MODAL_GROUP : undefined);

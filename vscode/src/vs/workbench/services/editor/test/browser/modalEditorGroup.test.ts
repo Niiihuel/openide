@@ -4,16 +4,18 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { addDisposableListener, EventType } from '../../../../../base/browser/dom.js';
+import { addDisposableListener, EventType, registerWindow } from '../../../../../base/browser/dom.js';
 import { timeout } from '../../../../../base/common/async.js';
 import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent.js';
-import { mainWindow } from '../../../../../base/browser/window.js';
-import { workbenchInstantiationService, registerTestEditor, TestFileEditorInput, createEditorParts } from '../../../../test/browser/workbenchTestServices.js';
+import { ensureCodeWindow, mainWindow } from '../../../../../base/browser/window.js';
+import { workbenchInstantiationService, registerTestEditor, TestFileEditorInput, createEditorParts, TestLayoutService } from '../../../../test/browser/workbenchTestServices.js';
 import { GroupsOrder, IEditorGroupsService } from '../../common/editorGroupsService.js';
 import { EditorExtensions, EditorInputCapabilities, IEditorFactoryRegistry } from '../../../../common/editor.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
-import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { Event } from '../../../../../base/common/event.js';
+import { upcastPartial } from '../../../../../base/test/common/mock.js';
 import { IKeybindingService, IKeyboardEvent } from '../../../../../platform/keybinding/common/keybinding.js';
 import { ResultKind, ResolutionResult } from '../../../../../platform/keybinding/common/keybindingResolver.js';
 import { MockKeybindingService, MockScopableContextKeyService } from '../../../../../platform/keybinding/test/common/mockKeybindingService.js';
@@ -24,13 +26,16 @@ import { IEditorService, MODAL_GROUP, MODAL_GROUP_TYPE } from '../../common/edit
 import { findGroup } from '../../common/editorGroupFinder.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
-import { EditorService } from '../../browser/editorService.js';
-import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
-import { TestStorageService } from '../../../../test/common/workbenchTestServices.js';
+import { EditorService, registerEditorWindowTarget } from '../../browser/editorService.js';
+import { IStorageService, StorageScope, StorageTarget, WillSaveStateReason } from '../../../../../platform/storage/common/storage.js';
+import { TestProductService, TestStorageService } from '../../../../test/common/workbenchTestServices.js';
 import { Memento } from '../../../../common/memento.js';
 import { IContextKeyService, IContextKeyServiceTarget } from '../../../../../platform/contextkey/common/contextkey.js';
 import { EditorPartModalVisibleContext } from '../../../../common/contextkeys.js';
 import { CLOSE_MODAL_EDITOR_COMMAND_ID } from '../../../../browser/parts/editor/editorCommands.js';
+import { IAuxiliaryWindow, IAuxiliaryWindowService } from '../../../auxiliaryWindow/browser/auxiliaryWindowService.js';
+import { IWorkbenchLayoutService } from '../../../layout/browser/layoutService.js';
+import { BrowserWorkbenchEnvironmentService } from '../../../environment/browser/environmentService.js';
 
 suite('Modal Editor Group', () => {
 
@@ -74,6 +79,62 @@ suite('Modal Editor Group', () => {
 		assert.strictEqual(typeof modalPart.close, 'function');
 
 		await modalPart.close();
+	});
+
+	test('embedded modal editors in auxiliary windows are excluded from generic window restoration', async () => {
+		const frame = document.body.appendChild(document.createElement('iframe'));
+		disposables.add(toDisposable(() => frame.remove()));
+		const targetWindow = frame.contentWindow!;
+		ensureCodeWindow(targetWindow, 9101);
+		disposables.add(registerWindow(targetWindow));
+		const auxiliary = upcastPartial<IAuxiliaryWindow>({ window: targetWindow, createState: () => ({ bounds: { width: 800, height: 600 } }) });
+		const instantiationService = workbenchInstantiationService({ contextKeyService: instantiationService => instantiationService.createInstance(MockScopableContextKeyService) }, disposables);
+		instantiationService.stub(IAuxiliaryWindowService, upcastPartial<IAuxiliaryWindowService>({
+			getWindow: id => id === targetWindow.vscodeWindowId ? auxiliary : undefined,
+			onDidOpenAuxiliaryWindow: Event.None,
+		}));
+		instantiationService.stub(IWorkbenchLayoutService, new class extends TestLayoutService {
+			override getContainer(window?: Window): HTMLElement { return window === targetWindow ? targetWindow.document.body : super.getContainer(); }
+		}());
+		instantiationService.invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));
+		const parts = await createEditorParts(instantiationService, disposables);
+		instantiationService.stub(IEditorGroupsService, parts);
+		const modal = await parts.createModalEditorPart({ targetWindowId: targetWindow.vscodeWindowId, nested: true, dockable: true });
+		const dock = targetWindow.document.body.appendChild(document.createElement('div'));
+		modal.setEmbeddedContainer(dock);
+		await modal.activeGroup.openEditor(createTestFileEditorInput(URI.file('project/browser-preview'), TEST_EDITOR_INPUT_ID), { pinned: true });
+		parts.saveWorkingSet('Agent workspace');
+		const workingSets = instantiationService.get(IStorageService).getObject<{ auxiliary: { auxiliary: object[]; mru: number[] } }[]>('editor.workingSets', StorageScope.WORKSPACE)!;
+		assert.deepStrictEqual(workingSets[0].auxiliary, { auxiliary: [], mru: [0] });
+		await modal.close();
+	});
+
+	test('Agents owners preserve the IDE auxiliary layout without restoring its detached windows', async () => {
+		const environment = new class extends BrowserWorkbenchEnvironmentService {
+			readonly openideAgentWindowOwner = true;
+		}('', URI.file('tests').with({ scheme: 'vscode-tests' }), {}, TestProductService);
+		const instantiationService = workbenchInstantiationService({
+			environmentService: () => environment,
+			contextKeyService: service => service.createInstance(MockScopableContextKeyService),
+		}, disposables);
+		let opens = 0;
+		instantiationService.stub(IAuxiliaryWindowService, upcastPartial<IAuxiliaryWindowService>({
+			getWindow: () => undefined,
+			onDidOpenAuxiliaryWindow: Event.None,
+			open: async () => { opens++; throw new Error('Hidden Agents owners must not restore IDE windows'); },
+		}));
+		const storageService = instantiationService.get(IStorageService) as TestStorageService;
+		const savedState = { 'editorparts.state': { auxiliary: [{ bounds: { width: 800, height: 600 }, state: {} }], mru: [0, 1] } };
+		storageService.store('memento/workbench.editorParts', savedState, StorageScope.WORKSPACE, StorageTarget.USER);
+		Memento.clear(StorageScope.WORKSPACE);
+		try {
+			const parts = await createEditorParts(instantiationService, disposables);
+			await parts.whenRestored;
+			storageService.testEmitWillSaveState(WillSaveStateReason.SHUTDOWN);
+			assert.deepStrictEqual({ opens, savedState: storageService.getObject('memento/workbench.editorParts', StorageScope.WORKSPACE) }, { opens: 0, savedState });
+		} finally {
+			Memento.clear(StorageScope.WORKSPACE);
+		}
 	});
 
 	test('Escape closes modal before focused controls can stop propagation', async () => {
@@ -886,6 +947,35 @@ suite('Modal Editor Group', () => {
 		assert.strictEqual(pane.options?.preserveFocus, false);
 
 		await parts.activeModalEditorPart?.close();
+	});
+
+	test('nested Settings workflows bypass the window workspace target without moving its editors', async () => {
+		const instantiationService = workbenchInstantiationService({ contextKeyService: service => service.createInstance(MockScopableContextKeyService) }, disposables);
+		instantiationService.invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));
+		const parts = await createEditorParts(instantiationService, disposables);
+		instantiationService.stub(IEditorGroupsService, parts);
+		const service = disposables.add(instantiationService.createInstance(EditorService, undefined));
+		instantiationService.stub(IEditorService, service);
+		const workspace = await parts.createModalEditorPart({ nested: true, dockable: true });
+		const workspaceService = service.createScoped(workspace, disposables, { openEditorsInContainer: true });
+		let routed = 0;
+		disposables.add(registerEditorWindowTarget(mainWindow.vscodeWindowId, async () => { routed++; return workspaceService; }));
+		const project = createTestFileEditorInput(URI.file('project/browser'), TEST_EDITOR_INPUT_ID);
+		await service.openEditor(project, { pinned: true }, MODAL_GROUP);
+
+		const settings = createTestFileEditorInput(URI.file('settings/skills'), TEST_EDITOR_INPUT_ID);
+		const settingsPane = await service.openEditor(settings, { pinned: true, modal: { nested: true } }, MODAL_GROUP);
+		const settingsPart = parts.activeModalEditorPart!;
+		assert.notStrictEqual(settingsPart, workspace);
+		const plugin = createTestFileEditorInput(URI.file('settings/plugins'), TEST_EDITOR_INPUT_ID);
+		const pluginPane = await service.openEditor(plugin, { pinned: true, modal: { targetWindowId: mainWindow.vscodeWindowId } }, MODAL_GROUP);
+
+		assert.deepStrictEqual({ routed, workspaceEditors: workspace.activeGroup.editors, settingsGroup: settingsPane?.group.id, pluginsGroup: pluginPane?.group.id }, {
+			routed: 1, workspaceEditors: [project], settingsGroup: settingsPart.activeGroup.id, pluginsGroup: settingsPart.activeGroup.id,
+		});
+		await settingsPart.close();
+		assert.strictEqual(workspace.activeGroup.activeEditor, project);
+		await workspace.close();
 	});
 
 	test('modal editor part state is remembered on close and reused on next open', async () => {

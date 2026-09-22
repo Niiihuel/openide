@@ -4,18 +4,17 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
-import { IDialogService } from '../../../../../../platform/dialogs/common/dialogs.js';
+import { IDialogService, IFileDialogService } from '../../../../../../platform/dialogs/common/dialogs.js';
 import { IOpenideNativeServices } from '../../../common/openideNativeServices.js';
 import { IOpenideCodexGoalResult } from '../../../../../../platform/openideAgentHost/common/openideCodexGoal.js';
 import { $, addDisposableListener, append, clearNode, getWindow } from '../../../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
-import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
-import { URI } from '../../../../../../base/common/uri.js';
+import { Disposable, DisposableStore, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { TerminalLocation } from '../../../../../../platform/terminal/common/terminal.js';
-import { IPathService } from '../../../../../services/path/common/pathService.js';
 import { ITerminalInstance, ITerminalService } from '../../../../terminal/browser/terminal.js';
-import { buildOpenideCliLaunch, getOpenideCli, IOpenideCliDefinition, OpenideCliSessionEvent, OpenideCliSessionStatus, reduceOpenideCliStatus, OPENIDE_HOSTED_CLI_ENV_RESET } from '../../../common/openideAgentCliCatalog.js';
+import { buildOpenideCliLaunch, getOpenideCli, IOpenideCliDefinition, IOpenideCliRuntimeState, OpenideCliSessionEvent, OpenideCliSessionStatus, reduceOpenideCliRuntime, OPENIDE_CLI_INITIAL_STATE, OPENIDE_HOSTED_CLI_ENV_RESET } from '../../../common/openideAgentCliCatalog.js';
+import { appendOpenideCliDraft, buildOpenideCliPaste, canPasteOpenideCliDraft, OPENIDE_CLI_TEXT_ATTACHMENT_LIMIT } from '../../../common/openideCliComposer.js';
 import { t } from '../../../common/openideStrings.js';
 import { OPENIDE_CLI_HOOK_OWNER } from '../../../common/openideCliHookOwner.js';
 import { buildSnippetContext, IComposerSnippet, snippetRange } from '../../../common/chat/openideChatSnippet.js';
@@ -23,6 +22,7 @@ import { IOpenideAgentService } from '../../openideAgentService.js';
 import { IOpenideCliChangesService, OpenideCliChangesService } from '../../openideCliChangesService.js';
 import { IOpenideIdeServerService, OpenideIdeServerService } from '../../openideIdeServerService.js';
 import { IChatSessionMeta } from '../../openideChatSessions.js';
+import '../media/openideChatCli.css';
 
 /**
  * The live xterm of an external agent session, hosted INSIDE the chat dock.
@@ -35,8 +35,8 @@ import { IChatSessionMeta } from '../../openideChatSessions.js';
  * `attachToElement` on a container the dock owns. Switching tabs detaches and re-attaches the
  * SAME instance — the PTY never dies (Orca's pane reparenting, `pane-lifecycle.ts`).
  *
- * Status is derived here and only here, through the pure reducer: hooks (Claude Code) win, the
- * quiet-after-output heuristic the run_command tool already uses is the fallback.
+ * Status is derived here through typed hooks or a structured control connection. Output and
+ * silence never prove that a CLI is waiting for user input.
  */
 
 interface IHostedTerminal {
@@ -46,28 +46,22 @@ interface IHostedTerminal {
 	readonly store: DisposableStore;
 	readonly launchedAt: number;
 	structuredGoal?: boolean;
-	status: OpenideCliSessionStatus;
-	/** True once a native hook reported for this session: the heuristic stands down. */
+	runtime: IOpenideCliRuntimeState;
+	/** True once a native hook reported for this session. */
 	hooked: boolean;
-	quietTimer: ReturnType<typeof setTimeout> | undefined;
 	exited: boolean;
 	/** The user has typed into this TUI recently. */
 	typing?: boolean;
 	typingTimer?: ReturnType<typeof setTimeout>;
-	/** A resume already failed for this session; the retry is fresh and happens ONCE. */
-	resumeAbandoned?: boolean;
+	pasting?: boolean;
+	/** Keep the provider session identity when a resume fails instead of silently starting over. */
+	resumeFailed?: boolean;
 }
 
 export interface IOpenideCliStatusChange {
 	readonly sessionId: string;
 	readonly status: OpenideCliSessionStatus;
 }
-
-/** Quiet-after-output window before an unhooked agent is assumed to be waiting on the user. */
-const QUIET_MS = 2500;
-/** How long after launch the transcript directory is polled for the CLI's own session id. */
-const RESUME_ID_POLL_MS = 4000;
-const RESUME_ID_POLL_LIMIT = 30;
 
 /**
  * How soon after launch a non-zero exit counts as "the resume never happened".
@@ -90,6 +84,14 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 	private _shown: string | undefined;
 	private integrationLabel: HTMLElement | undefined;
 	private discoveryLabel: HTMLElement | undefined;
+	private statusLabel: HTMLElement | undefined;
+	private provenanceLabel: HTMLElement | undefined;
+	private terminalHost: HTMLElement | undefined;
+	private draftInput: HTMLTextAreaElement | undefined;
+	private pasteButton: HTMLButtonElement | undefined;
+	private composerError: HTMLElement | undefined;
+	private readonly drafts = new Map<string, string>();
+	private readonly _viewStore = this._register(new DisposableStore());
 	private _dimension: { readonly width: number; readonly height: number } | undefined;
 
 	private readonly _onDidChangeStatus = this._register(new Emitter<IOpenideCliStatusChange>());
@@ -129,19 +131,26 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		@IOpenideAgentService private readonly agentService: IOpenideAgentService,
 		@IOpenideCliChangesService private readonly cliChanges: OpenideCliChangesService,
 		@IFileService private readonly fileService: IFileService,
-		@IPathService private readonly pathService: IPathService,
 		@IOpenideNativeServices private readonly native: IOpenideNativeServices,
 		@IDialogService private readonly dialogs: IDialogService,
 		@IOpenideIdeServerService private readonly ideServer: OpenideIdeServerService,
+		@IFileDialogService private readonly fileDialogs: IFileDialogService,
 	) {
 		super();
-		this.domNode = append(parent, $('.openide-chat-agent-terminal.hidden'));
+		this.domNode = append(parent, $('.openide-chat-agent-terminal.openide-cli-workspace.hidden'));
 		this._register(this.native.host.onDidChangeCodexGoal(event => {
 			const hosted = this._terminals.get(event.sessionId); if (!hosted?.structuredGoal) { return; }
-			if (event.kind === 'approval') {
-				void this.dialogs.confirm({ message: t('codexGoal.approval'), detail: `${event.title}\n\n${event.detail}`, primaryButton: t('codexGoal.approve') }).then(result => this.native.host.codexGoalRespond(event.sessionId, event.approvalId, result.confirmed)).catch(() => {});
+			if (event.kind === 'activity') {
+				this._apply(hosted, event.status === 'in-progress' ? { type: 'hook:prompt' } : event.status === 'needs-input' ? { type: 'hook:notification', reason: event.waitingReason }
+					: { type: 'hook:stop', failed: event.status === 'failed' }, 'control');
+			} else if (event.kind === 'approval') {
+				this._apply(hosted, { type: 'hook:notification', reason: 'permission' }, 'control');
+				void this.dialogs.confirm({ message: t('codexGoal.approval'), detail: `${event.title}\n\n${event.detail}`, primaryButton: t('codexGoal.approve') }).then(async result => {
+					await this.native.host.codexGoalRespond(event.sessionId, event.approvalId, result.confirmed);
+					this._apply(hosted, { type: 'hook:tool-complete' }, 'control');
+				}).catch(() => {});
 			} else {
-				if (event.kind === 'disconnected') { hosted.structuredGoal = false; this._onDidChangeGoalSupport.fire({ sessionId: event.sessionId, supported: false, reason: event.reason }); }
+				if (event.kind === 'disconnected') { hosted.structuredGoal = false; this._apply(hosted, { type: 'connection:lost' }); this._onDidChangeGoalSupport.fire({ sessionId: event.sessionId, supported: false, reason: event.reason }); }
 				this._onDidInterruptGoal.fire({ sessionId: event.sessionId, reason: event.reason });
 			}
 		}));
@@ -161,8 +170,10 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 	}
 
 	statusOf(sessionId: string): OpenideCliSessionStatus | undefined {
-		return this._terminals.get(sessionId)?.status;
+		return this._terminals.get(sessionId)?.runtime.status;
 	}
+
+	runtimeOf(sessionId: string): IOpenideCliRuntimeState | undefined { return this._terminals.get(sessionId)?.runtime; }
 
 	/**
 	 * Creates the PTY for a CLI session if it does not exist yet, and shows it. Resolves the
@@ -255,12 +266,13 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 			});
 			if (state.cancelled || this._disposed) { instance.dispose(); if (structuredGoal) { await this.native.host.codexGoalDispose(session.id); } return; }
 			const store = new DisposableStore();
-			const hosted: IHostedTerminal = { sessionId: session.id, cli, instance, store, launchedAt: Date.now(), status: 'in-progress', hooked: false, quietTimer: undefined, exited: false, structuredGoal };
+			const hosted: IHostedTerminal = { sessionId: session.id, cli, instance, store, launchedAt: Date.now(), runtime: OPENIDE_CLI_INITIAL_STATE, hooked: false, exited: false, structuredGoal };
 			this._terminals.set(session.id, hosted);
 			this._onDidChangeGoalSupport.fire({ sessionId: session.id, supported: structuredGoal, reason: goalSupportReason });
-			this._onDidChangeStatus.fire({ sessionId: session.id, status: 'in-progress' });
+			this._onDidChangeStatus.fire({ sessionId: session.id, status: 'unknown' });
 
-			store.add(instance.onData(() => this._apply(hosted, { type: 'output' })));
+			// PTY bytes are deliberately not a turn signal. Prompt repaints and long-running
+			// silent tools must never move the conversation into a fabricated waiting state.
 			// Keystrokes the user sends INTO the TUI. It decays on its own: nothing tells us when
 			// somebody stopped typing, so a flag that only ever turned on would stick forever.
 			store.add(instance.onDidInputData(() => {
@@ -282,28 +294,16 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 				hosted.exited = true;
 				this.cliChanges.noteExited(session.id);
 				const code = typeof exit === 'number' ? exit : exit?.code;
-				// A resumed session that dies within seconds did not fail: it never started. The
-				// common cause is the CLI refusing to attach to a conversation another process still
-				// holds — codex says `already has an active writer`, and after a window reload the
-				// previous agent can easily still be alive. Leaving a dead pane and a raw error there
-				// makes the user debug a lock they cannot see, so the session is reopened fresh, once,
-				// and told what happened.
-				const stillborn = !!session.providerSessionId && code !== 0 && Date.now() - hosted.launchedAt < RESUME_FAILURE_WINDOW_MS;
-				if (stillborn && !hosted.resumeAbandoned) {
-					hosted.resumeAbandoned = true;
-					this._renderBanner(t('sessions.cli.resumeBusy', cli.name), true);
-					this.forget(session.id);
-					void this.open({ ...session, providerSessionId: undefined });
-					return;
-				}
+				// A failed resume may indicate another active writer. Preserve the provider id and
+				// offer an explicit retry; a fresh launch here would silently lose conversation continuity.
+				hosted.resumeFailed = !!session.providerSessionId && code !== 0 && Date.now() - hosted.launchedAt < RESUME_FAILURE_WINDOW_MS;
 				this._apply(hosted, { type: 'exit', code });
 				if (this._shown === session.id) {
 					this._renderExit(hosted, code);
 				}
 			}));
-			if (!structuredGoal && !session.providerSessionId && cli.transcriptDir) {
-				this._pollProviderSessionId(hosted, session.cwd, store);
-			}
+			// Resume IDs come from an owned hook or control connection. The newest transcript
+			// in a shared cwd/day may belong to another live CLI and must never be adopted.
 			if (this._shown === session.id) {
 				this._attach(hosted);
 			}
@@ -363,17 +363,13 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		this._disposeHosted(hosted);
 	}
 
-	/** A native hook reported about this session; from here on the heuristic is inert. */
+	/** An owned native hook reported a turn event for this session. */
 	applyHookEvent(sessionId: string, event: OpenideCliSessionEvent): void {
 		const hosted = this._terminals.get(sessionId);
 		if (!hosted) {
 			return;
 		}
 		hosted.hooked = true;
-		if (hosted.quietTimer) {
-			clearTimeout(hosted.quietTimer);
-			hosted.quietTimer = undefined;
-		}
 		this._apply(hosted, event);
 	}
 
@@ -389,10 +385,7 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 	layout(width: number, height: number): void {
 		this._dimension = { width, height };
 		this.domNode.style.height = `${height}px`;
-		const hosted = this._shown ? this._terminals.get(this._shown) : undefined;
-		if (hosted && !hosted.exited && width > 0 && height > 0) {
-			hosted.instance.layout({ width, height: Math.max(0, height - 32) });
-		}
+		this.layoutTerminal();
 	}
 
 	focus(): void {
@@ -401,20 +394,124 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 	}
 
 	private _attach(hosted: IHostedTerminal, focus = true): void {
+		this._viewStore.clear();
 		clearNode(this.domNode);
 		const details = append(this.domNode, $<HTMLDetailsElement>('details.openide-cli-tools'));
 		const summary = append(details, $('summary', { 'aria-label': t('cli.tools.help') }));
+		this.statusLabel = append(summary, $('span.openide-cli-status', { role: 'status', 'aria-live': 'polite' }));
 		this.integrationLabel = append(summary, $('span'));
+		this.provenanceLabel = append(details, $('p'));
 		this.discoveryLabel = append(details, $('p'));
+		append(details, $('p', undefined, t('cli.integration.capabilities')));
 		append(details, $('p', undefined, t('cli.tools.guidance')));
 		this.renderIntegrationStatus();
-		const host = append(this.domNode, $('.openide-chat-agent-terminal-host'));
-		hosted.instance.attachToElement(host);
+		this.terminalHost = append(this.domNode, $('.openide-chat-agent-terminal-host'));
+		hosted.instance.attachToElement(this.terminalHost);
 		hosted.instance.setVisible(true);
-		if (this._dimension) {
-			hosted.instance.layout({ width: this._dimension.width, height: Math.max(0, this._dimension.height - 32) });
+		this.renderComposer(hosted);
+		const observer = new (getWindow(this.domNode).ResizeObserver)(() => this.layoutTerminal());
+		this._viewStore.add(toDisposable(() => observer.disconnect()));
+		observer.observe(this.terminalHost);
+		this.layoutTerminal();
+		if (focus) {
+			if (this.drafts.get(hosted.sessionId)) { this.draftInput?.focus(); }
+			else { hosted.instance.focus(true); }
 		}
-		if (focus) { hosted.instance.focus(true); }
+	}
+
+	private layoutTerminal(): void {
+		const hosted = this._shown ? this._terminals.get(this._shown) : undefined;
+		if (!hosted || hosted.exited || !this.terminalHost) { return; }
+		const width = this.terminalHost.clientWidth || this._dimension?.width || 0;
+		const height = this.terminalHost.clientHeight;
+		if (width > 0 && height > 0) { hosted.instance.layout({ width, height }); }
+	}
+
+	private renderComposer(hosted: IHostedTerminal): void {
+		const composer = append(this.domNode, $('.openide-cli-composer'));
+		append(composer, $('span.openide-cli-composer-route', undefined, t('cli.composer.route', hosted.cli.name)));
+		const input = this.draftInput = append(composer, $<HTMLTextAreaElement>('textarea', { rows: 2, placeholder: t('cli.composer.placeholder'), 'aria-label': t('cli.composer.route', hosted.cli.name) }));
+		input.value = this.drafts.get(hosted.sessionId) ?? '';
+		const actions = append(composer, $('.openide-cli-composer-actions'));
+		const attach = append(actions, $<HTMLButtonElement>('button.oi-btn', { type: 'button', 'aria-label': t('cli.composer.attachTitle') }, t('cli.composer.attach')));
+		this.pasteButton = append(actions, $<HTMLButtonElement>('button.oi-btn.primary', { type: 'button' }, t('cli.composer.paste', hosted.cli.name)));
+		this.pasteButton.disabled = !input.value.trim();
+		append(composer, $('span.openide-cli-composer-hint', undefined, t('cli.composer.hint')));
+		this.composerError = append(composer, $('span.openide-cli-composer-error', { role: 'status' }));
+		this._viewStore.add(addDisposableListener(input, 'input', () => {
+			this.drafts.set(hosted.sessionId, input.value);
+			if (this.pasteButton) { this.pasteButton.disabled = !input.value.trim(); }
+		}));
+		this._viewStore.add(addDisposableListener(this.pasteButton, 'click', () => void this.pasteDraft(hosted)));
+		this._viewStore.add(addDisposableListener(attach, 'click', () => void this.attachTextFile(hosted.sessionId)));
+		this._viewStore.add(addDisposableListener(input, 'keydown', event => {
+			// Plain Enter is always a newline. A shortcut only pastes, just like the labeled button.
+			if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) {
+				event.preventDefault();
+				void this.pasteDraft(hosted);
+			}
+		}));
+	}
+
+	/** Routes review comments and selected editor code to the exact conversation draft. */
+	stagePrompt(sessionId: string, text: string): boolean {
+		const hosted = this._terminals.get(sessionId);
+		if (hosted?.exited || !hosted && this._opening.get(sessionId)?.cancelled !== false) { return false; }
+		this.drafts.set(sessionId, appendOpenideCliDraft(this.drafts.get(sessionId) ?? '', text));
+		if (this._shown !== sessionId) { this.show(sessionId); }
+		this.refreshDraft(sessionId);
+		this.draftInput?.focus();
+		return true;
+	}
+
+	private refreshDraft(sessionId: string): void {
+		if (this._shown !== sessionId || !this.draftInput) { return; }
+		this.draftInput.value = this.drafts.get(sessionId) ?? '';
+		if (this.pasteButton) { this.pasteButton.disabled = !this.draftInput.value.trim(); }
+	}
+
+	private async pasteDraft(hosted: IHostedTerminal): Promise<void> {
+		if (hosted.exited || this._terminals.get(hosted.sessionId) !== hosted || hosted.pasting) { return; }
+		const draft = this.drafts.get(hosted.sessionId) ?? '';
+		if (!draft.trim()) { return; }
+		if (!canPasteOpenideCliDraft(draft, hosted.instance.xterm?.raw.modes.bracketedPasteMode === true)) {
+			if (this._shown === hosted.sessionId && this.composerError) { this.composerError.textContent = t('cli.composer.pasteUnsupported'); }
+			return;
+		}
+		hosted.pasting = true;
+		if (this._shown === hosted.sessionId && this.pasteButton) { this.pasteButton.disabled = true; this.pasteButton.textContent = t('cli.composer.pasting'); }
+		try {
+			await hosted.instance.sendText(buildOpenideCliPaste(draft), false, true);
+			if (this._terminals.get(hosted.sessionId) !== hosted || hosted.exited) { return; }
+			if (this.drafts.get(hosted.sessionId) === draft) { this.drafts.delete(hosted.sessionId); }
+			if (this._shown === hosted.sessionId) { hosted.instance.focus(true); if (this.composerError) { this.composerError.textContent = ''; } }
+		} catch {
+			if (this._shown === hosted.sessionId && this.composerError) { this.composerError.textContent = t('cli.composer.pasteFailed'); }
+		} finally {
+			hosted.pasting = false;
+			if (this._shown === hosted.sessionId && this.pasteButton) { this.pasteButton.textContent = t('cli.composer.paste', hosted.cli.name); }
+			this.refreshDraft(hosted.sessionId);
+		}
+	}
+
+	private async attachTextFile(sessionId: string): Promise<void> {
+		try {
+			const files = await this.fileDialogs.showOpenDialog({ title: t('cli.composer.attachTitle'), canSelectFiles: true, canSelectFolders: false, canSelectMany: false });
+			if (!files?.[0]) { return; }
+			const file = files[0];
+			const stat = await this.fileService.stat(file);
+			if (stat.size > OPENIDE_CLI_TEXT_ATTACHMENT_LIMIT) { throw new Error(t('cli.composer.fileTooLarge')); }
+			const content = await this.fileService.readFile(file, { limits: { size: OPENIDE_CLI_TEXT_ATTACHMENT_LIMIT } });
+			const text = content.value.toString();
+			if (text.includes('\0') || text.includes('\uFFFD')) { throw new Error(t('cli.composer.binaryFile')); }
+			const snippet = { path: file.path, uri: file.toString(), startLine: 1, endLine: text.split('\n').length, text };
+			const block = buildSnippetContext([snippet]);
+			if (!block || !this._terminals.has(sessionId)) { return; }
+			this.drafts.set(sessionId, appendOpenideCliDraft(this.drafts.get(sessionId) ?? '', block));
+			this.refreshDraft(sessionId);
+		} catch (error) {
+			if (this._shown === sessionId && this.composerError) { this.composerError.textContent = error instanceof Error ? error.message : t('cli.composer.fileFailed'); }
+		}
 	}
 
 	private renderIntegrationStatus(): void {
@@ -422,6 +519,17 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 		const state = this.ideServer.integrationState(this._shown);
 		this.integrationLabel.textContent = t(`cli.tools.${state}`);
 		const discovery = this.ideServer.discoveryStatus;
+		const hosted = this._terminals.get(this._shown);
+		if (hosted && this.statusLabel) {
+			const { status, waitingReason, source } = hosted.runtime;
+			this.statusLabel.dataset.status = status;
+			this.statusLabel.textContent = status === 'needs-input' ? t(`cli.integration.${waitingReason ?? 'prompt'}`)
+				: t(`cli.integration.${status === 'in-progress' ? 'working' : status}`);
+			if (this.provenanceLabel) {
+				this.provenanceLabel.textContent = source === 'hooks' ? t('cli.integration.hooks') : source === 'control' ? t('cli.integration.control')
+					: t(hosted.cli.supportsHooks ? 'cli.integration.hooksPending' : 'cli.integration.unverified');
+			}
+		}
 		if (this.discoveryLabel) {
 			this.discoveryLabel.textContent = discovery.toolsListedAt ? t('cli.tools.windowListed', discovery.toolCount)
 				: discovery.initializedAt ? t('cli.tools.windowInitialized') : '';
@@ -435,37 +543,31 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 			hosted.instance.detachFromElement();
 		}
 		clearNode(this.domNode);
+		this._viewStore.clear();
 		this.integrationLabel = undefined;
 		this.discoveryLabel = undefined;
+		this.statusLabel = undefined;
+		this.provenanceLabel = undefined;
+		this.terminalHost = undefined;
+		this.draftInput = undefined;
+		this.pasteButton = undefined;
+		this.composerError = undefined;
 	}
 
-	/**
-	 * Whether this session's state comes from the CLI's own hooks rather than the output
-	 * heuristic. It changes what a turn's file list is worth, so it travels with the turn.
-	 */
-	/**
-	 * The editor selection, into the CLI's prompt: the same fenced block the local chat carries,
-	 * pasted with bracketed paste so a TUI takes it as one paste and not as keystrokes (Claude
-	 * Code shows it as `[Pasted text #1 +N lines]`). False when the session has no live
-	 * terminal, and the caller falls back to the composer.
-	 */
+	/** Stages the editor selection for review; the explicit paste action hands it to the CLI. */
 	sendSnippet(sessionId: string, snippet: IComposerSnippet): boolean {
-		const hosted = this._terminals.get(sessionId);
-		if (!hosted || hosted.exited) {
-			return false;
-		}
 		const block = buildSnippetContext([snippet]) ?? `${snippet.path}:${snippetRange(snippet)}`;
-		void hosted.instance.sendText(block, false, true);
-		this.show(sessionId);
-		this.focus();
-		return true;
+		return this.stagePrompt(sessionId, block);
 	}
 
+	/** Whether turn boundaries are observed through a hook or the structured control connection. */
 	isHooked(sessionId: string): boolean {
-		return this._terminals.get(sessionId)?.hooked === true;
+		const hosted = this._terminals.get(sessionId);
+		return hosted?.hooked === true || hosted?.runtime.source === 'control';
 	}
 
 	private _renderBanner(message: string, error = false): void {
+		this._viewStore.clear();
 		clearNode(this.domNode);
 		const banner = append(this.domNode, $('.openide-chat-agent-terminal-banner'));
 		banner.classList.toggle('error', error);
@@ -473,96 +575,29 @@ export class OpenideChatAgentTerminalPane extends Disposable {
 	}
 
 	private _renderExit(hosted: IHostedTerminal, code: number | undefined): void {
+		this._viewStore.clear();
 		hosted.instance.detachFromElement();
 		clearNode(this.domNode);
 		const banner = append(this.domNode, $('.openide-chat-agent-terminal-banner'));
-		append(banner, $('span', undefined, t('sessions.cli.exited', hosted.cli.name, code ?? '?')));
+		append(banner, $('span', undefined, hosted.resumeFailed ? t('cli.integration.resumeFailed', hosted.cli.name) : t('sessions.cli.exited', hosted.cli.name, code ?? '?')));
 		const button = append(banner, $<HTMLButtonElement>('button.openide-chat-agent-terminal-relaunch.oi-btn.primary', { type: 'button' }, t('sessions.cli.relaunch')));
-		hosted.store.add(addDisposableListener(button, 'click', () => this._onDidRequestRelaunch.fire(hosted.sessionId)));
+		this._viewStore.add(addDisposableListener(button, 'click', () => this._onDidRequestRelaunch.fire(hosted.sessionId)));
 		button.focus();
 	}
 
-	private _apply(hosted: IHostedTerminal, event: OpenideCliSessionEvent): void {
-		const next = reduceOpenideCliStatus(hosted.status, event, hosted.hooked);
-		if (event.type === 'output' && !hosted.hooked && !hosted.exited) {
-			if (hosted.quietTimer) {
-				clearTimeout(hosted.quietTimer);
-			}
-			hosted.quietTimer = setTimeout(() => {
-				hosted.quietTimer = undefined;
-				this._apply(hosted, { type: 'quiet' });
-			}, QUIET_MS);
-		}
-		if (next === hosted.status) {
-			return;
-		}
-		hosted.status = next;
-		this._onDidChangeStatus.fire({ sessionId: hosted.sessionId, status: next });
-	}
-
-	/**
-	 * Claude Code and Codex write one transcript per session under the user's home; the newest
-	 * file created after our launch IS this session, and its name carries the id `--resume`
-	 * wants. Claude's directory is the cwd with every `/` and `.` replaced by `-` (Orca's
-	 * `agent-session-resume.ts`); Codex nests by date and suffixes the uuid.
-	 */
-	private _pollProviderSessionId(hosted: IHostedTerminal, cwd: string | undefined, store: DisposableStore): void {
-		let attempts = 0;
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		const stop: IDisposable = toDisposable(() => { if (timer) { clearTimeout(timer); } });
-		store.add(stop);
-		const tick = async (): Promise<void> => {
-			attempts++;
-			const id = await this._findProviderSessionId(hosted.cli, cwd, hosted.launchedAt).catch(() => undefined);
-			if (store.isDisposed) {
-				return;
-			}
-			if (id) {
-				this._onDidResolveProviderSession.fire({ sessionId: hosted.sessionId, providerSessionId: id });
-				return;
-			}
-			if (attempts < RESUME_ID_POLL_LIMIT && !hosted.exited) {
-				timer = setTimeout(() => void tick(), RESUME_ID_POLL_MS);
-			}
-		};
-		timer = setTimeout(() => void tick(), RESUME_ID_POLL_MS);
-	}
-
-	private async _findProviderSessionId(cli: IOpenideCliDefinition, cwd: string | undefined, since: number): Promise<string | undefined> {
-		const home = this.pathService.userHome({ preferLocal: true });
-		if (cli.id === 'claude') {
-			if (!cwd) {
-				return undefined;
-			}
-			const slug = cwd.replace(/[/.]/g, '-');
-			const dir = URI.joinPath(home, '.claude', 'projects', slug);
-			return this._newestJsonlName(dir, since);
-		}
-		if (cli.id === 'codex') {
-			const now = new Date(since);
-			const dir = URI.joinPath(home, '.codex', 'sessions', String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0'));
-			const name = await this._newestJsonlName(dir, since);
-			// rollout-2026-08-24T15-00-00-<uuid>.jsonl
-			const match = name?.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
-			return match?.[1];
-		}
-		return undefined;
-	}
-
-	private async _newestJsonlName(dir: URI, since: number): Promise<string | undefined> {
-		const stat = await this.fileService.resolve(dir, { resolveMetadata: true });
-		const candidates = (stat.children ?? [])
-			.filter(child => child.isFile && child.name.endsWith('.jsonl') && (child.mtime ?? 0) >= since - 1000)
-			.sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0));
-		const newest = candidates[0];
-		return newest ? newest.name.replace(/\.jsonl$/, '') : undefined;
+	private _apply(hosted: IHostedTerminal, event: OpenideCliSessionEvent, source: 'hooks' | 'control' = 'hooks'): void {
+		if (this._terminals.get(hosted.sessionId) !== hosted) { return; }
+		const next = reduceOpenideCliRuntime(hosted.runtime, event, source);
+		if (next === hosted.runtime) { return; }
+		const previous = hosted.runtime;
+		hosted.runtime = next;
+		if (next.status !== previous.status) { this._onDidChangeStatus.fire({ sessionId: hosted.sessionId, status: next.status }); }
+		if (this._shown === hosted.sessionId) { this.renderIntegrationStatus(); }
 	}
 
 	private _disposeHosted(hosted: IHostedTerminal): void {
 		if (hosted.structuredGoal) { hosted.structuredGoal = false; void this.native.host.codexGoalDispose(hosted.sessionId); this._onDidChangeGoalSupport.fire({ sessionId: hosted.sessionId, supported: false }); }
-		if (hosted.quietTimer) {
-			clearTimeout(hosted.quietTimer);
-		}
+		if (hosted.typingTimer) { clearTimeout(hosted.typingTimer); }
 		hosted.store.dispose();
 		hosted.instance.detachFromElement();
 		hosted.instance.dispose();

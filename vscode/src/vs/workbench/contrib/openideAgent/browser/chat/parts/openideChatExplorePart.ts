@@ -10,6 +10,7 @@ import { IHoverService } from '../../../../../../platform/hover/browser/hover.js
 import { IOpenideChatContent, IOpenideChatExploreContent, IOpenideChatExploreEntry, isOpenideChatContentOfKind } from '../../../common/chat/openideChatContent.js';
 import { isOpenideChatExploreActive, openideChatExploreLabel } from '../../../common/chat/openideChatExploreGroup.js';
 import { IOpenideChatItem } from '../../../common/chat/openideChatItem.js';
+import { openideChatToolPresentation } from '../../../common/chat/openideChatToolPresentation.js';
 import { getOpenideToolMeta, toolVisualKind } from '../../../common/chat/openideChatToolMeta.js';
 import { IOpenideChatContentPartContext, OpenideChatContentPart } from '../openideChatContentPart.js';
 import { isOpenideChatTextClipped, setupChatTooltip } from '../openideChatHover.js';
@@ -49,6 +50,8 @@ interface IRenderedEntry {
  * reads as if the path itself were the problem.
  */
 function entryLine(entry: IOpenideChatExploreEntry): string {
+	const presentation = openideChatToolPresentation(entry.tool, JSON.stringify({ path: entry.target }), entry.state);
+	if (presentation.authoring) { return presentation.detail ? `${presentation.verb} ${presentation.detail}` : presentation.verb; }
 	const meta = getOpenideToolMeta(entry.tool);
 	if (entry.state === 'error') {
 		return t('chatSurface.explore.error', meta.done || entry.tool);
@@ -205,10 +208,11 @@ export class OpenideChatExplorePart extends OpenideChatContentPart {
 
 	private _paintEntry(rendered: IRenderedEntry, entry: IOpenideChatExploreEntry): void {
 		const meta = getOpenideToolMeta(entry.tool);
-		setOpenideChatActivityIcon(rendered.row.icon, meta.icon);
+		const presentation = openideChatToolPresentation(entry.tool, JSON.stringify({ path: entry.target }), entry.state);
+		setOpenideChatActivityIcon(rendered.row.icon, entry.state === 'error' ? 'error' : presentation.authoring ? presentation.icon : meta.icon);
 		const line = entryLine(entry);
 		const verb = entry.state === 'running' ? meta.verb : (meta.done || meta.verb);
-		if (entry.state === 'error') {
+		if (entry.state === 'error' || presentation.authoring) {
 			rendered.row.verb.textContent = line;
 		} else {
 			renderOpenideChatActivityLine(

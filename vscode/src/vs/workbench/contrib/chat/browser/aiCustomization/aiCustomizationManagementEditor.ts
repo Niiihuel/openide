@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/aiCustomizationManagement.css';
+import './media/openideCustomizationManagement.css';
 import * as DOM from '../../../../../base/browser/dom.js';
 
 import { status } from '../../../../../base/browser/ui/aria/aria.js';

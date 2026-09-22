@@ -478,6 +478,7 @@ export const OPENIDE_SETTINGS_STRINGS = {
 	'settings.voice.modeToggle': { es: 'Un Clic para Hablar', en: 'Click to Talk' },
 	'settings.voice.modeHold': { es: 'Mantener apretado', en: 'Hold to talk' },
 	'settings.voice.modelsCount': { es: '{0} modelos', en: '{0} models' },
+	'settings.voice.modelsCountOne': { es: '1 modelo', en: '1 model' },
 	'settings.voice.unavailable': { es: 'Sin dictado compatible', en: 'No compatible dictation' },
 	'settings.voice.modelTitle': { es: 'Modelo de transcripción', en: 'Transcription model' },
 	'settings.voice.modelDesc': { es: 'Solo se listan modelos de proveedores conectados que aceptan audio de entrada.', en: 'Only models from connected providers that accept audio input are listed.' },

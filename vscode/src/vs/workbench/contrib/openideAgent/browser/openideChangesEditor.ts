@@ -43,6 +43,7 @@ import { openideButtonStyles, openideSearchBoxStyles } from './openideControlSty
 import { OpenideEmptyState } from '../../../browser/openideEmptyState.js';
 import { OpenideChangesNavigator } from './openideChangesNavigator.js';
 import { setupChatTooltip } from './chat/openideChatHover.js';
+import { IOpenideReviewComment, reviewDiffContext } from '../common/openideReviewComment.js';
 
 export interface IOpenideReviewFile {
 	readonly resource: URI;
@@ -50,6 +51,8 @@ export interface IOpenideReviewFile {
 	readonly added?: number;
 	readonly removed?: number;
 	readonly deleted?: boolean;
+	/** Exact pending snapshot key, only present for this conversation's live exclusive edit. */
+	readonly pendingPath?: string;
 	/** Immutable after-state for a conversation receipt; live CLI reviews omit it. */
 	readonly modifiedContent?: string;
 	/** Resolves the conversation's baseline, never another conversation's snapshot. */
@@ -66,6 +69,9 @@ export class OpenideChangesInput extends EditorInput {
 	readonly onDidChangeFiles = this.changed.event;
 	private readonly statsChanged = this._register(new Emitter<void>());
 	readonly onDidChangeStats = this.statsChanged.event;
+	private readonly acceptanceChanged = this._register(new Emitter<void>());
+	readonly onDidChangeAcceptance = this.acceptanceChanged.event;
+	private acceptanceAvailable = false;
 	private readonly references = new Map<string, Promise<IReference<IResolvedTextEditorModel>>>();
 	private readonly baselines = new Map<string, Promise<string>>();
 	private readonly owned = this._register(new DisposableStore());
@@ -75,6 +81,8 @@ export class OpenideChangesInput extends EditorInput {
 	readonly fullContextFiles = new Set<string>();
 	filterText = '';
 	readonly editorStates = new Map<string, ICodeEditorViewState>();
+	stageComment: ((comment: IOpenideReviewComment) => boolean) | undefined;
+	acceptChanges: { canAccept(): boolean; run(): Promise<void> } | undefined;
 	constructor(readonly sessionId: string, public files: readonly IOpenideReviewFile[],
 		@ITextModelService private readonly models: ITextModelService,
 		@ITextFileService private readonly textFiles: ITextFileService,
@@ -93,13 +101,17 @@ export class OpenideChangesInput extends EditorInput {
 		}));
 		this._register(textFiles.files.onDidChangeDirty(model => { if (this.references.has(model.resource.toString())) { this._onDidChangeDirty.fire(); } }));
 	}
+	refreshAcceptance(): void {
+		const available = !!this.acceptChanges?.canAccept();
+		if (this.acceptanceAvailable !== available) { this.acceptanceAvailable = available; this.acceptanceChanged.fire(); }
+	}
 	override getName(): string { return t('openide.changes'); }
 	override getIcon() { return Codicon.diff; }
 	override matches(other: EditorInput | IUntypedEditorInput): boolean { return other instanceof OpenideChangesInput && other.sessionId === this.sessionId; }
 	update(files: readonly IOpenideReviewFile[]): void {
 		const changed = this.files.length !== files.length || this.files.some((file, index) => {
 			const next = files[index];
-			return file.resource.toString() !== next.resource.toString() || file.deleted !== next.deleted || file.modifiedContent !== next.modifiedContent;
+			return file.resource.toString() !== next.resource.toString() || file.deleted !== next.deleted || file.modifiedContent !== next.modifiedContent || file.pendingPath !== next.pendingPath;
 		});
 		const statsChanged = this.files.map(f => `${f.added}:${f.removed}`).join() !== files.map(f => `${f.added}:${f.removed}`).join();
 		for (const file of files) {
@@ -170,8 +182,8 @@ export class OpenideChangesEditor extends EditorPane {
 	private scroll!: DomScrollableElement;
 	private filter!: InputBox;
 	private summary!: HTMLElement;
-	private saveButton!: Button;
-	private saving = false;
+	private acceptButton!: Button;
+	private accepting = false;
 	private focused: ICodeEditor | undefined;
 	private readonly content = this._register(new DisposableStore());
 	private readonly rows = this._register(new DisposableMap<string, IReviewRow>());
@@ -202,14 +214,15 @@ export class OpenideChangesEditor extends EditorPane {
 		this.root = append(parent, $('.openide-changes-editor.openide-chat-native.show-file-icons'));
 		const toolbar = append(this.root, $('.openide-changes-toolbar'));
 		this.summary = append(toolbar, $('.openide-changes-summary'));
-		this.saveButton = this._register(new Button(append(toolbar, $('.openide-changes-save')), { ...openideButtonStyles, secondary: true, small: true }));
-		this.saveButton.label = t('openide.review.save');
-		this.saveButton.enabled = false;
-		this._register(this.saveButton.onDidClick(async () => {
-			if (!(this.input instanceof OpenideChangesInput) || this.saving) { return; }
-			this.saving = true; this.updateSaveButton();
-			try { await this.input.save(); } catch (error) { this.showError(error); }
-			finally { this.saving = false; this.updateSaveButton(); }
+		this.acceptButton = this._register(new Button(append(toolbar, $('.openide-changes-save')), { ...openideButtonStyles, secondary: true, small: true }));
+		this.acceptButton.label = t('conversationWorkspace.acceptAll');
+		this._register(setupChatTooltip(this.hovers, this.acceptButton.element, () => t('conversationWorkspace.acceptAllHint'), { aria: false }));
+		this.acceptButton.enabled = false;
+		this._register(this.acceptButton.onDidClick(async () => {
+			if (!(this.input instanceof OpenideChangesInput) || this.accepting || !this.input.acceptChanges?.canAccept()) { return; }
+			this.accepting = true; this.updateAcceptButton();
+			try { await this.input.acceptChanges.run(); } catch (error) { this.showError(error); }
+			finally { this.accepting = false; this.updateAcceptButton(); }
 		}));
 		this.filter = this._register(new InputBox(append(toolbar, $('.openide-changes-filter')), undefined, { placeholder: t('openide.review.filter'), ariaLabel: t('openide.review.filter'), inputBoxStyles: openideSearchBoxStyles }));
 		const toolbarAction = (icon: string, label: string, run: () => void): HTMLButtonElement => {
@@ -256,8 +269,9 @@ export class OpenideChangesEditor extends EditorPane {
 		await super.setInput(input, options, context, token);
 		if (token.isCancellationRequested) { return; }
 		this.binding.clear(); this.filter.value = input.filterText;
-		this.binding.add(input.onDidChangeDirty(() => this.updateSaveButton()));
-		this.updateSaveButton();
+		this.binding.add(input.onDidChangeAcceptance(() => this.updateAcceptButton()));
+		this.binding.add(input.onDidChangeDirty(() => this.updateAcceptButton()));
+		this.updateAcceptButton();
 		let filesChanged = false;
 		const refresh = this.binding.add(new RunOnceScheduler(() => {
 			if (filesChanged) { filesChanged = false; this.render(); }
@@ -268,6 +282,7 @@ export class OpenideChangesEditor extends EditorPane {
 		this.render();
 	}
 	private updateStats(input: OpenideChangesInput): void {
+		this.updateAcceptButton();
 		this.renderSummary(input, this.matchingFiles(input)); this.navigator.updateStats(input.files);
 		for (const file of input.files) {
 			const stats = this.statsElements.get(file.resource.toString());
@@ -279,7 +294,7 @@ export class OpenideChangesEditor extends EditorPane {
 			}
 		}
 	}
-	private updateSaveButton(): void { this.saveButton.enabled = !this.saving && this.input instanceof OpenideChangesInput && this.input.isDirty(); }
+	private updateAcceptButton(): void { this.acceptButton.enabled = !this.accepting && this.input instanceof OpenideChangesInput && !!this.input.acceptChanges?.canAccept(); }
 	private showError(error: unknown): void { this.summary.textContent = String(error); }
 	private matchingFiles(input: OpenideChangesInput): readonly IOpenideReviewFile[] {
 		const terms = this.filter.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
@@ -355,6 +370,7 @@ export class OpenideChangesEditor extends EditorPane {
 		const heading = append(card, $('.openide-changes-file-heading'));
 		const toggle = append(heading, $<HTMLButtonElement>('button.openide-chat-head-btn.oi-dock-action', { type: 'button', 'aria-label': t('openide.review.collapse', file.path), 'aria-expanded': String(input.expandedFiles.has(key)) }));
 		append(toggle, $('span.codicon.codicon-chevron-down'));
+		const toggleTooltip = cardStore.add(setupChatTooltip(this.hovers, toggle, () => t(input.expandedFiles.has(key) ? 'openide.review.collapse' : 'conversationWorkspace.expandFile', file.path)));
 		const labelButton = append(heading, $('button.openide-changes-file-label', { type: 'button', 'aria-label': file.path }));
 		const label = labels.create(labelButton);
 		cardStore.add(label); label.setFile(file.resource, { hidePath: false });
@@ -364,7 +380,7 @@ export class OpenideChangesEditor extends EditorPane {
 		this.statsElements.set(key, { added, removed });
 		const full = append(heading, $<HTMLButtonElement>('button.openide-chat-head-btn.oi-dock-action', { type: 'button', 'aria-pressed': 'false' }));
 		append(full, $('span.codicon.codicon-unfold'));
-		cardStore.add(setupChatTooltip(this.hovers, full, () => t('openide.review.context')));
+		const fullTooltip = cardStore.add(setupChatTooltip(this.hovers, full, () => t(input.fullContextFiles.has(key) ? 'conversationWorkspace.changesOnly' : 'openide.review.context')));
 		const comparisonAction = (modal: boolean) => {
 			const button = append(heading, $<HTMLButtonElement>('button.openide-chat-head-btn.oi-dock-action', { type: 'button' }));
 			append(button, $(`span.codicon.codicon-${modal ? 'screen-full' : 'diff'}`, { 'aria-hidden': 'true' }));
@@ -401,6 +417,24 @@ export class OpenideChangesEditor extends EditorPane {
 		host.hidden = !expanded; card.classList.toggle('collapsed', !expanded); full.hidden = !expanded;
 		full.setAttribute('aria-pressed', String(showAll));
 		let editor: CodeEditorWidget | undefined;
+		const stageFeedback = async (text: string): Promise<boolean> => {
+			const { reference, baseline } = await input.resolveFile(file);
+			const snapshot = reference?.object.textEditorModel.getValue() ?? '';
+			const summary = await this.diffs.summarize(baseline, snapshot, CancellationToken.None, 120);
+			if (cardStore.isDisposed) { return false; }
+			const diffContext = summary ? reviewDiffContext(file.path, summary.lines, summary.added, summary.removed) : undefined;
+			return input.stageComment?.({ path: file.path, text, diffContext }) ?? false;
+		};
+		const sendToChat = append(heading, $<HTMLButtonElement>('button.openide-chat-head-btn.oi-dock-action', { type: 'button' }));
+		append(sendToChat, $('span.codicon.codicon-mention', { 'aria-hidden': 'true' }));
+		sendToChat.hidden = !input.stageComment;
+		cardStore.add(setupChatTooltip(this.hovers, sendToChat, () => t('conversationWorkspace.sendToChat')));
+		cardStore.add(addDisposableListener(sendToChat, 'click', () => {
+			sendToChat.disabled = true;
+			void stageFeedback(t('conversationWorkspace.reviewFilePrompt', file.path)).then(staged => {
+				if (!staged && !cardStore.isDisposed) { this.showError(t('conversationWorkspace.fileUnavailable')); }
+			}).catch(error => { if (!cardStore.isDisposed) { this.showError(error); } }).finally(() => { if (!cardStore.isDisposed) { sendToChat.disabled = false; } });
+		}));
 		let repaint: (() => void) | undefined;
 		const unload = () => {
 			generation++; mounted = false;
@@ -468,13 +502,13 @@ export class OpenideChangesEditor extends EditorPane {
 			expanded = value;
 			if (value) { input.expandedFiles.add(key); } else { input.expandedFiles.delete(key); }
 			host.hidden = !value; full.hidden = !value; card.classList.toggle('collapsed', !value);
-			toggle.setAttribute('aria-expanded', String(value)); if (scan) { this.scroll.scanDomNode(); }
+			toggle.setAttribute('aria-expanded', String(value)); toggleTooltip.update(); if (scan) { this.scroll.scanDomNode(); }
 			if (value) { void load(); } else { unload(); }
 		};
 		this.revealFiles.set(key, () => { setExpanded(true); this.scroll.setScrollPosition({ scrollTop: card.offsetTop }); });
 		cardStore.add(addDisposableListener(toggle, 'click', () => setExpanded(!expanded)));
 		cardStore.add(addDisposableListener(labelButton, 'click', () => setExpanded(!expanded)));
-		cardStore.add(addDisposableListener(full, 'click', () => { showAll = !showAll; if (showAll) { input.fullContextFiles.add(key); } else { input.fullContextFiles.delete(key); } full.setAttribute('aria-pressed', String(showAll)); repaint?.(); }));
+		cardStore.add(addDisposableListener(full, 'click', () => { showAll = !showAll; if (showAll) { input.fullContextFiles.add(key); } else { input.fullContextFiles.delete(key); } full.setAttribute('aria-pressed', String(showAll)); fullTooltip.update(); repaint?.(); }));
 		const observer = new win.IntersectionObserver(entries => {
 			visible = entries[0].isIntersecting;
 			if (visible) { void load(); } else if (!editor?.hasTextFocus()) { unload(); }
