@@ -12,6 +12,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { mock } from '../../../../../base/test/common/mock.js';
 import { IBrowserViewEditorOpenOptions, IBrowserViewNavigationEvent } from '../../../../../platform/browserView/common/browserView.js';
+import { IPlaywrightService } from '../../../../../platform/browserView/common/playwrightService.js';
 import { BrowserViewUri } from '../../../../../platform/browserView/common/browserViewUri.js';
 import { IContextKeyService, RawContextKey } from '../../../../../platform/contextkey/common/contextkey.js';
 import { ITunnelProxyInfo } from '../../../../../platform/tunnel/common/tunnelProxy.js';
@@ -98,6 +99,7 @@ suite('BrowserEditorInput', () => {
 		browserViewWorkbenchService = new TestBrowserViewWorkbenchService();
 		instantiationService = workbenchInstantiationService(undefined, disposables);
 		instantiationService.stub(IBrowserViewWorkbenchService, browserViewWorkbenchService);
+		instantiationService.stub(IPlaywrightService, { onDidChangeActivity: Event.None } as IPlaywrightService);
 	});
 
 	teardown(() => disposables.clear());
