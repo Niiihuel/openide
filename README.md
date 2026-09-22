@@ -235,8 +235,10 @@ rather than claiming every line was written by the CLI.
 
 | Mechanism | Purpose | Project location |
 |---|---|---|
+| Agent instructions | Standard project guidance loaded without mutating it during installs | `AGENTS.md` (`AGENTS.override.md` takes precedence) |
 | Rules | Instructions included with each native turn | `.openide/rules/*.md` |
-| Skills | Reusable procedures whose descriptions are indexed and whose content the agent loads when relevant | `.openide/skills/<name>/SKILL.md` or `.agents/skills/<name>/SKILL.md` |
+| Skills | Portable procedures whose descriptions are indexed and whose content the agent loads when relevant | `.agents/skills/<name>/SKILL.md` (`.openide/skills` remains readable for compatibility) |
+| Plugins | Versioned bundles of skills and optional MCP or host extensions | root `plugin.json`; local catalog `.agents/plugins/marketplace.json`; signed HTTP catalog `/v1/marketplace.json` |
 | Subagents | Named task profiles with model, tool and execution settings | `.openide/agents/*.md` |
 | Hooks | Shell integrations for prompt, tool and lifecycle events, with hook consent controls | `.openide/hooks.json` |
 | MCP servers | Additional tools discovered from configured external servers | `.openide/mcp.json` |
@@ -249,6 +251,13 @@ that asks only for the values each one needs. Rules and hooks also support
 profile-wide configuration. Hooks, native tool approvals and the CLI's own MCP
 permissions are separate mechanisms; their boundaries are explained in the
 [harness guide](./docs/harness.md#extension-points-and-permissions).
+
+Remote registries publish immutable, publisher-signed plugin releases. OpenIDE
+verifies the Ed25519 publisher identity and release signature, the exact
+artifact SHA-256 and every extracted file before an atomic install. Draft and
+staged releases remain private; publishing or rollback only moves the stable
+channel to already signed bytes. The dependency-free reference server and CLI
+live in [`dev/plugin-registry`](./dev/plugin-registry/README.md).
 
 OpenIDE's own surfaces — chat, Settings, plans, Project Map — are available in
 English and Spanish. `openide.language` follows the editor's display language by

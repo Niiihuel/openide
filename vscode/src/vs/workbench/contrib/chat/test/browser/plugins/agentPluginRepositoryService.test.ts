@@ -15,6 +15,7 @@ import { TestInstantiationService } from '../../../../../../platform/instantiati
 import { ILogService, NullLogService } from '../../../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../../../platform/notification/common/notification.js';
 import { IProgressService } from '../../../../../../platform/progress/common/progress.js';
+import { IRequestService } from '../../../../../../platform/request/common/request.js';
 import { IStorageService, InMemoryStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
 import { IUserDataProfileService } from '../../../../../services/userDataProfile/common/userDataProfile.js';
 import { AgentPluginRepositoryService } from '../../../browser/agentPluginRepositoryService.js';
@@ -23,6 +24,12 @@ import { IPluginGitService } from '../../../common/plugins/pluginGitService.js';
 
 suite('AgentPluginRepositoryService', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	function stubRequestService(instantiationService: TestInstantiationService): void {
+		instantiationService.stub(IRequestService, {
+			request: async () => { throw new Error('Unexpected registry request'); },
+		} as unknown as IRequestService);
+	}
 
 	function stubPluginGit(overrides?: Partial<IPluginGitService>): IPluginGitService {
 		return {
@@ -58,17 +65,35 @@ suite('AgentPluginRepositoryService', () => {
 		};
 	}
 
+	function transactionalFileService(onExists?: (resource: URI) => Promise<boolean>): IFileService {
+		return {
+			exists: async (resource: URI) => onExists ? onExists(resource) : true,
+			createFolder: async () => undefined,
+			copy: async () => undefined,
+			move: async () => undefined,
+			del: async () => undefined,
+			readFile: async (resource: URI) => { throw new Error(`Missing mock file: ${resource.toString()}`); },
+			writeFile: async () => undefined,
+			resolve: async (resource: URI) => ({
+				resource,
+				name: resource.path.split('/').pop() ?? '',
+				isDirectory: true,
+				isFile: false,
+				isSymbolicLink: false,
+				children: [],
+			}),
+		} as unknown as IFileService;
+	}
+
 	function createService(
 		onExists?: (resource: URI) => Promise<boolean>,
 		onExecuteCommand?: (id: string, ...args: unknown[]) => void,
 		pluginGitStub?: Partial<IPluginGitService>,
 	): AgentPluginRepositoryService {
 		const instantiationService = store.add(new TestInstantiationService());
+		stubRequestService(instantiationService);
 
-		const fileService = {
-			exists: async (resource: URI) => onExists ? onExists(resource) : true,
-			createFolder: async () => undefined,
-		} as unknown as IFileService;
+		const fileService = transactionalFileService(onExists);
 
 		const progressService = {
 			withProgress: async (_options: unknown, callback: (...args: unknown[]) => Promise<unknown>) => callback(),
@@ -128,6 +153,47 @@ suite('AgentPluginRepositoryService', () => {
 
 		assert.strictEqual(shorthandUri.path, '/cache/agentPlugins/github.com/microsoft/vscode');
 		assert.strictEqual(uriRefUri.path, '/cache/agentPlugins/github.com/microsoft/vscode');
+	});
+
+	test('registers a dedicated signed registry plugin source', () => {
+		const service = createService();
+
+		assert.strictEqual(service.getPluginSource(PluginSourceKind.Registry).kind, PluginSourceKind.Registry);
+	});
+
+	test('never invokes git pull or fetch for an HTTP registry', async () => {
+		let pullCount = 0;
+		let fetchCount = 0;
+		const service = createService(async () => true, undefined, {
+			pull: async () => { pullCount++; return true; },
+			fetchRepository: async () => { fetchCount++; },
+		});
+		const registry = parseMarketplaceReference('https://plugins.example.test/v1/marketplace.json');
+		assert.ok(registry);
+
+		assert.strictEqual(await service.pullRepository(registry), false);
+		assert.strictEqual(await service.fetchRepository(registry), false);
+		assert.deepStrictEqual({ pullCount, fetchCount }, { pullCount: 0, fetchCount: 0 });
+	});
+
+	test('rejects an unsafe source target before materializing it', async () => {
+		let cloneCount = 0;
+		const service = createService(async () => false, undefined, {
+			cloneRepository: async () => { cloneCount++; },
+		});
+
+		await assert.rejects(() => service.ensurePluginSource({
+			name: 'malicious',
+			description: '',
+			version: '',
+			source: '',
+			sourceDescriptor: { kind: PluginSourceKind.GitHub, repo: '../..' },
+			marketplace: 'microsoft/plugins',
+			marketplaceReference: parseMarketplaceReference('microsoft/plugins')!,
+			marketplaceType: MarketplaceType.Copilot,
+		}), /strict descendant/);
+
+		assert.strictEqual(cloneCount, 0);
 	});
 
 	test('ensures plugin repositories via cacheSegments path', async () => {
@@ -334,19 +400,19 @@ suite('AgentPluginRepositoryService', () => {
 
 	test('passes marketplace refs through cloneRepository', async () => {
 		let clonedRef: string | undefined;
+		let clonedTarget: string | undefined;
 		const instantiationService = store.add(new TestInstantiationService());
+		stubRequestService(instantiationService);
 		instantiationService.stub(ICommandService, { executeCommand: async () => undefined } as unknown as ICommandService);
 		instantiationService.stub(IEnvironmentService, { cacheHome: URI.file('/cache') } as unknown as IEnvironmentService);
 		instantiationService.stub(IUserDataProfileService, { currentProfile: { agentPluginsHome: URI.file('/cache/agentPlugins') } } as unknown as IUserDataProfileService);
-		instantiationService.stub(IFileService, {
-			exists: async () => false,
-			createFolder: async () => undefined,
-		} as unknown as IFileService);
+		instantiationService.stub(IFileService, transactionalFileService(async () => false));
 		instantiationService.stub(ILogService, new NullLogService());
 		instantiationService.stub(INotificationService, { notify: () => undefined } as unknown as INotificationService);
 		instantiationService.stub(IPluginGitService, stubPluginGit({
-			cloneRepository: async (_cloneUrl, _targetDir, ref) => {
+			cloneRepository: async (_cloneUrl, targetDir, ref) => {
 				clonedRef = ref;
+				clonedTarget = targetDir.path;
 			},
 		}));
 		instantiationService.stub(IProgressService, {
@@ -358,19 +424,23 @@ suite('AgentPluginRepositoryService', () => {
 		const plugin = createPlugin('microsoft/vscode#marketplace', 'plugins/myPlugin');
 		await service.ensureRepository(plugin.marketplaceReference, { marketplaceType: plugin.marketplaceType });
 
-		assert.strictEqual(clonedRef, 'marketplace');
+		assert.deepStrictEqual({
+			clonedRef,
+			staged: clonedTarget?.includes('.plugin-staging-'),
+		}, {
+			clonedRef: 'marketplace',
+			staged: true,
+		});
 	});
 
 	test('concurrent ensureRepository calls for the same marketplace clone only once', async () => {
 		let cloneCount = 0;
 		const instantiationService = store.add(new TestInstantiationService());
+		stubRequestService(instantiationService);
 
 		// Track whether the repo exists (set to true after the first clone completes)
 		let repoExists = false;
-		const fileService = {
-			exists: async (_resource: URI) => repoExists,
-			createFolder: async () => undefined,
-		} as unknown as IFileService;
+		const fileService = transactionalFileService(async () => repoExists);
 
 		const progressService = {
 			withProgress: async (_options: unknown, callback: (...args: unknown[]) => Promise<unknown>) => callback(),
@@ -427,6 +497,7 @@ suite('AgentPluginRepositoryService', () => {
 		}), StorageScope.APPLICATION, StorageTarget.MACHINE);
 
 		const instantiationService = store.add(new TestInstantiationService());
+		stubRequestService(instantiationService);
 		instantiationService.stub(ICommandService, { executeCommand: async () => undefined } as unknown as ICommandService);
 		instantiationService.stub(IPluginGitService, stubPluginGit());
 		instantiationService.stub(IEnvironmentService, { cacheHome: URI.file('/cache') } as unknown as IEnvironmentService);
@@ -512,7 +583,7 @@ suite('AgentPluginRepositoryService', () => {
 			marketplaceType: MarketplaceType.Copilot,
 		});
 
-		assert.deepStrictEqual(calls, ['revParse', 'fetch', 'checkoutCommit', 'revParse']);
+		assert.deepStrictEqual(calls, ['fetch', 'checkoutCommit']);
 	});
 
 	// =========================================================================
@@ -526,6 +597,7 @@ suite('AgentPluginRepositoryService', () => {
 			options?: { resolve?: (resource: URI) => { children?: unknown[] } },
 		) {
 			const instantiationService = store.add(new TestInstantiationService());
+			stubRequestService(instantiationService);
 			instantiationService.stub(ICommandService, { executeCommand: async () => undefined } as unknown as ICommandService);
 			instantiationService.stub(IPluginGitService, stubPluginGit());
 			instantiationService.stub(IEnvironmentService, { cacheHome: URI.file('/cache') } as unknown as IEnvironmentService);
@@ -559,6 +631,30 @@ suite('AgentPluginRepositoryService', () => {
 			});
 
 			assert.strictEqual(deleted.length, 0);
+		});
+
+		test('refuses to delete a registry cleanup target that traverses outside the cache', async () => {
+			const deleted: string[] = [];
+			const service = createServiceWithDel(r => deleted.push(r.path));
+			const registry = parseMarketplaceReference('https://plugins.example.test/v1/marketplace.json');
+			assert.ok(registry);
+
+			await service.cleanupPluginSource({
+				name: 'malicious/plugin',
+				description: '',
+				version: '1.0.0',
+				source: '',
+				sourceDescriptor: {
+					kind: PluginSourceKind.Registry,
+					url: 'https://plugins.example.test/v1/publishers/malicious/plugins/plugin/versions/1.0.0/artifact',
+					release: { publisherId: '../../../../outside', pluginId: 'plugin' },
+				} as never,
+				marketplace: registry.displayLabel,
+				marketplaceReference: registry,
+				marketplaceType: MarketplaceType.OpenPlugin,
+			});
+
+			assert.deepStrictEqual(deleted, []);
 		});
 
 		test('deletes cache for github plugin source', async () => {
@@ -621,6 +717,7 @@ suite('AgentPluginRepositoryService', () => {
 
 		test('does not throw when delete fails', async () => {
 			const instantiationService = store.add(new TestInstantiationService());
+			stubRequestService(instantiationService);
 			instantiationService.stub(ICommandService, { executeCommand: async () => undefined } as unknown as ICommandService);
 			instantiationService.stub(IPluginGitService, stubPluginGit());
 			instantiationService.stub(IEnvironmentService, { cacheHome: URI.file('/cache') } as unknown as IEnvironmentService);

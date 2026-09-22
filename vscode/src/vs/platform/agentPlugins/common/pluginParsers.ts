@@ -191,6 +191,11 @@ const OPEN_PLUGIN_FORMAT: IPluginFormatConfig = {
 	},
 };
 
+const CODEX_PLUGIN_FORMAT: IPluginFormatConfig = {
+	...OPEN_PLUGIN_FORMAT,
+	manifestPath: '.codex-plugin/plugin.json',
+};
+
 const AGENT_PLUGIN_COPILOT_EXTENSION_NAMESPACE = 'com.github.copilot';
 
 const AGENT_PLUGIN_FORMAT: IPluginFormatConfig = {
@@ -220,6 +225,9 @@ export async function detectPluginFormat(pluginUri: URI, fileService: IFileServi
 	}
 	if (await pathExists(joinPath(pluginUri, '.plugin', 'plugin.json'), fileService)) {
 		return OPEN_PLUGIN_FORMAT;
+	}
+	if (await pathExists(joinPath(pluginUri, '.codex-plugin', 'plugin.json'), fileService)) {
+		return CODEX_PLUGIN_FORMAT;
 	}
 
 	const isInClaudeDirectory = pluginUri.path.split('/').includes('.claude');

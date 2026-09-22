@@ -60,5 +60,5 @@ export interface IPluginSource {
 	 *
 	 * Not implemented by non-package-manager sources.
 	 */
-	runInstall?(installDir: URI, pluginDir: URI, plugin: IMarketplacePlugin, options?: { silent?: boolean }): Promise<{ pluginDir: URI } | undefined>;
+	runInstall?(installDir: URI, pluginDir: URI, plugin: IMarketplacePlugin, options?: { silent?: boolean }): Promise<{ pluginDir: URI; changed: boolean } | undefined>;
 }

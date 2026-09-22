@@ -171,6 +171,11 @@ function getMarketplaceCanonicalIdentity(plugin: IMarketplacePlugin | undefined)
 			const pip = source as IPipPluginSource;
 			return `pip:${pip.package.toLowerCase()}|${normalizedName}`;
 		}
+		case PluginSourceKind.Registry:
+			// Publisher namespaces are registry-scoped trust domains. Include the
+			// catalog identity so two registries cannot impersonate one another by
+			// claiming the same publisher/plugin coordinate.
+			return `registry:${plugin.marketplaceReference.canonicalId}|${source.release.publisherId}/${source.release.pluginId}`;
 	}
 }
 

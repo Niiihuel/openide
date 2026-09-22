@@ -463,7 +463,7 @@ suite('pluginParsers', () => {
 				return parsePlugin(root, fileService, undefined, URI.from({ scheme: Schemas.inMemory, path: '/home' }), root);
 			}
 
-			test('recognizes the Agent Plugin schema and gives it precedence over legacy metadata', async () => {
+			test('recognizes the Agent Plugin schema and gives it precedence over legacy manifests', async () => {
 				await write('/plugins/example/plugin.json', JSON.stringify({
 					$schema: AGENT_PLUGIN_SCHEMA.replace('/1.0.0/', '/1.0.1/'),
 					name: 'agent-plugin',
@@ -472,6 +472,7 @@ suite('pluginParsers', () => {
 					extensions: 'ignored',
 				}));
 				await write('/plugins/example/.plugin/plugin.json', JSON.stringify({ name: 'legacy-plugin', commands: './commands' }));
+				await write('/plugins/example/.codex-plugin/plugin.json', JSON.stringify({ name: 'codex-plugin', agents: './agents' }));
 				await write('/plugins/example/commands/legacy.md', '# Legacy');
 				await write('/plugins/example/skills/good/SKILL.md', '---\nname: good\ndescription: A valid skill\n---\nUse it.');
 				await write('/plugins/example/SKILL.md', '---\nname: example\ndescription: Root fallback\n---');
@@ -489,6 +490,35 @@ suite('pluginParsers', () => {
 					agents: 0,
 					hooks: 0,
 					instructions: 0,
+				});
+			});
+
+			test('parses components declared by a legacy Codex manifest', async () => {
+				await write('/plugins/example/.codex-plugin/plugin.json', JSON.stringify({
+					name: 'codex-plugin',
+					skills: './codex-skills',
+					hooks: './codex-hooks.json',
+					mcpServers: './codex-mcp.json',
+				}));
+				await write('/plugins/example/codex-skills/memory/SKILL.md', '---\nname: memory\ndescription: Remembers context\n---');
+				await write('/plugins/example/codex-hooks.json', JSON.stringify({
+					hooks: { SessionStart: [{ type: 'command', command: 'echo start' }] },
+				}));
+				await write('/plugins/example/codex-mcp.json', JSON.stringify({
+					mcpServers: { memory: { type: 'stdio', command: 'memory-server' } },
+				}));
+
+				const plugin = await parse();
+				assert.deepStrictEqual({
+					format: plugin.format,
+					skills: plugin.skills.map(skill => skill.name),
+					hooks: plugin.hooks.map(hook => hook.type),
+					mcpServers: plugin.mcpServers.map(server => server.name),
+				}, {
+					format: PluginFormat.OpenPlugin,
+					skills: ['memory'],
+					hooks: ['SessionStart'],
+					mcpServers: ['memory'],
 				});
 			});
 

@@ -13,6 +13,7 @@ export { extraKnownMarketplacesToConfigDict } from '../../../../../base/common/m
 export const enum MarketplaceReferenceKind {
 	GitHubShorthand = 'githubShorthand',
 	GitUri = 'gitUri',
+	HttpRegistry = 'httpRegistry',
 	LocalFileUri = 'localFileUri',
 }
 
@@ -26,6 +27,8 @@ export interface IMarketplaceReference {
 	readonly ref?: string;
 	readonly githubRepo?: string;
 	readonly localRepositoryUri?: URI;
+	/** Exact HTTP catalog endpoint for a remote plugin registry. */
+	readonly registryUri?: URI;
 	readonly autoUpdate?: boolean;
 }
 
@@ -64,9 +67,12 @@ export function readConfiguredMarketplaces(configurationService: IConfigurationS
 		const src = encoded?.source ?? value;
 		const autoUpdate = encoded?.autoUpdate;
 		const isGithubShorthand = _githubShorthandRe.test(src);
+		const isHttpRegistry = parseMarketplaceReference(src)?.kind === MarketplaceReferenceKind.HttpRegistry;
 		return [isGithubShorthand
 			? { name, autoUpdate, source: { source: 'github' as const, repo: src } }
-			: { name, autoUpdate, source: { source: 'git' as const, url: src } }];
+			: isHttpRegistry
+				? { name, autoUpdate, source: { source: 'registry' as const, url: src } }
+				: { name, autoUpdate, source: { source: 'git' as const, url: src } }];
 	});
 
 	return {
@@ -154,7 +160,11 @@ export function parseMarketplaceObjectEntry(entry: IExtraMarketplaceObjectEntry)
 	if (sourceType === 'github' && typeof repo === 'string') {
 		parsed = parseMarketplaceReference(appendMarketplaceRef(repo, ref));
 	} else if (sourceType === 'git' && typeof url === 'string') {
-		parsed = parseMarketplaceReference(appendMarketplaceRef(url, ref));
+		const candidate = parseMarketplaceReference(appendMarketplaceRef(url, ref));
+		parsed = candidate?.kind === MarketplaceReferenceKind.HttpRegistry ? undefined : candidate;
+	} else if (sourceType === 'registry' && typeof url === 'string' && ref === undefined) {
+		const candidate = parseMarketplaceReference(url);
+		parsed = candidate?.kind === MarketplaceReferenceKind.HttpRegistry ? candidate : undefined;
 	}
 
 	if (parsed && typeof entry.name === 'string' && entry.name.length > 0) {
@@ -253,6 +263,12 @@ function parseUriMarketplaceReference(rawValue: string): IMarketplaceReference |
 		};
 	}
 
+	// Registry endpoints deliberately occupy one exact route. Treat near
+	// matches as invalid instead of silently falling through to Git cloning.
+	if (uri.path.toLowerCase().includes('/v1/marketplace.json')) {
+		return parseHttpRegistryReference(rawValue);
+	}
+
 	if (scheme !== 'http' && scheme !== 'https' && scheme !== 'ssh') {
 		return undefined;
 	}
@@ -312,6 +328,46 @@ function parseUriMarketplaceReference(rawValue: string): IMarketplaceReference |
 		ref,
 		githubRepo,
 	};
+}
+
+function parseHttpRegistryReference(rawValue: string): IMarketplaceReference | undefined {
+	let url: URL;
+	try {
+		url = new URL(rawValue);
+	} catch {
+		return undefined;
+	}
+
+	if (!url.pathname.endsWith('/v1/marketplace.json')
+		|| url.username
+		|| url.password
+		|| rawValue.includes('?')
+		|| rawValue.includes('#')
+		|| url.search
+		|| url.hash
+		|| (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopbackRegistryHostname(url.hostname)))) {
+		return undefined;
+	}
+
+	const normalizedUrl = url.toString();
+	const registryUri = URI.parse(normalizedUrl);
+	return {
+		rawValue,
+		displayLabel: rawValue,
+		cloneUrl: normalizedUrl,
+		canonicalId: `registry:${normalizedUrl}`,
+		cacheSegments: [],
+		kind: MarketplaceReferenceKind.HttpRegistry,
+		registryUri,
+	};
+}
+
+function isLoopbackRegistryHostname(hostname: string): boolean {
+	const normalized = hostname.toLowerCase();
+	return normalized === 'localhost'
+		|| normalized === '127.0.0.1'
+		|| normalized === '[::1]'
+		|| normalized === '::1';
 }
 
 function parseScpMarketplaceReference(rawValue: string): IMarketplaceReference | undefined {

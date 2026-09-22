@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { runWhenGlobalIdle, ThrottledDelayer } from '../../../../../base/common/async.js';
+import { VSBuffer } from '../../../../../base/common/buffer.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { isCancellationError, onUnexpectedError } from '../../../../../base/common/errors.js';
 import { Event } from '../../../../../base/common/event.js';
@@ -13,7 +14,9 @@ import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { revive } from '../../../../../base/common/marshalling.js';
 import { autorun, derived, IObservable, observableFromEvent, observableValue } from '../../../../../base/common/observable.js';
 import { isEqual, isEqualOrParent, joinPath, normalizePath, relativePath } from '../../../../../base/common/resources.js';
+import { listenStream } from '../../../../../base/common/stream.js';
 import { URI } from '../../../../../base/common/uri.js';
+import type { IRequestContext } from '../../../../../base/parts/request/common/request.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
@@ -21,13 +24,15 @@ import { createDecorator } from '../../../../../platform/instantiation/common/in
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IMeteredConnectionService } from '../../../../../platform/meteredConnection/common/meteredConnection.js';
 import { ObservableMemento, observableMemento } from '../../../../../platform/observable/common/observableMemento.js';
-import { asJson, IRequestService } from '../../../../../platform/request/common/request.js';
+import { asJson, IRequestService, readHeader } from '../../../../../platform/request/common/request.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import type { Dto } from '../../../../services/extensions/common/proxyIdentifier.js';
 import { AutoUpdateConfigurationKey, IExtensionsWorkbenchService } from '../../../extensions/common/extensions.js';
 import { ChatConfiguration } from '../constants.js';
 import { IAgentPluginRepositoryService } from './agentPluginRepositoryService.js';
-import { FileBackedInstalledPluginsStore, IStoredInstalledPlugin } from './fileBackedInstalledPluginsStore.js';
+import { FileBackedInstalledPluginsStore, IStoredInstalledPlugin, type IStoredMarketplacePluginMetadata } from './fileBackedInstalledPluginsStore.js';
+import { normalizePluginTreeDigest } from './pluginInstallTransaction.js';
+import { type IPluginPublisherIdentity, type IPluginReleaseManifest, type IPluginReleaseSignature, parsePluginPublisherIdentity, parsePluginReleaseManifest, parsePluginReleaseSignature } from './pluginSupplyChain.js';
 import { IWorkspacePluginSettingsService } from './workspacePluginSettingsService.js';
 import { IWorkspaceTrustManagementService } from '../../../../../platform/workspace/common/workspaceTrust.js';
 import { readAgentPluginManifest } from '../../../../../platform/agentPlugins/common/agentPluginParser.js';
@@ -50,15 +55,21 @@ export const enum PluginSourceKind {
 	GitUrl = 'url',
 	Npm = 'npm',
 	Pip = 'pip',
+	Registry = 'registry',
 }
 
-export interface IRelativePathPluginSource {
+export interface IVerifiablePluginSource {
+	/** Optional deterministic SHA-256 digest of the installed plugin tree. */
+	readonly digest?: string;
+}
+
+export interface IRelativePathPluginSource extends IVerifiablePluginSource {
 	readonly kind: PluginSourceKind.RelativePath;
 	/** Resolved relative path within the marketplace repository. */
 	readonly path: string;
 }
 
-export interface IGitHubPluginSource {
+export interface IGitHubPluginSource extends IVerifiablePluginSource {
 	readonly kind: PluginSourceKind.GitHub;
 	readonly repo: string;
 	readonly ref?: string;
@@ -66,7 +77,7 @@ export interface IGitHubPluginSource {
 	readonly path?: string;
 }
 
-export interface IGitUrlPluginSource {
+export interface IGitUrlPluginSource extends IVerifiablePluginSource {
 	readonly kind: PluginSourceKind.GitUrl;
 	/** Full git repository URL (must end with .git). */
 	readonly url: string;
@@ -76,18 +87,29 @@ export interface IGitUrlPluginSource {
 	readonly path?: string;
 }
 
-export interface INpmPluginSource {
+export interface INpmPluginSource extends IVerifiablePluginSource {
 	readonly kind: PluginSourceKind.Npm;
 	readonly package: string;
 	readonly version?: string;
 	readonly registry?: string;
 }
 
-export interface IPipPluginSource {
+export interface IPipPluginSource extends IVerifiablePluginSource {
 	readonly kind: PluginSourceKind.Pip;
 	readonly package: string;
 	readonly version?: string;
 	readonly registry?: string;
+}
+
+/** Immutable, signed artifact selected by an HTTP registry catalog. */
+export interface IRegistryPluginSource extends IVerifiablePluginSource {
+	readonly kind: PluginSourceKind.Registry;
+	readonly url: string;
+	/** Lowercase hexadecimal SHA-256 of the exact artifact response bytes. */
+	readonly artifactSha256: IPluginReleaseManifest['artifact']['sha256'];
+	readonly release: IPluginReleaseManifest;
+	readonly signature: IPluginReleaseSignature;
+	readonly publisher: IPluginPublisherIdentity;
 }
 
 export type IPluginSourceDescriptor =
@@ -95,7 +117,8 @@ export type IPluginSourceDescriptor =
 	| IGitHubPluginSource
 	| IGitUrlPluginSource
 	| INpmPluginSource
-	| IPipPluginSource;
+	| IPipPluginSource
+	| IRegistryPluginSource;
 
 export interface IMarketplacePlugin {
 	readonly name: string;
@@ -125,6 +148,11 @@ interface IJsonPluginSource {
 	readonly path?: string;
 	readonly version?: string;
 	readonly registry?: string;
+	readonly digest?: string;
+	readonly artifactSha256?: unknown;
+	readonly release?: unknown;
+	readonly signature?: unknown;
+	readonly publisher?: unknown;
 }
 
 interface IMarketplaceJson {
@@ -135,8 +163,15 @@ interface IMarketplaceJson {
 		readonly name?: string;
 		readonly description?: string;
 		readonly version?: string;
+		readonly publisher?: string;
 		readonly source?: string | IJsonPluginSource;
 	}[];
+}
+
+interface IHttpRegistryMarketplaceJson extends IMarketplaceJson {
+	readonly schemaVersion?: unknown;
+	readonly name?: unknown;
+	readonly generatedAt?: unknown;
 }
 
 export interface IMarketplaceInstalledPlugin {
@@ -204,6 +239,8 @@ export interface IPluginMarketplaceService {
 	 * that clone a repo first, then need to discover its plugins.
 	 */
 	readPluginsFromDirectory(repoDir: URI, reference: IMarketplaceReference): Promise<IMarketplacePlugin[]>;
+	/** Fetches one exact HTTP registry catalog without routing through Git. */
+	readPluginsFromRegistry(reference: IMarketplaceReference, token?: CancellationToken): Promise<IMarketplacePlugin[]>;
 	/**
 	 * Reads a single-plugin manifest (e.g. `.claude-plugin/plugin.json`) at the
 	 * root of an already-cloned repository directory and returns a synthesised
@@ -230,6 +267,7 @@ export interface IPluginMarketplaceService {
  * The first match determines the marketplace type.
  */
 const MARKETPLACE_DEFINITIONS: { type: MarketplaceType; path: string }[] = [
+	{ type: MarketplaceType.OpenPlugin, path: '.agents/plugins/marketplace.json' },
 	{ type: MarketplaceType.OpenPlugin, path: 'marketplace.json' },
 	{ type: MarketplaceType.OpenPlugin, path: '.plugin/marketplace.json' },
 	{ type: MarketplaceType.Copilot, path: '.github/plugin/marketplace.json' },
@@ -240,16 +278,19 @@ const MARKETPLACE_DEFINITIONS: { type: MarketplaceType; path: string }[] = [
  * Single-plugin manifest files by type, checked in order. Used when a cloned
  * source repository has no marketplace index — the repository itself is the
  * plugin. Order matches {@link detectPluginFormat} so that runtime format
- * detection later agrees with the marketplace type chosen here.
+ * detection later agrees with the marketplace type chosen here. A root Agent
+ * Plugin v1 manifest is schema-disambiguated and checked before these fallbacks.
  */
 const SINGLE_PLUGIN_MANIFEST_DEFINITIONS: { type: MarketplaceType; path: string }[] = [
 	{ type: MarketplaceType.OpenPlugin, path: '.plugin/plugin.json' },
+	{ type: MarketplaceType.OpenPlugin, path: '.codex-plugin/plugin.json' },
 	{ type: MarketplaceType.Claude, path: '.claude-plugin/plugin.json' },
 	{ type: MarketplaceType.Copilot, path: 'plugin.json' },
 ];
 
 const GITHUB_MARKETPLACE_CACHE_TTL_MS = 8 * 60 * 60 * 1000;
 const GITHUB_MARKETPLACE_CACHE_STORAGE_KEY = 'chat.plugins.marketplaces.githubCache.v1';
+const HTTP_REGISTRY_CATALOG_MAX_BYTES = 8 * 1024 * 1024;
 
 /** Interval between periodic plugin update checks (24 hours). */
 const PLUGIN_UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -279,6 +320,110 @@ function ensureSourceDescriptor(plugin: IMarketplacePlugin): IMarketplacePlugin 
 		...plugin,
 		sourceDescriptor: { kind: PluginSourceKind.RelativePath, path: plugin.source },
 	};
+}
+
+function storedPluginMetadata(plugin: IMarketplacePlugin): IStoredMarketplacePluginMetadata {
+	return {
+		name: plugin.name,
+		description: plugin.description,
+		version: plugin.version,
+		source: plugin.source,
+		sourceDescriptor: plugin.sourceDescriptor,
+		marketplace: plugin.marketplace,
+		marketplaceType: plugin.marketplaceType,
+		...(plugin.readmeUri ? { readmeUri: plugin.readmeUri.toString() } : {}),
+	};
+}
+
+function reviveStoredPlugin(entry: IStoredInstalledPlugin): IMarketplacePlugin | undefined {
+	if (!entry.plugin) {
+		return undefined;
+	}
+	const marketplaceReference = parseMarketplaceReference(entry.marketplace);
+	if (!marketplaceReference) {
+		return undefined;
+	}
+	let readmeUri: URI | undefined;
+	try {
+		readmeUri = entry.plugin.readmeUri ? URI.parse(entry.plugin.readmeUri) : undefined;
+	} catch {
+		return undefined;
+	}
+	const { readmeUri: _storedReadmeUri, ...metadata } = entry.plugin;
+	return {
+		...metadata,
+		marketplaceReference,
+		...(readmeUri ? { readmeUri } : {}),
+	};
+}
+
+function parseHttpRegistryMarketplaceJson(value: unknown): IHttpRegistryMarketplaceJson {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		throw new Error('Registry marketplace response must be an object');
+	}
+	const catalog = value as Record<string, unknown>;
+	const allowedKeys = new Set(['schemaVersion', 'name', 'generatedAt', 'plugins']);
+	if (Object.keys(catalog).some(key => !allowedKeys.has(key))) {
+		throw new Error('Registry marketplace response contains unknown fields');
+	}
+	if (catalog.schemaVersion !== 1) {
+		throw new Error('Registry marketplace schemaVersion must be 1');
+	}
+	if (typeof catalog.name !== 'string' || !catalog.name || catalog.name.length > 128 || /[\u0000-\u001f\u007f]/.test(catalog.name)) {
+		throw new Error('Registry marketplace name is invalid');
+	}
+	if (typeof catalog.generatedAt !== 'string'
+		|| !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(catalog.generatedAt)
+		|| Number.isNaN(new Date(catalog.generatedAt).getTime())
+		|| new Date(catalog.generatedAt).toISOString() !== catalog.generatedAt) {
+		throw new Error('Registry marketplace generatedAt must be a canonical UTC timestamp');
+	}
+	if (!Array.isArray(catalog.plugins)) {
+		throw new Error('Registry marketplace plugins must be an array');
+	}
+	return catalog as unknown as IHttpRegistryMarketplaceJson;
+}
+
+function readBoundedJson(context: IRequestContext, maxBytes: number): Promise<unknown> {
+	return new Promise((resolve, reject) => {
+		const chunks: VSBuffer[] = [];
+		let totalBytes = 0;
+		let settled = false;
+		const fail = (error: Error): void => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			context.stream.destroy();
+			reject(error);
+		};
+
+		listenStream(context.stream, {
+			onData: chunk => {
+				if (settled) {
+					return;
+				}
+				totalBytes += chunk.byteLength;
+				if (totalBytes > maxBytes) {
+					fail(new Error(`Registry marketplace response exceeds ${maxBytes} bytes`));
+					return;
+				}
+				chunks.push(chunk);
+			},
+			onError: fail,
+			onEnd: () => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				try {
+					resolve(JSON.parse(VSBuffer.concat(chunks).toString()));
+				} catch {
+					reject(new Error('Registry marketplace response is not valid JSON'));
+				}
+			},
+		});
+	});
 }
 
 const trustedMarketplacesMemento = observableMemento<readonly string[]>({
@@ -372,7 +517,7 @@ export class PluginMarketplaceService extends Disposable implements IPluginMarke
 		this.installedPlugins = this._installedPluginsStore.value.map(entries => {
 			const result: IMarketplaceInstalledPlugin[] = [];
 			for (const e of entries) {
-				const plugin = this._pluginMetadata.get(e.pluginUri.toString());
+				const plugin = this._pluginMetadata.get(e.pluginUri.toString()) ?? reviveStoredPlugin(e);
 				if (plugin) {
 					result.push({ pluginUri: e.pluginUri, plugin });
 				}
@@ -494,6 +639,9 @@ export class PluginMarketplaceService extends Disposable implements IPluginMarke
 		);
 		const results = await Promise.all(
 			refsToFetch.map(ref => {
+				if (ref.kind === MarketplaceReferenceKind.HttpRegistry) {
+					return this._fetchFromHttpRegistry(ref, token, options);
+				}
 				if (ref.kind === MarketplaceReferenceKind.GitHubShorthand && ref.githubRepo) {
 					return this._fetchFromGitHubRepo(ref, ref.githubRepo, token, options);
 				}
@@ -513,6 +661,36 @@ export class PluginMarketplaceService extends Disposable implements IPluginMarke
 			: plugins;
 		this._lastFetchedPluginsStore.set({ plugins: storedPlugins, fetchedAt: Date.now() }, undefined);
 		return plugins;
+	}
+
+	private async _fetchFromHttpRegistry(reference: IMarketplaceReference, token: CancellationToken, options?: IFetchMarketplacePluginsOptions): Promise<IMarketplacePlugin[]> {
+		const url = reference.registryUri?.toString();
+		if (!url) {
+			return [];
+		}
+
+		try {
+			const context = await this._requestService.request({
+				type: 'GET',
+				url,
+				headers: { Accept: 'application/json' },
+				followRedirects: 0,
+				callSite: 'pluginMarketplaceService.fetchHttpRegistry',
+			}, token);
+			if (context.res.statusCode !== 200) {
+				throw new Error(`Registry marketplace returned HTTP ${context.res.statusCode}`);
+			}
+			const contentType = readHeader(context.res.headers, 'content-type');
+			if (contentType?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+				throw new Error(`Registry marketplace returned unsupported Content-Type '${contentType ?? ''}'`);
+			}
+			const catalog = parseHttpRegistryMarketplaceJson(await readBoundedJson(context, HTTP_REGISTRY_CATALOG_MAX_BYTES));
+			return this._parseMarketplacePlugins(catalog, reference, MarketplaceType.OpenPlugin);
+		} catch (error) {
+			this._logService.debug(`[PluginMarketplaceService] Failed to fetch HTTP registry ${reference.rawValue}:`, error);
+			options?.onMarketplaceError?.(reference, error);
+			return [];
+		}
 	}
 
 	private async _fetchFromGitHubRepo(reference: IMarketplaceReference, repo: string, token: CancellationToken, options?: IFetchMarketplacePluginsOptions): Promise<IMarketplacePlugin[]> {
@@ -670,6 +848,7 @@ export class PluginMarketplaceService extends Disposable implements IPluginMarke
 			pluginUri,
 			marketplace: plugin.marketplaceReference.rawValue,
 			name: plugin.name,
+			plugin: storedPluginMetadata(plugin),
 		};
 		const current = this._installedPluginsStore.get();
 		const existing = current.find(e => isEqual(e.pluginUri, pluginUri));
@@ -734,6 +913,12 @@ export class PluginMarketplaceService extends Disposable implements IPluginMarke
 			if (this._pluginMetadata.has(key)) {
 				continue;
 			}
+			const stored = reviveStoredPlugin(entry);
+			if (stored) {
+				this._pluginMetadata.set(key, stored);
+				hydrated++;
+				continue;
+			}
 
 			const reference = parseMarketplaceReference(entry.marketplace);
 			if (!reference) {
@@ -762,6 +947,9 @@ export class PluginMarketplaceService extends Disposable implements IPluginMarke
 	}
 
 	private async _readPluginsForInstalledEntry(reference: IMarketplaceReference, token: CancellationToken): Promise<IMarketplacePlugin[]> {
+		if (reference.kind === MarketplaceReferenceKind.HttpRegistry) {
+			return this._fetchFromHttpRegistry(reference, token);
+		}
 		if (reference.kind === MarketplaceReferenceKind.GitHubShorthand && reference.githubRepo) {
 			return this._fetchFromGitHubRepo(reference, reference.githubRepo, token);
 		}
@@ -790,16 +978,28 @@ export class PluginMarketplaceService extends Disposable implements IPluginMarke
 		}
 
 		return json.plugins
-			.filter((p): p is { name: string; description?: string; version?: string; source?: string | IJsonPluginSource } =>
+			.filter((p): p is { name: string; description?: string; version?: string; publisher?: string; source?: string | IJsonPluginSource } =>
 				typeof p.name === 'string' && !!p.name
 			)
 			.flatMap(p => {
+				if (reference.kind === MarketplaceReferenceKind.HttpRegistry) {
+					const allowedKeys = new Set(['name', 'description', 'version', 'publisher', 'source']);
+					if (Object.keys(p).some(key => !allowedKeys.has(key))
+						|| (p.description !== undefined && typeof p.description !== 'string')) {
+						this._logService.warn(`[PluginMarketplaceService] Skipping registry plugin '${p.name}': catalog entry contains invalid or unknown fields`);
+						return [];
+					}
+				}
 				const sourceDescriptor = parsePluginSource(p.source, json.metadata?.pluginRoot, {
 					pluginName: p.name,
+					pluginVersion: typeof p.version === 'string' ? p.version : undefined,
+					pluginPublisher: typeof p.publisher === 'string' ? p.publisher : undefined,
+					marketplaceReference: reference,
 					logService: this._logService,
 					logPrefix: '[PluginMarketplaceService]',
 				});
-				if (!sourceDescriptor) {
+				if (!sourceDescriptor
+					|| (reference.kind === MarketplaceReferenceKind.HttpRegistry && sourceDescriptor.kind !== PluginSourceKind.Registry)) {
 					return [];
 				}
 
@@ -807,8 +1007,8 @@ export class PluginMarketplaceService extends Disposable implements IPluginMarke
 
 				return [{
 					name: p.name,
-					description: p.description ?? '',
-					version: p.version ?? '',
+					description: typeof p.description === 'string' ? p.description : '',
+					version: typeof p.version === 'string' ? p.version : '',
 					source,
 					sourceDescriptor,
 					marketplace: reference.displayLabel,
@@ -899,7 +1099,15 @@ export class PluginMarketplaceService extends Disposable implements IPluginMarke
 				seenMarketplaces.add(ref.canonicalId);
 
 				try {
-					const behind = await this._pluginRepositoryService.fetchRepository(ref);
+					const behind = ref.kind === MarketplaceReferenceKind.HttpRegistry
+						? (await this._fetchFromHttpRegistry(ref, CancellationToken.None)).some(candidate => {
+							const current = installed.find(installedEntry =>
+								installedEntry.plugin.marketplaceReference.canonicalId === ref.canonicalId
+								&& installedEntry.plugin.name === candidate.name
+							);
+							return !!current && hasSourceChanged(current.plugin.sourceDescriptor, candidate.sourceDescriptor);
+						})
+						: await this._pluginRepositoryService.fetchRepository(ref);
 					if (behind) {
 						marketplacesWithUpdates.add(ref.canonicalId);
 					}
@@ -938,6 +1146,13 @@ export class PluginMarketplaceService extends Disposable implements IPluginMarke
 
 	async readPluginsFromDirectory(repoDir: URI, reference: IMarketplaceReference): Promise<IMarketplacePlugin[]> {
 		return this._readPluginsFromDirectory(repoDir, reference);
+	}
+
+	async readPluginsFromRegistry(reference: IMarketplaceReference, token: CancellationToken = CancellationToken.None): Promise<IMarketplacePlugin[]> {
+		if (reference.kind !== MarketplaceReferenceKind.HttpRegistry) {
+			throw new Error('readPluginsFromRegistry requires an HTTP registry reference');
+		}
+		return this._fetchFromHttpRegistry(reference, token);
 	}
 
 	async readSinglePluginManifest(repoDir: URI, reference: IMarketplaceReference): Promise<IMarketplacePlugin | undefined> {
@@ -1084,7 +1299,14 @@ function resolvePluginSource(pluginRoot: string | undefined, source: string): st
 export function parsePluginSource(
 	rawSource: string | IJsonPluginSource | undefined,
 	pluginRoot: string | undefined,
-	logContext: { pluginName: string; logService: ILogService; logPrefix: string },
+	logContext: {
+		pluginName: string;
+		pluginVersion?: string;
+		pluginPublisher?: string;
+		marketplaceReference?: IMarketplaceReference;
+		logService: ILogService;
+		logPrefix: string;
+	},
 ): IPluginSourceDescriptor | undefined {
 	if (rawSource === undefined || rawSource === null) {
 		// Treat missing source the same as empty string → pluginRoot or repo root.
@@ -1109,8 +1331,29 @@ export function parsePluginSource(
 		logContext.logService.warn(`${logContext.logPrefix} Skipping plugin '${logContext.pluginName}': source object is missing a 'source' discriminant`);
 		return undefined;
 	}
+	let digest: string | undefined;
+	if (rawSource.digest !== undefined) {
+		if (typeof rawSource.digest !== 'string') {
+			logContext.logService.warn(`${logContext.logPrefix} Skipping plugin '${logContext.pluginName}': source 'digest' must be a SHA-256 string when provided`);
+			return undefined;
+		}
+		try {
+			digest = normalizePluginTreeDigest(rawSource.digest);
+		} catch {
+			logContext.logService.warn(`${logContext.logPrefix} Skipping plugin '${logContext.pluginName}': source 'digest' must contain exactly 64 hexadecimal SHA-256 characters`);
+			return undefined;
+		}
+	}
 
 	switch (rawSource.source) {
+		case 'local': {
+			if (typeof rawSource.path !== 'string' || !rawSource.path) {
+				logContext.logService.warn(`${logContext.logPrefix} Skipping plugin '${logContext.pluginName}': local source is missing required 'path' field`);
+				return undefined;
+			}
+			const resolved = resolvePluginSource(pluginRoot, rawSource.path);
+			return resolved === undefined ? undefined : { kind: PluginSourceKind.RelativePath, path: resolved, ...(digest ? { digest } : {}) };
+		}
 		case 'github': {
 			if (typeof rawSource.repo !== 'string' || !rawSource.repo) {
 				logContext.logService.warn(`${logContext.logPrefix} Skipping plugin '${logContext.pluginName}': github source is missing required 'repo' field`);
@@ -1138,6 +1381,7 @@ export function parsePluginSource(
 				ref: rawSource.ref,
 				sha: rawSource.sha,
 				path: rawSource.path,
+				...(digest ? { digest } : {}),
 			};
 		}
 		case 'url':
@@ -1173,6 +1417,7 @@ export function parsePluginSource(
 				ref: rawSource.ref,
 				sha: rawSource.sha,
 				path: rawSource.path,
+				...(digest ? { digest } : {}),
 			};
 		}
 		case 'npm': {
@@ -1189,6 +1434,7 @@ export function parsePluginSource(
 				package: rawSource.package,
 				version: rawSource.version,
 				registry: rawSource.registry,
+				...(digest ? { digest } : {}),
 			};
 		}
 		case 'pip': {
@@ -1205,12 +1451,104 @@ export function parsePluginSource(
 				package: rawSource.package,
 				version: rawSource.version,
 				registry: rawSource.registry,
+				...(digest ? { digest } : {}),
 			};
 		}
+		case 'registry':
+			return parseRegistryPluginSource(rawSource, logContext);
 		default:
 			logContext.logService.warn(`${logContext.logPrefix} Skipping plugin '${logContext.pluginName}': unknown source kind '${rawSource.source}'`);
 			return undefined;
 	}
+}
+
+function parseRegistryPluginSource(
+	rawSource: IJsonPluginSource,
+	context: {
+		pluginName: string;
+		pluginVersion?: string;
+		pluginPublisher?: string;
+		marketplaceReference?: IMarketplaceReference;
+		logService: ILogService;
+		logPrefix: string;
+	},
+): IRegistryPluginSource | undefined {
+	const reject = (message: string): undefined => {
+		context.logService.warn(`${context.logPrefix} Skipping registry plugin '${context.pluginName}': ${message}`);
+		return undefined;
+	};
+	const reference = context.marketplaceReference;
+	if (reference?.kind !== MarketplaceReferenceKind.HttpRegistry || !reference.registryUri) {
+		return reject('registry sources are only accepted from an HTTP registry marketplace');
+	}
+
+	const allowedKeys = new Set(['source', 'url', 'artifactSha256', 'release', 'signature', 'publisher']);
+	if (Object.keys(rawSource).some(key => !allowedKeys.has(key))) {
+		return reject('source contains unknown fields');
+	}
+	if (typeof rawSource.url !== 'string' || typeof rawSource.artifactSha256 !== 'string') {
+		return reject('source requires url and artifactSha256 strings');
+	}
+
+	let release: IPluginReleaseManifest;
+	let signature: IPluginReleaseSignature;
+	let publisher: IPluginPublisherIdentity;
+	try {
+		release = parsePluginReleaseManifest(rawSource.release);
+		signature = parsePluginReleaseSignature(rawSource.signature);
+		publisher = parsePluginPublisherIdentity(rawSource.publisher);
+	} catch (error) {
+		return reject(error instanceof Error ? error.message : String(error));
+	}
+
+	const coordinate = `${release.publisherId}/${release.pluginId}`;
+	if (context.pluginName !== coordinate
+		|| context.pluginPublisher !== release.publisherId
+		|| context.pluginVersion !== release.version) {
+		return reject('catalog coordinates, publisher, and version must match the signed release');
+	}
+	if (rawSource.artifactSha256 !== release.artifact.sha256) {
+		return reject('artifactSha256 must match the signed release artifact');
+	}
+	if (release.artifact.mediaType !== 'application/vnd.openide.plugin+json') {
+		return reject('signed release artifact has an unsupported media type');
+	}
+	if (signature.keyId !== release.signingKeyId
+		|| publisher.publisherId !== release.publisherId
+		|| !publisher.keys.some(key => key.keyId === release.signingKeyId && key.state === 'active')) {
+		return reject('publisher identity and signing key must match the signed release');
+	}
+
+	let artifactUrl: URL;
+	let registryUrl: URL;
+	try {
+		artifactUrl = new URL(rawSource.url);
+		registryUrl = new URL(reference.registryUri.toString());
+	} catch {
+		return reject('artifact URL is invalid');
+	}
+	const registryBasePath = registryUrl.pathname.slice(0, -'/v1/marketplace.json'.length);
+	const expectedPath = `${registryBasePath}/v1/publishers/${encodeURIComponent(release.publisherId)}/plugins/${encodeURIComponent(release.pluginId)}/versions/${encodeURIComponent(release.version)}/artifact`;
+	if (artifactUrl.toString() !== rawSource.url
+		|| artifactUrl.origin !== registryUrl.origin
+		|| artifactUrl.username
+		|| artifactUrl.password
+		|| rawSource.url.includes('?')
+		|| rawSource.url.includes('#')
+		|| artifactUrl.search
+		|| artifactUrl.hash
+		|| artifactUrl.pathname !== expectedPath) {
+		return reject('artifact URL must be canonical, same-origin, and match the signed release coordinates');
+	}
+
+	return {
+		kind: PluginSourceKind.Registry,
+		url: rawSource.url,
+		artifactSha256: rawSource.artifactSha256,
+		release,
+		signature,
+		publisher,
+	};
 }
 
 function isOptionalString(value: unknown): value is string | undefined {
@@ -1241,6 +1579,8 @@ export function getPluginSourceLabel(descriptor: IPluginSourceDescriptor): strin
 			return descriptor.version ? `${descriptor.package}@${descriptor.version}` : descriptor.package;
 		case PluginSourceKind.Pip:
 			return descriptor.version ? `${descriptor.package}==${descriptor.version}` : descriptor.package;
+		case PluginSourceKind.Registry:
+			return `${descriptor.release.publisherId}/${descriptor.release.pluginId}@${descriptor.release.version}`;
 	}
 }
 
@@ -1250,6 +1590,9 @@ export function getPluginSourceLabel(descriptor: IPluginSourceDescriptor): strin
  */
 export function hasSourceChanged(installed: IPluginSourceDescriptor, marketplace: IPluginSourceDescriptor): boolean {
 	if (installed.kind !== marketplace.kind) {
+		return true;
+	}
+	if (installed.digest !== marketplace.digest) {
 		return true;
 	}
 
@@ -1266,6 +1609,16 @@ export function hasSourceChanged(installed: IPluginSourceDescriptor, marketplace
 			return installed.version !== (marketplace as typeof installed).version;
 		case PluginSourceKind.Pip:
 			return installed.version !== (marketplace as typeof installed).version;
+		case PluginSourceKind.Registry: {
+			const candidate = marketplace as typeof installed;
+			return installed.url !== candidate.url
+				|| installed.artifactSha256 !== candidate.artifactSha256
+				|| installed.release.publisherId !== candidate.release.publisherId
+				|| installed.release.pluginId !== candidate.release.pluginId
+				|| installed.release.version !== candidate.release.version
+				|| installed.signature.keyId !== candidate.signature.keyId
+				|| installed.signature.signature !== candidate.signature.signature;
+		}
 		default:
 			return false;
 	}

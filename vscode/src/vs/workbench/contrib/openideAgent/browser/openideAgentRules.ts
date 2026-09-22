@@ -16,11 +16,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { VSBuffer } from '../../../../base/common/buffer.js';
-import { joinPath } from '../../../../base/common/resources.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { basename,dirname,joinPath,relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
+import { AgentInstructionFileType,IPromptsService } from '../../chat/common/promptSyntax/service/promptsService.js';
 
 export type RuleScope = 'project' | 'global';
 
@@ -33,7 +36,13 @@ export interface IOpenideAgentRule {
 
 const RULE_NAME_RE = /^[a-z0-9](?:[a-z0-9]|-(?!-)){0,62}[a-z0-9]$|^[a-z0-9]$/;
 const RULE_FILE_CAP = 12_000;
-const RULE_TOTAL_CAP = 32_000;
+const RULE_TOTAL_CAP = 32 * 1024;
+
+interface IAgentInstructionSource {
+	readonly uri: URI;
+	readonly label: string;
+	readonly scope: RuleScope;
+}
 
 export class OpenideAgentRules {
 
@@ -41,6 +50,9 @@ export class OpenideAgentRules {
 		private readonly fileService: IFileService,
 		private readonly contextService: IWorkspaceContextService,
 		private readonly environmentService: IEnvironmentService,
+		private readonly promptsService?: IPromptsService,
+		private readonly workspaceTrust?: IWorkspaceTrustManagementService,
+		private readonly userHome?: URI,
 	) { }
 
 	root(scope: RuleScope): URI | undefined {
@@ -133,31 +145,139 @@ export class OpenideAgentRules {
 		return true;
 	}
 
+	private async firstNonEmpty(root: URI, names: readonly string[]): Promise<URI | undefined> {
+		for (const name of names) {
+			const candidate = joinPath(root, name);
+			try {
+				if ((await this.fileService.readFile(candidate)).value.toString().trim()) {
+					return candidate;
+				}
+			} catch { /* continue to the lower-precedence file */ }
+		}
+		return undefined;
+	}
+
+	/**
+	 * Resolve the standard instruction files without ever modifying them. Codex's global
+	 * AGENTS.override.md/AGENTS.md convention is added to the workbench-wide discovery service.
+	 * Trust is enforced here before asking that service for workspace and parent-repository files.
+	 */
+	private async agentInstructionSources(): Promise<IAgentInstructionSource[]> {
+		const result: IAgentInstructionSource[] = [];
+		const seen = new Set<string>();
+		const add = (uri: URI, label: string, scope: RuleScope) => {
+			const key = uri.toString();
+			if (!seen.has(key)) {
+				seen.add(key);
+				result.push({ uri, label, scope });
+			}
+		};
+
+		if (this.userHome) {
+			const global = await this.firstNonEmpty(joinPath(this.userHome, '.codex'), ['AGENTS.override.md', 'AGENTS.md']);
+			if (global) {
+				add(global, `~/.codex/${basename(global)}`, 'global');
+			}
+		}
+
+		if (this.workspaceTrust && !this.workspaceTrust.isWorkspaceTrusted()) {
+			return result;
+		}
+
+		let discovered: URI[] = [];
+		if (this.promptsService) {
+			try {
+				discovered = (await this.promptsService.listAgentInstructions(CancellationToken.None))
+					.filter(file => file.type === AgentInstructionFileType.agentsMd)
+					.map(file => file.uri);
+			} catch {
+				// Fall through to workspace-root discovery below.
+			}
+		}
+
+		if (!discovered.length) {
+			for (const folder of this.contextService.getWorkspace().folders) {
+				const instruction = await this.firstNonEmpty(folder.uri, ['AGENTS.override.md', 'AGENTS.md']);
+				if (instruction) {
+					discovered.push(instruction);
+				}
+			}
+		}
+
+		for (const uri of discovered.sort((a, b) => a.toString().localeCompare(b.toString()))) {
+			const root = dirname(uri);
+			const selected = await this.firstNonEmpty(root, ['AGENTS.override.md', basename(uri)]);
+			if (!selected) {
+				continue;
+			}
+			const folder = this.contextService.getWorkspaceFolder(selected);
+			const relative = folder ? relativePath(folder.uri, selected) : undefined;
+			add(selected, folder ? `${folder.name}/${relative ?? basename(selected)}` : selected.path, 'project');
+		}
+		return result;
+	}
+
 	async buildPromptBlock(): Promise<string> {
-		const rules = await this.list();
-		if (!rules.length) {
+		const [allRules, instructions] = await Promise.all([this.list(), this.agentInstructionSources()]);
+		const rules = this.workspaceTrust && !this.workspaceTrust.isWorkspaceTrusted()
+			? allRules.filter(rule => rule.scope === 'global')
+			: allRules;
+		if (!rules.length && !instructions.length) {
 			return '';
 		}
 		let used = 0;
-		const blocks: string[] = [];
-		for (const rule of rules) {
+		let exhausted = false;
+		const ruleBlocks: string[] = [];
+		const instructionBlocks: string[] = [];
+		const readBody = async (uri: URI, truncatedLabel: string): Promise<string | undefined> => {
 			let body = '';
-			try { body = (await this.fileService.readFile(rule.uri)).value.toString().trim(); } catch { continue; }
+			try { body = (await this.fileService.readFile(uri)).value.toString().trim(); } catch { return undefined; }
 			if (!body) {
-				continue;
+				return undefined;
 			}
 			if (body.length > RULE_FILE_CAP) {
-				body = body.slice(0, RULE_FILE_CAP) + '\n…(regla truncada)';
+				body = body.slice(0, RULE_FILE_CAP) + `\n…(${truncatedLabel} truncated)`;
 			}
-			if (used + body.length > RULE_TOTAL_CAP) {
-				blocks.push('…(Rules budget exhausted; consolidate redundant rules)');
+			const bodyBytes = VSBuffer.fromString(body).byteLength;
+			if (used + bodyBytes > RULE_TOTAL_CAP) {
+				exhausted = true;
+				return undefined;
+			}
+			used += bodyBytes;
+			return body;
+		};
+		// Reserve the bounded budget for the interoperable AGENTS.md contract first;
+		// legacy OpenIDE rules are still rendered before it so project guidance stays last.
+		for (const instruction of instructions) {
+			const body = await readBody(instruction.uri, 'AGENTS.md');
+			if (exhausted) {
 				break;
 			}
-			used += body.length;
-			blocks.push(`### ${rule.name} [${rule.scope}]\n${body}`);
+			if (body) {
+				instructionBlocks.push(`### ${instruction.label} [${instruction.scope}]\n${body}`);
+			}
 		}
-		return blocks.length
-			? '\n\nMANDATORY OPENIDE RULES (follow ALL of them. You may only change them if the user asked for it explicitly in this turn):\n' + blocks.join('\n\n')
-			: '';
+		if (!exhausted) {
+			for (const rule of rules) {
+				const body = await readBody(rule.uri, 'rule');
+				if (exhausted) {
+					break;
+				}
+				if (body) {
+					ruleBlocks.push(`### ${rule.name} [${rule.scope}]\n${body}`);
+				}
+			}
+		}
+		const sections: string[] = [];
+		if (ruleBlocks.length) {
+			sections.push('MANDATORY OPENIDE RULES (follow ALL of them. You may only change them if the user asked for it explicitly in this turn):\n' + ruleBlocks.join('\n\n'));
+		}
+		if (instructionBlocks.length) {
+			sections.push('AGENTS.MD INSTRUCTIONS (global first, project entries later; the current user request prevails. Do not edit these files unless explicitly asked):\n' + instructionBlocks.join('\n\n'));
+		}
+		if (exhausted) {
+			sections.push('…(Instruction budget exhausted; consolidate redundant rules and AGENTS.md files)');
+		}
+		return sections.length ? '\n\n' + sections.join('\n\n') : '';
 	}
 }

@@ -157,6 +157,8 @@ import { OpenideVoiceService } from './openideVoiceService.js';
 import { OpenideWebResearch } from './openideWebResearch.js';
 
 import { IWorkingCopyService } from '../../../services/workingCopy/common/workingCopyService.js';
+import { IAgentPluginService } from '../../chat/common/plugins/agentPluginService.js';
+import { IPromptsService } from '../../chat/common/promptSyntax/service/promptsService.js';
 import { IOpenideAgentRunStateService } from '../common/openideAgentRunState.js';
 import { IOpenidePickerGroup,IOpenidePickerModel } from '../common/openidePickerModels.js';
 import { IOpenidePickerPreferencesService } from './openidePickerPreferencesService.js';
@@ -833,7 +835,9 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 		@ICodebaseMemoryService private readonly codebaseMemory: ICodebaseMemoryService,
 		@IOpenideCanvasService private readonly canvasService: IOpenideCanvasService,
 						@IOpenideUsageService private readonly usageService: IOpenideUsageService,
-						@IEditorService private readonly editorService: IEditorService,
+		@IEditorService private readonly editorService: IEditorService,
+		@IAgentPluginService agentPluginService: IAgentPluginService,
+		@IPromptsService promptsService: IPromptsService,
 		@ISubagentExecutionService private readonly subagentExecution: ISubagentExecutionService,
 		@ISubagentRoutingService private readonly subagentRouting: ISubagentRoutingService,
 		@ISubagentPermissionService private readonly subagentPermissions: ISubagentPermissionService,
@@ -843,8 +847,9 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 	) {
 		super();
 		this.memory = this._register(new OpenideAgentMemory(fileService, contextService, environmentService, configurationService, nativeServices.host, workingCopyService, workspaceTrust));
-		this.skills = new OpenideAgentSkills(fileService, contextService, configurationService, joinPath(pathService.userHome({ preferLocal: true }), '.config', 'agents', 'skills'));
-		this.rules = new OpenideAgentRules(fileService, contextService, environmentService);
+		const userHome = pathService.userHome({ preferLocal: true });
+		this.skills = new OpenideAgentSkills(fileService, contextService, configurationService, joinPath(userHome, '.agents', 'skills'), agentPluginService, joinPath(userHome, '.config', 'agents', 'skills'), workspaceTrust);
+		this.rules = new OpenideAgentRules(fileService, contextService, environmentService, promptsService, workspaceTrust, userHome);
 		// ALL agent traffic (providers, OAuth, catalog) goes through the MAIN channel
 		// (Electron net, no CORS and with streaming) — the renderer's fetch crashes against
 		// CORS en endpoints como chatgpt.com/backend-api ("Failed to fetch").
@@ -1366,7 +1371,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			kind: 'skill',
 			name: skill.name,
 			description: skill.description,
-			origin: skill.scope === 'global' ? 'Personal' : 'Project',
+			origin: skill.origin ?? (skill.scope === 'global' ? 'Personal' : 'Project'),
 		}));
 		for (const def of this.tools.getDefinitions()) {
 			const tool = this.tools.getTool(def.name);
@@ -1852,7 +1857,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 				description: 'Load the full body of a project skill (the ones in the system prompt index). Use it BEFORE taking on a task that matches a skill description.',
 				parameters: {
 					type: 'object',
-					properties: { name: { type: 'string', description: 'Skill name (kebab-case, as listed in the index)' } },
+					properties: { name: { type: 'string', description: 'Exact skill name as listed in the index (plugin skills may be namespaced with a colon)' } },
 					required: ['name'],
 				},
 			},
@@ -1869,7 +1874,7 @@ export class OpenideAgentService extends Disposable implements IOpenideAgentServ
 			risk: 'safe' as const,
 			def: {
 				name: 'skill_save',
-				description: 'Create or update a project skill (.openide/skills/<name>/SKILL.md). Store reusable PROCEDURES: a convention you discovered, a setup/recipe that repeats, the solution to a hard problem. The description must say what it does and WHEN to use it (with keywords) — it is all the index shows. Prefer updating an existing skill over creating a similar one.',
+				description: 'Create or update a portable project skill (.agents/skills/<name>/SKILL.md). Store reusable PROCEDURES: a convention you discovered, a setup/recipe that repeats, the solution to a hard problem. The description must say what it does and WHEN to use it (with keywords) — it is all the index shows. Prefer updating an existing skill over creating a similar one.',
 				parameters: {
 					type: 'object',
 					properties: {

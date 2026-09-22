@@ -9,7 +9,7 @@ import { CancellationToken, CancellationTokenSource } from '../../../../base/com
 import { isCancellationError } from '../../../../base/common/errors.js';
 import { Lazy } from '../../../../base/common/lazy.js';
 import { revive } from '../../../../base/common/marshalling.js';
-import { dirname, isEqual, isEqualOrParent, joinPath } from '../../../../base/common/resources.js';
+import { dirname, isEqual, isEqualOrParent, joinPath, relativePath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
@@ -26,7 +26,9 @@ import { IAgentPluginRepositoryService, IEnsureRepositoryOptions, IPullRepositor
 import { IMarketplacePlugin, IMarketplaceReference, IPluginSourceDescriptor, MarketplaceReferenceKind, MarketplaceType, PluginSourceKind } from '../common/plugins/pluginMarketplaceService.js';
 import { IPluginSource } from '../common/plugins/pluginSource.js';
 import { IPluginGitService } from '../common/plugins/pluginGitService.js';
-import { GitHubPluginSource, GitUrlPluginSource, NpmPluginSource, PipPluginSource, RelativePathPluginSource } from './pluginSources.js';
+import { IPluginInstallProvenance, runPluginInstallTransaction } from '../common/plugins/pluginInstallTransaction.js';
+import { isPortablePluginPathSegment } from '../common/plugins/pluginPathValidation.js';
+import { GitHubPluginSource, GitUrlPluginSource, NpmPluginSource, PipPluginSource, RegistryPluginSource, RelativePathPluginSource } from './pluginSources.js';
 
 const MARKETPLACE_INDEX_STORAGE_KEY = 'chat.plugins.marketplaces.index.v1';
 
@@ -40,6 +42,15 @@ interface IMarketplaceIndexEntry {
 }
 
 type IStoredMarketplaceIndex = Dto<Record<string, IMarketplaceIndexEntry>>;
+
+function marketplaceInstallProvenance(marketplace: IMarketplaceReference): IPluginInstallProvenance {
+	return {
+		sourceKind: 'marketplace',
+		source: marketplace.rawValue,
+		...(marketplace.ref ? { ref: marketplace.ref } : {}),
+		marketplace: marketplace.displayLabel,
+	};
+}
 
 export class AgentPluginRepositoryService implements IAgentPluginRepositoryService {
 	declare readonly _serviceBrand: undefined;
@@ -89,6 +100,7 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 			[PluginSourceKind.GitUrl, instantiationService.createInstance(GitUrlPluginSource)],
 			[PluginSourceKind.Npm, instantiationService.createInstance(NpmPluginSource)],
 			[PluginSourceKind.Pip, instantiationService.createInstance(PipPluginSource)],
+			[PluginSourceKind.Registry, instantiationService.createInstance(RegistryPluginSource)],
 		]);
 	}
 
@@ -127,6 +139,9 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 	}
 
 	async ensureRepository(marketplace: IMarketplaceReference, options?: IEnsureRepositoryOptions): Promise<URI> {
+		if (marketplace.kind === MarketplaceReferenceKind.HttpRegistry) {
+			throw new Error(`HTTP registry '${marketplace.displayLabel}' does not have a local git repository`);
+		}
 		await this._migrationDone;
 		const repoDir = this.getRepositoryUri(marketplace, options?.marketplaceType);
 		return this._cloneSequencer.queue(repoDir.fsPath, async () => {
@@ -161,7 +176,7 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 			return false;
 		}
 
-		if (marketplace.kind === MarketplaceReferenceKind.LocalFileUri || SHA_REF_PATTERN.test(marketplace.ref ?? '')) {
+		if (marketplace.kind === MarketplaceReferenceKind.LocalFileUri || marketplace.kind === MarketplaceReferenceKind.HttpRegistry || SHA_REF_PATTERN.test(marketplace.ref ?? '')) {
 			return false;
 		}
 
@@ -180,7 +195,7 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 	 */
 	private async _refreshRepository(repoDir: URI, marketplace: IMarketplaceReference, token: CancellationToken | undefined): Promise<number | undefined> {
 		try {
-			await this._pluginGit.pull(repoDir, token);
+			await this._pullRepositoryTransaction(repoDir, marketplace, token);
 		} catch (err) {
 			if (isCancellationError(err)) {
 				return undefined;
@@ -192,6 +207,9 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 	}
 
 	async pullRepository(marketplace: IMarketplaceReference, options?: IPullRepositoryOptions): Promise<boolean> {
+		if (marketplace.kind === MarketplaceReferenceKind.HttpRegistry) {
+			return false;
+		}
 		const repoDir = this.getRepositoryUri(marketplace, options?.marketplaceType);
 		const repoExists = await this._fileService.exists(repoDir);
 		if (!repoExists) {
@@ -202,9 +220,13 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 		const updateLabel = options?.pluginName ?? marketplace.displayLabel;
 
 		try {
-			const changed = options?.silent
-				? await this._pluginGit.pull(repoDir)
-				: await this._pullWithProgress(repoDir, updateLabel);
+			const changed = marketplace.kind === MarketplaceReferenceKind.LocalFileUri
+				? options?.silent
+					? await this._pluginGit.pull(repoDir)
+					: await this._pullWithProgress(repoDir, marketplace, updateLabel, true)
+				: options?.silent
+					? await this._pullRepositoryTransaction(repoDir, marketplace)
+					: await this._pullWithProgress(repoDir, marketplace, updateLabel, false);
 
 			// An explicit pull leaves the clone exactly as fresh as a stale
 			// refresh would, so record it — otherwise flows that pull and then
@@ -235,7 +257,7 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 	}
 
 	/** Pulls a clone behind a cancellable progress notification. */
-	private async _pullWithProgress(repoDir: URI, updateLabel: string): Promise<boolean> {
+	private async _pullWithProgress(repoDir: URI, marketplace: IMarketplaceReference, updateLabel: string, mutateInPlace: boolean): Promise<boolean> {
 		const cts = new CancellationTokenSource();
 		try {
 			return await this._progressService.withProgress(
@@ -244,12 +266,26 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 					title: localize('updatingPlugin', "Updating plugin '{0}'...", updateLabel),
 					cancellable: true,
 				},
-				() => this._pluginGit.pull(repoDir, cts.token),
+				() => mutateInPlace
+					? this._pluginGit.pull(repoDir, cts.token)
+					: this._pullRepositoryTransaction(repoDir, marketplace, cts.token),
 				() => cts.dispose(true),
 			);
 		} finally {
 			cts.dispose();
 		}
+	}
+
+	private async _pullRepositoryTransaction(repoDir: URI, marketplace: IMarketplaceReference, token?: CancellationToken): Promise<boolean> {
+		const result = await runPluginInstallTransaction(this._fileService, {
+			target: repoDir,
+			provenance: marketplaceInstallProvenance(marketplace),
+			prepare: async staging => {
+				await this._fileService.copy(repoDir, staging, false);
+				await this._pluginGit.pull(staging, token);
+			},
+		});
+		return result.changed;
 	}
 
 	private async _purgeAndRecloneMarketplace(marketplace: IMarketplaceReference, marketplaceType: MarketplaceType | undefined, label: string): Promise<void> {
@@ -364,10 +400,15 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 					title: progressTitle,
 					cancellable: true,
 				},
-				async () => {
-					await this._fileService.createFolder(dirname(repoDir));
-					await this._pluginGit.cloneRepository(cloneUrl, repoDir, ref, cts.token);
-				},
+				() => runPluginInstallTransaction(this._fileService, {
+					target: repoDir,
+					provenance: {
+						sourceKind: 'marketplace',
+						source: cloneUrl,
+						...(ref ? { ref } : {}),
+					},
+					prepare: staging => this._pluginGit.cloneRepository(cloneUrl, staging, ref, cts.token),
+				}),
 				() => cts.dispose(true),
 			);
 		} catch (err) {
@@ -397,6 +438,7 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 	async ensurePluginSource(plugin: IMarketplacePlugin, options?: IEnsureRepositoryOptions): Promise<URI> {
 		await this._migrationDone;
 		const repo = this.getPluginSource(plugin.sourceDescriptor.kind);
+		this._assertSafePluginSourceTarget(repo.getCleanupTarget(this._cacheRoot, plugin.sourceDescriptor), plugin.sourceDescriptor.kind);
 		if (plugin.sourceDescriptor.kind === PluginSourceKind.RelativePath) {
 			return this.ensureRepository(plugin.marketplaceReference, options);
 		}
@@ -405,6 +447,7 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 
 	async updatePluginSource(plugin: IMarketplacePlugin, options?: IPullRepositoryOptions): Promise<boolean> {
 		const repo = this.getPluginSource(plugin.sourceDescriptor.kind);
+		this._assertSafePluginSourceTarget(repo.getCleanupTarget(this._cacheRoot, plugin.sourceDescriptor), plugin.sourceDescriptor.kind);
 		if (plugin.sourceDescriptor.kind === PluginSourceKind.RelativePath) {
 			return this.pullRepository(plugin.marketplaceReference, options);
 		}
@@ -412,6 +455,9 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 	}
 
 	async fetchRepository(marketplace: IMarketplaceReference): Promise<boolean> {
+		if (marketplace.kind === MarketplaceReferenceKind.HttpRegistry) {
+			return false;
+		}
 		const repoDir = this.getRepositoryUri(marketplace);
 		const repoExists = await this._fileService.exists(repoDir);
 		if (!repoExists) {
@@ -432,6 +478,10 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 		const repo = this.getPluginSource(plugin.sourceDescriptor.kind);
 		const cleanupDir = repo.getCleanupTarget(this._cacheRoot, plugin.sourceDescriptor);
 		if (!cleanupDir) {
+			return;
+		}
+		if (!this._isSafePluginSourceTarget(cleanupDir)) {
+			this._logService.warn(`[${plugin.sourceDescriptor.kind}] Refusing to remove plugin cache outside agent-plugins home: ${cleanupDir.toString()}`);
 			return;
 		}
 
@@ -466,6 +516,20 @@ export class AgentPluginRepositoryService implements IAgentPluginRepositoryServi
 		} catch (err) {
 			this._logService.warn(`[${plugin.sourceDescriptor.kind}] Failed to cleanup plugin source:`, err);
 		}
+	}
+
+	private _assertSafePluginSourceTarget(target: URI | undefined, kind: PluginSourceKind): void {
+		if (target && !this._isSafePluginSourceTarget(target)) {
+			throw new Error(`[${kind}] Plugin source target must be a strict descendant of agent-plugins home: ${target.toString()}`);
+		}
+	}
+
+	private _isSafePluginSourceTarget(target: URI): boolean {
+		if (isEqual(target, this._cacheRoot) || !isEqualOrParent(target, this._cacheRoot)) {
+			return false;
+		}
+		const relative = relativePath(this._cacheRoot, target);
+		return relative !== undefined && relative.length > 0 && relative.split('/').every(isPortablePluginPathSegment);
 	}
 
 	/**

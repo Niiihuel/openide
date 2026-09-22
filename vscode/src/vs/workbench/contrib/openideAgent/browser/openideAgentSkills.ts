@@ -5,8 +5,8 @@
 
 /*---------------------------------------------------------------------------------------------
  *  OpenIDE — agent skills (Anthropic's Agent Skills standard, agentskills.io).
- *  Each skill is either our own `.openide/skills/<name>/SKILL.md` directory or a standard
- *  `.agents/skills/<name>/SKILL.md` install (Skills CLI), with minimal YAML frontmatter
+ *  Each skill is a standard `.agents/skills/<name>/SKILL.md` install (Skills CLI) or a legacy
+ *  `.openide/skills/<name>/SKILL.md` directory, with minimal YAML frontmatter
  *  (name + description) and a markdown body. Progressive disclosure: ONLY the name+description
  *  index goes to the system prompt; the body is loaded on demand with the skill_view tool. The
  *  modelo CREA/actualiza skills con skill_save (convenciones, configs repetidas, soluciones
@@ -19,12 +19,17 @@ import { URI } from '../../../../base/common/uri.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
+import { isContributionEnabled } from '../../chat/common/enablement.js';
+import { getCanonicalPluginCommandId, IAgentPluginService } from '../../chat/common/plugins/agentPluginService.js';
 
 export interface ISkillInfo {
 	readonly name: string;
 	readonly description: string;
-	readonly location: 'builtin' | 'openide' | 'agents';
+	readonly location: 'builtin' | 'openide' | 'agents' | 'plugin';
 	readonly scope: 'project' | 'global';
+	/** Human-readable source shown in capability and settings surfaces. */
+	readonly origin?: string;
 	/** In the `openide.agent.disabledSkills` exclusion list: out of the index and out of skill_view. */
 	readonly disabled: boolean;
 }
@@ -123,15 +128,19 @@ Before delivering, check hierarchy, reasonable responsiveness, absence of TUI/ne
 
 export class OpenideAgentSkills {
 	/** Current name → file/directory resolution. Refreshed on list, it allows operating
-	 *  indistinctly on OpenIDE's own skills or ones installed by the Skills CLI. */
+	 *  indistinctly on legacy OpenIDE skills or standard Agent Skills. */
 	private readonly resolvedSkillFiles = new Map<string, URI>();
 	private readonly resolvedSkillDirs = new Map<string, URI>();
+	private readonly readOnlySkillNames = new Set<string>();
 
 	constructor(
 		private readonly fileService: IFileService,
 		private readonly contextService: IWorkspaceContextService,
 		private readonly configurationService: IConfigurationService,
 		private readonly globalSkillsRoot: URI,
+		private readonly pluginService?: IAgentPluginService,
+		private readonly legacyGlobalSkillsRoot?: URI,
+		private readonly workspaceTrust?: IWorkspaceTrustManagementService,
 	) { }
 
 	private skillsRoot(): URI | undefined {
@@ -149,9 +158,14 @@ export class OpenideAgentSkills {
 		return root ? joinPath(root, name, 'SKILL.md') : undefined;
 	}
 
+	private agentsSkillUri(name: string): URI | undefined {
+		const root = this.agentsSkillsRoot();
+		return root ? joinPath(root, name, 'SKILL.md') : undefined;
+	}
+
 	/** URI of a skill's SKILL.md (the extensions UI opens it in a normal editor). */
 	fileUri(name: string): URI | undefined {
-		return NAME_RE.test(name) ? (this.resolvedSkillFiles.get(name) ?? this.skillUri(name)) : undefined;
+		return this.resolvedSkillFiles.get(name) ?? (NAME_RE.test(name) ? this.agentsSkillUri(name) ?? this.skillUri(name) : undefined);
 	}
 
 	/** Set of disabled skills (the settings exclusion list). */
@@ -207,6 +221,7 @@ export class OpenideAgentSkills {
 	/** Lists the workspace skills (lightweight index: head frontmatter only). By default it
 	 *  FILTERS the disabled ones (that is what the prompt sees); the UI asks for includeDisabled=true. */
 	async listSkills(includeDisabled = false): Promise<ISkillInfo[]> {
+		const workspaceTrusted = !this.workspaceTrust || this.workspaceTrust.isWorkspaceTrusted();
 		const disabledSet = this.disabledSet();
 		const builtinDisabled = disabledSet.has('openide-canvas');
 		const builtin: ISkillInfo[] = builtinDisabled && !includeDisabled ? [] : [{ name: 'openide-canvas', description: (this.parseFrontmatter(BUILTIN_CANVAS_SKILL).description ?? '').slice(0, INDEX_DESC_CAP), disabled: builtinDisabled, location: 'builtin', scope: 'global' }];
@@ -217,14 +232,19 @@ export class OpenideAgentSkills {
 		}
 		this.resolvedSkillFiles.clear();
 		this.resolvedSkillDirs.clear();
+		this.readOnlySkillNames.clear();
 		const out: ISkillInfo[] = [...builtin];
 		const seen = new Set(out.map(skill => skill.name));
 		for (const source of [
-			{ root: openideRoot, location: 'openide' as const, scope: 'project' as const },
 			{ root: agentsRoot, location: 'agents' as const, scope: 'project' as const },
+			{ root: openideRoot, location: 'openide' as const, scope: 'project' as const },
 			{ root: this.globalSkillsRoot, location: 'agents' as const, scope: 'global' as const },
+			{ root: this.legacyGlobalSkillsRoot, location: 'openide' as const, scope: 'global' as const },
 		]) {
 			if (!source.root) {
+				continue;
+			}
+			if (source.scope === 'project' && !workspaceTrusted) {
 				continue;
 			}
 			let children;
@@ -243,14 +263,12 @@ export class OpenideAgentSkills {
 					const fm = this.parseFrontmatter(content);
 					const description = (fm.description ?? '').slice(0, INDEX_DESC_CAP);
 					const name = fm.name && NAME_RE.test(fm.name) ? fm.name : child.name;
-					if (seen.has(name) && !includeDisabled) {
-						continue; // una skill propia de .openide tiene prioridad sobre la universal
+					if (seen.has(name)) {
+						continue; // Earlier sources have priority; the portable .agents layout comes first.
 					}
-					if (!seen.has(name)) {
-						seen.add(name);
-						this.resolvedSkillFiles.set(name, file);
-						this.resolvedSkillDirs.set(name, child.resource);
-					}
+					seen.add(name);
+					this.resolvedSkillFiles.set(name, file);
+					this.resolvedSkillDirs.set(name, child.resource);
 					const disabled = disabledSet.has(name) || disabledSet.has(child.name);
 					if (disabled && !includeDisabled) {
 						continue;
@@ -264,24 +282,58 @@ export class OpenideAgentSkills {
 				}
 			}
 		}
+
+		for (const plugin of this.pluginService?.plugins.get() ?? []) {
+			if (!isContributionEnabled(plugin.enablement.get())) {
+				continue;
+			}
+			const scope = this.contextService.getWorkspaceFolder(plugin.uri) ? 'project' : 'global';
+			if (scope === 'project' && !workspaceTrusted) {
+				continue;
+			}
+			for (const skill of plugin.skills.get()) {
+				const name = getCanonicalPluginCommandId(plugin, skill.name);
+				if (!name || seen.has(name)) {
+					continue;
+				}
+				seen.add(name);
+				this.resolvedSkillFiles.set(name, skill.uri);
+				this.readOnlySkillNames.add(name);
+				const disabled = disabledSet.has(name);
+				if (disabled && !includeDisabled) {
+					continue;
+				}
+				out.push({
+					name,
+					description: (skill.description ?? '').slice(0, INDEX_DESC_CAP),
+					disabled,
+					location: 'plugin',
+					scope,
+					origin: `Plugin · ${plugin.label}`,
+				});
+				if (out.length >= INDEX_MAX_SKILLS && !includeDisabled) {
+					return out;
+				}
+			}
+		}
 		return out;
 	}
 
 	/** Full content of a skill (for skill_view). Disabled ⇒ an error message (the only consumer is
 	 *  the tool, which returns it verbatim to the model). */
 	async readSkill(name: string): Promise<string | undefined> {
-		if (!NAME_RE.test(name)) {
-			return undefined;
-		}
 		if (name === 'openide-canvas') {
 			return this.disabledSet().has(name) ? `Error: skill "${name}" is disabled.` : BUILTIN_CANVAS_SKILL;
 		}
 		let uri = this.resolvedSkillFiles.get(name);
 		if (!uri) {
 			await this.listSkills(true);
-			uri = this.resolvedSkillFiles.get(name) ?? this.skillUri(name);
+			uri = this.resolvedSkillFiles.get(name);
+			if (!uri && (!this.workspaceTrust || this.workspaceTrust.isWorkspaceTrusted())) {
+				uri = this.agentsSkillUri(name) ?? this.skillUri(name);
+			}
 		}
-		if (!uri) {
+		if (!uri || (!NAME_RE.test(name) && !this.readOnlySkillNames.has(name))) {
 			return undefined;
 		}
 		if (this.disabledSet().has(name)) {
@@ -299,8 +351,11 @@ export class OpenideAgentSkills {
 		if (!NAME_RE.test(name) || name === 'openide-canvas') {
 			return false;
 		}
-		if (!this.resolvedSkillDirs.has(name)) {
+		if (!this.resolvedSkillDirs.has(name) && !this.readOnlySkillNames.has(name)) {
 			await this.listSkills(true);
+		}
+		if (this.readOnlySkillNames.has(name)) {
+			return false;
 		}
 		const dir = this.resolvedSkillDirs.get(name) ?? (this.skillsRoot() ? joinPath(this.skillsRoot()!, name) : undefined);
 		if (!dir) {
@@ -314,8 +369,11 @@ export class OpenideAgentSkills {
 		}
 	}
 
-	/** Creates or updates a skill (used by the MODEL via skill_save). */
+	/** Creates or updates a portable Agent Skill (used by the MODEL via skill_save). */
 	async saveSkill(name: string, description: string, content: string): Promise<string> {
+		if (this.workspaceTrust && !this.workspaceTrust.isWorkspaceTrusted()) {
+			return 'Error: project skills are disabled until this workspace is trusted.';
+		}
 		if (!NAME_RE.test(name)) {
 			return `Error: invalid skill name "${name}" (kebab-case: a-z, 0-9 and hyphens; no -- and no hyphen at either end).`;
 		}
@@ -325,14 +383,18 @@ export class OpenideAgentSkills {
 		if (!content.trim()) {
 			return 'Error: content is empty.';
 		}
-		const uri = this.skillUri(name);
-		if (!uri) {
-			return 'Error: no folder is open (skills live in .openide/skills inside the workspace).';
+		const root = this.agentsSkillsRoot();
+		const uri = this.agentsSkillUri(name);
+		if (!root || !uri) {
+			return 'Error: no folder is open (skills live in .agents/skills inside the workspace).';
 		}
 		const existed = await this.fileService.exists(uri);
 		const doc = `---\nname: ${name}\ndescription: ${description.trim().replace(/\n+/g, ' ')}\n---\n\n${content.trim()}\n`;
 		await this.fileService.writeFile(uri, VSBuffer.fromString(doc));
-		return `OK: skill "${name}" ${existed ? 'updated' : 'created'} at .openide/skills/${name}/SKILL.md.`;
+		this.resolvedSkillFiles.set(name, uri);
+		this.resolvedSkillDirs.set(name, joinPath(root, name));
+		this.readOnlySkillNames.delete(name);
+		return `OK: skill "${name}" ${existed ? 'updated' : 'created'} at .agents/skills/${name}/SKILL.md.`;
 	}
 
 	/** System prompt block: compact index + creation guide (progressive disclosure tier 1). */
@@ -343,6 +405,6 @@ export class OpenideAgentSkills {
 			return '\n\nPROJECT SKILLS: none yet. ' + guide;
 		}
 		const index = skills.map(s => `- ${s.name}: ${s.description || '(no description)'}`).join('\n');
-		return '\n\nPROJECT SKILLS (reusable procedures in .openide/skills and .agents/skills):\nBefore tackling the task, scan this list; if a skill applies, you MUST load it with skill_view before continuing.\n' + index + '\n' + guide;
+		return '\n\nPROJECT SKILLS (portable procedures in .agents/skills; legacy .openide/skills remains readable):\nBefore tackling the task, scan this list; if a skill applies, you MUST load it with skill_view before continuing.\n' + index + '\n' + guide;
 	}
 }

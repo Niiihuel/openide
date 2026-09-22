@@ -8,14 +8,19 @@ import { VSBuffer } from '../../../../../base/common/buffer.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { revive } from '../../../../../base/common/marshalling.js';
 import { IObservable, ITransaction, observableValue } from '../../../../../base/common/observable.js';
-import { isEqual, joinPath } from '../../../../../base/common/resources.js';
+import { isEqual, isEqualOrParent, joinPath } from '../../../../../base/common/resources.js';
 import { URI, UriComponents } from '../../../../../base/common/uri.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IStorageService, StorageScope } from '../../../../../platform/storage/common/storage.js';
+import type { IPluginSourceDescriptor, MarketplaceType } from './pluginMarketplaceService.js';
+import { MarketplaceReferenceKind, parseMarketplaceReference } from './marketplaceReference.js';
+import { normalizePluginTreeDigest } from './pluginInstallTransaction.js';
+import { getRegistryPluginInstallUri, isCanonicalPluginRelativePath, isPortablePluginPackageName, isPortablePluginPathSegment } from './pluginPathValidation.js';
+import { parsePluginPublisherIdentity, parsePluginReleaseManifest, parsePluginReleaseSignature } from './pluginSupplyChain.js';
 
 const INSTALLED_JSON_FILENAME = 'installed.json';
-const INSTALLED_JSON_VERSION = 1;
+const INSTALLED_JSON_VERSION = 2;
 
 /** Legacy storage key used before migration to file-backed store. */
 const LEGACY_INSTALLED_PLUGINS_STORAGE_KEY = 'chat.plugins.installed.v1';
@@ -23,16 +28,26 @@ const LEGACY_INSTALLED_PLUGINS_STORAGE_KEY = 'chat.plugins.installed.v1';
 const LEGACY_MARKETPLACE_INDEX_STORAGE_KEY = 'chat.plugins.marketplaces.index.v1';
 
 /**
- * Minimal entry stored in `installed.json`. URIs are serialised as strings
- * so that external tools can read and write the file without depending on
- * VS Code internal URI representations. The optional `name` identifies the
- * marketplace plugin and lets VS Code re-read the full descriptor from the
- * marketplace when needed.
+ * Exact installed metadata persisted independently of the mutable marketplace
+ * channel. This prevents a restart from silently replacing the installed
+ * version, signed release, or digest with whatever the catalog serves later.
  */
+export interface IStoredMarketplacePluginMetadata {
+	readonly name: string;
+	readonly description: string;
+	readonly version: string;
+	readonly source: string;
+	readonly sourceDescriptor: IPluginSourceDescriptor;
+	readonly marketplace: string;
+	readonly marketplaceType: MarketplaceType;
+	readonly readmeUri?: string;
+}
+
 interface IInstalledJsonEntry {
 	readonly pluginUri: string;
 	readonly marketplace: string;
 	readonly name?: string;
+	readonly plugin?: IStoredMarketplacePluginMetadata;
 }
 
 /**
@@ -50,6 +65,7 @@ export interface IStoredInstalledPlugin {
 	readonly pluginUri: URI;
 	readonly marketplace: string;
 	readonly name?: string;
+	readonly plugin?: IStoredMarketplacePluginMetadata;
 }
 
 /**
@@ -58,10 +74,9 @@ export interface IStoredInstalledPlugin {
  * the installed-plugin manifest discoverable by external tools (CLIs,
  * other editors, etc.) without depending on VS Code internals.
  *
- * The on-disk format stores only the plugin URI (as a string), marketplace
- * identifier, and plugin name. Full plugin metadata (description, source
- * descriptor, etc.) is read from marketplace data by the discovery layer -
- * keeping a single source of truth.
+ * Version 2 stores the plugin URI plus the exact marketplace descriptor used
+ * for installation. Version 1 identity-only files remain readable and are
+ * hydrated from their marketplace when possible.
  *
  * On construction the store:
  * 1. Attempts to read `installed.json` from the agent-plugins directory.
@@ -133,19 +148,50 @@ export class FileBackedInstalledPluginsStore extends Disposable {
 
 			const content = await this._fileService.readFile(this._fileUri);
 			const json: IInstalledJson = JSON.parse(content.value.toString());
-			if (!json || !Array.isArray(json.installed)) {
+			if (!json || (json.version !== 1 && json.version !== INSTALLED_JSON_VERSION) || !Array.isArray(json.installed)) {
 				this._logService.warn('[FileBackedInstalledPluginsStore] installed.json has unexpected format, ignoring');
 				return undefined;
 			}
 
-			// Each entry is { pluginUri, marketplace, name? }.
-			return json.installed
-				.filter((entry): entry is IInstalledJsonEntry => typeof entry.pluginUri === 'string' && typeof entry.marketplace === 'string')
-				.map(entry => ({
-					pluginUri: URI.parse(entry.pluginUri),
+			// Version 1 entries contain only identity. Version 2 may additionally
+			// carry the exact descriptor that was verified at install time.
+			const installed: IStoredInstalledPlugin[] = [];
+			for (const rawEntry of json.installed) {
+				const entry = parseInstalledJsonEntry(rawEntry);
+				if (!entry) {
+					this._logService.warn('[FileBackedInstalledPluginsStore] Ignoring malformed installed.json entry');
+					continue;
+				}
+				let pluginUri: URI;
+				try {
+					pluginUri = URI.parse(entry.pluginUri);
+				} catch {
+					this._logService.warn(`[FileBackedInstalledPluginsStore] Ignoring invalid plugin URI '${entry.pluginUri}'`);
+					continue;
+				}
+				const plugin = json.version === INSTALLED_JSON_VERSION && entry.plugin !== undefined
+					? parseStoredPluginMetadata(entry.plugin, entry.marketplace)
+					: undefined;
+				if (json.version === INSTALLED_JSON_VERSION && entry.plugin !== undefined && !plugin) {
+					this._logService.warn(`[FileBackedInstalledPluginsStore] Ignoring invalid stored metadata for ${pluginUri.toString()}`);
+					continue;
+				}
+				if (plugin && entry.name !== undefined && entry.name !== plugin.name) {
+					this._logService.warn(`[FileBackedInstalledPluginsStore] Ignoring installed entry whose name does not match its stored metadata: ${pluginUri.toString()}`);
+					continue;
+				}
+				if (!this._isAllowedPluginUri(pluginUri, entry.pluginUri, entry.marketplace, plugin)) {
+					this._logService.warn(`[FileBackedInstalledPluginsStore] Ignoring plugin with an unsafe install URI: ${pluginUri.toString()}`);
+					continue;
+				}
+				installed.push({
+					pluginUri,
 					marketplace: entry.marketplace,
-					name: typeof entry.name === 'string' ? entry.name : undefined,
-				}));
+					name: entry.name,
+					plugin,
+				});
+			}
+			return installed;
 		} catch {
 			return undefined;
 		}
@@ -162,6 +208,7 @@ export class FileBackedInstalledPluginsStore extends Disposable {
 			pluginUri: e.pluginUri.toString(),
 			marketplace: e.marketplace,
 			...(e.name ? { name: e.name } : {}),
+			...(e.plugin ? { plugin: e.plugin } : {}),
 		}));
 
 		const data: IInstalledJson = {
@@ -239,15 +286,34 @@ export class FileBackedInstalledPluginsStore extends Disposable {
 				return;
 			}
 
-			const migrated: IStoredInstalledPlugin[] = (revive(parsed) as { pluginUri: UriComponents; plugin?: { name?: string; marketplaceReference?: { rawValue?: string } } }[]).map(entry => {
+			const migrated: IStoredInstalledPlugin[] = [];
+			for (const entry of revive(parsed) as { pluginUri: UriComponents; plugin?: Partial<IStoredMarketplacePluginMetadata> & { marketplaceReference?: { rawValue?: string }; readmeUri?: URI } }[]) {
 				const uri = URI.revive(entry.pluginUri);
-				const rebased = this._rebasePluginUri(uri);
-				return {
-					pluginUri: rebased ?? uri,
-					marketplace: entry.plugin?.marketplaceReference?.rawValue ?? '',
-					name: entry.plugin?.name,
-				};
-			}).filter(e => !!e.marketplace);
+				const pluginUri = this._rebasePluginUri(uri) ?? uri;
+				const marketplace = entry.plugin?.marketplaceReference?.rawValue ?? '';
+				if (!entry.plugin || !marketplace) {
+					continue;
+				}
+				const { marketplaceReference: _marketplaceReference, readmeUri, ...legacyMetadata } = entry.plugin;
+				const plugin = parseStoredPluginMetadata({
+					...legacyMetadata,
+					marketplace,
+					sourceDescriptor: legacyMetadata.sourceDescriptor ?? (typeof legacyMetadata.source === 'string'
+						? { kind: 'relativePath', path: legacyMetadata.source }
+						: undefined),
+					...(readmeUri ? { readmeUri: readmeUri.toString() } : {}),
+				}, marketplace);
+				if (!plugin || !this._isAllowedPluginUri(pluginUri, pluginUri.toString(), marketplace, plugin)) {
+					this._logService.warn(`[FileBackedInstalledPluginsStore] Ignoring unsafe legacy installed plugin entry: ${pluginUri.toString()}`);
+					continue;
+				}
+				migrated.push({
+					pluginUri,
+					marketplace,
+					name: plugin.name,
+					plugin,
+				});
+			}
 
 			this._logService.info(`[FileBackedInstalledPluginsStore] Migrating ${migrated.length} plugin(s) from storage to installed.json`);
 
@@ -283,4 +349,250 @@ export class FileBackedInstalledPluginsStore extends Disposable {
 		}
 		return undefined;
 	}
+
+	/**
+	 * Installed entries normally point at managed copies below agentPluginsHome.
+	 * A relative-path plugin from a file:// marketplace is the deliberate
+	 * exception: it remains in that local marketplace, and must resolve exactly
+	 * to the descriptor path below (or at) the configured local root.
+	 */
+	private _isAllowedPluginUri(uri: URI, serializedUri: string, marketplaceRawValue: string, plugin: IStoredMarketplacePluginMetadata | undefined): boolean {
+		if (uri.toString() !== serializedUri || uri.query || uri.fragment) {
+			return false;
+		}
+		const marketplace = parseMarketplaceReference(marketplaceRawValue);
+		if (!marketplace || marketplace.rawValue !== marketplaceRawValue) {
+			return false;
+		}
+		if (marketplace.kind === MarketplaceReferenceKind.LocalFileUri) {
+			const localRoot = marketplace.localRepositoryUri;
+			if (!localRoot || hasTraversalSegment(localRoot.path)) {
+				return false;
+			}
+			if (!plugin) {
+				// Version 1 did not persist a descriptor, so containment is the
+				// strongest compatibility-preserving check available.
+				return isEqual(uri, localRoot) || isEqualOrParent(uri, localRoot);
+			}
+			if (plugin.sourceDescriptor.kind !== 'relativePath') {
+				return false;
+			}
+			const expected = plugin.sourceDescriptor.path ? joinPath(localRoot, plugin.sourceDescriptor.path) : localRoot;
+			return isEqual(uri, expected);
+		}
+		if (plugin?.sourceDescriptor.kind === 'registry' && marketplace.kind !== MarketplaceReferenceKind.HttpRegistry
+			|| plugin?.sourceDescriptor.kind !== 'registry' && marketplace.kind === MarketplaceReferenceKind.HttpRegistry) {
+			return false;
+		}
+		if (plugin?.sourceDescriptor.kind === 'registry') {
+			const descriptor = plugin.sourceDescriptor;
+			const expected = getRegistryPluginInstallUri(this._agentPluginsHome, descriptor.url, descriptor.release.publisherId, descriptor.release.pluginId);
+			return isEqual(uri, expected);
+		}
+		return !isEqual(uri, this._agentPluginsHome) && isEqualOrParent(uri, this._agentPluginsHome);
+	}
+}
+
+function parseInstalledJsonEntry(value: unknown): IInstalledJsonEntry | undefined {
+	if (!isRecord(value) || hasUnknownKeys(value, ['pluginUri', 'marketplace', 'name', 'plugin']) || typeof value.pluginUri !== 'string' || typeof value.marketplace !== 'string' || value.name !== undefined && typeof value.name !== 'string') {
+		return undefined;
+	}
+	return {
+		pluginUri: value.pluginUri,
+		marketplace: value.marketplace,
+		...(value.name === undefined ? {} : { name: value.name }),
+		...(value.plugin === undefined ? {} : { plugin: value.plugin as IStoredMarketplacePluginMetadata }),
+	};
+}
+
+function parseStoredPluginMetadata(value: unknown, marketplaceRawValue: string): IStoredMarketplacePluginMetadata | undefined {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		return undefined;
+	}
+	const candidate = value as Partial<IStoredMarketplacePluginMetadata> & Record<string, unknown>;
+	if (hasUnknownKeys(candidate, ['name', 'description', 'version', 'source', 'sourceDescriptor', 'marketplace', 'marketplaceType', 'readmeUri'])) {
+		return undefined;
+	}
+	if (typeof candidate.name !== 'string'
+		|| !candidate.name
+		|| typeof candidate.description !== 'string'
+		|| typeof candidate.version !== 'string'
+		|| typeof candidate.source !== 'string'
+		|| typeof candidate.marketplace !== 'string'
+		|| candidate.marketplace.length === 0
+		|| candidate.marketplace !== candidate.marketplace.trim()
+		|| candidate.marketplace !== candidate.marketplace.normalize('NFC')
+		|| /[\u0000-\u001f\u007f]/.test(candidate.marketplace)
+		|| (candidate.marketplaceType !== 'copilot' && candidate.marketplaceType !== 'claude' && candidate.marketplaceType !== 'openPlugin')
+		|| candidate.readmeUri !== undefined && typeof candidate.readmeUri !== 'string') {
+		return undefined;
+	}
+	const sourceDescriptor = parseStoredPluginSourceDescriptor(candidate.sourceDescriptor, candidate.name, candidate.version, marketplaceRawValue);
+	if (!sourceDescriptor
+		|| sourceDescriptor.kind === 'relativePath' && candidate.source !== sourceDescriptor.path
+		|| sourceDescriptor.kind !== 'relativePath' && candidate.source !== ''
+		|| candidate.readmeUri !== undefined && !isValidUriString(candidate.readmeUri)) {
+		return undefined;
+	}
+	return {
+		name: candidate.name,
+		description: candidate.description,
+		version: candidate.version,
+		source: candidate.source,
+		sourceDescriptor,
+		marketplace: candidate.marketplace,
+		marketplaceType: candidate.marketplaceType,
+		...(candidate.readmeUri ? { readmeUri: candidate.readmeUri } : {}),
+	};
+}
+
+function parseStoredPluginSourceDescriptor(value: unknown, pluginName: string, pluginVersion: string, marketplaceRawValue: string): IPluginSourceDescriptor | undefined {
+	if (!isRecord(value) || typeof value.kind !== 'string') {
+		return undefined;
+	}
+	const digest = parseOptionalDigest(value.digest);
+	if (value.digest !== undefined && !digest) {
+		return undefined;
+	}
+	const withDigest = digest ? { digest } : {};
+	switch (value.kind) {
+		case 'relativePath':
+			return !hasUnknownKeys(value, ['kind', 'path', 'digest']) && isCanonicalPluginRelativePath(value.path, true)
+				? { kind: 'relativePath', path: value.path, ...withDigest } as IPluginSourceDescriptor
+				: undefined;
+		case 'github':
+			return !hasUnknownKeys(value, ['kind', 'repo', 'ref', 'sha', 'path', 'digest'])
+				&& typeof value.repo === 'string' && isPortableGitHubRepo(value.repo)
+				&& isOptionalString(value.ref) && isOptionalGitSha(value.sha) && isOptionalCanonicalRelativePath(value.path)
+				? { kind: 'github', repo: value.repo, ...(value.ref === undefined ? {} : { ref: value.ref }), ...(value.sha === undefined ? {} : { sha: value.sha }), ...(value.path === undefined ? {} : { path: value.path }), ...withDigest } as IPluginSourceDescriptor
+				: undefined;
+		case 'url':
+			return !hasUnknownKeys(value, ['kind', 'url', 'ref', 'sha', 'path', 'digest'])
+				&& typeof value.url === 'string' && isCanonicalGitUri(value.url)
+				&& isOptionalString(value.ref) && isOptionalGitSha(value.sha) && isOptionalCanonicalRelativePath(value.path)
+				? { kind: 'url', url: value.url, ...(value.ref === undefined ? {} : { ref: value.ref }), ...(value.sha === undefined ? {} : { sha: value.sha }), ...(value.path === undefined ? {} : { path: value.path }), ...withDigest } as IPluginSourceDescriptor
+				: undefined;
+		case 'npm':
+		case 'pip':
+			return !hasUnknownKeys(value, ['kind', 'package', 'version', 'registry', 'digest'])
+				&& isPortablePluginPackageName(value.package)
+				&& isOptionalString(value.version) && isOptionalString(value.registry)
+				? { kind: value.kind, package: value.package, ...(value.version === undefined ? {} : { version: value.version }), ...(value.registry === undefined ? {} : { registry: value.registry }), ...withDigest } as IPluginSourceDescriptor
+				: undefined;
+		case 'registry':
+			return parseStoredRegistrySource(value, pluginName, pluginVersion, marketplaceRawValue, digest);
+		default:
+			return undefined;
+	}
+}
+
+function parseStoredRegistrySource(value: Record<string, unknown>, pluginName: string, pluginVersion: string, marketplaceRawValue: string, digest: string | undefined): IPluginSourceDescriptor | undefined {
+	if (hasUnknownKeys(value, ['kind', 'url', 'artifactSha256', 'release', 'signature', 'publisher', 'digest']) || typeof value.url !== 'string' || typeof value.artifactSha256 !== 'string') {
+		return undefined;
+	}
+	const reference = parseMarketplaceReference(marketplaceRawValue);
+	if (reference?.kind !== MarketplaceReferenceKind.HttpRegistry || !reference.registryUri) {
+		return undefined;
+	}
+	try {
+		const release = parsePluginReleaseManifest(value.release);
+		const signature = parsePluginReleaseSignature(value.signature);
+		const publisher = parsePluginPublisherIdentity(value.publisher);
+		if (pluginName !== `${release.publisherId}/${release.pluginId}`
+			|| pluginVersion !== release.version
+			|| !isPortablePluginPathSegment(release.publisherId)
+			|| !isPortablePluginPathSegment(release.pluginId)
+			|| value.artifactSha256 !== release.artifact.sha256
+			|| release.artifact.mediaType !== 'application/vnd.openide.plugin+json'
+			|| signature.keyId !== release.signingKeyId
+			|| publisher.publisherId !== release.publisherId
+			|| !publisher.keys.some(key => key.keyId === release.signingKeyId && key.state === 'active')) {
+			return undefined;
+		}
+		const artifactUrl = new URL(value.url);
+		const registryUrl = new URL(reference.registryUri.toString());
+		const registryBasePath = registryUrl.pathname.slice(0, -'/v1/marketplace.json'.length);
+		const expectedPath = `${registryBasePath}/v1/publishers/${encodeURIComponent(release.publisherId)}/plugins/${encodeURIComponent(release.pluginId)}/versions/${encodeURIComponent(release.version)}/artifact`;
+		if (artifactUrl.toString() !== value.url || artifactUrl.origin !== registryUrl.origin || artifactUrl.username || artifactUrl.password || artifactUrl.search || artifactUrl.hash || artifactUrl.pathname !== expectedPath) {
+			return undefined;
+		}
+		return {
+			kind: 'registry',
+			url: value.url,
+			artifactSha256: value.artifactSha256,
+			release,
+			signature,
+			publisher,
+			...(digest ? { digest } : {}),
+		} as IPluginSourceDescriptor;
+	} catch {
+		return undefined;
+	}
+}
+
+function parseOptionalDigest(value: unknown): string | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (typeof value !== 'string') {
+		return undefined;
+	}
+	try {
+		return normalizePluginTreeDigest(value);
+	} catch {
+		return undefined;
+	}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasUnknownKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+	return Object.keys(value).some(key => !allowed.includes(key));
+}
+
+function isOptionalString(value: unknown): value is string | undefined {
+	return value === undefined || typeof value === 'string';
+}
+
+function isOptionalGitSha(value: unknown): value is string | undefined {
+	return value === undefined || typeof value === 'string' && /^[0-9a-fA-F]{40}$/.test(value);
+}
+
+function isOptionalCanonicalRelativePath(value: unknown): value is string | undefined {
+	return value === undefined || isCanonicalPluginRelativePath(value, true);
+}
+
+function isPortableGitHubRepo(value: string): boolean {
+	const segments = value.split('/');
+	return segments.length === 2
+		&& segments.every(segment => /^[A-Za-z0-9_.-]+$/.test(segment) && isPortablePluginPathSegment(segment));
+}
+
+function isCanonicalGitUri(value: string): boolean {
+	if (!value.toLowerCase().endsWith('.git') || hasTraversalSegment(value)) {
+		return false;
+	}
+	const reference = parseMarketplaceReference(value);
+	return reference?.kind === MarketplaceReferenceKind.GitUri && reference.rawValue === value && reference.ref === undefined;
+}
+
+function isValidUriString(value: string): boolean {
+	try {
+		const uri = URI.parse(value);
+		return !!uri.scheme && uri.toString() === value;
+	} catch {
+		return false;
+	}
+}
+
+function hasTraversalSegment(value: string): boolean {
+	let decoded: string;
+	try {
+		decoded = decodeURIComponent(value);
+	} catch {
+		return true;
+	}
+	return decoded.split(/[\\/]/).some(segment => segment === '.' || segment === '..');
 }

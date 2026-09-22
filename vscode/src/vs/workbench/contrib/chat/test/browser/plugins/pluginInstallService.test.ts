@@ -50,6 +50,32 @@ suite('PluginInstallService', () => {
 		};
 	}
 
+	function createRegistryDescriptor(version = '1.0.0', artifactSha256 = 'a'.repeat(64)): IPluginSourceDescriptor {
+		const signingKeyId = `sha256:${'b'.repeat(64)}`;
+		return {
+			kind: PluginSourceKind.Registry,
+			url: `https://plugins.example.test/v1/publishers/acme/plugins/lint-tools/versions/${version}/artifact`,
+			artifactSha256,
+			release: {
+				schemaVersion: 1,
+				publisherId: 'acme',
+				pluginId: 'lint-tools',
+				version,
+				signingKeyId,
+				createdAt: '2026-01-02T00:00:00.000Z',
+				artifact: { mediaType: 'application/vnd.openide.plugin+json', size: 100, sha256: artifactSha256 },
+			},
+			signature: { algorithm: 'ed25519', keyId: signingKeyId, signature: 'A'.repeat(86) },
+			publisher: {
+				schemaVersion: 1,
+				publisherId: 'acme',
+				displayName: 'Acme',
+				principal: { issuer: 'https://identity.example.test/', subject: 'account-42' },
+				keys: [{ keyId: signingKeyId, algorithm: 'ed25519', publicKey: 'A'.repeat(43), state: 'active', createdAt: '2026-01-01T00:00:00.000Z' }],
+			},
+		};
+	}
+
 	// --- Mock tracking types ---------------------------------------------------
 
 	interface MockState {
@@ -258,7 +284,7 @@ suite('PluginInstallService', () => {
 					return undefined;
 				}
 
-				return { pluginDir };
+				return { pluginDir, changed: true };
 			},
 		});
 
@@ -266,6 +292,7 @@ suite('PluginInstallService', () => {
 			[PluginSourceKind.RelativePath, { kind: PluginSourceKind.RelativePath, getCleanupTarget: () => undefined, getInstallUri: () => { throw new Error(); }, ensure: async () => { throw new Error(); }, update: async () => { throw new Error(); }, getLabel: (d) => (d as { path: string }).path || '.' }],
 			[PluginSourceKind.GitHub, { kind: PluginSourceKind.GitHub, getCleanupTarget: () => URI.file('/mock'), getInstallUri: () => URI.file('/mock'), ensure: async () => URI.file('/mock'), update: async () => true, getLabel: (d) => (d as { repo: string }).repo }],
 			[PluginSourceKind.GitUrl, { kind: PluginSourceKind.GitUrl, getCleanupTarget: () => URI.file('/mock'), getInstallUri: () => URI.file('/mock'), ensure: async () => URI.file('/mock'), update: async () => true, getLabel: (d) => (d as { url: string }).url }],
+			[PluginSourceKind.Registry, { kind: PluginSourceKind.Registry, getCleanupTarget: () => URI.file('/mock'), getInstallUri: () => URI.file('/mock'), ensure: async () => URI.file('/mock'), update: async () => true, getLabel: (d) => (d as { url: string }).url }],
 			[PluginSourceKind.Npm, makeMockPackageRepo(PluginSourceKind.Npm)],
 			[PluginSourceKind.Pip, makeMockPackageRepo(PluginSourceKind.Pip)],
 		]);
@@ -314,6 +341,7 @@ suite('PluginInstallService', () => {
 				state.trustedMarketplaces.push(ref.canonicalId);
 			},
 			readPluginsFromDirectory: async () => state.readPluginsResult,
+			readPluginsFromRegistry: async () => state.fetchedMarketplacePlugins,
 			readSinglePluginManifest: async () => state.singlePluginManifestResult,
 			isPluginDirectory: async () => state.isPluginDirectoryResult,
 		} as unknown as IPluginMarketplaceService);
@@ -455,6 +483,28 @@ suite('PluginInstallService', () => {
 			assert.ok(state.notifications[0].message.includes('not found'));
 		});
 
+		test('does not register a relative-path plugin whose expected digest mismatches', async () => {
+			const { service, state } = createService();
+			const plugin = createPlugin({
+				source: 'plugins/myPlugin',
+				sourceDescriptor: {
+					kind: PluginSourceKind.RelativePath,
+					path: 'plugins/myPlugin',
+					digest: 'sha256:' + '0'.repeat(64),
+				},
+			});
+
+			await service.installPlugin(plugin);
+
+			assert.deepStrictEqual({
+				installed: state.addedPlugins.length,
+				notification: state.notifications[0]?.message.includes('integrity verification'),
+			}, {
+				installed: 0,
+				notification: true,
+			});
+		});
+
 		test('does not install when ensureRepository throws', async () => {
 			const { state } = createService();
 			// Override ensureRepository to throw
@@ -519,6 +569,27 @@ suite('PluginInstallService', () => {
 
 			assert.strictEqual(state.addedPlugins.length, 1);
 			assert.strictEqual(state.notifications.length, 0);
+		});
+
+		test('registers a signed registry plugin after its source installs', async () => {
+			const registryReference = makeMarketplaceRef('https://plugins.example.test/v1/marketplace.json');
+			const installUri = URI.file('/cache/agentPlugins/registry/acme/lint-tools');
+			const { service, state } = createService({ ensurePluginSourceResult: installUri });
+			const plugin = createPlugin({
+				name: 'acme/lint-tools',
+				version: '1.0.0',
+				sourceDescriptor: createRegistryDescriptor(),
+				marketplace: registryReference.displayLabel,
+				marketplaceReference: registryReference,
+				marketplaceType: MarketplaceType.OpenPlugin,
+			});
+
+			await service.installPlugin(plugin);
+
+			assert.deepStrictEqual(state.addedPlugins.map(entry => ({ uri: entry.uri, name: entry.plugin.name })), [{
+				uri: installUri.toString(),
+				name: 'acme/lint-tools',
+			}]);
 		});
 
 		test('notifies error when cloned directory does not exist', async () => {
@@ -767,6 +838,24 @@ suite('PluginInstallService', () => {
 			assert.strictEqual(state.updatePluginSourceCalls.length, 1);
 		});
 
+		test('delegates signed registry updates without git-specific handling', async () => {
+			const registryReference = makeMarketplaceRef('https://plugins.example.test/v1/marketplace.json');
+			const { service, state } = createService();
+			const plugin = createPlugin({
+				name: 'acme/lint-tools',
+				version: '2.0.0',
+				sourceDescriptor: createRegistryDescriptor('2.0.0', 'c'.repeat(64)),
+				marketplace: registryReference.displayLabel,
+				marketplaceReference: registryReference,
+				marketplaceType: MarketplaceType.OpenPlugin,
+			});
+
+			await service.updatePlugin(plugin, true);
+
+			assert.strictEqual(state.updatePluginSourceCalls.length, 1);
+			assert.strictEqual(state.updatePluginSourceCalls[0].options?.silent, true);
+		});
+
 		test('blocks direct updates when the strict marketplace policy disallows the source', async () => {
 			const { service, state } = createService({
 				strictMarketplacePolicyActive: true,
@@ -889,6 +978,28 @@ suite('PluginInstallService', () => {
 			});
 		});
 
+		test('refreshes an HTTP registry catalog without attempting a git pull', async () => {
+			const marketplaceReference = makeMarketplaceRef('https://plugins.example.test/v1/marketplace.json');
+			const plugin = createPlugin({
+				name: 'acme/lint-tools',
+				version: '1.0.0',
+				sourceDescriptor: createRegistryDescriptor(),
+				marketplace: marketplaceReference.displayLabel,
+				marketplaceReference,
+				marketplaceType: MarketplaceType.OpenPlugin,
+			});
+			const installed = { pluginUri: URI.file('/plugins/lint-tools'), plugin };
+			const { service, state } = createService({
+				installedPlugins: [installed],
+				fetchedMarketplacePlugins: [plugin],
+			});
+
+			await service.updateAllPlugins({ silent: true }, CancellationToken.None);
+
+			assert.deepStrictEqual(state.pullRepositoryCalls, []);
+			assert.deepStrictEqual(state.fetchMarketplaceCalls, [[marketplaceReference.canonicalId]]);
+		});
+
 		test('rechecks managed auto-update policy before an automatic update', async () => {
 			const installed = installedPlugin('blocked', 'microsoft/blocked');
 			const { service, state } = createService({
@@ -975,6 +1086,7 @@ suite('PluginInstallService', () => {
 				{ kind: PluginSourceKind.GitUrl, url: 'https://example.com/repo.git' },
 				{ kind: PluginSourceKind.Npm, package: 'my-pkg' },
 				{ kind: PluginSourceKind.Pip, package: 'my-pkg' },
+				createRegistryDescriptor(),
 			];
 
 			for (const sourceDescriptor of kinds) {
@@ -997,6 +1109,28 @@ suite('PluginInstallService', () => {
 			assert.strictEqual(result.success, false);
 			assert.ok(result.message);
 			assert.strictEqual(state.addedPlugins.length, 0);
+		});
+
+		test('installs directly from an HTTP registry catalog without cloning it', async () => {
+			const reference = makeMarketplaceRef('https://plugins.example.test/v1/marketplace.json');
+			const registryPlugin = createPlugin({
+				name: 'acme/lint-tools',
+				version: '1.0.0',
+				sourceDescriptor: createRegistryDescriptor(),
+				marketplace: reference.displayLabel,
+				marketplaceReference: reference,
+				marketplaceType: MarketplaceType.OpenPlugin,
+			});
+			const { service, state } = createService({
+				fetchedMarketplacePlugins: [registryPlugin],
+				ensurePluginSourceResult: URI.file('/cache/agentPlugins/registry/acme/lint-tools'),
+			});
+
+			const result = await service.installPluginFromSource(reference.rawValue);
+
+			assert.strictEqual(result.success, true);
+			assert.deepStrictEqual(state.addedPlugins.map(entry => entry.plugin.name), ['acme/lint-tools']);
+			assert.deepStrictEqual(state.pullRepositoryCalls, []);
 		});
 
 		test('validatePluginSource accepts git and local sources and rejects garbage', () => {

@@ -29,7 +29,8 @@ import { IEnvironmentService } from '../../../../../../platform/environment/comm
 import { AutoUpdateConfigurationValue, IExtensionsWorkbenchService } from '../../../../extensions/common/extensions.js';
 import { ChatConfiguration } from '../../../common/constants.js';
 import { IAgentPluginRepositoryService } from '../../../common/plugins/agentPluginRepositoryService.js';
-import { IMarketplacePlugin, IMarketplaceReference, IPluginSourceDescriptor, MarketplaceReferenceKind, MarketplaceType, PluginMarketplaceService, PluginSourceKind, extraKnownMarketplacesToConfigDict, getPluginSourceLabel, parseMarketplaceReference, parseMarketplaceReferences, parsePluginSource, readConfiguredMarketplaces } from '../../../common/plugins/pluginMarketplaceService.js';
+import { IMarketplacePlugin, IMarketplaceReference, IPluginSourceDescriptor, MarketplaceReferenceKind, MarketplaceType, PluginMarketplaceService, PluginSourceKind, extraKnownMarketplacesToConfigDict, getPluginSourceLabel, hasSourceChanged, parseMarketplaceReference, parseMarketplaceReferences, parsePluginSource, readConfiguredMarketplaces } from '../../../common/plugins/pluginMarketplaceService.js';
+import { getRegistryPluginInstallUri } from '../../../common/plugins/pluginPathValidation.js';
 import { IWorkspacePluginSettingsService } from '../../../common/plugins/workspacePluginSettingsService.js';
 
 class TestMeteredConnectionService extends Disposable implements IMeteredConnectionService {
@@ -56,6 +57,84 @@ const unmeteredConnectionService: IMeteredConnectionService = {
 
 function stubMeteredConnectionService(instantiationService: TestInstantiationService, service: IMeteredConnectionService = unmeteredConnectionService): void {
 	instantiationService.stub(IMeteredConnectionService, service);
+}
+
+function createRegistryCatalog(baseUrl = 'https://registry.example.test', version = '1.2.3', artifactSha256 = 'a'.repeat(64)) {
+	const normalizedBase = baseUrl.replace(/\/+$/g, '');
+	const publisherId = 'acme';
+	const pluginId = 'review-tools';
+	const signingKeyId = `sha256:${'1'.repeat(64)}`;
+	const createdAt = '2026-09-21T12:00:00.000Z';
+	const release = {
+		schemaVersion: 1 as const,
+		publisherId,
+		pluginId,
+		version,
+		signingKeyId,
+		createdAt,
+		artifact: {
+			mediaType: 'application/vnd.openide.plugin+json',
+			size: 512,
+			sha256: artifactSha256,
+		},
+	};
+	const publisher = {
+		schemaVersion: 1 as const,
+		publisherId,
+		displayName: 'Acme Engineering',
+		principal: { issuer: 'https://identity.example.test/', subject: 'acme-publisher' },
+		keys: [{
+			keyId: signingKeyId,
+			algorithm: 'ed25519' as const,
+			publicKey: 'A'.repeat(43),
+			state: 'active' as const,
+			createdAt,
+		}],
+	};
+	const source = {
+		source: 'registry' as const,
+		url: `${normalizedBase}/v1/publishers/${publisherId}/plugins/${pluginId}/versions/${version}/artifact`,
+		artifactSha256,
+		release,
+		signature: {
+			algorithm: 'ed25519' as const,
+			keyId: signingKeyId,
+			signature: 'A'.repeat(86),
+		},
+		publisher,
+	};
+	return {
+		url: `${normalizedBase}/v1/marketplace.json`,
+		catalog: {
+			schemaVersion: 1,
+			name: 'acme-registry',
+			generatedAt: createdAt,
+			plugins: [{
+				name: `${publisherId}/${pluginId}`,
+				description: 'Signed review tools',
+				version,
+				publisher: publisherId,
+				source,
+			}],
+		},
+	};
+}
+
+function createRegistryDescriptor(baseUrl = 'https://registry.example.test', version = '1.2.3', artifactSha256 = 'a'.repeat(64)) {
+	const registry = createRegistryCatalog(baseUrl, version, artifactSha256);
+	const plugin = registry.catalog.plugins[0];
+	const reference = parseMarketplaceReference(registry.url);
+	assert.ok(reference);
+	const descriptor = parsePluginSource(plugin.source, undefined, {
+		pluginName: plugin.name,
+		pluginVersion: plugin.version,
+		pluginPublisher: plugin.publisher,
+		marketplaceReference: reference,
+		logService: new NullLogService(),
+		logPrefix: '[test]',
+	});
+	assert.ok(descriptor?.kind === PluginSourceKind.Registry);
+	return descriptor;
 }
 
 suite('PluginMarketplaceService', () => {
@@ -176,6 +255,42 @@ suite('PluginMarketplaceService', () => {
 		assert.deepStrictEqual(parsed.cacheSegments, []);
 	});
 
+	test('parses exact HTTPS and loopback HTTP registry catalog URLs before Git', () => {
+		const https = parseMarketplaceReference('https://plugins.example.test/openide/v1/marketplace.json');
+		assert.ok(https);
+		assert.deepStrictEqual({
+			kind: https.kind,
+			canonicalId: https.canonicalId,
+			registryUri: https.registryUri?.toString(),
+			cacheSegments: https.cacheSegments,
+		}, {
+			kind: MarketplaceReferenceKind.HttpRegistry,
+			canonicalId: 'registry:https://plugins.example.test/openide/v1/marketplace.json',
+			registryUri: 'https://plugins.example.test/openide/v1/marketplace.json',
+			cacheSegments: [],
+		});
+
+		assert.strictEqual(parseMarketplaceReference('http://127.0.0.1:8787/v1/marketplace.json')?.kind, MarketplaceReferenceKind.HttpRegistry);
+		assert.strictEqual(parseMarketplaceReference('http://localhost:8787/dev/v1/marketplace.json')?.kind, MarketplaceReferenceKind.HttpRegistry);
+		assert.strictEqual(parseMarketplaceReference('http://[::1]:8787/v1/marketplace.json')?.kind, MarketplaceReferenceKind.HttpRegistry);
+	});
+
+	test('rejects insecure or non-canonical registry endpoints instead of treating them as Git', () => {
+		for (const value of [
+			'http://plugins.example.test/v1/marketplace.json',
+			'https://user:password@plugins.example.test/v1/marketplace.json',
+			'https://plugins.example.test/v1/marketplace.json?',
+			'https://plugins.example.test/v1/marketplace.json?channel=stable',
+			'https://plugins.example.test/v1/marketplace.json#',
+			'https://plugins.example.test/v1/marketplace.json#stable',
+			'https://plugins.example.test/v1/marketplace.json/',
+			'https://plugins.example.test/v1/marketplace.json/artifact',
+			'https://plugins.example.test/V1/marketplace.json',
+		]) {
+			assert.strictEqual(parseMarketplaceReference(value), undefined, value);
+		}
+	});
+
 	test('accepts HTTPS and SSH marketplace entries without .git suffix', () => {
 		const https = parseMarketplaceReference('https://example.com/org/repo');
 		assert.ok(https);
@@ -225,6 +340,44 @@ suite('PluginMarketplaceService', () => {
 		assert.deepStrictEqual(refs.map(r => r.autoUpdate), [true, false, undefined]);
 		// Effective values union user + extra
 		assert.strictEqual(effectiveValues.length, extraValues.length);
+	});
+
+	test('parses registry object entries explicitly and rejects registry URLs labeled as git', () => {
+		const registryUrl = 'https://plugins.example.test/openide/v1/marketplace.json';
+		const refs = parseMarketplaceReferences([{
+			name: 'acme-registry',
+			autoUpdate: true,
+			source: { source: 'registry', url: registryUrl },
+		}]);
+
+		assert.deepStrictEqual(refs.map(reference => ({
+			kind: reference.kind,
+			displayLabel: reference.displayLabel,
+			autoUpdate: reference.autoUpdate,
+		})), [{
+			kind: MarketplaceReferenceKind.HttpRegistry,
+			displayLabel: 'acme-registry',
+			autoUpdate: true,
+		}]);
+		assert.deepStrictEqual(parseMarketplaceReferences([{
+			source: { source: 'git', url: registryUrl },
+		}]), []);
+	});
+
+	test('readConfiguredMarketplaces preserves managed HTTP registries', () => {
+		const registryUrl = 'https://plugins.example.test/openide/v1/marketplace.json';
+		const configService = new TestConfigurationService({
+			[ChatConfiguration.ExtraMarketplaces]: {
+				'acme-registry': JSON.stringify({ source: registryUrl, autoUpdate: true }),
+			},
+		});
+
+		const refs = parseMarketplaceReferences(readConfiguredMarketplaces(configService as unknown as IConfigurationService).extraValues);
+
+		assert.strictEqual(refs.length, 1);
+		assert.strictEqual(refs[0].kind, MarketplaceReferenceKind.HttpRegistry);
+		assert.strictEqual(refs[0].displayLabel, 'acme-registry');
+		assert.strictEqual(refs[0].autoUpdate, true);
 	});
 
 	test('extraKnownMarketplacesToConfigDict: returns undefined for empty/missing input', () => {
@@ -512,6 +665,154 @@ suite('PluginMarketplaceService - GitHub marketplace refs', () => {
 	});
 });
 
+suite('PluginMarketplaceService - HTTP registries', () => {
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	function createService(
+		registryUrl: string,
+		response: unknown,
+		state?: { requests: { url?: string; followRedirects?: number }[]; repositoryCalls: number },
+		contentType = 'application/json; charset=utf-8',
+	): PluginMarketplaceService {
+		const instantiationService = store.add(new TestInstantiationService());
+		instantiationService.stub(IConfigurationService, new TestConfigurationService({
+			[ChatConfiguration.PluginMarketplaces]: [registryUrl],
+			[ChatConfiguration.PluginsEnabled]: true,
+		}));
+		instantiationService.stub(IEnvironmentService, { cacheHome: URI.file('/cache') } as Partial<IEnvironmentService> as IEnvironmentService);
+		instantiationService.stub(IFileService, {} as unknown as IFileService);
+		instantiationService.stub(IAgentPluginRepositoryService, {
+			agentPluginsHome: URI.file('/agent-plugins'),
+			ensureRepository: async () => {
+				if (state) {
+					state.repositoryCalls++;
+				}
+				throw new Error('HTTP registry must not clone a Git repository');
+			},
+		} as Partial<IAgentPluginRepositoryService> as IAgentPluginRepositoryService);
+		instantiationService.stub(ILogService, new NullLogService());
+		instantiationService.stub(IRequestService, {
+			request: async (options: { url?: string; followRedirects?: number }) => {
+				state?.requests.push({ url: options.url, followRedirects: options.followRedirects });
+				return {
+					res: { headers: { 'content-type': contentType }, statusCode: 200 },
+					stream: bufferToStream(VSBuffer.fromString(JSON.stringify(response))),
+				};
+			},
+		} as Partial<IRequestService> as IRequestService);
+		instantiationService.stub(IStorageService, store.add(new InMemoryStorageService()));
+		instantiationService.stub(IWorkspacePluginSettingsService, {
+			extraMarketplaces: observableValue('test.extraMarketplaces', []),
+			enabledPlugins: observableValue('test.enabledPlugins', new Map()),
+		} as Partial<IWorkspacePluginSettingsService> as IWorkspacePluginSettingsService);
+		instantiationService.stub(IWorkspaceTrustManagementService, {
+			isWorkspaceTrusted: () => true,
+			onDidChangeTrust: Event.None,
+		} as Partial<IWorkspaceTrustManagementService> as IWorkspaceTrustManagementService);
+		instantiationService.stub(IExtensionsWorkbenchService, {
+			getAutoUpdateValue: () => 'on',
+		} as Partial<IExtensionsWorkbenchService> as IExtensionsWorkbenchService);
+		stubMeteredConnectionService(instantiationService);
+		return store.add(instantiationService.createInstance(PluginMarketplaceService));
+	}
+
+	test('fetches a strict signed catalog directly without invoking Git', async () => {
+		const registry = createRegistryCatalog('https://plugins.example.test/openide');
+		const state = { requests: [] as { url?: string; followRedirects?: number }[], repositoryCalls: 0 };
+		const service = createService(registry.url, registry.catalog, state);
+
+		const plugins = await service.fetchMarketplacePlugins(CancellationToken.None);
+
+		assert.strictEqual(plugins.length, 1);
+		const descriptor = plugins[0].sourceDescriptor;
+		assert.ok(descriptor.kind === PluginSourceKind.Registry);
+		assert.deepStrictEqual({
+			request: state.requests[0],
+			repositoryCalls: state.repositoryCalls,
+			name: plugins[0].name,
+			version: plugins[0].version,
+			marketplaceType: plugins[0].marketplaceType,
+			kind: descriptor.kind,
+			url: descriptor.url,
+			artifactSha256: descriptor.artifactSha256,
+			publisherId: descriptor.release.publisherId,
+			pluginId: descriptor.release.pluginId,
+		}, {
+			request: { url: registry.url, followRedirects: 0 },
+			repositoryCalls: 0,
+			name: 'acme/review-tools',
+			version: '1.2.3',
+			marketplaceType: MarketplaceType.OpenPlugin,
+			kind: PluginSourceKind.Registry,
+			url: 'https://plugins.example.test/openide/v1/publishers/acme/plugins/review-tools/versions/1.2.3/artifact',
+			artifactSha256: 'a'.repeat(64),
+			publisherId: 'acme',
+			pluginId: 'review-tools',
+		});
+	});
+
+	test('rejects registry entries that escape origin or mismatch signed metadata', async () => {
+		const registry = createRegistryCatalog();
+		const valid = registry.catalog.plugins[0];
+		const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+		const crossOrigin = clone(valid);
+		crossOrigin.source.url = crossOrigin.source.url.replace('registry.example.test', 'evil.example.test');
+		const emptyQuery = clone(valid);
+		emptyQuery.source.url += '?';
+		const wrongVersion = clone(valid);
+		wrongVersion.version = '9.9.9';
+		const wrongDigest = clone(valid);
+		wrongDigest.source.artifactSha256 = 'b'.repeat(64);
+		const wrongCoordinates = clone(valid);
+		wrongCoordinates.name = 'other/review-tools';
+		const unknownField = clone(valid) as typeof valid & { unexpected: boolean };
+		unknownField.unexpected = true;
+		const gitEscape = { ...clone(valid), source: { source: 'github', repo: 'attacker/repo' } };
+		const service = createService(registry.url, {
+			...registry.catalog,
+			plugins: [valid, crossOrigin, emptyQuery, wrongVersion, wrongDigest, wrongCoordinates, unknownField, gitEscape],
+		});
+
+		const plugins = await service.fetchMarketplacePlugins(CancellationToken.None);
+
+		assert.deepStrictEqual(plugins.map(plugin => plugin.name), ['acme/review-tools']);
+	});
+
+	test('reports a malformed registry envelope and does not fall back to cloning', async () => {
+		const registry = createRegistryCatalog();
+		const state = { requests: [] as { url?: string; followRedirects?: number }[], repositoryCalls: 0 };
+		const service = createService(registry.url, { ...registry.catalog, schemaVersion: 2 }, state);
+		const failures: string[] = [];
+
+		const plugins = await service.fetchMarketplacePlugins(CancellationToken.None, undefined, {
+			onMarketplaceError: reference => failures.push(reference.canonicalId),
+		});
+
+		assert.deepStrictEqual({ plugins, failures, repositoryCalls: state.repositoryCalls }, {
+			plugins: [],
+			failures: [`registry:${registry.url}`],
+			repositoryCalls: 0,
+		});
+	});
+
+	test('rejects a catalog response that is not JSON media type', async () => {
+		const registry = createRegistryCatalog();
+		const state = { requests: [] as { url?: string; followRedirects?: number }[], repositoryCalls: 0 };
+		const service = createService(registry.url, registry.catalog, state, 'text/html');
+		const failures: string[] = [];
+
+		const plugins = await service.fetchMarketplacePlugins(CancellationToken.None, undefined, {
+			onMarketplaceError: reference => failures.push(reference.canonicalId),
+		});
+
+		assert.deepStrictEqual({ plugins, failures, repositoryCalls: state.repositoryCalls }, {
+			plugins: [],
+			failures: [`registry:${registry.url}`],
+			repositoryCalls: 0,
+		});
+	});
+});
+
 suite('PluginMarketplaceService - Agent Plugin direct install probes', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 
@@ -589,6 +890,77 @@ suite('PluginMarketplaceService - Agent Plugin direct install probes', () => {
 		const result = await service.isPluginDirectory(repoDir);
 
 		assert.strictEqual(result, true);
+	});
+
+	test('reads a legacy Codex direct-source manifest as an OpenPlugin fallback', async () => {
+		const fileService = new ProbeFileService();
+		const repoDir = URI.file('/repos/codex');
+		fileService.files.set(joinPath(repoDir, '.codex-plugin', 'plugin.json').toString(), JSON.stringify({
+			name: 'codex-plugin',
+			description: 'Legacy Codex plugin',
+			version: '1.2.3',
+		}));
+		const service = createService(fileService);
+
+		const result = await service.readSinglePluginManifest(repoDir, parseMarketplaceReference('owner/codex')!);
+
+		assert.deepStrictEqual({
+			name: result?.name,
+			description: result?.description,
+			version: result?.version,
+			marketplaceType: result?.marketplaceType,
+		}, {
+			name: 'codex-plugin',
+			description: 'Legacy Codex plugin',
+			version: '1.2.3',
+			marketplaceType: MarketplaceType.OpenPlugin,
+		});
+	});
+
+	test('prefers the root Agent Plugin manifest over the legacy Codex manifest', async () => {
+		const fileService = new ProbeFileService();
+		const repoDir = URI.file('/repos/agent-and-codex');
+		seedCompatibleManifest(fileService, repoDir);
+		fileService.files.set(joinPath(repoDir, '.codex-plugin', 'plugin.json').toString(), JSON.stringify({
+			name: 'legacy-codex-plugin',
+		}));
+		const service = createService(fileService);
+
+		const result = await service.readSinglePluginManifest(repoDir, parseMarketplaceReference('owner/agent-and-codex')!);
+
+		assert.deepStrictEqual({
+			name: result?.name,
+			marketplaceType: result?.marketplaceType,
+		}, {
+			name: 'compatible-plugin',
+			marketplaceType: MarketplaceType.OpenPlugin,
+		});
+	});
+
+	test('prefers the OpenPlugin marketplace in .agents/plugins over legacy definitions', async () => {
+		const fileService = new ProbeFileService();
+		const repoDir = URI.file('/repos/marketplace');
+		fileService.files.set(joinPath(repoDir, '.agents', 'plugins', 'marketplace.json').toString(), JSON.stringify({
+			plugins: [{ name: 'modern', source: { source: 'local', path: './plugins/modern' } }],
+		}));
+		fileService.files.set(joinPath(repoDir, 'marketplace.json').toString(), JSON.stringify({
+			plugins: [{ name: 'legacy', source: './plugins/legacy' }],
+		}));
+		const service = createService(fileService);
+
+		const result = await service.readPluginsFromDirectory(repoDir, parseMarketplaceReference('owner/marketplace')!);
+
+		assert.deepStrictEqual(result.map(plugin => ({
+			name: plugin.name,
+			marketplaceType: plugin.marketplaceType,
+			source: plugin.source,
+			sourceDescriptor: plugin.sourceDescriptor,
+		})), [{
+			name: 'modern',
+			marketplaceType: MarketplaceType.OpenPlugin,
+			source: 'plugins/modern',
+			sourceDescriptor: { kind: PluginSourceKind.RelativePath, path: 'plugins/modern' },
+		}]);
 	});
 });
 
@@ -1236,10 +1608,10 @@ suite('PluginMarketplaceService - hydration after restart', () => {
 		assert.strictEqual(installed[0].plugin.marketplaceReference.canonicalId, awesomeCopilot.canonicalId);
 	});
 
-	test('persists plugin name when a plugin is added so it survives a restart', async () => {
+	test('persists exact plugin metadata when a plugin is added so it survives a restart', async () => {
 		// First service writes installed.json, second service (sharing the
-		// same file system + storage) reads it back and must reconstruct
-		// the plugin from its stored name plus marketplace data.
+		// same file system + storage) reads it back without replacing the
+		// installed descriptor from mutable marketplace data.
 		const storageService = store.add(new InMemoryStorageService());
 		const fileService = new TestFileService();
 
@@ -1291,10 +1663,23 @@ suite('PluginMarketplaceService - hydration after restart', () => {
 			pluginUri: azurePluginUri.toString(),
 			marketplace: awesomeCopilot.rawValue,
 			name: 'azure',
+			plugin: {
+				name: 'azure',
+				description: 'Microsoft Azure MCP Server and skills',
+				version: '1.0.0',
+				source: '',
+				sourceDescriptor: {
+					kind: PluginSourceKind.GitHub,
+					repo: 'microsoft/azure-skills',
+					path: '.github/plugins/azure-skills',
+				},
+				marketplace: awesomeCopilot.displayLabel,
+				marketplaceType: MarketplaceType.Copilot,
+			},
 		});
 
-		// Second session: restart with shared storage + file system. The
-		// plugin must be reconstructed from installed.json + marketplace data.
+		// Second session: restart with shared storage + file system. The exact
+		// descriptor is revived from installed.json before marketplace lookup.
 		const second = makeService();
 		for (let i = 0; i < 50; i++) {
 			if (second.installedPlugins.get().length === 1) {
@@ -1306,6 +1691,78 @@ suite('PluginMarketplaceService - hydration after restart', () => {
 		assert.strictEqual(installed.length, 1);
 		assert.strictEqual(installed[0].plugin.name, 'azure');
 		assert.strictEqual(installed[0].plugin.sourceDescriptor.kind, PluginSourceKind.GitHub);
+	});
+
+	test('revives the exact installed registry release before consulting the mutable catalog', async () => {
+		const storageService = store.add(new InMemoryStorageService());
+		const fileService = new TestFileService();
+		const registry = createRegistryCatalog('https://registry.example.test/openide', '1.2.3', 'a'.repeat(64));
+		const marketplaceReference = parseMarketplaceReference(registry.url)!;
+		const sourceDescriptor = createRegistryDescriptor('https://registry.example.test/openide', '1.2.3', 'a'.repeat(64));
+		assert.strictEqual(sourceDescriptor.kind, PluginSourceKind.Registry);
+		const pluginUri = getRegistryPluginInstallUri(CACHE_ROOT, sourceDescriptor.url, sourceDescriptor.release.publisherId, sourceDescriptor.release.pluginId);
+		fileService.setFile(URI.joinPath(CACHE_ROOT, 'installed.json'), JSON.stringify({
+			version: 2,
+			installed: [{
+				pluginUri: pluginUri.toString(),
+				marketplace: marketplaceReference.rawValue,
+				name: 'acme/review-tools',
+				plugin: {
+					name: 'acme/review-tools',
+					description: 'Signed review tools',
+					version: '1.2.3',
+					source: '',
+					sourceDescriptor,
+					marketplace: marketplaceReference.displayLabel,
+					marketplaceType: MarketplaceType.OpenPlugin,
+				},
+			}],
+		}));
+
+		let requestCount = 0;
+		const instantiationService = store.add(new TestInstantiationService());
+		instantiationService.stub(IConfigurationService, new TestConfigurationService({
+			// Keep the catalog out of the configured discovery list so any request
+			// here can only have come from installed-entry hydration.
+			[ChatConfiguration.PluginMarketplaces]: [],
+			[ChatConfiguration.PluginsEnabled]: true,
+		}));
+		instantiationService.stub(IEnvironmentService, { cacheHome: URI.file('/cache') } as Partial<IEnvironmentService> as IEnvironmentService);
+		instantiationService.stub(IFileService, fileService as unknown as IFileService);
+		instantiationService.stub(IAgentPluginRepositoryService, createPluginRepositoryStub());
+		instantiationService.stub(ILogService, new NullLogService());
+		instantiationService.stub(IRequestService, {
+			request: async () => {
+				requestCount++;
+				throw new Error('stored registry metadata must not fetch during hydration');
+			},
+		} as Partial<IRequestService> as IRequestService);
+		instantiationService.stub(IStorageService, storageService);
+		instantiationService.stub(IWorkspacePluginSettingsService, {
+			extraMarketplaces: observableValue('test.extraMarketplaces', []),
+			enabledPlugins: observableValue('test.enabledPlugins', new Map()),
+		} as Partial<IWorkspacePluginSettingsService> as IWorkspacePluginSettingsService);
+		instantiationService.stub(IWorkspaceTrustManagementService, {
+			isWorkspaceTrusted: () => true,
+			onDidChangeTrust: Event.None,
+		} as Partial<IWorkspaceTrustManagementService> as IWorkspaceTrustManagementService);
+		instantiationService.stub(IExtensionsWorkbenchService, {
+			getAutoUpdateValue: () => 'off',
+		} as Partial<IExtensionsWorkbenchService> as IExtensionsWorkbenchService);
+		stubMeteredConnectionService(instantiationService);
+
+		const service = store.add(instantiationService.createInstance(PluginMarketplaceService));
+		for (let i = 0; i < 50 && service.installedPlugins.get().length === 0; i++) {
+			await timeout(10);
+		}
+
+		const installed = service.installedPlugins.get();
+		assert.strictEqual(installed.length, 1);
+		assert.strictEqual(requestCount, 0);
+		assert.strictEqual(installed[0].plugin.version, '1.2.3');
+		assert.ok(installed[0].plugin.sourceDescriptor.kind === PluginSourceKind.Registry);
+		assert.strictEqual(installed[0].plugin.sourceDescriptor.artifactSha256, 'a'.repeat(64));
+		assert.strictEqual(installed[0].plugin.sourceDescriptor.signature.signature, 'A'.repeat(86));
 	});
 });
 
@@ -1346,6 +1803,15 @@ suite('parsePluginSource', () => {
 		assert.deepStrictEqual(parsePluginSource(undefined, undefined, logContext), { kind: PluginSourceKind.RelativePath, path: '' });
 	});
 
+	test('parses local object source as RelativePath', () => {
+		const result = parsePluginSource({ source: 'local', path: './my-plugin' }, 'plugins', logContext);
+		assert.deepStrictEqual(result, { kind: PluginSourceKind.RelativePath, path: 'plugins/my-plugin' });
+	});
+
+	test('returns undefined for local source missing path', () => {
+		assert.strictEqual(parsePluginSource({ source: 'local' }, undefined, logContext), undefined);
+	});
+
 	test('parses github object source', () => {
 		const result = parsePluginSource({ source: 'github', repo: 'owner/repo' }, undefined, logContext);
 		assert.deepStrictEqual(result, { kind: PluginSourceKind.GitHub, repo: 'owner/repo', ref: undefined, sha: undefined, path: undefined });
@@ -1354,6 +1820,39 @@ suite('parsePluginSource', () => {
 	test('parses github object source with ref and sha', () => {
 		const result = parsePluginSource({ source: 'github', repo: 'owner/repo', ref: 'v2.0.0', sha: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0' }, undefined, logContext);
 		assert.deepStrictEqual(result, { kind: PluginSourceKind.GitHub, repo: 'owner/repo', ref: 'v2.0.0', sha: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0', path: undefined });
+	});
+
+	test('normalizes a source tree digest and treats digest changes as updates', () => {
+		const first = parsePluginSource({
+			source: 'github',
+			repo: 'owner/repo',
+			digest: 'A'.repeat(64),
+		}, undefined, logContext);
+		const second = parsePluginSource({
+			source: 'github',
+			repo: 'owner/repo',
+			digest: 'sha256:' + 'b'.repeat(64),
+		}, undefined, logContext);
+
+		assert.deepStrictEqual({ first, changed: first && second ? hasSourceChanged(first, second) : undefined }, {
+			first: {
+				kind: PluginSourceKind.GitHub,
+				repo: 'owner/repo',
+				ref: undefined,
+				sha: undefined,
+				path: undefined,
+				digest: 'sha256:' + 'a'.repeat(64),
+			},
+			changed: true,
+		});
+	});
+
+	test('rejects a malformed source tree digest', () => {
+		assert.strictEqual(parsePluginSource({
+			source: 'github',
+			repo: 'owner/repo',
+			digest: 'sha256:not-a-digest',
+		}, undefined, logContext), undefined);
 	});
 
 	test('parses github object source with path', () => {
@@ -1500,5 +1999,18 @@ suite('getPluginSourceLabel', () => {
 
 	test('formats pip source with version', () => {
 		assert.strictEqual(getPluginSourceLabel({ kind: PluginSourceKind.Pip, package: 'my-plugin', version: '2.0' }), 'my-plugin==2.0');
+	});
+
+	test('formats registry source using immutable release coordinates', () => {
+		assert.strictEqual(getPluginSourceLabel(createRegistryDescriptor()), 'acme/review-tools@1.2.3');
+	});
+
+	test('detects registry artifact and signed release changes', () => {
+		const installed = createRegistryDescriptor('https://registry.example.test', '1.2.3', 'a'.repeat(64));
+		const unchanged = createRegistryDescriptor('https://registry.example.test', '1.2.3', 'a'.repeat(64));
+		const updated = createRegistryDescriptor('https://registry.example.test', '1.2.4', 'b'.repeat(64));
+
+		assert.strictEqual(hasSourceChanged(installed, unchanged), false);
+		assert.strictEqual(hasSourceChanged(installed, updated), true);
 	});
 });

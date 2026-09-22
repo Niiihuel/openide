@@ -361,8 +361,10 @@ terminal does not automatically give every client every native tool.
 
 | Mechanism | Storage and behavior |
 |---|---|
+| Agent instructions | Root `AGENTS.md` is loaded for trusted workspaces; `AGENTS.override.md` takes precedence, and `~/.codex/AGENTS.md` provides global guidance. Installing a skill or plugin never rewrites these files. |
 | Rules | `.openide/rules/*.md` and profile `openideAgent/rules/*.md`; bounded snapshots enter native turns. A project rule with the same name overrides the global one. |
-| Skills | `.openide/skills/<name>/SKILL.md` and project `.agents/skills/<name>/SKILL.md`; the model sees descriptions and loads applicable procedures with `skill_view`. OpenIDE's project copy wins a name collision. |
+| Skills | Project `.agents/skills/<name>/SKILL.md` and user `~/.agents/skills/<name>/SKILL.md`; the model sees descriptions and loads applicable procedures with `skill_view`. Legacy `.openide/skills` and `~/.config/agents/skills` remain readable. Enabled plugin skills are exposed read-only through the same tool. |
+| Plugins | Portable Agent Plugins use a root `plugin.json`, `skills/` and optional `mcp.json`; local catalogs use `.agents/plugins/marketplace.json`, while signed registries expose `/v1/marketplace.json`. Claude, Codex and Copilot/Open Plugin compatibility manifests are import formats over the same internal model. Registry installs verify publisher/release Ed25519 signatures and content hashes before atomic promotion. |
 | Subagents | `.openide/agents/*.md`; named definitions can select a model, profile, read-only behavior, background operation and tool restrictions. |
 | Hooks | `.openide/hooks.json` plus profile `openideAgent/hooks.json`; events include `preToolUse`, `postToolUse`, `userPromptSubmit`, `sessionStart`, `stop` and `subagentStop`. |
 | MCP | `.openide/mcp.json` plus profile `openideAgent/mcp.json`; configured servers publish additional schemas and tools. Settings offers a [catalog](#mcp-server-catalog) of common servers. |

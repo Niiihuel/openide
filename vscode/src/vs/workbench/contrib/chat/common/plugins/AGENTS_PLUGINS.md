@@ -19,7 +19,7 @@ Agent plugins are a modular extension system that allows external packages of pr
 | File | Role |
 |------|------|
 | `agentPluginRepositoryService.ts` | Browser implementation of `IAgentPluginRepositoryService` (git clone/pull via Git service) |
-| `pluginSources.ts` | Concrete `IPluginSource` implementations: `GitHubPluginSource`, `GitUrlPluginSource`, `NpmPluginSource`, `PipPluginSource`, `RelativePathPluginSource` |
+| `pluginSources.ts` | Concrete `IPluginSource` implementations: `GitHubPluginSource`, `GitUrlPluginSource`, `RegistryPluginSource`, `NpmPluginSource`, `PipPluginSource`, `RelativePathPluginSource` |
 | `pluginInstallService.ts` | Browser implementation of `IPluginInstallService` |
 | `agentPluginsView.ts` | Installed-plugins tree view UI |
 | `agentPluginActions.ts` | Context-menu actions for plugins |
@@ -93,12 +93,12 @@ Four format adapters share the discovery surface:
 
 | | Agent Plugins v1 | Copilot | Claude | Open Plugin |
 |-|------------------|---------|--------|-------------|
-| Manifest | `plugin.json` with the exact Agent Plugins v1 schema | `plugin.json` | `.claude-plugin/plugin.json` | `.plugin/plugin.json` |
+| Manifest | `plugin.json` with the exact Agent Plugins v1 schema | `plugin.json` | `.claude-plugin/plugin.json` | `.plugin/plugin.json` or legacy Codex `.codex-plugin/plugin.json` |
 | Portable components | `skills/*/SKILL.md`, `mcp.json` | Host-specific components | Host-specific components | Open Plugin components |
 | Hooks config | `com.github.copilot/hooks/hooks.json` client extension | `hooks.json` | `hooks/hooks.json` | `hooks/hooks.json` |
 | Special handling | Compatible schema recognition, portable fixed paths, Copilot client extensions, and package containment | Legacy permissive behavior | `${CLAUDE_PLUGIN_ROOT}` token replacement | `${PLUGIN_ROOT}` token replacement |
 
-Auto-detection first reads root `plugin.json`. The Agent adapter is selected when `$schema` uses the `agent-plugins.org` plugin schema namespace. Compatible schema revisions are accepted and known usable fields are read without rejecting unknown or malformed optional metadata. An Agent manifest wins over coexisting legacy metadata. Otherwise `.plugin/plugin.json` selects Open Plugin, a Claude path or manifest selects Claude, and the remaining packages use the Copilot adapter.
+Auto-detection first reads root `plugin.json`. The Agent adapter is selected when `$schema` uses the `agent-plugins.org` plugin schema namespace. Compatible schema revisions are accepted and known usable fields are read without rejecting unknown or malformed optional metadata. An Agent manifest wins over coexisting legacy metadata. Otherwise `.plugin/plugin.json` or `.codex-plugin/plugin.json` selects the Open Plugin adapter, a Claude path or manifest selects Claude, and the remaining packages use the Copilot adapter.
 
 Agent Plugins use the shared plugin discovery pipeline and permissive component readers. Portable discovery scans only immediate children of `skills/` and root `mcp.json`. Copilot-specific commands, agents, rules, and hooks use the sanctioned `com.github.copilot` client extension namespace in both the manifest and filesystem. Their defaults are `com.github.copilot/commands/`, `com.github.copilot/agents/`, `com.github.copilot/rules/`, and `com.github.copilot/hooks/hooks.json`. Component path configuration under `extensions["com.github.copilot"]` resolves relative to the matching extension directory and supports the same string, string array, and `{ paths, exclusive }` forms as legacy plugin manifests. Inline hook and MCP definitions are also accepted there. Other extension namespaces and malformed optional metadata are ignored.
 
@@ -109,6 +109,7 @@ Agent Plugins use the shared plugin discovery pipeline and permissive component 
 ├── plugin.json                                    # Agent Plugins v1 or Copilot manifest
 ├── .claude-plugin/plugin.json                     # Claude manifest
 ├── .plugin/plugin.json                            # Open Plugin manifest
+├── .codex-plugin/plugin.json                      # Legacy Codex compatibility manifest
 ├── hooks.json   OR  hooks/hooks.json              # hook definitions
 ├── mcp.json                                       # Agent Plugins v1 MCP definitions
 ├── com.github.copilot/                            # Copilot Agent Plugin client extension
@@ -137,8 +138,8 @@ Agent Plugins use the shared plugin discovery pipeline and permissive component 
 
 Manages the catalog of available and installed plugins:
 
-- **Fetch** — reads `chat.plugins.marketplaces` config (GitHub shorthand, Git URLs, or file URIs), fetches `marketplace.json` from each, and returns parsed `IMarketplacePlugin` entries.
-- **Installed storage** — persists installed plugins in application-scoped storage (`chat.plugins.installed.v1`). Each entry tracks `{ pluginUri, plugin, enabled }`.
+- **Fetch** — reads `chat.plugins.marketplaces` config (GitHub shorthand, Git URLs, file URIs, or an exact signed-registry `.../v1/marketplace.json` URL), fetches the catalog, and returns parsed `IMarketplacePlugin` entries.
+- **Installed storage** — persists installed plugins in `<agentPluginsHome>/installed.json`. Version 2 snapshots the exact marketplace descriptor, including registry publisher identity, release signature, artifact digest, and immutable version; version 1 entries remain readable and are migrated on the next write.
 - **Trust** — marketplace canonical IDs must be explicitly trusted before install proceeds (`chat.plugins.trustedMarketplaces.v1`).
 - **Auto-update** — checks eligible installed marketplaces approximately every 24 hours and reports their canonical IDs through `marketplacesWithUpdates`. Managed `extraKnownMarketplaces.<name>.autoUpdate` values override `extensions.autoUpdate` for that marketplace; undefined entries inherit the global setting. Checks and updates are restricted to enabled marketplaces and still enforce `strictKnownMarketplaces`.
 - **GitHub caching** — caches raw GitHub API responses with an 8-hour TTL to avoid repeated fetches.
@@ -146,18 +147,21 @@ Manages the catalog of available and installed plugins:
 ### Marketplace Definition Files
 
 Checked in order per repository:
-1. `marketplace.json` → `MarketplaceType.OpenPlugin`
-2. `.plugin/marketplace.json` → `MarketplaceType.OpenPlugin`
-3. `.github/plugin/marketplace.json` → `MarketplaceType.Copilot`
-4. `.claude-plugin/marketplace.json` → `MarketplaceType.Claude`
+1. `.agents/plugins/marketplace.json` → `MarketplaceType.OpenPlugin`
+2. `marketplace.json` → `MarketplaceType.OpenPlugin`
+3. `.plugin/marketplace.json` → `MarketplaceType.OpenPlugin`
+4. `.github/plugin/marketplace.json` → `MarketplaceType.Copilot`
+5. `.claude-plugin/marketplace.json` → `MarketplaceType.Claude`
+
+Codex-style local entries such as `{ "source": "local", "path": "./my-plugin" }` are normalized to the existing contained relative-path source model. The Create Plugin action emits an Agent Plugins v1 root manifest, portable `skills/` and `mcp.json`, and places host-specific resources under `com.github.copilot/`. When the selected parent already contains `.agents/plugins/marketplace.json`, the action registers the new package there.
 
 ### IPluginInstallService
 
 Orchestrates install and update workflows:
 
 - `installPlugin()` — checks marketplace trust, delegates to the appropriate source strategy to ensure files are locally available, and registers the plugin in installed storage.
-- `installPluginFromSource()` — installs from a source string: GitHub shorthand (`owner/repo`), a git clone URL, or a local folder path (`file://` URI, absolute path, or `~`-prefixed path). Local folders are inspected to decide whether they are a marketplace (registered under `chat.plugins.marketplaces`) or a standalone plugin (registered under `chat.pluginLocations`).
-- `updatePlugin()` / `updateAllPlugins()` — pulls latest changes for cloned repositories and re-runs package-manager installs where applicable.
+- `installPluginFromSource()` — installs from a source string: GitHub shorthand (`owner/repo`), a git clone URL, an exact signed-registry catalog URL, or a local folder path (`file://` URI, absolute path, or `~`-prefixed path). Local folders are inspected to decide whether they are a marketplace (registered under `chat.plugins.marketplaces`) or a standalone plugin (registered under `chat.pluginLocations`).
+- `updatePlugin()` / `updateAllPlugins()` — pulls latest changes for cloned repositories, re-runs package-manager installs where applicable, or fetches and verifies the new immutable release selected by a registry catalog.
 
 ### Plugin Source Strategies (IPluginSource)
 
@@ -168,6 +172,7 @@ Each `PluginSourceKind` has a strategy that knows how to compute cache paths, pr
 | `RelativePath` | No-op (lives inside marketplace repo) | `<cacheRoot>/github.com/<owner>/<repo>/<path>` |
 | `GitHub` | `git clone` / `git pull` | `<cacheRoot>/github.com/<owner>/<repo>[/ref_<ref>]` |
 | `GitUrl` | `git clone` / `git pull` | `<cacheRoot>/<host>/<path>[/ref_<ref>]` |
+| `Registry` | HTTPS fetch, Ed25519 publisher/release verification, exact artifact and file SHA-256 checks, then transactional promotion | `<agentPluginsHome>/registry/<origin>/<base>/<publisher>/<plugin>/` |
 | `Npm` | `npm install` in terminal | `<cacheRoot>/npm/<sanitized-package>/` |
 | `Pip` | `pip install` in terminal | `<cacheRoot>/pip/<package>/` |
 
@@ -191,14 +196,16 @@ The managed customization controls are complementary:
 
 `strictPluginOnlyCustomization` does not replace strict marketplace enforcement. Hardened deployments apply both controls when plugin source and standalone customization provenance must both be constrained.
 
-### Storage (ApplicationScope, MachineTarget)
+### Storage
 | Key | Description |
 |-----|-------------|
-| `chat.plugins.installed.v1` | Installed marketplace plugins |
+| `<agentPluginsHome>/installed.json` | Installed marketplace plugins and exact source descriptors (`version: 2`) |
 | `chat.plugins.trustedMarketplaces.v1` | User-trusted marketplace canonical IDs |
 | `chat.plugins.lastFetchedPlugins.v2` | Last marketplace fetch results (persisted until next fetch) |
 | `chat.plugins.marketplaces.githubCache.v1` | GitHub API response cache (8 hour TTL) |
 | `chat.plugins.lastUpdateCheck.v1` | Timestamp of last periodic update check |
+
+Registry installation treats the configured HTTPS origin and enterprise allowlist as the trust anchor. A catalog entry must use the exact same origin and canonical artifact route, and the client independently verifies the publisher key fingerprint, detached Ed25519 release signature, exact artifact byte length and SHA-256, each file hash, normalized extraction paths, package limits, and the root Agent Plugin manifest. Files are first written to a sibling staging directory; only a fully verified package is atomically promoted, with a receipt binding the installation to publisher, key, artifact, version, and marketplace. A release signature protects immutable bytes but does not make an untrusted registry origin trustworthy.
 
 ### Enablement Storage
 | Key | Description |

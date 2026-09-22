@@ -24,6 +24,7 @@ import { IAgentPluginRepositoryService } from '../common/plugins/agentPluginRepo
 import { ChatConfiguration } from '../common/constants.js';
 import { IPluginInstallService, IInstallPluginFromSourceOptions, IInstallPluginFromSourceResult, IUpdateAllPluginsOptions, IUpdateAllPluginsResult } from '../common/plugins/pluginInstallService.js';
 import { IMarketplacePlugin, IMarketplaceReference, IPluginMarketplaceService, MarketplaceReferenceKind, MarketplaceType, hasSourceChanged, parseMarketplaceReference, parseMarketplaceReferences, PluginSourceKind, readConfiguredMarketplaces } from '../common/plugins/pluginMarketplaceService.js';
+import { computePluginTreeDigest, normalizePluginTreeDigest } from '../common/plugins/pluginInstallTransaction.js';
 
 export class PluginInstallService implements IPluginInstallService {
 	declare readonly _serviceBrand: undefined;
@@ -58,8 +59,8 @@ export class PluginInstallService implements IPluginInstallService {
 			return;
 		}
 
-		// GitHub / GitUrl
-		return this._installGitPlugin(plugin);
+		// Independently materialized sources (git or signed registry artifact).
+		return this._installIndependentPlugin(plugin);
 	}
 
 	validatePluginSource(source: string): string | undefined {
@@ -67,7 +68,7 @@ export class PluginInstallService implements IPluginInstallService {
 		if (reference || this._isLocalPathSource(source)) {
 			return undefined;
 		}
-		return localize('invalidSource', "'{0}' is not a valid plugin source. Enter a GitHub repository (owner/repo), a git clone URL, or a local folder path.", source);
+		return localize('invalidSource', "'{0}' is not a valid plugin source. Enter an HTTP registry URL, a GitHub repository (owner/repo), a git clone URL, or a local folder path.", source);
 	}
 
 	async installPluginFromSource(source: string, options?: IInstallPluginFromSourceOptions): Promise<IInstallPluginFromSourceResult> {
@@ -83,11 +84,15 @@ export class PluginInstallService implements IPluginInstallService {
 
 		return {
 			success: false,
-			message: localize('invalidSource', "'{0}' is not a valid plugin source. Enter a GitHub repository (owner/repo), a git clone URL, or a local folder path.", source),
+			message: localize('invalidSource', "'{0}' is not a valid plugin source. Enter an HTTP registry URL, a GitHub repository (owner/repo), a git clone URL, or a local folder path.", source),
 		};
 	}
 
 	private async _doInstallFromSource(reference: IMarketplaceReference, options?: IInstallPluginFromSourceOptions): Promise<IInstallPluginFromSourceResult> {
+		if (reference.kind === MarketplaceReferenceKind.HttpRegistry) {
+			return this._doInstallFromRegistry(reference, options);
+		}
+
 		// Build a source descriptor for the git clone.
 		const sourceDescriptor = reference.kind === MarketplaceReferenceKind.GitHubShorthand
 			? { kind: PluginSourceKind.GitHub as const, repo: reference.githubRepo! }
@@ -167,6 +172,31 @@ export class PluginInstallService implements IPluginInstallService {
 		return this._installDiscoveredPlugins(reference, discoveredPlugins, options);
 	}
 
+	private async _doInstallFromRegistry(reference: IMarketplaceReference, options?: IInstallPluginFromSourceOptions): Promise<IInstallPluginFromSourceResult> {
+		const trustProbe: IMarketplacePlugin = {
+			name: reference.displayLabel,
+			description: '',
+			version: '',
+			source: '',
+			sourceDescriptor: { kind: PluginSourceKind.RelativePath, path: '' },
+			marketplace: reference.displayLabel,
+			marketplaceReference: reference,
+			marketplaceType: MarketplaceType.OpenPlugin,
+		};
+		if (!await this._ensureMarketplaceTrusted(trustProbe)) {
+			return { success: false };
+		}
+
+		const discoveredPlugins = await this._pluginMarketplaceService.readPluginsFromRegistry(reference);
+		if (discoveredPlugins.length === 0) {
+			return {
+				success: false,
+				message: localize('noRegistryPluginsFound', "No plugins found in registry '{0}'.", reference.displayLabel),
+			};
+		}
+		return this._installDiscoveredPlugins(reference, discoveredPlugins, options);
+	}
+
 	/**
 	 * Installs a plugin from a local folder path (`file://` URI, absolute path,
 	 * or `~`-prefixed path). Inspects the directory to decide whether it is a
@@ -179,7 +209,7 @@ export class PluginInstallService implements IPluginInstallService {
 		if (!repoDir) {
 			return {
 				success: false,
-				message: localize('invalidSource', "'{0}' is not a valid plugin source. Enter a GitHub repository (owner/repo), a git clone URL, or a local folder path.", reference.rawValue),
+				message: localize('invalidSource', "'{0}' is not a valid plugin source. Enter an HTTP registry URL, a GitHub repository (owner/repo), a git clone URL, or a local folder path.", reference.rawValue),
 			};
 		}
 
@@ -370,11 +400,13 @@ export class PluginInstallService implements IPluginInstallService {
 			return this._installPackagePlugin(plugin, silent);
 		}
 
-		// For relative-path and git sources, delegate to repository service
+		// For relative-path and independently materialized sources, delegate to
+		// the repository service strategy selected by source kind.
 		return this._pluginRepositoryService.updatePluginSource(plugin, {
 			pluginName: plugin.name,
 			failureLabel: plugin.name,
 			marketplaceType: plugin.marketplaceType,
+			silent,
 		});
 	}
 
@@ -392,7 +424,7 @@ export class PluginInstallService implements IPluginInstallService {
 		const failedNames: string[] = [];
 
 		const doUpdate = async () => {
-			const gitTasks: Promise<void>[] = [];
+			const marketplaceRefreshTasks: Promise<void>[] = [];
 			const packagePlugins: { installed: IMarketplacePlugin; marketplace: IMarketplacePlugin }[] = [];
 
 			// 1. Pull each unique marketplace repository first (handles all
@@ -409,7 +441,12 @@ export class PluginInstallService implements IPluginInstallService {
 					failedNames.push(ref.displayLabel);
 					continue;
 				}
-				gitTasks.push((async () => {
+				// HTTP registries are refreshed by fetchMarketplacePlugins below;
+				// they have no local git checkout to pull.
+				if (ref.kind === MarketplaceReferenceKind.HttpRegistry) {
+					continue;
+				}
+				marketplaceRefreshTasks.push((async () => {
 					if (token.isCancellationRequested) {
 						return;
 					}
@@ -431,7 +468,7 @@ export class PluginInstallService implements IPluginInstallService {
 				})());
 			}
 
-			await Promise.all(gitTasks);
+			await Promise.all(marketplaceRefreshTasks);
 
 			// 2. Re-fetch marketplace data *after* pulling so we see any
 			//    updated plugin descriptors (new versions, refs, etc.).
@@ -443,7 +480,7 @@ export class PluginInstallService implements IPluginInstallService {
 			}
 
 			// 3. Update non-relative-path plugins individually.
-			const independentGitTasks: Promise<void>[] = [];
+			const independentSourceTasks: Promise<void>[] = [];
 			for (const entry of installed) {
 				if (entry.plugin.sourceDescriptor.kind === PluginSourceKind.RelativePath) {
 					continue;
@@ -463,7 +500,7 @@ export class PluginInstallService implements IPluginInstallService {
 					continue;
 				}
 
-				independentGitTasks.push((async () => {
+				independentSourceTasks.push((async () => {
 					if (token.isCancellationRequested) {
 						return;
 					}
@@ -486,7 +523,7 @@ export class PluginInstallService implements IPluginInstallService {
 				})());
 			}
 
-			await Promise.all(independentGitTasks);
+			await Promise.all(independentSourceTasks);
 
 			for (const { installed: _installed, marketplace } of packagePlugins) {
 				if (token.isCancellationRequested) {
@@ -624,13 +661,40 @@ export class PluginInstallService implements IPluginInstallService {
 			});
 			return;
 		}
+		if (!await this._verifyExpectedDigest(pluginDir, plugin)) {
+			return;
+		}
 
 		this._pluginMarketplaceService.addInstalledPlugin(pluginDir, plugin);
 	}
 
-	// --- GitHub / Git URL source (independent clone) --------------------------
+	private async _verifyExpectedDigest(pluginDir: URI, plugin: IMarketplacePlugin): Promise<boolean> {
+		const expected = plugin.sourceDescriptor.digest;
+		if (!expected) {
+			return true;
+		}
+		try {
+			const actual = await computePluginTreeDigest(this._fileService, pluginDir);
+			const normalizedExpected = normalizePluginTreeDigest(expected);
+			if (actual === normalizedExpected) {
+				return true;
+			}
+			this._notificationService.notify({
+				severity: Severity.Error,
+				message: localize('pluginDigestMismatch', "Plugin '{0}' failed integrity verification. Expected {1}, got {2}.", plugin.name, normalizedExpected, actual),
+			});
+		} catch (error) {
+			this._notificationService.notify({
+				severity: Severity.Error,
+				message: localize('pluginDigestVerificationFailed', "Plugin '{0}' could not be verified: {1}", plugin.name, error instanceof Error ? error.message : String(error)),
+			});
+		}
+		return false;
+	}
 
-	private async _installGitPlugin(plugin: IMarketplacePlugin): Promise<void> {
+	// --- Independently materialized source (git clone or registry artifact) ---
+
+	private async _installIndependentPlugin(plugin: IMarketplacePlugin): Promise<void> {
 		const repo = this._pluginRepositoryService.getPluginSource(plugin.sourceDescriptor.kind);
 		let pluginDir: URI;
 		try {
@@ -647,7 +711,7 @@ export class PluginInstallService implements IPluginInstallService {
 		if (!pluginExists) {
 			this._notificationService.notify({
 				severity: Severity.Error,
-				message: localize('pluginSourceNotFound', "Plugin source '{0}' not found after cloning.", repo.getLabel(plugin.sourceDescriptor)),
+				message: localize('pluginSourceNotFound', "Plugin source '{0}' was not found after installation.", repo.getLabel(plugin.sourceDescriptor)),
 			});
 			return;
 		}

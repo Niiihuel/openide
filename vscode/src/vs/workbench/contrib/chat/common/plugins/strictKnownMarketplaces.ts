@@ -71,7 +71,9 @@ function matchesAllowlistEntry(entry: IStrictMarketplaceSource, ref: IMarketplac
 				return false;
 			}
 			const candidate = parseMarketplaceReference(appendRef(entry.url, entry.ref));
-			return !!candidate && candidate.canonicalId === ref.canonicalId;
+			return !!candidate
+				&& candidate.kind !== MarketplaceReferenceKind.HttpRegistry
+				&& candidate.canonicalId === ref.canonicalId;
 		}
 		case 'url': {
 			if (typeof entry.url !== 'string') {
@@ -125,6 +127,13 @@ function appendRef(value: string, ref: string | undefined): string {
 function extractHost(ref: IMarketplaceReference): string | undefined {
 	if (ref.kind === MarketplaceReferenceKind.GitHubShorthand) {
 		return 'github.com';
+	}
+	if (ref.kind === MarketplaceReferenceKind.HttpRegistry) {
+		try {
+			return new URL(ref.registryUri?.toString() ?? ref.cloneUrl).hostname.replace(/^\[|\]$/g, '').toLowerCase() || undefined;
+		} catch {
+			return undefined;
+		}
 	}
 	if (ref.kind !== MarketplaceReferenceKind.GitUri) {
 		return undefined;

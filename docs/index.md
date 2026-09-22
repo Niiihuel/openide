@@ -35,6 +35,8 @@
 
 ## Releases
 
+- [OpenIDE 1.4.3 release notes](./releases/1.4.3.md)
+- [OpenIDE 1.4.2 release notes](./releases/1.4.2.md)
 - [OpenIDE 1.4.1 release notes](./releases/1.4.1.md)
 - [OpenIDE 1.4.0 release notes](./releases/1.4.0.md)
 - [OpenIDE 1.3.0 release notes](./releases/1.3.0.md)

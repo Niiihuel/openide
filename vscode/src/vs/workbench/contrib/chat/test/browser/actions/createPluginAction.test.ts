@@ -9,6 +9,7 @@ import { DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { Schemas } from '../../../../../../base/common/network.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
+import { AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA } from '../../../../../../platform/agentPlugins/common/agentPluginParser.js';
 import { FileService } from '../../../../../../platform/files/common/fileService.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { InMemoryFileSystemProvider } from '../../../../../../platform/files/common/inMemoryFilesystemProvider.js';
@@ -263,7 +264,7 @@ suite('CreatePluginAction helpers', () => {
 					headers: [['Authorization', 'Bearer token']],
 				}),
 				{
-					type: 'http',
+					type: 'streamable-http',
 					url: 'http://localhost:3000/',
 					headers: { Authorization: 'Bearer token' },
 				}
@@ -278,7 +279,7 @@ suite('CreatePluginAction helpers', () => {
 					headers: [],
 				}),
 				{
-					type: 'http',
+					type: 'streamable-http',
 					url: 'http://localhost:3000/',
 				}
 			);
@@ -310,15 +311,17 @@ suite('writePluginToDisk', () => {
 		return JSON.parse(content.value.toString());
 	}
 
-	test('creates manifest with correct structure', async () => {
+	test('creates an Agent Plugins v1 manifest at the plugin root', async () => {
 		const pluginRoot = URI.joinPath(root, 'my-plugin');
 		await writePluginToDisk(fileService, pluginRoot, 'my-plugin', []);
 
-		assert.deepStrictEqual(await readJson(URI.joinPath(pluginRoot, '.plugin', 'plugin.json')), {
+		assert.deepStrictEqual(await readJson(URI.joinPath(pluginRoot, 'plugin.json')), {
+			$schema: AGENT_PLUGIN_SCHEMA,
 			name: 'my-plugin',
 			version: '1.0.0',
 			description: '',
 		});
+		assert.ok(!(await fileService.exists(URI.joinPath(pluginRoot, '.plugin', 'plugin.json'))));
 	});
 
 	test('copies instructions to rules/', async () => {
@@ -339,8 +342,15 @@ suite('writePluginToDisk', () => {
 			}),
 		]);
 
-		const content = await fileService.readFile(URI.joinPath(pluginRoot, 'rules', 'coding.instructions.md'));
+		const content = await fileService.readFile(URI.joinPath(pluginRoot, 'com.github.copilot', 'rules', 'coding.instructions.md'));
 		assert.strictEqual(content.value.toString(), '# My coding rules');
+		assert.deepStrictEqual(await readJson(URI.joinPath(pluginRoot, 'plugin.json')), {
+			$schema: AGENT_PLUGIN_SCHEMA,
+			name: 'test-plugin',
+			version: '1.0.0',
+			description: '',
+			extensions: { 'com.github.copilot': {} },
+		});
 	});
 
 	test('preserves .mdc suffix for rule files', async () => {
@@ -361,7 +371,7 @@ suite('writePluginToDisk', () => {
 			}),
 		]);
 
-		const content = await fileService.readFile(URI.joinPath(pluginRoot, 'rules', 'prefer-const.mdc'));
+		const content = await fileService.readFile(URI.joinPath(pluginRoot, 'com.github.copilot', 'rules', 'prefer-const.mdc'));
 		assert.strictEqual(content.value.toString(), 'prefer const');
 	});
 
@@ -383,7 +393,7 @@ suite('writePluginToDisk', () => {
 			}),
 		]);
 
-		const content = await fileService.readFile(URI.joinPath(pluginRoot, 'commands', 'review.md'));
+		const content = await fileService.readFile(URI.joinPath(pluginRoot, 'com.github.copilot', 'commands', 'review.md'));
 		assert.strictEqual(content.value.toString(), 'Review this code');
 	});
 
@@ -405,7 +415,7 @@ suite('writePluginToDisk', () => {
 			}),
 		]);
 
-		const content = await fileService.readFile(URI.joinPath(pluginRoot, 'agents', 'reviewer.md'));
+		const content = await fileService.readFile(URI.joinPath(pluginRoot, 'com.github.copilot', 'agents', 'reviewer.md'));
 		assert.strictEqual(content.value.toString(), '---\nname: reviewer\n---\nYou review code.');
 	});
 
@@ -455,7 +465,7 @@ suite('writePluginToDisk', () => {
 			}),
 		]);
 
-		assert.deepStrictEqual(await readJson(URI.joinPath(pluginRoot, 'hooks', 'hooks.json')), {
+		assert.deepStrictEqual(await readJson(URI.joinPath(pluginRoot, 'com.github.copilot', 'hooks', 'hooks.json')), {
 			hooks: {
 				SessionStart: [{ type: 'command', command: 'echo start' }],
 				PreToolUse: [{ type: 'command', command: 'echo pre' }],
@@ -463,7 +473,7 @@ suite('writePluginToDisk', () => {
 		});
 	});
 
-	test('exports MCP servers to .mcp.json', async () => {
+	test('exports MCP servers to Agent Plugins v1 mcp.json', async () => {
 		const pluginRoot = URI.joinPath(root, 'test-plugin');
 		await writePluginToDisk(fileService, pluginRoot, 'test-plugin', [
 			makeResourceItem({
@@ -493,7 +503,8 @@ suite('writePluginToDisk', () => {
 			}),
 		]);
 
-		assert.deepStrictEqual(await readJson(URI.joinPath(pluginRoot, '.mcp.json')), {
+		assert.deepStrictEqual(await readJson(URI.joinPath(pluginRoot, 'mcp.json')), {
+			$schema: AGENT_PLUGIN_MCP_SCHEMA,
 			mcpServers: {
 				'my-server': {
 					type: 'stdio',
@@ -522,7 +533,7 @@ suite('writePluginToDisk', () => {
 			}),
 		]);
 
-		const content = await fileService.readFile(URI.joinPath(pluginRoot, 'rules', 'writing-rules.instructions.md'));
+		const content = await fileService.readFile(URI.joinPath(pluginRoot, 'com.github.copilot', 'rules', 'writing-rules.instructions.md'));
 		assert.strictEqual(content.value.toString(), 'content');
 	});
 
@@ -530,13 +541,14 @@ suite('writePluginToDisk', () => {
 		const pluginRoot = URI.joinPath(root, 'test-plugin');
 		await writePluginToDisk(fileService, pluginRoot, 'test-plugin', []);
 
-		assert.ok(await fileService.exists(URI.joinPath(pluginRoot, '.plugin', 'plugin.json')));
+		assert.ok(await fileService.exists(URI.joinPath(pluginRoot, 'plugin.json')));
 		assert.ok(!(await fileService.exists(URI.joinPath(pluginRoot, 'rules'))));
 		assert.ok(!(await fileService.exists(URI.joinPath(pluginRoot, 'commands'))));
 		assert.ok(!(await fileService.exists(URI.joinPath(pluginRoot, 'agents'))));
 		assert.ok(!(await fileService.exists(URI.joinPath(pluginRoot, 'skills'))));
 		assert.ok(!(await fileService.exists(URI.joinPath(pluginRoot, 'hooks'))));
-		assert.ok(!(await fileService.exists(URI.joinPath(pluginRoot, '.mcp.json'))));
+		assert.ok(!(await fileService.exists(URI.joinPath(pluginRoot, 'mcp.json'))));
+		assert.ok(!(await fileService.exists(URI.joinPath(pluginRoot, 'com.github.copilot'))));
 	});
 });
 
@@ -558,6 +570,23 @@ suite('updateMarketplaceIfNeeded', () => {
 	});
 
 	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('updates .agents/plugins/marketplace.json before legacy marketplaces', async () => {
+		const modernUri = URI.joinPath(root, '.agents', 'plugins', 'marketplace.json');
+		const legacyUri = URI.joinPath(root, 'marketplace.json');
+		await fileService.writeFile(modernUri, VSBuffer.fromString(JSON.stringify({ name: 'modern', plugins: [] })));
+		await fileService.writeFile(legacyUri, VSBuffer.fromString(JSON.stringify({ name: 'legacy', plugins: [] })));
+
+		await updateMarketplaceIfNeeded(fileService, root, 'my-plugin');
+
+		assert.deepStrictEqual({
+			modern: (await readMarketplace(modernUri)).plugins,
+			legacy: (await readMarketplace(legacyUri)).plugins,
+		}, {
+			modern: [{ name: 'my-plugin', source: { source: 'local', path: './my-plugin' } }],
+			legacy: [],
+		});
+	});
 
 	test('adds plugin to existing marketplace.json', async () => {
 		const marketplace = { name: 'my-marketplace', plugins: [{ name: 'existing', source: './existing/' }] };
@@ -615,4 +644,9 @@ suite('updateMarketplaceIfNeeded', () => {
 			{ name: 'my-plugin', source: './my-plugin/' },
 		]);
 	});
+
+	async function readMarketplace(uri: URI): Promise<{ plugins?: unknown[] }> {
+		const content = await fileService.readFile(uri);
+		return JSON.parse(content.value.toString());
+	}
 });

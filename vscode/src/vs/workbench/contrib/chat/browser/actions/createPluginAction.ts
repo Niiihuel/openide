@@ -13,6 +13,7 @@ import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { isUriComponents, URI } from '../../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
+import { AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA } from '../../../../../platform/agentPlugins/common/agentPluginParser.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IFileDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
@@ -30,6 +31,7 @@ import { CHAT_CATEGORY } from './chatActions.js';
 
 const VALID_PLUGIN_NAME = /^[a-z0-9]([a-z0-9\-.]*[a-z0-9])?$/;
 const INVALID_CONSECUTIVE = /--|[.][.]/;
+const COPILOT_EXTENSION_NAMESPACE = 'com.github.copilot';
 
 export function validatePluginName(name: string): string | undefined {
 	if (!name) {
@@ -323,16 +325,6 @@ export async function writePluginToDisk(
 ): Promise<void> {
 	await fileService.createFolder(pluginRoot);
 
-	// Create .plugin/plugin.json
-	const manifestDir = joinPath(pluginRoot, '.plugin');
-	await fileService.createFolder(manifestDir);
-	const manifest = {
-		name: pluginName,
-		version: '1.0.0',
-		description: '',
-	};
-	await fileService.writeFile(joinPath(manifestDir, 'plugin.json'), VSBuffer.fromString(JSON.stringify(manifest, null, '\t')));
-
 	// Group selected items by type
 	const byType = {
 		instruction: selected.filter(i => i.resourceType === 'instruction'),
@@ -342,10 +334,22 @@ export async function writePluginToDisk(
 		hook: selected.filter(i => i.resourceType === 'hook'),
 		mcp: selected.filter(i => i.resourceType === 'mcp'),
 	};
+	const hasCopilotComponents = byType.instruction.length > 0
+		|| byType.prompt.length > 0
+		|| byType.agent.length > 0
+		|| byType.hook.length > 0;
+	const manifest = {
+		$schema: AGENT_PLUGIN_SCHEMA,
+		name: pluginName,
+		version: '1.0.0',
+		description: '',
+		...(hasCopilotComponents ? { extensions: { [COPILOT_EXTENSION_NAMESPACE]: {} } } : {}),
+	};
+	await fileService.writeFile(joinPath(pluginRoot, 'plugin.json'), VSBuffer.fromString(JSON.stringify(manifest, null, '\t')));
 
-	// Copy instructions → rules/
+	// Copy instructions → com.github.copilot/rules/
 	if (byType.instruction.length > 0) {
-		const rulesDir = joinPath(pluginRoot, 'rules');
+		const rulesDir = joinPath(pluginRoot, COPILOT_EXTENSION_NAMESPACE, 'rules');
 		await fileService.createFolder(rulesDir);
 		for (const item of byType.instruction) {
 			if (!item.promptPath) {
@@ -360,9 +364,9 @@ export async function writePluginToDisk(
 		}
 	}
 
-	// Copy prompts → commands/
+	// Copy prompts → com.github.copilot/commands/
 	if (byType.prompt.length > 0) {
-		const commandsDir = joinPath(pluginRoot, 'commands');
+		const commandsDir = joinPath(pluginRoot, COPILOT_EXTENSION_NAMESPACE, 'commands');
 		await fileService.createFolder(commandsDir);
 		for (const item of byType.prompt) {
 			if (!item.promptPath) {
@@ -375,9 +379,9 @@ export async function writePluginToDisk(
 		}
 	}
 
-	// Copy agents → agents/
+	// Copy agents → com.github.copilot/agents/
 	if (byType.agent.length > 0) {
-		const agentsDir = joinPath(pluginRoot, 'agents');
+		const agentsDir = joinPath(pluginRoot, COPILOT_EXTENSION_NAMESPACE, 'agents');
 		await fileService.createFolder(agentsDir);
 		for (const item of byType.agent) {
 			if (!item.promptPath) {
@@ -411,9 +415,9 @@ export async function writePluginToDisk(
 		}
 	}
 
-	// Copy hooks → hooks/hooks.json (merge all selected hook files)
+	// Copy hooks → com.github.copilot/hooks/hooks.json (merge all selected hook files)
 	if (byType.hook.length > 0) {
-		const hooksDir = joinPath(pluginRoot, 'hooks');
+		const hooksDir = joinPath(pluginRoot, COPILOT_EXTENSION_NAMESPACE, 'hooks');
 		await fileService.createFolder(hooksDir);
 
 		const mergedHooks: Record<string, Record<string, unknown>[]> = {};
@@ -449,7 +453,7 @@ export async function writePluginToDisk(
 		);
 	}
 
-	// Export MCP servers → .mcp.json
+	// Export MCP servers → mcp.json
 	if (byType.mcp.length > 0) {
 		const mcpServers: Record<string, object> = {};
 		for (const item of byType.mcp) {
@@ -459,9 +463,9 @@ export async function writePluginToDisk(
 			const def = item.mcpServer.definition;
 			mcpServers[def.label] = serializeMcpLaunch(def.launch);
 		}
-		const mcpJson = { mcpServers };
+		const mcpJson = { $schema: AGENT_PLUGIN_MCP_SCHEMA, mcpServers };
 		await fileService.writeFile(
-			joinPath(pluginRoot, '.mcp.json'),
+			joinPath(pluginRoot, 'mcp.json'),
 			VSBuffer.fromString(JSON.stringify(mcpJson, null, '\t'))
 		);
 	}
@@ -511,7 +515,7 @@ export function serializeMcpLaunch(launch: McpServerDefinition['launch']): objec
 		return result;
 	} else {
 		const result: Record<string, unknown> = {
-			type: 'http',
+			type: 'streamable-http',
 			url: launch.uri.toString(),
 		};
 		if (launch.headers.length > 0) {
@@ -542,13 +546,14 @@ export async function copyDirectory(fileService: IFileService, source: URI, targ
 }
 
 const MARKETPLACE_PATHS = [
-	'marketplace.json',
-	'.plugin/marketplace.json',
-];
+	{ path: '.agents/plugins/marketplace.json', sourceKind: 'local' },
+	{ path: 'marketplace.json', sourceKind: 'legacy' },
+	{ path: '.plugin/marketplace.json', sourceKind: 'legacy' },
+] as const;
 
 export async function updateMarketplaceIfNeeded(fileService: IFileService, targetDir: URI, pluginName: string): Promise<void> {
-	for (const relPath of MARKETPLACE_PATHS) {
-		const marketplaceUri = joinPath(targetDir, relPath);
+	for (const definition of MARKETPLACE_PATHS) {
+		const marketplaceUri = joinPath(targetDir, definition.path);
 		if (await fileService.exists(marketplaceUri)) {
 			try {
 				const content = await fileService.readFile(marketplaceUri);
@@ -558,7 +563,7 @@ export async function updateMarketplaceIfNeeded(fileService: IFileService, targe
 						marketplace['plugins'] = [];
 					}
 
-					const plugins = marketplace['plugins'] as { name?: string; source?: string }[];
+					const plugins = marketplace['plugins'] as { name?: string; source?: string | { source: string; path: string } }[];
 
 					// Skip if a plugin with this name already exists
 					if (plugins.some(p => p.name === pluginName)) {
@@ -567,7 +572,9 @@ export async function updateMarketplaceIfNeeded(fileService: IFileService, targe
 
 					plugins.push({
 						name: pluginName,
-						source: `./${pluginName}/`,
+						source: definition.sourceKind === 'local'
+							? { source: 'local', path: `./${pluginName}` }
+							: `./${pluginName}/`,
 					});
 
 					await fileService.writeFile(

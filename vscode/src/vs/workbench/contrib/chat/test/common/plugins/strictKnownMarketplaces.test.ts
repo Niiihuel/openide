@@ -79,6 +79,22 @@ suite('strictKnownMarketplaces', () => {
 		assert.strictEqual(isMarketplaceReferenceAllowed(pinned, ref('https://example.com/team/kit.git#dev')), false);
 	});
 
+	test('registry endpoints require an exact url entry and never match a git entry', () => {
+		const registry = ref('https://plugins.example.test/openide/v1/marketplace.json');
+		assert.strictEqual(isMarketplaceReferenceAllowed([{
+			source: 'url',
+			url: 'https://plugins.example.test/openide/v1/marketplace.json',
+		}], registry), true);
+		assert.strictEqual(isMarketplaceReferenceAllowed([{
+			source: 'url',
+			url: 'https://plugins.example.test/other/v1/marketplace.json',
+		}], registry), false);
+		assert.strictEqual(isMarketplaceReferenceAllowed([{
+			source: 'git',
+			url: 'https://plugins.example.test/openide/v1/marketplace.json',
+		}], registry), false);
+	});
+
 	test('npm entries never match', () => {
 		const allowlist: IStrictMarketplaceSource[] = [{ source: 'npm', package: 'whatever' }];
 		assert.strictEqual(isMarketplaceReferenceAllowed(allowlist, ref('owner/repo')), false);
@@ -94,6 +110,8 @@ suite('strictKnownMarketplaces', () => {
 	test('hostPattern matches by host; invalid regex is treated as non-matching', () => {
 		assert.strictEqual(isMarketplaceReferenceAllowed([{ source: 'hostPattern', hostPattern: '^github\\.com$' }], ref('microsoft/vscode')), true);
 		assert.strictEqual(isMarketplaceReferenceAllowed([{ source: 'hostPattern', hostPattern: '\\.internal\\.example\\.com$' }], ref('https://plugins.internal.example.com/team/kit.git')), true);
+		assert.strictEqual(isMarketplaceReferenceAllowed([{ source: 'hostPattern', hostPattern: '^plugins\\.example\\.test$' }], ref('https://plugins.example.test/v1/marketplace.json')), true);
+		assert.strictEqual(isMarketplaceReferenceAllowed([{ source: 'hostPattern', hostPattern: '^::1$' }], ref('http://[::1]:8787/v1/marketplace.json')), true);
 		assert.strictEqual(isMarketplaceReferenceAllowed([{ source: 'hostPattern', hostPattern: '^github\\.com$' }], ref('https://example.com/team/kit.git')), false);
 		assert.strictEqual(isMarketplaceReferenceAllowed([{ source: 'hostPattern', hostPattern: '(' }], ref('microsoft/vscode')), false);
 	});

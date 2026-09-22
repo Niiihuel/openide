@@ -20,6 +20,7 @@ import { IContextViewService } from '../../../../platform/contextview/browser/co
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { basename, joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IDialogService, IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
@@ -28,6 +29,7 @@ import { IWorkspaceContextService } from '../../../../platform/workspace/common/
 import type { IOpenideSettingsSection, IOpenideSettingsSectionContext } from '../../openideSettings/browser/openideSettingsSection.js';
 import { OpenideSectionRenderer } from '../../openideSettings/browser/openideSettingsSectionBuilder.js';
 import { IEditorService, MODAL_GROUP } from '../../../services/editor/common/editorService.js';
+import { AICustomizationManagementCommands,AICustomizationManagementSection } from '../../chat/common/aiCustomizationWorkspaceService.js';
 import { IOpenideAgentService } from './openideAgentService.js';
 import { ISkillInfo } from './openideAgentSkills.js';
 import { OpenideSkillInstallerInput, OpenideSkillInstallScope } from './openideSkillInstallerInput.js';
@@ -40,6 +42,7 @@ const LOCATION_BADGE: Record<ISkillInfo['location'], string | undefined> = {
 	builtin: undefined,
 	openide: 'OpenIDE',
 	agents: 'Skills CLI',
+	plugin: 'Plugin',
 };
 
 export class OpenideSkillsSettingsSection extends Disposable implements IOpenideSettingsSection {
@@ -61,6 +64,7 @@ export class OpenideSkillsSettingsSection extends Disposable implements IOpenide
 		@IQuickInputService private readonly quickInputService: IQuickInputService,
 		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
 		@IEditorService private readonly editorService: IEditorService,
+		@ICommandService private readonly commandService: ICommandService,
 		@INotificationService private readonly notificationService: INotificationService,
 	) { super(); }
 
@@ -89,7 +93,8 @@ export class OpenideSkillsSettingsSection extends Disposable implements IOpenide
 				{ label: t('openide.skills.import'), icon: 'folder-opened', run: () => void this.importSkill() },
 				{ label: t('openide.skills.new'), icon: 'edit', run: () => void this.newSkill() },
 			] : []),
-			{ label: t('openide.skills.install'), icon: 'cloud-download', primary: true, run: () => void this.openInstaller() },
+			{ label: t('openide.skills.install'), icon: 'cloud-download', run: () => void this.openInstaller() },
+			{ label: t('openide.skills.plugins'), icon: 'extensions', primary: true, run: () => void this.openPluginMarketplace() },
 		];
 		const body = this.render_.section(root, {
 			title: t('openide.skills.title'),
@@ -135,7 +140,7 @@ export class OpenideSkillsSettingsSection extends Disposable implements IOpenide
 
 		for (const skill of skills) {
 			const badges: string[] = [];
-			const locationBadge = LOCATION_BADGE[skill.location];
+			const locationBadge = skill.origin ?? LOCATION_BADGE[skill.location];
 			if (locationBadge) { badges.push(locationBadge); }
 			if (skill.disabled) { badges.push(t('openide.skills.disabled')); }
 
@@ -144,10 +149,12 @@ export class OpenideSkillsSettingsSection extends Disposable implements IOpenide
 				mono: true,
 				description: skill.description || t('openide.skills.noDesc'),
 				badges,
-				// Built-ins live inside the product: they are neither opened nor deleted, only turned off.
+				// Built-ins and plugin-managed skills cannot be deleted from this surface.
 				iconActions: skill.location === 'builtin' ? [] : [
 					{ label: t('openide.skills.open'), icon: 'go-to-file', run: () => void this.openSkill(skill.name) },
-					{ label: t('openide.skills.delete'), icon: 'trash', run: () => void this.deleteSkill(skill.name) },
+					...(skill.location === 'plugin' ? [] : [
+						{ label: t('openide.skills.delete'), icon: 'trash', run: () => void this.deleteSkill(skill.name) },
+					]),
 				],
 				toggle: {
 					checked: !skill.disabled,
@@ -190,6 +197,10 @@ export class OpenideSkillsSettingsSection extends Disposable implements IOpenide
 			pinned: true,
 			modal: { nested: true, size: { width: 920, height: 660 } },
 		}, MODAL_GROUP);
+	}
+
+	private async openPluginMarketplace(): Promise<void> {
+		await this.commandService.executeCommand(AICustomizationManagementCommands.OpenMarketplace, AICustomizationManagementSection.Plugins);
 	}
 
 	private async newSkill(): Promise<void> {
@@ -251,7 +262,7 @@ export class OpenideSkillsSettingsSection extends Disposable implements IOpenide
 			name = asked.trim();
 		}
 
-		const destination = joinPath(root, '.openide', 'skills', name);
+		const destination = joinPath(root, '.agents', 'skills', name);
 		if (await this.fileService.exists(destination)) {
 			const overwrite = await this.dialogService.confirm({
 				message: t('openide.skills.importExists', name),

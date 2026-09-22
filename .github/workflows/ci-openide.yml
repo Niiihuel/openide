@@ -63,6 +63,9 @@ jobs:
       - name: Test release feed verification
         run: node --test dev/verify-release-feed.test.mjs
 
+      - name: Test plugin registry supply chain
+        run: node --test dev/plugin-registry/registry.test.mjs
+
       - name: Test upstream synchronization
         run: node --test dev/codeoss-sync.test.mjs dev/audit-fork-delta.test.mjs
 
