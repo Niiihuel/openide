@@ -119,7 +119,7 @@ try {
 	await compare('large cycle', graph(Array.from({ length: 240 }, (_, i) => `cycle/${i}.ts`), Array.from({ length: 240 }, (_, i) => [i, (i + 1) % 240])));
 	await compare('all hubs', graph(['hub/a', 'hub/b', 'hub/c'], Array.from({ length: 80 }, (_, i) => [i % 3, (i + 1) % 3])));
 
-	const paths = execFileSync('rg', ['--files', 'vscode/src/vs/platform/openideCodebase', 'vscode/src/vs/code/electron-utility/sharedProcess/contrib'], { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(path => path.endsWith('.ts')).sort();
+	const paths = execFileSync('git', ['ls-files', '--', 'vscode/src/vs/platform/openideCodebase', 'vscode/src/vs/code/electron-utility/sharedProcess/contrib'], { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(path => path.endsWith('.ts')).sort();
 	const real = { uris: [], payloads: {} };
 	for (const path of paths) {
 		const content = await readFile(new URL(`../${path}`, import.meta.url), 'utf8');
