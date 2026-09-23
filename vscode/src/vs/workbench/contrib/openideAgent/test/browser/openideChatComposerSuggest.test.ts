@@ -54,6 +54,8 @@ suite('OpenIDE ChatComposerSuggest', () => {
 		const goals = buildOpenideChatSlashSuggestions('goal', [{ slug: 'goal', description: 'shadowed', argumentHint: '' }], []);
 		assert.deepStrictEqual(goals.map(item => item.name), ['goal']);
 		assert.strictEqual(items.find(item => item.name === 'plan')?.icon, 'checklist');
+		assert.strictEqual(items.find(item => item.name === 'plan')?.hint?.includes('<'), false);
+		assert.strictEqual(items.find(item => item.name === 'mine')?.hint, 'x');
 		assert.strictEqual(items.find(item => item.name === 'verify')?.icon, 'verified');
 		assert.strictEqual(items.find(item => item.name === 'compact')?.icon, 'fold');
 	});

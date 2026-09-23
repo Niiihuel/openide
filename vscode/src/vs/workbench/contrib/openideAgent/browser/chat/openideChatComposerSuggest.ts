@@ -68,7 +68,7 @@ export function compactSlashDescription(value: string): string {
 }
 
 const SLASH_GROUPS: readonly { kind: IOpenideChatSlashSuggestion['kind']; label: string; icon: string }[] = [
-	{ kind: 'skill', label: 'Skills', icon: 'sparkle' },
+	{ kind: 'skill', label: 'Skills', icon: 'book' },
 	{ kind: 'command', label: 'Commands', icon: 'terminal' },
 	{ kind: 'mcp', label: 'MCP', icon: 'plug' },
 	{ kind: 'tool', label: 'Tools', icon: 'tools' },
@@ -78,7 +78,7 @@ const SLASH_GROUPS: readonly { kind: IOpenideChatSlashSuggestion['kind']; label:
  * familiar glyph from their stable name; explicit command icons always win. */
 export function slashSuggestionIcon(item: IOpenideChatSlashSuggestion, fallback: string): string {
 	if (item.icon) { return item.icon; }
-	if (item.kind === 'skill') { return 'sparkle'; }
+	if (item.kind === 'skill') { return 'book'; }
 	if (item.kind === 'mcp') { return 'plug'; }
 	if (item.kind === 'command') { return 'terminal'; }
 	const name = item.name.toLowerCase();
@@ -346,7 +346,7 @@ export class OpenideChatComposerSuggest extends Disposable {
 			const entries = this._slash.map((item, index) => ({ item, index })).filter(entry => entry.item.kind === group.kind);
 			if (!entries.length) { continue; }
 			const section = append(content, createOpenideElement(document, 'div'));
-			section.className = 'openide-chat-suggest-section';
+			section.className = `openide-chat-suggest-section${group.kind === 'skill' ? ' openide-chat-suggest-skill-section' : ''}`;
 			const heading = append(section, createOpenideElement(document, 'div'));
 			heading.className = 'openide-menu-section';
 			heading.textContent = group.label;

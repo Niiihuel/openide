@@ -33,7 +33,7 @@ function riskIcon(capability: IComposerCapability): ThemeIcon {
 	switch (capability.risk) {
 		case 'exec': return Codicon.terminal;
 		case 'write': return Codicon.edit;
-		default: return capability.kind === 'mcp' ? Codicon.plug : capability.kind === 'skill' ? Codicon.sparkle : Codicon.tools;
+		default: return capability.kind === 'mcp' ? Codicon.plug : capability.kind === 'skill' ? Codicon.book : Codicon.tools;
 	}
 }
 

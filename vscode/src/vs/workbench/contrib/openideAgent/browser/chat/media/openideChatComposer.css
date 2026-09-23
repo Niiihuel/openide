@@ -803,6 +803,27 @@
 	font-size: 11.5px;
 	color: var(--vscode-descriptionForeground);
 }
+/* Skill names identify the action. Give them the full first line, then let the supporting
+   description use only the space available on its own line. */
+.openide-chat-suggest-skill-section .openide-chat-suggest-text {
+	flex-direction: column;
+	align-items: stretch;
+	gap: 0;
+	overflow: visible;
+	white-space: normal;
+}
+.openide-chat-suggest-skill-section .openide-chat-suggest-name {
+	flex: 0 0 auto;
+	max-width: none;
+	overflow: visible;
+	text-overflow: clip;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+.openide-chat-suggest-skill-section .openide-chat-suggest-desc {
+	flex: 0 1 auto;
+	min-width: 0;
+}
 .openide-chat-suggest-hit {
 	font-weight: 650;
 	color: var(--vscode-editorSuggestWidget-highlightForeground, var(--vscode-list-highlightForeground));

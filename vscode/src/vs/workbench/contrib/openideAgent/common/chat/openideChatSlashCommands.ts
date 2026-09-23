@@ -39,8 +39,13 @@ export function nativeCommandDescription(command: { descriptionKey: OpenideStrin
 	return t(command.descriptionKey);
 }
 
+/** Argument placeholders are labels in the menu, not syntax the user needs to type. */
+function commandHintLabel(hint: string): string {
+	return hint.replace(/<([^<>]+)>/g, '$1');
+}
+
 export function nativeCommandHint(command: { hintKey?: OpenideStringKey }): string {
-	return command.hintKey ? t(command.hintKey) : '';
+	return command.hintKey ? commandHintLabel(t(command.hintKey)) : '';
 }
 
 export const NATIVE_WORKFLOW_COMMANDS: readonly INativeWorkflowCommand[] = [
@@ -67,7 +72,7 @@ export interface IOpenideChatSlashSuggestion {
 	readonly icon?: string;
 	/** Compact source label aligned to the trailing edge (for example Personal or Project). */
 	readonly origin?: string;
-	/** Argument hint shown after the name (`<tarea>`), commands only. */
+	/** Argument hint shown after the name (`tarea`), commands only. */
 	readonly hint?: string;
 	readonly risk?: 'safe' | 'write' | 'exec';
 }
@@ -121,7 +126,7 @@ export function buildOpenideChatSlashSuggestions(
 		.filter(c => c.slug !== COMPACT_COMMAND.slug && c.slug !== 'goal')
 		.filter(c => !NATIVE_WORKFLOW_COMMANDS.some(native => native.slug === c.slug))
 		.filter(c => matches(c.slug, c.description))
-		.map(c => ({ kind: 'command', name: c.slug, description: c.description, hint: c.argumentHint, icon: 'terminal' }));
+		.map(c => ({ kind: 'command', name: c.slug, description: c.description, hint: commandHintLabel(c.argumentHint), icon: 'terminal' }));
 	const goalDescription = t('goal.suggestion');
 	const builtinItems: IOpenideChatSlashSuggestion[] = [
 		...(matches('goal', goalDescription) ? [{ kind: 'command' as const, name: 'goal', description: goalDescription, icon: 'target' }] : []),

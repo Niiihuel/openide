@@ -18,9 +18,9 @@ import { createCodicon } from './openideComposerMenu.js';
 /** Eight is the webview host's ceiling (`openideChatView.ts` `references.length >= 8`). */
 export const REFERENCE_LIMIT = 8;
 
-/** Codicon per capability kind, transcribed from `capabilityIcon` (the removed chat webview). */
+/** Codicon per capability kind, shared with the composer's suggestion menu. */
 export function capabilityIcon(kind: IChatCapabilityMention['kind'] | 'mcp' | 'tool'): string {
-	return kind === 'skill' ? 'sparkle' : kind === 'command' ? 'terminal' : kind === 'mcp' ? 'plug' : 'tools';
+	return kind === 'skill' ? 'book' : kind === 'command' ? 'terminal' : kind === 'mcp' ? 'plug' : 'tools';
 }
 
 /**
