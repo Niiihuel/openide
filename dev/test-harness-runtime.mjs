@@ -37,6 +37,10 @@ function journalRecords() {
 	});
 }
 
+function recordedPreview(value) {
+	return typeof value === 'string' ? value : typeof value?.preview === 'string' ? value.preview : '';
+}
+
 function reply(response, call, text) {
 	response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
 	const delta = call ? { role: 'assistant', tool_calls: [{ index: 0, id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } }] } : { role: 'assistant', content: text };
@@ -67,7 +71,7 @@ const server = http.createServer(async (request, response) => {
 		const durableAttempts = records.filter(record => {
 			if (record.event.kind !== 'model/request' || record.event.payload.phase !== 'attempt') { return false; }
 			const user = record.event.payload.request.messages.findLast(message => message.role === 'user');
-			return user?.content.includes(marker) && String(record.event.payload.request.system).startsWith('You maintain project memory.') === memory;
+			return recordedPreview(user?.content).includes(marker) && recordedPreview(record.event.payload.request.system).startsWith('You maintain project memory.') === memory;
 		});
 		assert.equal(durableAttempts.length, requests.filter(request => request.run === run).length, 'Each journal request must be on disk before its HTTP dispatch');
 		const tools = input.tools?.map(tool => tool.function.name) ?? [];
