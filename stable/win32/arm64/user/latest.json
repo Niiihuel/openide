@@ -5,19 +5,19 @@
   "platform": "win32",
   "architecture": "arm64",
   "target": "user",
-  "productVersion": "1.4.1",
-  "buildVersion": "096dcc9b7b7282628610b5871260e8dffc5b2195",
+  "productVersion": "1.5.0",
+  "buildVersion": "1edc40574d7f40c06bc09e53de9e879d6d4c7bca",
   "codeOssVersion": "1.136.1",
-  "publishedAt": "2026-09-15T03:09:06.000Z",
+  "publishedAt": "2026-09-23T20:50:27.000Z",
   "minimumUpdaterVersion": 1,
   "artifact": {
-    "url": "https://github.com/Niiihuel/openide/releases/download/v1.4.1/OpenIDEUserSetup-arm64-1.4.1.exe",
-    "size": 163982985,
-    "sha256": "3f7eba2e50ff65cf24948b0f943573d38739e8306c707da57471caff955b0307"
+    "url": "https://github.com/Niiihuel/openide/releases/download/v1.5.0/OpenIDEUserSetup-arm64-1.5.0.exe",
+    "size": 168759707,
+    "sha256": "6688576317d34b968b01bc8367263a88139190346ad6271cb045cf6006cb81e8"
   },
-  "releaseNotesUrl": "https://github.com/Niiihuel/openide/releases/tag/v1.4.1",
+  "releaseNotesUrl": "https://github.com/Niiihuel/openide/releases/tag/v1.5.0",
   "rollout": {
     "percentage": 100,
-    "seed": "1.4.1-stable"
+    "seed": "1.5.0-stable"
   }
 }
