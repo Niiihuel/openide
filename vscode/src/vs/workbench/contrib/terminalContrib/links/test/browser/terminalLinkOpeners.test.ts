@@ -12,11 +12,12 @@ import { IFileService, IFileStatWithPartialMetadata } from '../../../../../../pl
 import { FileService } from '../../../../../../platform/files/common/fileService.js';
 import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { ILogService, NullLogService } from '../../../../../../platform/log/common/log.js';
+import { IOpenerService } from '../../../../../../platform/opener/common/opener.js';
 import { IQuickInputService } from '../../../../../../platform/quickinput/common/quickInput.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { CommandDetectionCapability } from '../../../../../../platform/terminal/common/capabilities/commandDetectionCapability.js';
 import { TerminalBuiltinLinkType } from '../../browser/links.js';
-import { TerminalLocalFileLinkOpener, TerminalLocalFolderInWorkspaceLinkOpener, TerminalSearchLinkOpener } from '../../browser/terminalLinkOpeners.js';
+import { TerminalLocalFileLinkOpener, TerminalLocalFolderInWorkspaceLinkOpener, TerminalSearchLinkOpener, TerminalUrlLinkOpener } from '../../browser/terminalLinkOpeners.js';
 import { TerminalCapability } from '../../../../../../platform/terminal/common/capabilities/capabilities.js';
 import { TerminalCapabilityStore } from '../../../../../../platform/terminal/common/capabilities/terminalCapabilityStore.js';
 import { IEditorService } from '../../../../../services/editor/common/editorService.js';
@@ -28,6 +29,7 @@ import { SearchService } from '../../../../../services/search/common/searchServi
 import { ITerminalLogService } from '../../../../../../platform/terminal/common/terminal.js';
 import { importAMDNodeModule } from '../../../../../../amdX.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
+import { upcastPartial } from '../../../../../../base/test/common/mock.js';
 import { TerminalCommand } from '../../../../../../platform/terminal/common/capabilities/commandDetection/terminalCommand.js';
 import type { IMarker } from '@xterm/headless';
 import { generateUuid } from '../../../../../../base/common/uuid.js';
@@ -118,6 +120,28 @@ suite('Workbench - TerminalLinkOpeners', () => {
 		} as Partial<IEditorService>);
 		const TerminalCtor = (await importAMDNodeModule<typeof import('@xterm/xterm')>('@xterm/xterm', 'lib/xterm.js')).Terminal;
 		xterm = store.add(new TerminalCtor({ allowProposedApi: true, logger: TestXtermLogger }));
+	});
+
+	test('local URL links can bypass contributed openers for the external browser', async () => {
+		const url = 'http://localhost:5173/a%2Bb';
+		const calls: Array<{ resource: string; openExternal: boolean | undefined; allowContributedOpeners: boolean | string | undefined }> = [];
+		const openerService = upcastPartial<IOpenerService>({
+			open: async (resource, options) => {
+				calls.push({
+					resource: String(resource),
+					openExternal: options && 'openExternal' in options ? options.openExternal : undefined,
+					allowContributedOpeners: options && 'allowContributedOpeners' in options ? options.allowContributedOpeners : undefined
+				});
+				return true;
+			}
+		});
+		const opener = new TerminalUrlLinkOpener(false, null!, null!, null!, openerService, null!, null!, null!, null!, null!);
+		await opener.open({ text: url, uri: URI.parse(url), type: TerminalBuiltinLinkType.Url, bufferRange: { start: { x: 1, y: 1 }, end: { x: 30, y: 1 } } });
+		await opener.openInExternalBrowser(url);
+		deepStrictEqual(calls, [
+			{ resource: url, openExternal: true, allowContributedOpeners: true },
+			{ resource: url, openExternal: true, allowContributedOpeners: false }
+		]);
 	});
 
 	suite('TerminalSearchLinkOpener', () => {

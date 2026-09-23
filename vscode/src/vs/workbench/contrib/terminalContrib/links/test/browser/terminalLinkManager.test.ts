@@ -12,6 +12,7 @@ import { ContextMenuService } from '../../../../../../platform/contextview/brows
 import { IContextMenuService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { ILogService, NullLogService } from '../../../../../../platform/log/common/log.js';
+import { IOpenerService } from '../../../../../../platform/opener/common/opener.js';
 import { IStorageService } from '../../../../../../platform/storage/common/storage.js';
 import { IThemeService } from '../../../../../../platform/theme/common/themeService.js';
 import { TestThemeService } from '../../../../../../platform/theme/test/common/testThemeService.js';
@@ -32,10 +33,12 @@ import { timeout } from '../../../../../../base/common/async.js';
 import { IDisposable } from '../../../../../../base/common/lifecycle.js';
 import { Emitter } from '../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
+import { isMacintosh } from '../../../../../../base/common/platform.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { ILinkHoverTargetOptions } from '../../../../terminal/browser/widgets/terminalHoverWidget.js';
 import { TerminalWidgetManager } from '../../../../terminal/browser/widgets/widgetManager.js';
 import { TerminalLink } from '../../browser/terminalLink.js';
+import { ITerminalConfigurationService } from '../../../../terminal/browser/terminal.js';
 
 const defaultTerminalConfig: Partial<ITerminalConfiguration> = {
 	fontFamily: 'monospace',
@@ -75,6 +78,7 @@ suite('TerminalLinkManager', () => {
 	let viewDescriptorService: TestViewDescriptorService;
 	let xterm: Terminal;
 	let linkManager: TestLinkManager;
+	let openedUrls: Array<{ url: string; allowContributedOpeners: boolean | string | undefined }>;
 
 	setup(async () => {
 		configurationService = new TestConfigurationService({
@@ -96,6 +100,19 @@ suite('TerminalLinkManager', () => {
 		instantiationService.stub(IStorageService, store.add(new TestStorageService()));
 		instantiationService.stub(IThemeService, themeService);
 		instantiationService.stub(IViewDescriptorService, viewDescriptorService);
+		instantiationService.stub(ITerminalConfigurationService, upcastPartial<ITerminalConfigurationService>({
+			config: upcastPartial<ITerminalConfiguration>({ allowedLinkSchemes: ['http', 'https'] })
+		}));
+		openedUrls = [];
+		instantiationService.stub(IOpenerService, upcastPartial<IOpenerService>({
+			open: async (resource, options) => {
+				openedUrls.push({
+					url: resource.toString(),
+					allowContributedOpeners: options && 'allowContributedOpeners' in options ? options.allowContributedOpeners : undefined
+				});
+				return true;
+			}
+		}));
 
 		const TerminalCtor = (await importAMDNodeModule<typeof import('@xterm/xterm')>('@xterm/xterm', 'lib/xterm.js')).Terminal;
 		xterm = store.add(new TerminalCtor({ allowProposedApi: true, cols: 80, rows: 30, logger: TestXtermLogger }));
@@ -109,6 +126,23 @@ suite('TerminalLinkManager', () => {
 				return undefined;
 			}
 		} as Partial<ITerminalCapabilityStore> as any, instantiationService.createInstance(TerminalLinkResolver)));
+	});
+
+	test('Shift with the terminal link modifier opens local URLs externally', async () => {
+		const activate = xterm.options.linkHandler?.activate;
+		if (!activate) {
+			throw new Error('Expected xterm link activation handler');
+		}
+		const range = { start: { x: 1, y: 1 }, end: { x: 30, y: 1 } };
+		const modifier = { ctrlKey: !isMacintosh, metaKey: isMacintosh };
+		await activate(new MouseEvent('click', modifier), 'http://localhost:5173/', range);
+		await activate(new MouseEvent('click', { ...modifier, shiftKey: true }), 'http://localhost:5173/', range);
+		await activate(new MouseEvent('click', { ...modifier, shiftKey: true }), 'https://example.com/', range);
+		deepStrictEqual(openedUrls, [
+			{ url: 'http://localhost:5173/', allowContributedOpeners: true },
+			{ url: 'http://localhost:5173/', allowContributedOpeners: false },
+			{ url: 'https://example.com/', allowContributedOpeners: true }
+		]);
 	});
 
 	suite('registerExternalLinkProvider', () => {
@@ -148,6 +182,41 @@ suite('TerminalLinkManager', () => {
 	}
 
 	suite('OSC 8 hover', () => {
+		test('local URL hover presents the IDE browser and external browser routes', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+			await configurationService.setUserConfiguration('workbench.hover.delay', 0);
+			const linkHandler = xterm.options.linkHandler;
+			if (!linkHandler?.hover) {
+				throw new Error('Expected link hover handler');
+			}
+			const testableLinkManager = linkManager as unknown as TestableLinkManager;
+			const originalShowHover = testableLinkManager._showHover;
+			const renderServiceRestore = mockXtermCoreRenderService();
+			let hover: { text: string; actions: string[] } | undefined;
+			testableLinkManager._showHover = (...args) => {
+				hover = {
+					text: (args[1] as MarkdownString).value,
+					actions: ((args[2] as Array<{ label: string }> | undefined) ?? []).map(action => action.label)
+				};
+				return undefined;
+			};
+			try {
+				linkHandler.hover(new MouseEvent('mousemove'), 'http://localhost:5173/', { start: { x: 1, y: 1 }, end: { x: 30, y: 1 } });
+				await timeout(0);
+				deepStrictEqual({
+					primary: hover?.text.includes('Open&nbsp;in&nbsp;IDE&nbsp;browser'),
+					shortcut: hover?.text.includes('opens in the external browser'),
+					actions: hover?.actions
+				}, {
+					primary: true,
+					shortcut: true,
+					actions: ['Open in external browser']
+				});
+			} finally {
+				renderServiceRestore.dispose();
+				testableLinkManager._showHover = originalShowHover;
+			}
+		}));
+
 		test('should cancel delayed tooltip when leave happens before hover delay', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
 			await configurationService.setUserConfiguration('workbench.hover.delay', 10);
 			const linkHandler = xterm.options.linkHandler;

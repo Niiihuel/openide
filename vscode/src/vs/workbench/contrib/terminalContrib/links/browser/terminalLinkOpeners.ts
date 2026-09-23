@@ -305,9 +305,18 @@ export class TerminalUrlLinkOpener implements ITerminalLinkOpener {
 		}
 		// It's important to use the raw string value here to avoid converting pre-encoded values
 		// from the URL like `%2B` -> `+`.
-		this._openerService.open(link.text, {
+		await this._openWebUrl(link.text, true);
+	}
+
+	/** Opens a web link in the system browser, bypassing contributed URI openers. */
+	async openInExternalBrowser(url: string): Promise<void> {
+		await this._openWebUrl(url, false);
+	}
+
+	private async _openWebUrl(url: string, allowContributedOpeners: boolean): Promise<void> {
+		await this._openerService.open(url, {
 			allowTunneling: this._isRemote && this._configurationService.getValue('remote.forwardOnOpen'),
-			allowContributedOpeners: true,
+			allowContributedOpeners,
 			openExternal: true
 		});
 	}

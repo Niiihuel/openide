@@ -315,9 +315,6 @@ registerAction2(class extends Action2 {
 	}
 });
 
-/** Ctrl+click on a localhost URL in the terminal (or any local link) offers to open it in the
- *  IDE PREVIEW, in addition to the external browser. By registering an opener with 'Option'
- *  priority, VS Code shows the native picker (IDE vs external) when both can open it. */
 /**
  * Retires `openide.language`, the fork's second language switch.
  *
@@ -397,6 +394,8 @@ class OpenideLanguageMigrationContribution extends Disposable implements IWorkbe
 }
 PlatformRegistry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(OpenideLanguageMigrationContribution, LifecyclePhase.Eventually);
 
+/** Local HTTP links open in the IDE browser by default. The terminal link hover and
+ * Shift+modifier+click provide a direct route to the external browser. */
 class OpenideLocalPreviewOpenerContribution implements IWorkbenchContribution {
 	constructor(
 		@IExternalUriOpenerService externalUriOpenerService: IExternalUriOpenerService,
@@ -414,8 +413,7 @@ class OpenideLocalPreviewOpenerContribution implements IWorkbenchContribution {
 					label: t('contrib.opener.preview'),
 					async canOpen(uri: URI, _token: CancellationToken): Promise<ExternalUriOpenerPriority> {
 						const isLocal = (uri.scheme === 'http' || uri.scheme === 'https') && !!normalizeLocalUrl(uri.toString(true), extraHosts());
-						// 'Option' does NOT override the browser: it adds the option → the native picker appears.
-						return isLocal ? ExternalUriOpenerPriority.Option : ExternalUriOpenerPriority.None;
+						return isLocal ? ExternalUriOpenerPriority.Preferred : ExternalUriOpenerPriority.None;
 					},
 					async openExternalUri(uri: URI, _ctx: { sourceUri: URI }, _token: CancellationToken): Promise<boolean> {
 						const url = normalizeLocalUrl(uri.toString(true), extraHosts());

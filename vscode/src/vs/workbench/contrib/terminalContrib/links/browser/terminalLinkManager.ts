@@ -35,6 +35,7 @@ import { INotificationService, Severity } from '../../../../../platform/notifica
 import type { IHoverAction } from '../../../../../base/browser/ui/hover/hover.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { isString } from '../../../../../base/common/types.js';
+import { normalizeLocalUrl } from '../../../openideAgent/common/openideLocalUrl.js';
 
 export type XtermLinkMatcherHandler = (event: MouseEvent | undefined, link: string) => Promise<void>;
 
@@ -47,6 +48,7 @@ export class TerminalLinkManager extends DisposableStore {
 	private readonly _linkProvidersDisposables: IDisposable[] = [];
 	private readonly _externalLinkProviders: IDisposable[] = [];
 	private readonly _openers: Map<TerminalLinkType, ITerminalLinkOpener> = new Map();
+	private readonly _urlOpener: TerminalUrlLinkOpener;
 	private readonly _linkHoverInvalidationDisposable = this.add(new MutableDisposable<IDisposable>());
 
 	externalProvideLinksCb?: OmitFirstArg<ITerminalExternalLinkProvider['provideLinks']>;
@@ -94,7 +96,8 @@ export class TerminalLinkManager extends DisposableStore {
 		this._openers.set(TerminalBuiltinLinkType.LocalFolderInWorkspace, localFolderInWorkspaceOpener);
 		this._openers.set(TerminalBuiltinLinkType.LocalFolderOutsideWorkspace, localFolderOutsideWorkspaceOpener);
 		this._openers.set(TerminalBuiltinLinkType.Search, this._instantiationService.createInstance(TerminalSearchLinkOpener, capabilities, this._processInfo.initialCwd, localFileOpener, localFolderInWorkspaceOpener, () => this._processInfo.os || OS));
-		this._openers.set(TerminalBuiltinLinkType.Url, this._instantiationService.createInstance(TerminalUrlLinkOpener, !!this._processInfo.remoteAuthority, localFileOpener, localFolderInWorkspaceOpener, localFolderOutsideWorkspaceOpener));
+		this._urlOpener = this._instantiationService.createInstance(TerminalUrlLinkOpener, !!this._processInfo.remoteAuthority, localFileOpener, localFolderInWorkspaceOpener, localFolderOutsideWorkspaceOpener);
+		this._openers.set(TerminalBuiltinLinkType.Url, this._urlOpener);
 		this._registerStandardLinkProviders();
 
 		let activeHoverDisposable: IDisposable | undefined;
@@ -147,12 +150,16 @@ export class TerminalLinkManager extends DisposableStore {
 						return;
 					}
 				}
-				this._openers.get(TerminalBuiltinLinkType.Url)?.open({
-					type: TerminalBuiltinLinkType.Url,
-					text,
-					bufferRange: null!,
-					uri: URI.parse(text)
-				});
+				if (event.shiftKey && this._localPreviewUrl(text)) {
+					await this._urlOpener.openInExternalBrowser(text);
+				} else {
+					await this._urlOpener.open({
+						type: TerminalBuiltinLinkType.Url,
+						text,
+						bufferRange: null!,
+						uri: URI.parse(text)
+					});
+				}
 			},
 			hover: (e, text, range) => {
 				clearActiveLinkHover();
@@ -170,11 +177,14 @@ export class TerminalLinkManager extends DisposableStore {
 						height: this._xterm.rows
 					};
 					const hoverViewportY = this._xterm.buffer.active.viewportY;
+					const isLocalPreview = !!this._localPreviewUrl(text);
 					activeHoverDisposable = this._showHover({
 						viewportRange: convertBufferRangeToViewport(range, hoverViewportY),
 						cellDimensions,
 						terminalDimensions
-					}, this._getLinkHoverString(text, text), undefined, (text) => this._xterm.options.linkHandler?.activate(e, text, range));
+					}, this._getLinkHoverString(text, isLocalPreview ? nls.localize('terminalLinkHandler.openInIdeBrowser', 'Open in IDE browser') : text, isLocalPreview),
+						isLocalPreview ? [this._externalBrowserHoverAction(text)] : undefined,
+						text => this._xterm.options.linkHandler?.activate(e, text, range));
 					activeHoverListeners = new DisposableStore();
 					activeHoverListeners.add(this._xterm.onScroll(() => clearActiveLinkHover()));
 					activeHoverListeners.add(this._xterm.onRender(renderedRange => {
@@ -211,7 +221,7 @@ export class TerminalLinkManager extends DisposableStore {
 				// Custom activate call (external links only)
 				e.link.activate(e.link.text);
 			} else {
-				this._openLink(e.link);
+				this._openLink(e.link, e.event);
 			}
 		}));
 		this.add(detectorAdapter.onDidShowHover(e => this._tooltipCallback(e.link, e.viewportRange, e.modifierDownCallback, e.modifierUpCallback)));
@@ -221,7 +231,7 @@ export class TerminalLinkManager extends DisposableStore {
 		return detectorAdapter;
 	}
 
-	private async _openLink(link: ITerminalSimpleLink): Promise<void> {
+	private async _openLink(link: ITerminalSimpleLink, event?: MouseEvent): Promise<void> {
 		this._logService.debug('Opening link', link);
 		const opener = this._openers.get(link.type);
 		if (!opener) {
@@ -234,6 +244,10 @@ export class TerminalLinkManager extends DisposableStore {
 			comment: 'When the user opens a link in the terminal';
 			linkType: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The type of link being opened' };
 		}>('terminal/openLink', { linkType: isString(link.type) ? link.type : `extension:${link.type.id}` });
+		if (link.type === TerminalBuiltinLinkType.Url && event?.shiftKey && this._localPreviewUrl(link.text)) {
+			await this._urlOpener.openInExternalBrowser(link.text);
+			return;
+		}
 		await opener.open(link);
 	}
 
@@ -385,6 +399,7 @@ export class TerminalLinkManager extends DisposableStore {
 			height: this._xterm.rows
 		};
 
+		const isLocalPreview = link.type === TerminalBuiltinLinkType.Url && !!this._localPreviewUrl(link.text);
 		// Don't pass the mouse event as this avoids the modifier check
 		this._showHover({
 			viewportRange,
@@ -392,7 +407,12 @@ export class TerminalLinkManager extends DisposableStore {
 			terminalDimensions,
 			modifierDownCallback,
 			modifierUpCallback
-		}, this._getLinkHoverString(link.text, link.label), link.actions, (text) => link.activate(undefined, text), link);
+		}, this._getLinkHoverString(link.text, isLocalPreview
+			? nls.localize('terminalLinkHandler.openInIdeBrowser', 'Open in IDE browser') : link.label,
+			isLocalPreview),
+			isLocalPreview
+				? [...(link.actions ?? []), this._externalBrowserHoverAction(link.text)] : link.actions,
+			text => link.activate(undefined, text), link);
 	}
 
 	private _showHover(
@@ -460,7 +480,22 @@ export class TerminalLinkManager extends DisposableStore {
 		return isMacintosh ? event.metaKey : event.ctrlKey;
 	}
 
-	private _getLinkHoverString(uri: string, label: string | undefined): IMarkdownString {
+	private _localPreviewUrl(url: string): string | undefined {
+		const extraHosts = this._configurationService.getValue<string[]>('openide.agent.browserAllowedHosts');
+		return normalizeLocalUrl(url, Array.isArray(extraHosts) ? extraHosts : []);
+	}
+
+	private _externalBrowserHoverAction(url: string): IHoverAction {
+		return {
+			label: nls.localize('terminalLinkHandler.openInExternalBrowser', 'Open in external browser'),
+			commandId: 'openide.terminal.openInExternalBrowser',
+			run: () => {
+				void this._urlOpener.openInExternalBrowser(url).catch(error => this._logService.error('Failed to open URL in external browser', error));
+			}
+		};
+	}
+
+	private _getLinkHoverString(uri: string, label: string | undefined, isLocalPreview = false): IMarkdownString {
 		const editorConf = this._configurationService.getValue<{ multiCursorModifier: 'ctrlCmd' | 'alt' }>('editor');
 
 		let clickLabel = '';
@@ -506,7 +541,10 @@ export class TerminalLinkManager extends DisposableStore {
 			uri = nls.localize('followLinkUrl', 'Link');
 		}
 
-		return markdown.appendLink(uri, label).appendMarkdown(` (${clickLabel})`);
+		const hint = isLocalPreview
+			? nls.localize('terminalLinkHandler.externalShortcut', '{0}; Shift + {0} opens in the external browser', clickLabel)
+			: clickLabel;
+		return markdown.appendLink(uri, label).appendMarkdown(` (${hint})`);
 	}
 }
 
