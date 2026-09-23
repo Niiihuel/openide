@@ -196,7 +196,7 @@ try {
 		await command(second.generation, 'exit');
 		fs.writeFileSync(executable, '#!/bin/sh\nexit 23\n');
 		await page.locator('.openide-chat-agent-terminal-relaunch').click();
-		await until(async () => /23/.test(await page.locator('.openide-chat-agent-terminal').innerText()), 'CLI failure banner');
+		await until(async () => /23/.test(await page.locator('.openide-chat-agent-terminal.openide-cli-workspace:visible .openide-chat-agent-terminal-banner').innerText()), 'CLI failure banner');
 		assert.equal(generations().length, 2, 'Failed launcher must not execute a fallback CLI');
 		fs.writeFileSync(executable, fixtureLauncher);
 		await page.locator('.openide-chat-agent-terminal-relaunch').click();
