@@ -24,7 +24,7 @@ const dirtyText = 'unsaved editor content must survive';
 const ptyCommand = ['printf OPENIDE_PTY_RUNTIME > pty-marker.txt', ...Array.from({ length: 8 }, (_, index) => `printf 'OpenIDE terminal preview line ${index + 1}\\n'`)].join(' &&\n');
 fs.writeFileSync(target, original);
 execFileSync('git', ['init', '-q', workspace]);
-const results = [], requests = [], providerErrors = [], consoleLog = [];
+const results = [], requests = [], providerErrors = [], consoleLog = [], observedJournalEvents = [];
 const capturedApprovals = new Set();
 let application, page, failure;
 
@@ -39,6 +39,15 @@ function journalRecords() {
 
 function recordedPreview(value) {
 	return typeof value === 'string' ? value : typeof value?.preview === 'string' ? value.preview : '';
+}
+
+function memoryCheckpointStates() {
+	const directory = path.join(userData, 'User/globalStorage/openide/memory');
+	if (!fs.existsSync(directory)) { return []; }
+	return fs.readdirSync(directory, { recursive: true }).filter(file => file.split(path.sep).includes('checkpoints') && file.endsWith('.json')).map(file => {
+		const checkpoint = JSON.parse(fs.readFileSync(path.join(directory, file), 'utf8'));
+		return checkpoint.state ?? checkpoint;
+	});
 }
 
 function reply(response, call, text) {
@@ -68,6 +77,7 @@ const server = http.createServer(async (request, response) => {
 		const marker = pty ? 'PTY_RUNTIME_FIXTURE' : dirty ? 'DIRTY_RUNTIME_FIXTURE' : 'CLEAN_RUNTIME_FIXTURE';
 		requests.push({ run, input });
 		const records = journalRecords();
+		observedJournalEvents.push(...records.map(record => record.event));
 		const durableAttempts = records.filter(record => {
 			if (record.event.kind !== 'model/request' || record.event.payload.phase !== 'attempt') { return false; }
 			const user = record.event.payload.request.messages.findLast(message => message.role === 'user');
@@ -203,21 +213,24 @@ try {
 		assert.equal(requests.filter(request => request.run === 'clean').length, 3, 'Exactly read, write, and final-response rounds');
 		await assertApprovalsSettled();
 	});
-	await check('journal persists request, tool intents/results and final conversation', async () => {
-		await until(() => journalRecords().some(record => record.event.kind === 'run/end'), 'durable final checkpoint');
-		const records = journalRecords();
+	await check('journal persists requests and tool results before dispatch, then clears the completed run', async () => {
+		const records = observedJournalEvents;
+		const runId = records.find(event => event.kind === 'run/start' && !event.payload.purpose)?.runId;
+		assert.ok(runId, 'The native run must have a durable start before model dispatch');
+		assert.ok(records.some(event => event.runId === runId && event.kind === 'model/request' && event.payload.phase === 'attempt'));
 		for (const callId of ['clean-read', 'clean-write']) {
-			assert.ok(records.some(record => record.event.kind === 'tool/intent' && record.event.payload.callId === callId));
-			assert.ok(records.some(record => record.event.kind === 'tool/result' && record.event.payload.callId === callId));
+			assert.ok(records.some(event => event.runId === runId && event.kind === 'tool/intent' && event.payload.callId === callId));
+			assert.ok(records.some(event => event.runId === runId && event.kind === 'tool/result' && event.payload.callId === callId));
 		}
-		assert.ok(records.some(record => record.event.kind === 'run/end' && record.event.payload.messages.some(message => message.content === 'CLEAN_RUNTIME_CONFIRMED')));
+		await until(() => !journalRecords().some(record => record.event.runId === runId), 'completed native journal reset');
 	});
-	await check('background memory extraction checkpoints its own model request before dispatch', async () => {
-		await until(() => requests.some(request => request.run === 'clean:memory') && journalRecords().some(record => record.event.kind === 'memory/checkpoint' && record.event.payload.status === 'no_durable_change'), 'durable background memory capture');
-		const records = journalRecords();
-		const captureRun = records.find(record => record.event.kind === 'run/start' && record.event.payload.purpose === 'memory-capture')?.event.runId;
+	await check('background memory extraction checkpoints its model request and final state', async () => {
+		await until(() => requests.some(request => request.run === 'clean:memory') && memoryCheckpointStates().some(state => state.status === 'no_durable_change'), 'durable background memory capture');
+		const records = observedJournalEvents;
+		const captureRun = records.find(event => event.kind === 'run/start' && event.payload.purpose === 'memory-capture')?.runId;
 		assert.ok(captureRun);
-		assert.ok(records.some(record => record.event.runId === captureRun && record.event.kind === 'model/request' && record.event.payload.phase === 'attempt'));
+		assert.ok(records.some(event => event.runId === captureRun && event.kind === 'model/request' && event.payload.phase === 'attempt'));
+		await until(() => !journalRecords().some(record => record.event.runId === captureRun), 'completed memory journal reset');
 	});
 	await check('dirty editor content is read and a subsequent model write is refused', async () => {
 		await page.keyboard.press('Control+KeyP');
@@ -242,32 +255,31 @@ try {
 		await until(async () => (await page.locator('.openide-chat-native').innerText()).includes('PTY_RUNTIME_CONFIRMED') && !await page.locator('.openide-composer-send.running').count(), 'native PTY turn');
 		assert.equal(fs.readFileSync(path.join(workspace, 'pty-marker.txt'), 'utf8'), 'OPENIDE_PTY_RUNTIME');
 		assert.equal(requests.filter(request => request.run === 'pty').length, 2);
-		const records = journalRecords();
-		assert.ok(records.some(record => record.event.kind === 'tool/intent' && record.event.payload.callId === 'pty-shell'));
-		assert.ok(records.some(record => record.event.kind === 'tool/result' && record.event.payload.callId === 'pty-shell'));
+		const records = observedJournalEvents;
+		assert.ok(records.some(event => event.kind === 'tool/intent' && event.payload.callId === 'pty-shell'));
+		assert.ok(records.some(event => event.kind === 'tool/result' && event.payload.callId === 'pty-shell'));
 		await assertApprovalsSettled();
 	});
-	await check('terminal expansion stays outside its output and inside the card frame', async () => {
-		const card = page.locator('.openide-chat-term-card').last();
+	await check('completed PTY approval keeps its command scrollable inside the card', async () => {
+		const card = page.locator('.openide-chat-approval').filter({ hasText: 'OPENIDE_PTY_RUNTIME' }).last();
 		await revealCard(card);
-		const expand = card.locator('.openide-fold-expand');
-		assert.ok(await expand.isVisible(), 'The multiline command must offer expansion');
-		await card.screenshot({ path: path.join(reports, 'terminal-card.png') });
 		const layout = await card.evaluate(element => {
-			const card = element.getBoundingClientRect();
-			const output = element.querySelector('.openide-chat-term-out').getBoundingClientRect();
-			const footer = element.querySelector('.openide-fold-expand').getBoundingClientRect();
-			return { belowOutput: footer.top >= output.bottom, insideFrame: footer.bottom < card.bottom,
-				outputBottom: output.bottom, footerTop: footer.top, footerBottom: footer.bottom, cardBottom: card.bottom };
+			const frame = element.getBoundingClientRect();
+			const body = element.querySelector('.openide-chat-approval-body');
+			const command = element.querySelector('.openide-chat-approval-cmd');
+			const status = element.querySelector('.openide-chat-approval-status');
+			const bodyBounds = body.getBoundingClientRect();
+			const statusBounds = status.getBoundingClientRect();
+			return { commandPresent: command.textContent.includes('OPENIDE_PTY_RUNTIME'), scrollable: body.scrollHeight > body.clientHeight,
+				contained: bodyBounds.left >= frame.left && bodyBounds.right <= frame.right && statusBounds.bottom <= frame.bottom };
 		});
-		assert.ok(layout.belowOutput && layout.insideFrame, JSON.stringify(layout));
-		await expand.focus();
-		await expand.press('Enter');
-		assert.equal(await expand.getAttribute('aria-expanded'), 'true');
-		await expand.press('Space');
-		assert.equal(await expand.getAttribute('aria-expanded'), 'false');
-		await revealCard(card);
+		assert.deepEqual(layout, { commandPresent: true, scrollable: true, contained: true });
+		assert.ok(await card.locator('.openide-chat-approval-status').isVisible(), 'Completed approval must show its status');
 		await card.screenshot({ path: path.join(reports, 'terminal-card.png') });
+		assert.ok(await card.locator('.openide-chat-approval-body').evaluate(element => {
+			element.scrollTop = element.scrollHeight;
+			return element.scrollTop > 0;
+		}), 'The long command must be scrollable');
 	});
 	await page.screenshot({ path: path.join(reports, 'harness-runtime.png') });
 } catch (error) { failure = error; console.error(error); await page?.screenshot({ path: path.join(reports, 'failure.png') }).catch(() => {}); }
