@@ -9,8 +9,9 @@ import { DeferredPromise, disposableTimeout, raceTimeout, timeout } from '../../
 import { ILogService } from '../../log/common/log.js';
 import { ITelemetryService } from '../../telemetry/common/telemetry.js';
 import { IAgentNetworkFilterService } from '../../networkFilter/common/networkFilterService.js';
-import { IInvokeFunctionResult, IPlaywrightExecutionContext, IPlaywrightService } from '../common/playwrightService.js';
+import { IBrowserDebugCaptureStatus, IBrowserDebugReport, IInvokeFunctionResult, IPlaywrightExecutionContext, IPlaywrightService } from '../common/playwrightService.js';
 import { BrowserAgentEvent } from '../common/browserAgentEvents.js';
+import { BrowserDebugCapture, emptyBrowserDebugCaptureStatus } from './browserDebugCapture.js';
 import { PlaywrightBrowserAgentAdapter } from './playwrightBrowserAgentAdapter.js';
 import { IBrowserViewGroupRemoteService } from '../node/browserViewGroupRemoteService.js';
 import { IBrowserViewGroup } from '../common/browserViewGroup.js';
@@ -32,6 +33,7 @@ export interface IPlaywrightActionScope {
 const DEFERRED_RESULT_CLEANUP_MS = 5 * 60_000; // 5 minutes
 const SESSION_INACTIVITY_MS = 30 * 60_000; // 30 minutes
 const OPEN_PAGE_NAVIGATION_TIMEOUT_MS = 30_000;
+const MAX_CLOSED_DEBUG_REPORTS = 5;
 
 /**
  * Narrow a raw Playwright transport payload to a {@link CDPRequest}.
@@ -193,6 +195,13 @@ export class PlaywrightService extends Disposable implements IPlaywrightService 
 		const session = new PlaywrightSession(
 			pageId => this.beginActivity(pageId),
 			event => this.browserAgentEmitter.fire(event),
+			active => {
+				if (active) {
+					this._inactivityTimers.deleteAndDispose(sessionId);
+				} else if (this._sessions.has(sessionId)) {
+					this._touchSession(sessionId);
+				}
+			},
 			sessionId,
 			browser,
 			group,
@@ -217,6 +226,23 @@ export class PlaywrightService extends Disposable implements IPlaywrightService 
 	}
 
 	// --- Playwright operations (delegated to per-session instances) ---
+
+	async startDebugCapture(sessionId: string, pageId: string): Promise<IBrowserDebugCaptureStatus> {
+		const session = await this._getOrCreateSession(sessionId);
+		return session.startDebugCapture(pageId);
+	}
+
+	async getDebugCaptureStatus(sessionId: string, pageId: string): Promise<IBrowserDebugCaptureStatus> {
+		return this._sessions.get(sessionId)?.getDebugCaptureStatus(pageId) ?? emptyBrowserDebugCaptureStatus();
+	}
+
+	async stopDebugCapture(sessionId: string, pageId: string): Promise<IBrowserDebugReport> {
+		const session = this._sessions.get(sessionId) ?? await this._pendingInits.get(sessionId);
+		if (!session) {
+			throw new Error(`No debug capture is active for page "${pageId}"`);
+		}
+		return session.stopDebugCapture(pageId);
+	}
 
 	async reportBrowserAgentAction(sessionId: string, pageId: string, action: 'screenshot', phase: 'started' | 'completed' | 'error', context: IPlaywrightExecutionContext): Promise<void> {
 		const session = phase === 'started' ? await this._getOrCreateSession(sessionId) : this._sessions.get(sessionId);
@@ -281,6 +307,9 @@ export class PlaywrightService extends Disposable implements IPlaywrightService 
 	 */
 	private _touchSession(sessionId: string): void {
 		this._inactivityTimers.deleteAndDispose(sessionId);
+		if (this._sessions.get(sessionId)?.hasActiveDebugCaptures()) {
+			return;
+		}
 		const timer = disposableTimeout(
 			() => {
 				this.logService.debug(`[PlaywrightService] Session ${sessionId} inactive for ${SESSION_INACTIVITY_MS / 60_000}m, disposing`);
@@ -304,6 +333,8 @@ export class PlaywrightService extends Disposable implements IPlaywrightService 
 class PlaywrightSession extends Disposable {
 	private readonly activeInvocations = this._register(new DisposableMap<string, IDisposable>());
 	private readonly browserAgents = this._register(new DisposableMap<string, PlaywrightBrowserAgentAdapter>());
+	private readonly debugCaptures = this._register(new DisposableMap<string, BrowserDebugCapture>());
+	private readonly closedDebugReports = new Map<string, IBrowserDebugReport>();
 
 	// --- Page matching ---
 
@@ -324,6 +355,7 @@ class PlaywrightSession extends Disposable {
 	constructor(
 		private readonly beginActivity: (pageId: string) => IDisposable,
 		private readonly publishBrowserAgentEvent: (event: BrowserAgentEvent) => void,
+		private readonly onDebugCaptureActiveChanged: (active: boolean) => void,
 		readonly sessionId: string,
 		private _browser: Browser,
 		readonly group: IBrowserViewGroup,
@@ -345,6 +377,80 @@ class PlaywrightSession extends Disposable {
 	}
 
 	// --- Page operations ---
+
+	async startDebugCapture(pageId: string): Promise<IBrowserDebugCaptureStatus> {
+		const existing = this.debugCaptures.get(pageId);
+		if (existing) {
+			return existing.status();
+		}
+
+		const page = await this._waitForPage(pageId, Date.now() + 5_000);
+		// Two concurrent starts must attach one set of listeners and keep its data.
+		const concurrent = this.debugCaptures.get(pageId);
+		if (concurrent) {
+			return concurrent.status();
+		}
+		if (page.isClosed()) {
+			throw new Error(`Page "${pageId}" closed before debug capture could start`);
+		}
+		this.closedDebugReports.delete(pageId);
+		const capture = new BrowserDebugCapture(page, () => this.closeDebugCapture(pageId));
+		this.debugCaptures.set(pageId, capture);
+		this.onDebugCaptureActiveChanged(true);
+		return capture.status();
+	}
+
+	getDebugCaptureStatus(pageId: string): IBrowserDebugCaptureStatus {
+		const capture = this.debugCaptures.get(pageId);
+		if (capture) {
+			return capture.status();
+		}
+		const closed = this.closedDebugReports.get(pageId);
+		if (closed) {
+			const { startedAt, requestCount, consoleCount, droppedRequestCount, droppedConsoleCount } = closed;
+			return { active: false, startedAt, requestCount, consoleCount, droppedRequestCount, droppedConsoleCount };
+		}
+		return emptyBrowserDebugCaptureStatus();
+	}
+
+	hasActiveDebugCaptures(): boolean {
+		return this.debugCaptures.size > 0;
+	}
+
+	stopDebugCapture(pageId: string): IBrowserDebugReport {
+		const capture = this.debugCaptures.get(pageId);
+		if (capture) {
+			const report = capture.stop();
+			this.debugCaptures.deleteAndDispose(pageId);
+			if (!this.debugCaptures.size) {
+				this.onDebugCaptureActiveChanged(false);
+			}
+			return report;
+		}
+		const closedReport = this.closedDebugReports.get(pageId);
+		if (closedReport) {
+			this.closedDebugReports.delete(pageId);
+			return closedReport;
+		}
+		throw new Error(`No debug capture is active for page "${pageId}"`);
+	}
+
+	private closeDebugCapture(pageId: string): void {
+		const capture = this.debugCaptures.get(pageId);
+		if (capture) {
+			this.closedDebugReports.set(pageId, capture.stop());
+			this.debugCaptures.deleteAndDispose(pageId);
+			if (!this.debugCaptures.size) {
+				this.onDebugCaptureActiveChanged(false);
+			}
+			if (this.closedDebugReports.size > MAX_CLOSED_DEBUG_REPORTS) {
+				const oldestPageId = this.closedDebugReports.keys().next().value;
+				if (oldestPageId) {
+					this.closedDebugReports.delete(oldestPageId);
+				}
+			}
+		}
+	}
 
 	async reportBrowserAgentAction(pageId: string, action: 'screenshot', phase: 'started' | 'completed' | 'error', context: IPlaywrightExecutionContext): Promise<void> {
 		if (!context.executionId) { return; }
@@ -674,6 +780,7 @@ class PlaywrightSession extends Disposable {
 		this._pageDiscoveryPromises.delete(page);
 		const viewId = this._pageToViewId.get(page);
 		if (viewId) {
+			this.closeDebugCapture(viewId);
 			this._viewIdToPage.delete(viewId);
 			this.browserAgents.deleteAndDispose(viewId);
 		}
@@ -731,6 +838,7 @@ class PlaywrightSession extends Disposable {
 	}
 
 	override dispose(): void {
+		this.closedDebugReports.clear();
 		this._browser?.close().catch(() => { /* ignore */ });
 		super.dispose();
 	}

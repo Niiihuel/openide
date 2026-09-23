@@ -16,7 +16,7 @@ import { generateUuid } from '../../../../base/common/uuid.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
-import { IPlaywrightService, IInvokeFunctionResult } from '../../../../platform/browserView/common/playwrightService.js';
+import { IPlaywrightService, IInvokeFunctionResult, IBrowserDebugCaptureStatus, IBrowserDebugReport } from '../../../../platform/browserView/common/playwrightService.js';
 import { IOpenideNativeServices } from '../common/openideNativeServices.js';
 import { IOpenideBrowserAutomation } from '../../../../platform/openideBrowser/common/openideBrowserAutomation.js';
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../browserView/common/browserView.js';
@@ -56,6 +56,7 @@ export class OpenideBrowserAutomation {
 
 	private readonly client: IOpenideBrowserAutomation;
 	private readonly playwrightSessionId = 'openide-native-browser';
+	private debugPageId: string | undefined;
 	/** The flow being recorded, if any. Mirrors the recorder that lives on the page, so the
 	 *  action tools can add their marks without a round trip when nothing is recording. */
 	private recording: { id: string; label: string } | undefined;
@@ -169,6 +170,36 @@ export class OpenideBrowserAutomation {
 	/** Where recordings land: beside the other per-user agent data, one folder per flow. */
 	private recordingsRoot() {
 		return joinPath(this.environmentService.userRoamingDataHome, 'openideAgent', 'recordings');
+	}
+
+	private debugReportsRoot() {
+		return joinPath(this.environmentService.userRoamingDataHome, 'openideAgent', 'browser-debug');
+	}
+
+	private formatDebugStatus(status: IBrowserDebugCaptureStatus): string {
+		if (!status.active) {
+			if (status.startedAt !== undefined) {
+				return `Browser debug capture stopped when the page closed: ${status.requestCount} requests, ${status.consoleCount} console messages retained. Call browser_debug_stop to save the report.`;
+			}
+			return 'No browser debug capture is running. Call browser_debug_start before reproducing the issue.';
+		}
+		const since = status.startedAt === undefined ? '' : ` since ${new Date(status.startedAt).toISOString()}`;
+		return `Browser debug capture active${since}: ${status.requestCount} requests, ${status.consoleCount} console messages (${status.droppedRequestCount} earlier requests and ${status.droppedConsoleCount} console messages omitted)`;
+	}
+
+	private formatDebugReport(report: IBrowserDebugReport, filePath?: string): string {
+		const requestIssues = report.requests.filter(request => request.failureText || (request.status !== undefined && request.status >= 400));
+		const consoleIssues = report.console.filter(entry => entry.type === 'error' || entry.type === 'warning' || entry.type === 'pageerror');
+		const lines = [
+			`Browser debug capture: ${report.durationMs} ms; ${report.requestCount} requests, ${report.consoleCount} console messages.`,
+			`Omitted older entries: ${report.droppedRequestCount} requests, ${report.droppedConsoleCount} console messages.`,
+			...(filePath ? [`Full JSON report: ${filePath}`] : []),
+			`Request issues (${requestIssues.length}):`,
+			...requestIssues.slice(-20).map(request => `- ${request.status ?? 'FAILED'} ${request.method} ${request.url}${request.failureText ? ` — ${request.failureText}` : ''}`),
+			`Console issues (${consoleIssues.length}):`,
+			...consoleIssues.slice(-20).map(entry => `- [${entry.type}] ${entry.text}`),
+		];
+		return lines.join('\n');
 	}
 
 	/**
@@ -332,6 +363,89 @@ export class OpenideBrowserAutomation {
 	private buildTools(): IAgentTool[] {
 		return [
 			{
+				risk: 'safe' as const,
+				def: {
+					name: 'browser_debug_start',
+					description: 'Starts a bounded network and console capture on the visible native preview. Call before navigation or reproducing a failure, then use browser_debug_stop to save a local JSON report. Captures request metadata and console messages, without request or response bodies or headers. Console text may contain sensitive values.',
+					parameters: { type: 'object', properties: {} },
+				},
+				invoke: async (_args: any, _token: CancellationToken, context?: IAgentToolContext) => {
+					try {
+						if (!this.browserViewService.getPreview()) {
+							await this.browserViewService.openPreview(undefined, undefined, { preserveFocus: true, targetWindowId: context?.targetWindowId });
+						}
+						const { pageId } = await this.getPage();
+						const status = await this.playwrightService.startDebugCapture(this.playwrightSessionId, pageId);
+						this.debugPageId = pageId;
+						return `${this.formatDebugStatus(status)}. Reproduce the issue, then call browser_debug_stop.`;
+					} catch (error) {
+						return `Error: ${error instanceof Error ? error.message : String(error)}`;
+					}
+				},
+			},
+			{
+				risk: 'safe' as const,
+				def: {
+					name: 'browser_debug_status',
+					description: 'Shows whether a browser network and console capture is active and how much evidence has been retained.',
+					parameters: { type: 'object', properties: {} },
+				},
+				invoke: async () => {
+					try {
+						const pageId = this.debugPageId ?? (await this.getPage()).pageId;
+						return this.formatDebugStatus(await this.playwrightService.getDebugCaptureStatus(this.playwrightSessionId, pageId));
+					} catch (error) {
+						return `Error: ${error instanceof Error ? error.message : String(error)}`;
+					}
+				},
+			},
+			{
+				risk: 'write' as const,
+				def: {
+					name: 'browser_debug_stop',
+					description: 'Stops the browser network and console capture, reports failures, and saves the bounded evidence as JSON in local OpenIDE user data.',
+					parameters: { type: 'object', properties: {} },
+				},
+				approvalInfo: () => ({ title: 'Guardar diagnóstico del navegador', detail: 'Reporte JSON en los datos locales de OpenIDE' }),
+				invoke: async () => {
+					try {
+						const pageId = this.debugPageId ?? (await this.getPage()).pageId;
+						const report = await this.playwrightService.stopDebugCapture(this.playwrightSessionId, pageId);
+						this.debugPageId = undefined;
+						const root = this.debugReportsRoot();
+						const stamp = new Date(report.startedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, '');
+						const file = joinPath(root, `${stamp}-${generateUuid().slice(0, 8)}.json`);
+						try {
+							await this.fileService.createFolder(root);
+							await this.fileService.writeFile(file, VSBuffer.fromString(JSON.stringify(report, undefined, 2)));
+							return this.formatDebugReport(report, file.fsPath);
+						} catch (error) {
+							return `${this.formatDebugReport(report)}\nCould not save JSON report: ${error instanceof Error ? error.message : String(error)}`;
+						}
+					} catch (error) {
+						return `Error: ${error instanceof Error ? error.message : String(error)}`;
+					}
+				},
+			},
+			{
+				risk: 'safe' as const,
+				def: {
+					name: 'browser_debug_discard',
+					description: 'Stops the browser network and console capture and discards the evidence without saving a file. Use when a report is not needed or saving was declined.',
+					parameters: { type: 'object', properties: {} },
+				},
+				invoke: async () => {
+					try {
+						const pageId = this.debugPageId ?? (await this.getPage()).pageId;
+						await this.playwrightService.stopDebugCapture(this.playwrightSessionId, pageId);
+						this.debugPageId = undefined;
+						return 'Browser debug capture stopped and discarded.';
+					} catch (error) {
+						return `Error: ${error instanceof Error ? error.message : String(error)}`;
+					}
+				},
+			},
+			{
 				risk: 'exec' as const,
 				def: {
 					name: 'browser_navigate',
@@ -383,7 +497,7 @@ export class OpenideBrowserAutomation {
 				risk: 'safe' as const,
 				def: {
 					name: 'browser_snapshot',
-					description: 'Gets the Playwright accessibility snapshot of the native preview: structure, roles, names and stable references to interact with.',
+					description: 'Gets the Playwright accessibility snapshot of the native preview: structure, roles, names and element references. Take a new snapshot after the DOM changes before reusing a reference.',
 					parameters: { type: 'object', properties: {} },
 				},
 				invoke: async () => {
@@ -399,10 +513,10 @@ export class OpenideBrowserAutomation {
 				risk: 'safe' as const,
 				def: {
 					name: 'browser_screenshot',
-					description: 'Captures the whole visible native preview, or one element. The image arrives as the next message.',
+					description: 'Captures the whole visible native preview, or one element matched by a unique selector. The image arrives as the next message.',
 					parameters: {
 						type: 'object',
-						properties: { selector: { type: 'string', description: 'Selector Playwright/CSS opcional' } },
+						properties: { selector: { type: 'string', description: 'Optional unique Playwright selector, such as aria-ref=e2 from the latest browser_snapshot.' } },
 					},
 				},
 				invoke: async (args: any, _token: CancellationToken, context?: IAgentToolContext) => {
@@ -410,7 +524,7 @@ export class OpenideBrowserAutomation {
 						const { model, pageId } = await this.getPage();
 						const selector = args?.selector ? String(args.selector) : undefined;
 						const bounds = selector ? await this.invokeRaw<{ x: number; y: number; width: number; height: number }>(context, `async (page, selector, timeoutMs) => {
-							const locator = page.locator(selector).first();
+							const locator = page.locator(selector);
 							await locator.waitFor({ state: 'visible', timeout: timeoutMs });
 							await locator.scrollIntoViewIfNeeded();
 							const bounds = await locator.boundingBox();
@@ -437,13 +551,13 @@ export class OpenideBrowserAutomation {
 				risk: 'safe' as const,
 				def: {
 					name: 'browser_read_dom',
-					description: 'Reads the rendered HTML of the native preview, or of one element. The maximum length is configurable (openide.agent.browserTools.maxDomReadChars).',
-					parameters: { type: 'object', properties: { selector: { type: 'string', description: 'Selector Playwright/CSS opcional' } } },
+					description: 'Reads the rendered HTML of the native preview, or of one element matched by a unique selector. The maximum length is configurable (openide.agent.browserTools.maxDomReadChars).',
+					parameters: { type: 'object', properties: { selector: { type: 'string', description: 'Optional unique Playwright selector, such as aria-ref=e2 from the latest browser_snapshot.' } } },
 				},
 				invoke: async (args: any, _token: CancellationToken, context?: IAgentToolContext) => {
 					try {
 						const html = await this.invokeRaw<string>(context, `async (page, selector, timeoutMs) => {
-							const locator = selector ? page.locator(selector).first() : page.locator('html');
+							const locator = selector ? page.locator(selector) : page.locator('html');
 							await locator.waitFor({ state: 'attached', timeout: timeoutMs });
 							return await locator.evaluate(element => element.outerHTML);
 						}`, args?.selector ? String(args.selector) : '', this.actionTimeoutMs());
@@ -473,10 +587,10 @@ export class OpenideBrowserAutomation {
 				risk: 'exec' as const,
 				def: {
 					name: 'browser_click',
-					description: 'Clicks in the native preview with Playwright, using a selector, text, role or coordinates.',
+					description: 'Clicks in the native preview with Playwright using a unique selector or coordinates. Use a reference from the latest browser_snapshot, or take a new snapshot after the DOM changes.',
 					parameters: {
 						type: 'object',
-						properties: { selector: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } },
+						properties: { selector: { type: 'string', description: 'Unique Playwright selector, such as aria-ref=e2 from the latest browser_snapshot.' }, x: { type: 'number' }, y: { type: 'number' } },
 					},
 				},
 				approvalInfo: (args: any) => ({ title: 'Click en la vista previa', detail: String(args?.selector ?? `${args?.x},${args?.y}`) }),
@@ -484,7 +598,7 @@ export class OpenideBrowserAutomation {
 					try {
 						await this.invokeRaw<void>(context, `async (page, selector, x, y, timeoutMs, settleMs) => {
 							if (selector) {
-								await page.locator(selector).first().click({ timeout: timeoutMs });
+								await page.locator(selector).click({ timeout: timeoutMs });
 							} else if (Number.isFinite(x) && Number.isFinite(y)) {
 								await page.mouse.click(x, y);
 							} else {
@@ -503,10 +617,10 @@ export class OpenideBrowserAutomation {
 				risk: 'exec' as const,
 				def: {
 					name: 'browser_type',
-					description: 'Fills an input, textarea or contenteditable in the native preview with Playwright.',
+					description: 'Fills one input, textarea or contenteditable in the native preview with Playwright. Use a unique selector or a reference from the latest browser_snapshot; take a new snapshot after the DOM changes.',
 					parameters: {
 						type: 'object',
-						properties: { selector: { type: 'string' }, text: { type: 'string' } },
+						properties: { selector: { type: 'string', description: 'Unique Playwright selector, such as aria-ref=e2 from the latest browser_snapshot.' }, text: { type: 'string' } },
 						required: ['selector', 'text'],
 					},
 				},
@@ -514,7 +628,7 @@ export class OpenideBrowserAutomation {
 				invoke: async (args: any, _token: CancellationToken, context?: IAgentToolContext) => {
 					try {
 						const typed = await this.invokeRaw<{ mode: string; value: string | null; sensitive: boolean }>(context, `async (page, selector, text, timeoutMs, keyDelayMs, maxKeystrokes, settleMs) => {
-							const locator = page.locator(selector).first();
+							const locator = page.locator(selector);
 							await locator.waitFor({ state: 'visible', timeout: timeoutMs });
 							const sensitive = await locator.evaluate(element => element.getAttribute('type') === 'password' || /password|passwd|secret|token|credential|api.?key|credit.?card|cc-number|one-time-code/i.test(['name', 'id', 'autocomplete', 'aria-label'].map(name => element.getAttribute(name) || '').join(' '))).catch(() => true);
 							// Exercise real key events for masks/autocompletes independently of overlay visibility.

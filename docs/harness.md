@@ -194,6 +194,7 @@ provider capabilities and MCP configuration affect the exposed set.
 | `browser_open`, `browser_navigate` | Open the integrated preview and navigate its page. |
 | `browser_snapshot`, `browser_read_dom` | Inspect accessibility structure and DOM content. |
 | `browser_screenshot`, `browser_console` | Capture the visible page and inspect console output. |
+| `browser_debug_start`, `browser_debug_status`, `browser_debug_stop`, `browser_debug_discard` | Opt in to network and console diagnostics for one reproduction. |
 | `browser_click`, `browser_type` | Interact with the current page. |
 | `browser_evaluate`, `browser_set_style` | Evaluate page logic or inspect a temporary style change. |
 | `browser_playwright` | Run a self-contained Playwright operation against the integrated browser. |
@@ -205,6 +206,13 @@ The browser tools operate on the visible preview, with its current session and
 login state, subject to allowed-host configuration. This lets both the user and
 the agent inspect the same application state. Pick & Polish attaches an element's
 selector, HTML, styles and screenshot to a request.
+
+For a failed load or interaction, call `browser_debug_start` before navigating
+or reproducing it. `browser_debug_status` reports capture progress. Call
+`browser_debug_stop` afterward for a bounded network and console report plus a
+local JSON artifact, or `browser_debug_discard` to stop without saving.
+Diagnostics capture metadata only; request and response bodies and headers are
+excluded.
 
 Recordings return a video, contact sheet and keyframes. Findings can point to
 motion stalls, flashes, layout shifts, clipping, broken images or other possible

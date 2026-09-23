@@ -25,6 +25,7 @@ const FORBIDDEN_READONLY = new Set([
 	'git_commit', 'git_checkpoint', 'git_preflight', 'workflow_configure', 'git_configure',
 	'plan_save', 'canvas_write', 'memory', 'skill_save', 'rule_manage', 'codebase_save_priority',
 	'browser_set_style', 'browser_type', 'browser_click', 'browser_playwright', 'browser_dialog',
+	'browser_debug_start', 'browser_debug_stop', 'browser_debug_discard',
 ]);
 
 export class SubagentPermissionService implements ISubagentPermissionService {

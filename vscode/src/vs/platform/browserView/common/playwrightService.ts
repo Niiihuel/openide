@@ -30,6 +30,46 @@ export interface IPlaywrightExecutionContext {
 	readonly executionId?: string;
 }
 
+/** State of an opt-in, page-scoped browser debug capture. */
+export interface IBrowserDebugCaptureStatus {
+	readonly active: boolean;
+	readonly startedAt?: number;
+	readonly requestCount: number;
+	readonly consoleCount: number;
+	readonly droppedRequestCount: number;
+	readonly droppedConsoleCount: number;
+}
+
+/** Request metadata only; request and response bodies and headers are never captured. */
+export interface IBrowserDebugRequestEntry {
+	readonly timestamp: number;
+	readonly method: string;
+	readonly url: string;
+	readonly status?: number;
+	readonly durationMs?: number;
+	readonly failureText?: string;
+}
+
+/** Console output or an uncaught page error (`type: 'pageerror'`). */
+export interface IBrowserDebugConsoleEntry {
+	readonly timestamp: number;
+	readonly type: string;
+	readonly text: string;
+	readonly url?: string;
+	readonly lineNumber?: number;
+	readonly columnNumber?: number;
+}
+
+/** Bounded, serializable result returned when a page's debug capture stops. */
+export interface IBrowserDebugReport extends IBrowserDebugCaptureStatus {
+	readonly active: false;
+	readonly startedAt: number;
+	readonly stoppedAt: number;
+	readonly durationMs: number;
+	readonly requests: readonly IBrowserDebugRequestEntry[];
+	readonly console: readonly IBrowserDebugConsoleEntry[];
+}
+
 /**
  * A service for using Playwright to connect to and automate the integrated browser.
  *
@@ -45,6 +85,12 @@ export interface IPlaywrightService {
 	readonly onDidChangeActivity: Event<{ pageId: string; active: boolean }>;
 	/** Runtime-independent, sanitized browser activity for native presentation. */
 	readonly onDidBrowserAgentEvent: Event<BrowserAgentEvent>;
+	/** Begin collecting bounded request and console metadata for one page. Repeated starts preserve the active capture. */
+	startDebugCapture(sessionId: string, pageId: string): Promise<IBrowserDebugCaptureStatus>;
+	/** Read counters without starting a capture or creating a session. */
+	getDebugCaptureStatus(sessionId: string, pageId: string): Promise<IBrowserDebugCaptureStatus>;
+	/** Stop collecting, detach listeners, and return the collected metadata. */
+	stopDebugCapture(sessionId: string, pageId: string): Promise<IBrowserDebugReport>;
 	/** Reports a native capture that intentionally bypasses Playwright's screenshot implementation. */
 	reportBrowserAgentAction(sessionId: string, pageId: string, action: 'screenshot', phase: 'started' | 'completed' | 'error', context: IPlaywrightExecutionContext): Promise<void>;
 

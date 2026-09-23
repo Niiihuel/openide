@@ -13,6 +13,11 @@ import { IAgentNetworkFilterService } from '../../networkFilter/common/networkFi
 import { IPlaywrightActionScope } from './playwrightService.js';
 
 type IAiAriaSnapshotOptions = NonNullable<Parameters<playwright.Locator['ariaSnapshot']>[0]> & { _track?: string };
+type PageLog = { type: string; time: number; description: string };
+
+const maxRecentEvents = 50;
+const maxEventDescriptionLength = 1000;
+const truncatedDescriptionSuffix = '... [truncated]';
 
 declare module 'playwright-core' {
 	interface Page {
@@ -44,7 +49,8 @@ export class PlaywrightTab {
 
 	private _dialog: playwright.Dialog | undefined;
 	private _fileChooser: playwright.FileChooser | undefined;
-	private _logs: { type: string; time: number; description: string }[] = [];
+	private _logs: PageLog[] = [];
+	private _droppedLogCount = 0;
 	private _needsFullSnapshot = false;
 
 	private _initialized: Promise<void>;
@@ -116,22 +122,33 @@ export class PlaywrightTab {
 	}
 
 	private async _handleDownload(download: playwright.Download) {
-		this._logs.push({ type: 'download', time: Date.now(), description: `${download.suggestedFilename()}` });
+		this._appendLog({ type: 'download', time: Date.now(), description: `${download.suggestedFilename()}` });
 	}
 
 	private _handleRequestFailed(request: playwright.Request) {
 		const timing = request.timing();
-		this._logs.push({ type: 'requestFailed', time: timing.responseEnd + timing.startTime, description: `${request.method()} request to ${request.url()} failed: "${request.failure()?.errorText}"` });
+		this._appendLog({ type: 'requestFailed', time: timing.responseEnd + timing.startTime, description: `${request.method()} request to ${request.url()} failed: "${request.failure()?.errorText}"` });
 	}
 
 	private _handleConsoleMessage(message: playwright.ConsoleMessage) {
 		if (message.type() === 'error' || message.type() === 'warning') {
-			this._logs.push({ type: 'console', time: message.timestamp(), description: `[${message.type()}] ${message.text()}` });
+			this._appendLog({ type: 'console', time: message.timestamp(), description: `[${message.type()}] ${message.text()}` });
 		}
 	}
 
 	private _handlePageError(error: Error) {
-		this._logs.push({ type: 'pageError', time: Date.now(), description: error.stack ?? error.message });
+		this._appendLog({ type: 'pageError', time: Date.now(), description: error.stack ?? error.message });
+	}
+
+	private _appendLog(log: PageLog): void {
+		const description = log.description.length > maxEventDescriptionLength
+			? `${log.description.slice(0, maxEventDescriptionLength - truncatedDescriptionSuffix.length)}${truncatedDescriptionSuffix}`
+			: log.description;
+		this._logs.push({ ...log, description });
+		if (this._logs.length > maxRecentEvents) {
+			this._logs.shift();
+			this._droppedLogCount++;
+		}
 	}
 
 	/**
@@ -224,7 +241,9 @@ export class PlaywrightTab {
 		const title = await this.safeRunAgainstPage((page) => page.title()).catch(() => '');
 
 		const logs = this._logs;
+		const droppedLogCount = this._droppedLogCount;
 		this._logs = [];
+		this._droppedLogCount = 0;
 
 		const snapshot = snapshotFromPage?.trim() ?? '';
 
@@ -233,8 +252,9 @@ export class PlaywrightTab {
 			`URL: ${this.page.url()}`,
 			...(this._dialog ? [`Active ${this._dialog.type()} dialog: "${this._dialog.message()}"`] : []),
 			...(this._fileChooser ? [`Active file chooser dialog`] : []),
-			...(logs.length > 0 ? [
+			...(logs.length > 0 || droppedLogCount > 0 ? [
 				`Recent events:`,
+				...(droppedLogCount > 0 ? [`Older events omitted: ${droppedLogCount}`] : []),
 				...logs.map(log => `- [${new Date(log.time).toISOString()}] (${log.type}) ${log.description}`)
 			] : []),
 			`Snapshot: ${snapshotFromPage !== undefined ? snapshot ? `\n${snapshot}` : '<unchanged>' : '<unavailable>'}`,

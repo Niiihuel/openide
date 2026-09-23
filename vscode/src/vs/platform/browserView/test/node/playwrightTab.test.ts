@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { EventEmitter } from 'node:events';
 import { URI } from '../../../../base/common/uri.js';
 import { mock } from '../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
@@ -16,15 +17,19 @@ import { PlaywrightTab } from '../../node/playwrightTab.js';
 type PlaywrightPage = ConstructorParameters<typeof PlaywrightTab>[0];
 
 class TestPage extends mock<PlaywrightPage>() {
-	constructor(private readonly currentUrl: string) {
+	readonly events = new EventEmitter();
+
+	constructor(private readonly currentUrl: string, private readonly pageErrorHistory: Error[] = []) {
 		super();
 	}
 
-	override on(): this {
+	override on(event: string, listener: (...args: never[]) => void): this {
+		this.events.on(event, listener as (...args: unknown[]) => void);
 		return this;
 	}
 
-	override off(): this {
+	override off(event: string, listener: (...args: never[]) => void): this {
+		this.events.off(event, listener as (...args: unknown[]) => void);
 		return this;
 	}
 
@@ -37,7 +42,7 @@ class TestPage extends mock<PlaywrightPage>() {
 	}
 
 	override async pageErrors() {
-		return [];
+		return this.pageErrorHistory;
 	}
 
 	override async title(): Promise<string> {
@@ -83,6 +88,55 @@ suite('PlaywrightTab', () => {
 			actionBlocked: true,
 			actionRan: false,
 			summary: networkFilterService.formatError(URI.parse(url)),
+		});
+	});
+
+	test('bounds recent events and reports omitted and truncated evidence', async () => {
+		const errors = Array.from({ length: 55 }, (_, index) => {
+			const error = new Error(`event ${index + 1}`);
+			error.stack = undefined;
+			return error;
+		});
+		const longError = new Error(`event 56 ${'x'.repeat(1500)} TAIL`);
+		longError.stack = undefined;
+		errors.push(longError);
+
+		const page = new TestPage('about:blank', errors);
+		const networkFilterService = disposables.add(new AgentNetworkFilterService(new TestConfigurationService()));
+		const tab = new PlaywrightTab(page, { activeCalls: 0 }, networkFilterService);
+		const firstSummary = await tab.getSummary();
+		const secondSummary = await tab.getSummary();
+
+		const nextError = new Error('event after summary');
+		nextError.stack = undefined;
+		page.events.emit('pageerror', nextError);
+		const thirdSummary = await tab.getSummary();
+
+		const descriptions = (summary: string) => summary.split('\n')
+			.filter(line => line.includes('(pageError)'))
+			.map(line => line.slice(line.indexOf(') ') + 2));
+		const firstDescriptions = descriptions(firstSummary);
+		const longDescription = firstDescriptions.at(-1);
+		assert.deepStrictEqual({
+			omitted: firstSummary.match(/^Older events omitted: (\d+)$/m)?.[1],
+			retained: firstDescriptions.length,
+			oldest: firstDescriptions[0],
+			newestLength: longDescription?.length,
+			newestTruncated: longDescription?.endsWith('... [truncated]'),
+			newestIncludesTail: longDescription?.includes('TAIL'),
+			secondHasEvents: secondSummary.includes('Recent events:'),
+			thirdDescriptions: descriptions(thirdSummary),
+			thirdHasOmissions: thirdSummary.includes('Older events omitted:'),
+		}, {
+			omitted: '6',
+			retained: 50,
+			oldest: 'event 7',
+			newestLength: 1000,
+			newestTruncated: true,
+			newestIncludesTail: false,
+			secondHasEvents: false,
+			thirdDescriptions: ['event after summary'],
+			thirdHasOmissions: false,
 		});
 	});
 });

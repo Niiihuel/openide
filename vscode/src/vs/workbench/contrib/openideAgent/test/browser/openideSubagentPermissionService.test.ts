@@ -18,6 +18,15 @@ suite('OpenIDE subagent permissions', () => {
 		assert.strictEqual(service.checkTool(definition, 'write_file', 'write').allowed, false);
 		assert.deepStrictEqual(service.allowedTools(definition, ['read_file', 'write_file']), ['read_file']);
 	});
+	test('readonly cannot start or save a browser debug capture', () => {
+		const browserDefinition = { ...definition, tools: [] };
+		assert.deepStrictEqual(service.allowedTools(browserDefinition, ['browser_debug_start', 'browser_debug_status', 'browser_debug_stop', 'browser_debug_discard']), ['browser_debug_status']);
+		assert.deepStrictEqual({
+			start: service.checkTool(browserDefinition, 'browser_debug_start', 'safe').allowed,
+			stop: service.checkTool(browserDefinition, 'browser_debug_stop', 'write').allowed,
+			discard: service.checkTool(browserDefinition, 'browser_debug_discard', 'safe').allowed,
+		}, { start: false, stop: false, discard: false });
+	});
 	test('prevents nesting cycles and depth overflow', () => {
 		assert.strictEqual(service.validateNesting(definition.id, 1, [definition.id], 2).allowed, false);
 		assert.strictEqual(service.validateNesting(definition.id, 3, [], 2).allowed, false);
