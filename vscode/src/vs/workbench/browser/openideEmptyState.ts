@@ -18,6 +18,7 @@ export interface IOpenideEmptyStateAction {
 export interface IOpenideEmptyStateOptions {
 	readonly title: string;
 	readonly description: string;
+	readonly brand?: boolean;
 	readonly compact?: boolean;
 	readonly hideHeading?: boolean;
 	readonly actions?: readonly IOpenideEmptyStateAction[];
@@ -61,7 +62,7 @@ export class OpenideEmptyState extends Disposable {
 		this.domNode.setAttribute('aria-label', options.title);
 		const body = append(this.domNode, $('.openide-empty-state-body'));
 		const headingNode = append(body, $('div'));
-		const heading = renderOpenideEmptyStateHeading(headingNode, { title: options.title, description: options.description });
+		const heading = renderOpenideEmptyStateHeading(headingNode, { title: options.title, description: options.description, brand: options.brand });
 		headingNode.hidden = !!options.hideHeading;
 		this.descriptionNode = heading.descriptionNode;
 		this.actionsNode = append(body, $('.openide-empty-state-actions.openide-command-list'));

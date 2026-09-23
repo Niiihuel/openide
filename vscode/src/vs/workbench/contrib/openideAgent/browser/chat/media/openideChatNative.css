@@ -202,39 +202,20 @@
 
 /* The shared empty state stays outside the transcript's virtual list. */
 .openide-chat-empty { position: absolute; inset: 0; z-index: 1; }
-.openide-chat-empty-workspace {
-	display: flex;
-	align-items: center;
-	gap: var(--vscode-spacing-size8, 8px);
-	width: 100%;
-	margin-bottom: var(--vscode-spacing-size12, 12px);
-	padding: 7px 9px;
-	border: 1px solid var(--oi-border);
-	border-radius: var(--oi-radius-md);
-	background: var(--oi-surface);
-	color: var(--vscode-foreground);
-	font-size: var(--oi-text-sm);
-	text-align: left;
-	cursor: pointer;
+.openide-chat-empty .openide-empty-state-heading {
+	flex-direction: column;
+	gap: var(--vscode-spacing-size24, 24px);
+	text-align: center;
 }
-.openide-chat-empty-workspace:hover { background: var(--oi-hover); }
-.openide-chat-empty-workspace:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-.openide-chat-empty-workspace > .codicon { color: var(--vscode-textLink-foreground); }
-.openide-chat-empty-workspace-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 1px; }
-.openide-chat-empty-workspace-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.openide-chat-empty-workspace-hint { color: var(--vscode-descriptionForeground); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.openide-chat-empty-hints {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--vscode-spacing-size12, 12px);
-	font-size: var(--oi-text-sm);
+.openide-chat-empty .openide-empty-state-icon { opacity: 0.45; }
+.openide-chat-empty .openide-empty-state-title {
+	font-size: 28px;
+	font-weight: 400;
+	line-height: 1.2;
+	text-wrap: balance;
 }
-.openide-chat-empty-hint { display: flex; align-items: center; gap: var(--vscode-spacing-size8, 8px); }
-.openide-chat-empty-hint .monaco-keybinding-key {
-	background: var(--vscode-keybindingLabel-background); color: var(--vscode-keybindingLabel-foreground);
-	border-color: var(--vscode-keybindingLabel-border); border-bottom-color: var(--vscode-keybindingLabel-bottomBorder);
-	box-shadow: inset 0 -1px 0 var(--vscode-widget-shadow);
-}
+.hc-black .openide-chat-empty .openide-empty-state-icon,
+.hc-light .openide-chat-empty .openide-empty-state-icon { opacity: 1; }
 
 .openide-chat-notice {
 	flex: 0 0 auto;

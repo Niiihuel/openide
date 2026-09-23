@@ -3,7 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { AgentWindowAction } from '../../common/openideAgentWindowShortcuts.js';
 import { getWindow, $, addDisposableListener, append, reset } from '../../../../../base/browser/dom.js';
 import { OpenideEmptyState } from '../../../../browser/openideEmptyState.js';
 import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
@@ -100,7 +99,6 @@ const SESSIONS_SIDE_WIDTH = 300;
 interface IOpenideChatCompanionOptions {
 	readonly primary: OpenideChatWidget;
 	readonly openSubagent?: (runId: string, parentSessionId?: string) => void;
-	readonly openProject?: () => Promise<void>;
 }
 
 const selectionTargets = new WeakMap<Window, OpenideChatWidget>();
@@ -135,9 +133,9 @@ export class OpenideChatWidget extends Disposable {
 
 	showConversationMenu(anchor: HTMLElement): void { this._header.showConversationMenu(anchor); }
 
-	createCompanion(parent: HTMLElement, openSubagent?: (runId: string, parentSessionId?: string) => void, openProject?: () => Promise<void>): OpenideChatWidget {
+	createCompanion(parent: HTMLElement, openSubagent?: (runId: string, parentSessionId?: string) => void): OpenideChatWidget {
 		const primary = this._companion?.primary ?? this;
-		companionParents.set(parent, { primary, openSubagent, openProject });
+		companionParents.set(parent, { primary, openSubagent });
 		try {
 			const widget = this._instantiationService.createInstance(OpenideChatWidget, parent, primary.sessions);
 			primary._companions.add(widget);
@@ -941,57 +939,12 @@ export class OpenideChatWidget extends Disposable {
 		this._composer.focus();
 	}
 
-	/** A short path into a real task; suggestions only prepare a draft for the user to review. */
+	/** The quiet prompt shown before the conversation begins. */
 	private _buildEmptyState(): HTMLElement {
 		const root = append(this._listHost, $('.openide-chat-empty.hidden'));
-		const actions = [
-			['chat.empty.explore', AgentWindowAction.explore],
-			['chat.empty.plan', AgentWindowAction.plan],
-			['chat.empty.debug', AgentWindowAction.debug],
-		] as const;
-		const draftActions = actions.map(([label, commandId], index) => ({
-			label: t(label), commandId: this._companion ? commandId : undefined,
-			run: () => this.prepareStarter(index),
+		this._register(this._instantiationService.createInstance(OpenideEmptyState, root, {
+			title: t('chat.empty.start'), description: '', brand: true,
 		}));
-		const state = this._register(this._instantiationService.createInstance(OpenideEmptyState, root, {
-			title: t('chat.empty.start'), description: t('chat.empty.text'), actions: draftActions,
-		}));
-		const workspace = append(state.contentNode, $<HTMLButtonElement>('button.openide-chat-empty-workspace', { type: 'button' }));
-		append(workspace, $('span.codicon.codicon-folder-opened', { 'aria-hidden': 'true' }));
-		const workspaceCopy = append(workspace, $('.openide-chat-empty-workspace-copy'));
-		const workspaceName = append(workspaceCopy, $('span.openide-chat-empty-workspace-name'));
-		const workspaceHint = append(workspaceCopy, $('span.openide-chat-empty-workspace-hint'));
-		this._register(addDisposableListener(workspace, 'click', () => {
-			const opening = this._companion?.openProject ? this._companion.openProject()
-				: this.commandService.executeCommand('workbench.action.files.openFolder');
-			void opening.catch(onUnexpectedError);
-		}));
-		const syncWorkspace = () => {
-			const folders = this.contextService.getWorkspace().folders;
-			const hasProject = folders.length > 0;
-			workspace.classList.toggle('empty', !hasProject);
-			workspaceName.textContent = hasProject ? folders.map(folder => folder.name).join(', ') : t('chat.empty.chooseProject');
-			workspaceHint.textContent = t(hasProject ? 'chat.empty.changeProjectHint' : 'chat.empty.chooseProjectHint');
-			workspace.setAttribute('aria-label', workspaceName.textContent);
-		};
-		syncWorkspace();
-		this._register(this.contextService.onDidChangeWorkspaceFolders(syncWorkspace));
-		const hints = append(state.contentNode, $('.openide-chat-empty-hints'));
-		for (const [key, hint] of [['/', 'chat.empty.hintSlash'], ['@', 'chat.empty.hintAt']] as const) {
-			const row = append(hints, $('.openide-chat-empty-hint'));
-			const keyLabel = append(row, $('span.monaco-keybinding'));
-			append(keyLabel, $('span.monaco-keybinding-key', undefined, key));
-			append(row, $('span', undefined, t(hint)));
-		}
-		let hasSessions = false;
-		const syncSessions = () => {
-			const available = this.sessions.listAll().some(session => !session.empty);
-			if (available === hasSessions) { return; }
-			hasSessions = available;
-			state.setActions(available ? [...draftActions, { label: t('chat.empty.sessions'), run: () => this._enterListMode() }] : draftActions);
-		};
-		syncSessions();
-		this._register(this.sessions.onDidChange(syncSessions));
 		return root;
 	}
 

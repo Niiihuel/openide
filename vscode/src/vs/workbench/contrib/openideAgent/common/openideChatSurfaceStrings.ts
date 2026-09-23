@@ -388,7 +388,7 @@ export const OPENIDE_CHAT_SURFACE_STRINGS = {
 	'chatSurface.language.migrateYes': { es: 'Cambiar el idioma de la interfaz', en: 'Change display language' },
 	'chatSurface.language.deprecatedDesc': { es: 'Obsoleto. OpenIDE ahora dibuja sus propias pantallas en el idioma de la interfaz, así que Configuración › Idioma mueve todo a la vez.', en: 'Deprecated. OpenIDE now renders its own screens in the display language, so Settings › Language moves the whole interface at once.' },
 	'chatSurface.language.deprecatedMessage': { es: 'Usá el idioma de la interfaz (Configuración › Idioma). OpenIDE lo sigue para sus propias pantallas.', en: 'Use the display language instead (Settings › Language). OpenIDE follows it for its own screens.' },
-	'chat.empty.start': { es: '¿En qué querés trabajar?', en: 'What would you like to work on?' },
+	'chat.empty.start': { es: '¿Qué vamos a construir?', en: 'What should we build?' },
 	// ---- fork-owned goal, Canvas, activity, review, and navigation surfaces
 	'codexGoal.approval': { es: 'Codex requiere tu aprobación', en: 'Codex Requires Your Approval' },
 	'codexGoal.approve': { es: 'Permitir una vez', en: 'Allow Once' },

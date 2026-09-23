@@ -299,7 +299,7 @@ export class OpenideAgentWindow extends Disposable {
 		const chatHost = append(conversationBody, $('.openide-agent-window-chat'));
 		const companion = store.add(this.source.createCompanion(chatHost, (runId, parentId) => {
 			void showSubagents(parentId ?? this.source.sessionStore.activeSessionId(), runId).catch(onUnexpectedError);
-		}, () => projects.openFolder()));
+		}));
 		const terminalHost = append(center, $('.openide-agent-window-terminal-island.openide-agent-island', { id: 'openide-agent-window-terminal' }));
 		terminalHost.hidden = true;
 		const terminal = store.add(this.instantiationService.createInstance(OpenideAgentWindowTerminal, terminalHost, () => closeTerminal()));
